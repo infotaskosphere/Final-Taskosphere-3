@@ -15,7 +15,8 @@ import {
   Building2,
   Calendar,
   Activity,
-  MessageCircle
+  MessageCircle,
+  ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -24,6 +25,8 @@ import NotificationBell from './NotificationBell';
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
+  lightBlue: '#E0F2FE',
+  skyBlue: '#7DD3FC',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
@@ -33,6 +36,7 @@ export const DashboardLayout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   
   // Enable activity tracking for all users
   useActivityTracker(true);
@@ -60,80 +64,70 @@ export const DashboardLayout = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Sidebar - WHITE background */}
+      {/* Sidebar - Light Blue Gradient Background with Scroll */}
       <aside
-        className={`fixed left-0 top-0 h-full bg-white border-r border-slate-200 shadow-lg transition-all duration-300 z-50 ${
+        className={`fixed left-0 top-0 h-full border-r border-blue-200 shadow-lg transition-all duration-300 z-50 ${
           sidebarOpen ? 'w-64' : 'w-0'
         } overflow-hidden`}
+        style={{
+          background: `linear-gradient(180deg, ${COLORS.lightBlue} 0%, #F0F9FF 50%, #E0F7FA 100%)`
+        }}
       >
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-8">
-            <img src="/logo.png" alt="Taskosphere" className="h-10" />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden text-slate-600 hover:bg-slate-100"
-              data-testid="sidebar-close-btn"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          </div>
-
-          <nav className="space-y-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                    isActive
-                      ? 'text-white shadow-lg'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                  style={isActive ? { 
-                    background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` 
-                  } : {}}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-
-        <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-slate-200 bg-slate-50/50">
-          <div className="flex items-center space-x-3 mb-4">
-            <div 
-              className="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-white"
-              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
-            >
-              {user?.full_name?.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-900 truncate" data-testid="sidebar-user-name">{user?.full_name}</p>
-              <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+        <div className="flex flex-col h-full">
+          {/* Logo Header - Fixed */}
+          <div className="p-6 border-b border-blue-100/50">
+            <div className="flex items-center justify-between">
+              <img src="/logo.png" alt="Taskosphere" className="h-10" />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden text-slate-600 hover:bg-blue-100"
+                data-testid="sidebar-close-btn"
+              >
+                <X className="h-5 w-5" />
+              </Button>
             </div>
           </div>
-          <Button
-            onClick={handleLogout}
-            variant="ghost"
-            className="w-full justify-start text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-            data-testid="logout-btn"
-          >
-            <LogOut className="h-5 w-5 mr-3" />
-            Logout
-          </Button>
+
+          {/* Scrollable Navigation */}
+          <div className="flex-1 overflow-y-auto py-4 px-4">
+            <nav className="space-y-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
+                    className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+                      isActive
+                        ? 'text-white shadow-lg'
+                        : 'text-slate-700 hover:bg-blue-100/70 hover:text-slate-900'
+                    }`}
+                    style={isActive ? { 
+                      background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` 
+                    } : {}}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="font-medium">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Footer - Fixed at bottom */}
+          <div className="p-4 border-t border-blue-100/50 bg-gradient-to-t from-blue-50/80 to-transparent">
+            <p className="text-xs text-slate-500 text-center">© 2025 TaskoSphere</p>
+          </div>
         </div>
       </aside>
 
       {/* Main Content */}
       <div className={`transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-0'}`}>
-        {/* Header */}
+        {/* Header with User Profile & Logout on Right */}
         <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200">
           <div className="flex items-center justify-between px-6 py-4">
             <div className="flex items-center space-x-4">
@@ -156,19 +150,50 @@ export const DashboardLayout = ({ children }) => {
               </div>
             </div>
 
-            <div className="flex items-center space-x-4">
+            {/* Right Side - Notifications, User Name & Logout */}
+            <div className="flex items-center space-x-3">
               <NotificationBell />
-              <div className="hidden sm:flex items-center space-x-2 px-3 py-2 bg-slate-100 rounded-full">
-                <div 
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+              
+              {/* User Profile Dropdown with Logout */}
+              <div className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center space-x-2 px-3 py-2 rounded-full hover:bg-slate-100 transition-colors"
+                  data-testid="user-menu-btn"
                 >
-                  {user?.full_name?.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-900">{user?.full_name}</p>
-                  <p className="text-xs text-slate-500 capitalize">{user?.role}</p>
-                </div>
+                  <div 
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-md"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+                  >
+                    {user?.full_name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="hidden sm:block text-left">
+                    <p className="text-sm font-semibold text-slate-900" data-testid="header-user-name">{user?.full_name}</p>
+                    <p className="text-xs text-slate-500 capitalize">{user?.role}</p>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Dropdown Menu */}
+                {userMenuOpen && (
+                  <div 
+                    className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50"
+                    onMouseLeave={() => setUserMenuOpen(false)}
+                  >
+                    <div className="px-4 py-3 border-b border-slate-100">
+                      <p className="text-sm font-semibold text-slate-900">{user?.full_name}</p>
+                      <p className="text-xs text-slate-500">{user?.email}</p>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center space-x-3 px-4 py-3 text-left text-red-600 hover:bg-red-50 transition-colors"
+                      data-testid="logout-btn"
+                    >
+                      <LogOut className="h-5 w-5" />
+                      <span className="font-medium">Logout</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -179,6 +204,14 @@ export const DashboardLayout = ({ children }) => {
           <div className="max-w-7xl mx-auto">{children}</div>
         </main>
       </div>
+
+      {/* Click outside to close user menu */}
+      {userMenuOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setUserMenuOpen(false)}
+        />
+      )}
     </div>
   );
 };
