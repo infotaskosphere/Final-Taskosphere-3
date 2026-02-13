@@ -307,7 +307,7 @@ export default function Tasks() {
               New Task
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="create-task-dialog">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl" style={{ color: COLORS.deepBlue }}>
                 {editingTask ? 'Edit Task' : 'Create New Task'}
@@ -316,19 +316,22 @@ export default function Tasks() {
                 {editingTask ? 'Update task details below.' : 'Fill in the details to create a new task.'}
               </DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Task Title */}
               <div className="space-y-2">
-                <Label htmlFor="title">Task Title *</Label>
+                <Label htmlFor="title">Task Title <span className="text-red-500">*</span></Label>
                 <Input
                   id="title"
                   placeholder="Enter task title"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
+                  className="border-slate-300"
                   data-testid="task-title-input"
                 />
               </div>
 
+              {/* Description */}
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
@@ -337,10 +340,12 @@ export default function Tasks() {
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
+                  className="border-slate-300"
                   data-testid="task-description-input"
                 />
               </div>
 
+              {/* Client and Due Date Row */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Client</Label>
@@ -348,10 +353,10 @@ export default function Tasks() {
                     value={formData.client_id || 'no_client'}
                     onValueChange={(value) => setFormData({ ...formData, client_id: value === 'no_client' ? '' : value })}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select client" />
+                    <SelectTrigger className="border-slate-300">
+                      <SelectValue placeholder="No Client" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-60 overflow-y-auto">
                       <SelectItem value="no_client">No Client</SelectItem>
                       {clients.map((client) => (
                         <SelectItem key={client.id} value={client.id}>
@@ -369,23 +374,25 @@ export default function Tasks() {
                     type="date"
                     value={formData.due_date}
                     onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                    className="border-slate-300"
                     data-testid="task-due-date-input"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                {user?.role !== 'staff' && (
+              {/* Assignee and Co-assignee Row */}
+              {user?.role !== 'staff' && (
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="assigned_to">Primary Assignee</Label>
+                    <Label htmlFor="assigned_to">Assignee</Label>
                     <Select
                       value={formData.assigned_to}
                       onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
                     >
-                      <SelectTrigger data-testid="task-assign-select">
-                        <SelectValue placeholder="Select user" />
+                      <SelectTrigger className="border-slate-300" data-testid="task-assign-select">
+                        <SelectValue placeholder="Select assignee..." />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-60 overflow-y-auto">
                         <SelectItem value="unassigned">Unassigned</SelectItem>
                         {users.map((u) => (
                           <SelectItem key={u.id} value={u.id}>
@@ -395,56 +402,71 @@ export default function Tasks() {
                       </SelectContent>
                     </Select>
                   </div>
-                )}
 
-                <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Select
-                    value={formData.category}
-                    onValueChange={(value) => setFormData({ ...formData, category: value })}
-                  >
-                    <SelectTrigger data-testid="task-category-select">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TASK_CATEGORIES.map((cat) => (
-                        <SelectItem key={cat.value} value={cat.value}>
-                          {cat.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Multi-Staff Assignment */}
-              {user?.role !== 'staff' && users.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Additional Team Members
-                  </Label>
-                  <div className="border rounded-lg p-3 bg-slate-50 max-h-32 overflow-y-auto">
-                    <div className="grid grid-cols-2 gap-2">
-                      {users
-                        .filter(u => u.id !== formData.assigned_to)
-                        .map((u) => (
-                        <div key={u.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`sub-${u.id}`}
-                            checked={formData.sub_assignees.includes(u.id)}
-                            onCheckedChange={() => toggleSubAssignee(u.id)}
-                          />
-                          <label htmlFor={`sub-${u.id}`} className="text-sm cursor-pointer">
-                            {u.full_name}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="co_assignee">Co-assignee</Label>
+                    <Select
+                      value={formData.sub_assignees?.[0] || 'none'}
+                      onValueChange={(value) => {
+                        if (value === 'none') {
+                          setFormData({ ...formData, sub_assignees: [] });
+                        } else {
+                          setFormData({ ...formData, sub_assignees: [value] });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="border-slate-300" data-testid="task-co-assign-select">
+                        <SelectValue placeholder="Select co-assignee..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60 overflow-y-auto">
+                        <SelectItem value="none">No Co-assignee</SelectItem>
+                        {users
+                          .filter(u => u.id !== formData.assigned_to)
+                          .map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
 
+              {/* Department Selection with Toggle Buttons */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">Department</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DEPARTMENTS.map((dept) => {
+                    const isSelected = formData.category === dept.value;
+                    return (
+                      <button
+                        key={dept.value}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, category: dept.value })}
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2
+                          ${isSelected 
+                            ? 'text-white shadow-md' 
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+                          }`}
+                        style={isSelected ? { background: COLORS.mediumBlue } : {}}
+                        data-testid={`dept-${dept.value}`}
+                      >
+                        {isSelected && (
+                          <Switch 
+                            checked={true} 
+                            className="h-4 w-7 pointer-events-none"
+                            style={{ background: 'rgba(255,255,255,0.3)' }}
+                          />
+                        )}
+                        {dept.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Priority and Status Row */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
@@ -452,7 +474,7 @@ export default function Tasks() {
                     value={formData.priority}
                     onValueChange={(value) => setFormData({ ...formData, priority: value })}
                   >
-                    <SelectTrigger data-testid="task-priority-select">
+                    <SelectTrigger className="border-slate-300" data-testid="task-priority-select">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -470,7 +492,7 @@ export default function Tasks() {
                     value={formData.status}
                     onValueChange={(value) => setFormData({ ...formData, status: value })}
                   >
-                    <SelectTrigger data-testid="task-status-select">
+                    <SelectTrigger className="border-slate-300" data-testid="task-status-select">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -540,15 +562,20 @@ export default function Tasks() {
                 )}
               </div>
 
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
+              <DialogFooter className="pt-4 border-t border-slate-200">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => { setDialogOpen(false); resetForm(); }}
+                  className="px-6"
+                >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={loading}
-                  style={{ background: COLORS.deepBlue }}
-                  className="text-white"
+                  className="text-white px-6"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
                 >
                   {loading ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}
                 </Button>
