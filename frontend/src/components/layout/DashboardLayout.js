@@ -77,7 +77,7 @@ export const DashboardLayout = ({ children }) => {
           {/* Logo Header - Fixed */}
           <div className="p-6 border-b border-blue-100/50">
             <div className="flex items-center justify-between">
-              <img src="/logo.png" alt="Taskosphere" className="h-10" />
+              <img src="/logo.png" alt="Taskosphere" className="h-14" style={{ background: 'transparent' }} />
               <Button
                 variant="ghost"
                 size="icon"
