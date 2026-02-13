@@ -515,8 +515,8 @@ def main():
     # Setup
     tester = TaskosphereAPITester()
     
-    print("🚀 Starting Taskosphere API Tests")
-    print("=" * 50)
+    print("🚀 Starting Taskosphere API Tests - Login & DSC Updates")
+    print("=" * 60)
     
     # Test login
     if not tester.test_login("admin@test.com", "admin123"):
@@ -532,6 +532,18 @@ def main():
     
     if created_user_id:
         tester.test_update_user_departments(created_user_id)
+
+    # Test DSC management with new model (no certificate_number)
+    print("\n🔐 Testing DSC Management (New Model)")
+    print("-" * 40)
+    
+    dsc_id_full = tester.test_dsc_create_without_certificate_number()
+    dsc_id_minimal = tester.test_dsc_create_minimal_required_fields()
+    dsc_list = tester.test_get_dsc_list()
+    
+    # Test DSC movement tracking
+    if dsc_id_full:
+        tester.test_dsc_movement_tracking(dsc_id_full)
 
     # Test task management with assignees and departments
     print("\n📋 Testing Task Management")
@@ -565,7 +577,7 @@ def main():
         tester.test_quick_status_change(special_tasks['high_priority'])
 
     # Print results
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print(f"📊 Test Results: {tester.tests_passed}/{tester.tests_run} passed")
     
     if tester.tests_passed == tester.tests_run:
