@@ -51,6 +51,7 @@ class UserBase(BaseModel):
     role: str = "staff"  # admin, manager, staff
     profile_picture: Optional[str] = None
     permissions: Optional[UserPermissions] = None  # Custom permissions
+    departments: List[str] = []  # Multiple departments: gst, income_tax, accounts, tds, roc, trademark, msme_smadhan, fema, dsc, other
 
 class UserCreate(UserBase):
     password: str
