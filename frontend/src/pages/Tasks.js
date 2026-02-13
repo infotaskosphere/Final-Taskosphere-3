@@ -49,7 +49,7 @@ const RECURRENCE_PATTERNS = [
   { value: 'yearly', label: 'Yearly' },
 ];
 
-// Status colors
+// Status colors with gradients for cards
 const STATUS_STYLES = {
   pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do' },
   in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Progress' },
@@ -64,6 +64,19 @@ const PRIORITY_STYLES = {
   medium: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'MEDIUM' },
   high: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'HIGH' },
   critical: { bg: 'bg-red-100', text: 'text-red-700', label: 'CRITICAL' },
+};
+
+// Card gradient styles based on status/priority
+const getCardGradient = (task, isOverdue) => {
+  if (isOverdue) {
+    // Red gradient for overdue tasks
+    return 'linear-gradient(135deg, rgba(254, 202, 202, 0.6) 0%, rgba(252, 165, 165, 0.4) 50%, rgba(248, 113, 113, 0.2) 100%)';
+  }
+  if (task.priority === 'high' || task.priority === 'critical') {
+    // Orange gradient for high priority/urgent tasks
+    return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
+  }
+  return 'none';
 };
 
 // Animation variants
