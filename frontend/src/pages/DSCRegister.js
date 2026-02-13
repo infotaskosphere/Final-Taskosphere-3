@@ -256,7 +256,7 @@ export default function DSCRegister() {
     const query = searchQuery.toLowerCase();
     return (
       dsc.holder_name?.toLowerCase().includes(query) ||
-      dsc.certificate_number?.toLowerCase().includes(query) ||
+      dsc.dsc_type?.toLowerCase().includes(query) ||
       dsc.associated_with?.toLowerCase().includes(query)
     );
   };
