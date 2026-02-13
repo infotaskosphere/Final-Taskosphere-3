@@ -295,6 +295,132 @@ class TaskosphereAPITester:
         
         return True
 
+    def test_dsc_create_without_certificate_number(self):
+        """Test creating DSC without certificate_number field (new model)"""
+        dsc_data = {
+            "holder_name": "Test DSC Holder",
+            "dsc_type": "Class 3 Signature",  # New optional field
+            "dsc_password": "TestPassword123",  # New optional field
+            "associated_with": "Test Company Ltd",  # Optional field
+            "entity_type": "firm",
+            "issue_date": "2024-01-01T00:00:00Z",
+            "expiry_date": "2025-12-31T23:59:59Z",
+            "notes": "Test DSC for new model validation"
+        }
+        
+        success, response = self.run_test(
+            "Create DSC with New Model (no certificate_number)",
+            "POST",
+            "dsc",
+            200,
+            data=dsc_data
+        )
+        
+        if success:
+            # Verify new fields are saved correctly
+            dsc_type = response.get('dsc_type')
+            dsc_password = response.get('dsc_password')
+            associated_with = response.get('associated_with')
+            
+            if (dsc_type == dsc_data['dsc_type'] and 
+                dsc_password == dsc_data['dsc_password'] and
+                associated_with == dsc_data['associated_with']):
+                print(f"   ✅ New DSC fields saved correctly - Type: {dsc_type}, Password: {dsc_password}, Associated: {associated_with}")
+                return response.get('id')
+            else:
+                print(f"   ❌ DSC field mismatch")
+        return None
+
+    def test_dsc_create_minimal_required_fields(self):
+        """Test creating DSC with only required fields (holder_name, issue_date, expiry_date)"""
+        dsc_data = {
+            "holder_name": "Minimal DSC Holder",
+            "entity_type": "firm",
+            "issue_date": "2024-01-01T00:00:00Z",
+            "expiry_date": "2025-12-31T23:59:59Z"
+            # No dsc_type, dsc_password, or associated_with (all optional)
+        }
+        
+        success, response = self.run_test(
+            "Create DSC with Minimal Required Fields",
+            "POST",
+            "dsc",
+            200,
+            data=dsc_data
+        )
+        
+        if success:
+            holder_name = response.get('holder_name')
+            if holder_name == dsc_data['holder_name']:
+                print(f"   ✅ Minimal DSC created successfully - Holder: {holder_name}")
+                return response.get('id')
+            else:
+                print(f"   ❌ Minimal DSC creation failed")
+        return None
+
+    def test_dsc_movement_tracking(self, dsc_id):
+        """Test DSC IN/OUT movement tracking"""
+        if not dsc_id:
+            print("   ⚠️  Skipping - No DSC ID provided")
+            return False
+        
+        # Test marking DSC as OUT
+        movement_out = {
+            "movement_type": "OUT",
+            "person_name": "John Doe",
+            "notes": "Taken for client work"
+        }
+        
+        success, response = self.run_test(
+            "Mark DSC as OUT",
+            "POST",
+            f"dsc/{dsc_id}/movement",
+            200,
+            data=movement_out
+        )
+        
+        if not success:
+            return False
+        
+        # Test marking DSC as IN
+        movement_in = {
+            "movement_type": "IN",
+            "person_name": "Jane Smith",
+            "notes": "Returned after completion"
+        }
+        
+        success, response = self.run_test(
+            "Mark DSC as IN",
+            "POST",
+            f"dsc/{dsc_id}/movement",
+            200,
+            data=movement_in
+        )
+        
+        if success:
+            print(f"   ✅ DSC movement tracking working correctly")
+            return True
+        return False
+
+    def test_get_dsc_list(self):
+        """Test getting DSC list"""
+        success, response = self.run_test(
+            "Get DSC List",
+            "GET",
+            "dsc",
+            200
+        )
+        
+        if success and isinstance(response, list):
+            print(f"   ✅ Retrieved {len(response)} DSC certificates")
+            # Check for new fields in DSC records
+            dscs_with_type = [d for d in response if d.get('dsc_type')]
+            dscs_with_password = [d for d in response if d.get('dsc_password')]
+            print(f"   ✅ {len(dscs_with_type)} DSCs have type field")
+            print(f"   ✅ {len(dscs_with_password)} DSCs have password field")
+            return response
+        return []
+
     def test_task_priority_and_overdue_scenarios(self):
         """Test creating tasks with different priorities and overdue scenarios"""
         # Test high priority task
