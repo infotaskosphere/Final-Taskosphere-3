@@ -10,6 +10,7 @@
     --brand-medium-blue: #1F6FB2;
     --brand-emerald: #1FAF5A;
     --brand-light-green: #5CCB5F;
+    --brand-light-blue: #E0F2FE;
 }
 
 body {
@@ -23,6 +24,77 @@ body {
 
 code {
     font-family: 'JetBrains Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* ============================================
+   DESIGN SYSTEM - Consistent Components
+   ============================================ */
+
+@layer components {
+    /* Consistent Card Styling */
+    .card-base {
+        @apply bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-200;
+    }
+    
+    /* Consistent Button - Pill Shape */
+    .btn-pill {
+        @apply h-9 px-4 rounded-full font-semibold text-xs flex items-center justify-center gap-1.5 transition-all;
+    }
+    
+    .btn-pill-sm {
+        @apply h-8 px-3 rounded-full font-medium text-xs flex items-center justify-center gap-1 transition-all;
+    }
+    
+    .btn-pill-lg {
+        @apply h-11 px-6 rounded-full font-semibold text-sm flex items-center justify-center gap-2 transition-all;
+    }
+    
+    /* Status Button Variants */
+    .btn-status-active {
+        @apply text-white shadow-md;
+    }
+    
+    .btn-status-inactive {
+        @apply bg-slate-100 text-slate-600 hover:shadow-sm;
+    }
+    
+    /* Consistent Badge Styling */
+    .badge-base {
+        @apply px-2.5 py-1 rounded-full text-xs font-semibold;
+    }
+    
+    /* Consistent Input Styling */
+    .input-base {
+        @apply h-11 rounded-xl border-slate-200 focus:border-blue-400 transition-colors;
+    }
+    
+    /* Consistent Grid Card - Equal Heights */
+    .grid-card-equal {
+        @apply h-full flex flex-col;
+    }
+    
+    /* Avatar Styles */
+    .avatar-sm {
+        @apply w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold;
+    }
+    
+    .avatar-md {
+        @apply w-10 h-10 rounded-full flex items-center justify-center text-white text-base font-semibold;
+    }
+    
+    .avatar-lg {
+        @apply w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg font-bold;
+    }
+    
+    /* Stat Card */
+    .stat-card {
+        @apply bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 hover:shadow-md transition-all h-full;
+    }
+    
+    /* Department Pills */
+    .dept-pill {
+        @apply inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold;
+    }
 }
 
 @layer base {
