@@ -454,7 +454,7 @@ async def update_user(user_id: str, user_data: dict, current_user: User = Depend
         raise HTTPException(status_code=404, detail="User not found")
     
     # Only allow updating these fields
-    allowed_fields = ["full_name", "role"]
+    allowed_fields = ["full_name", "role", "departments"]
     update_data = {k: v for k, v in user_data.items() if k in allowed_fields}
     
     await db.users.update_one({"id": user_id}, {"$set": update_data})
