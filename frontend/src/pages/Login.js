@@ -79,7 +79,7 @@ export default function Login() {
       {/* Floating Shapes - Abstract geometric elements */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <div 
-          className="absolute w-96 h-96 rounded-full opacity-20 animate-pulse"
+          className="absolute w-64 sm:w-80 lg:w-96 h-64 sm:h-80 lg:h-96 rounded-full opacity-20 animate-pulse"
           style={{ 
             background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.secondary} 100%)`,
             top: '-10%',
@@ -88,7 +88,7 @@ export default function Login() {
           }}
         />
         <div 
-          className="absolute w-64 h-64 rounded-full opacity-15 animate-pulse"
+          className="absolute w-48 sm:w-56 lg:w-64 h-48 sm:h-56 lg:h-64 rounded-full opacity-15 animate-pulse"
           style={{ 
             background: `linear-gradient(135deg, ${COLORS.secondary} 0%, ${COLORS.primary} 100%)`,
             bottom: '-5%',
@@ -98,7 +98,7 @@ export default function Login() {
           }}
         />
         <div 
-          className="absolute w-80 h-80 rounded-full opacity-10 animate-pulse"
+          className="absolute w-60 sm:w-72 lg:w-80 h-60 sm:h-72 lg:h-80 rounded-full opacity-10 animate-pulse hidden sm:block"
           style={{ 
             background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.secondary} 100%)`,
             top: '30%',
@@ -109,10 +109,10 @@ export default function Login() {
         />
       </div>
 
-      {/* Left Side - Dashboard Preview (blurred) */}
-      <div className="hidden lg:flex lg:w-1/2 relative z-10 items-center justify-center p-8">
+      {/* Left Side - Dashboard Preview (hidden on mobile/tablet) */}
+      <div className="hidden lg:flex lg:w-1/2 relative z-10 items-center justify-center p-4 xl:p-8">
         <div 
-          className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+          className="w-full max-w-md xl:max-w-lg rounded-3xl shadow-2xl overflow-hidden"
           style={{ 
             background: 'rgba(255, 255, 255, 0.7)',
             backdropFilter: 'blur(10px)',
@@ -120,28 +120,28 @@ export default function Login() {
           }}
         >
           {/* Mock Dashboard Preview */}
-          <div className="p-6 space-y-4">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-lg" style={{ background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.secondary} 100%)` }}></div>
-              <div className="h-4 w-32 bg-slate-200 rounded"></div>
+          <div className="p-4 xl:p-6 space-y-3 xl:space-y-4">
+            <div className="flex items-center gap-3 mb-4 xl:mb-6">
+              <div className="w-8 xl:w-10 h-8 xl:h-10 rounded-lg" style={{ background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.secondary} 100%)` }}></div>
+              <div className="h-3 xl:h-4 w-24 xl:w-32 bg-slate-200 rounded"></div>
             </div>
             {/* Stats Cards */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-white/80 p-4 rounded-xl shadow-sm">
-                <div className="h-3 w-12 bg-blue-200 rounded mb-2"></div>
-                <div className="h-6 w-8 bg-blue-400 rounded"></div>
+            <div className="grid grid-cols-3 gap-2 xl:gap-3">
+              <div className="bg-white/80 p-3 xl:p-4 rounded-xl shadow-sm">
+                <div className="h-2 xl:h-3 w-10 xl:w-12 bg-blue-200 rounded mb-2"></div>
+                <div className="h-5 xl:h-6 w-6 xl:w-8 bg-blue-400 rounded"></div>
               </div>
-              <div className="bg-white/80 p-4 rounded-xl shadow-sm">
-                <div className="h-3 w-12 bg-green-200 rounded mb-2"></div>
-                <div className="h-6 w-8 bg-green-400 rounded"></div>
+              <div className="bg-white/80 p-3 xl:p-4 rounded-xl shadow-sm">
+                <div className="h-2 xl:h-3 w-10 xl:w-12 bg-green-200 rounded mb-2"></div>
+                <div className="h-5 xl:h-6 w-6 xl:w-8 bg-green-400 rounded"></div>
               </div>
-              <div className="bg-white/80 p-4 rounded-xl shadow-sm">
-                <div className="h-3 w-12 bg-amber-200 rounded mb-2"></div>
-                <div className="h-6 w-8 bg-amber-400 rounded"></div>
+              <div className="bg-white/80 p-3 xl:p-4 rounded-xl shadow-sm">
+                <div className="h-2 xl:h-3 w-10 xl:w-12 bg-amber-200 rounded mb-2"></div>
+                <div className="h-5 xl:h-6 w-6 xl:w-8 bg-amber-400 rounded"></div>
               </div>
             </div>
             {/* Chart Placeholder */}
-            <div className="bg-white/80 p-4 rounded-xl shadow-sm h-32 flex items-end gap-2">
+            <div className="bg-white/80 p-3 xl:p-4 rounded-xl shadow-sm h-24 xl:h-32 flex items-end gap-1 xl:gap-2">
               {[40, 65, 45, 80, 55, 70, 50].map((h, i) => (
                 <div 
                   key={i} 
@@ -158,10 +158,10 @@ export default function Login() {
             {/* Task List */}
             <div className="space-y-2">
               {[1, 2, 3].map((_, i) => (
-                <div key={i} className="bg-white/80 p-3 rounded-lg shadow-sm flex items-center gap-3">
-                  <div className="w-4 h-4 rounded border-2 border-slate-300"></div>
-                  <div className="h-3 flex-1 bg-slate-200 rounded"></div>
-                  <div className="h-5 w-16 bg-slate-100 rounded-full"></div>
+                <div key={i} className="bg-white/80 p-2 xl:p-3 rounded-lg shadow-sm flex items-center gap-2 xl:gap-3">
+                  <div className="w-3 xl:w-4 h-3 xl:h-4 rounded border-2 border-slate-300"></div>
+                  <div className="h-2 xl:h-3 flex-1 bg-slate-200 rounded"></div>
+                  <div className="h-4 xl:h-5 w-12 xl:w-16 bg-slate-100 rounded-full"></div>
                 </div>
               ))}
             </div>
@@ -169,10 +169,10 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Right Side - Login Form */}
-      <div className="flex-1 flex items-center justify-center p-8 z-10">
+      {/* Right Side - Login Form (full width on mobile) */}
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8 z-10">
         <div 
-          className="w-full max-w-md p-8 rounded-3xl shadow-xl"
+          className="w-full max-w-sm sm:max-w-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl"
           style={{ 
             background: 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(20px)',
