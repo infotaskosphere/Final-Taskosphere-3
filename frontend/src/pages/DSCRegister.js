@@ -635,7 +635,7 @@ export default function DSCRegister() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="holder_name">Holder Name *</Label>
+                    <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
                     <Input
                       id="holder_name"
                       placeholder="Name of certificate holder"
@@ -647,33 +647,45 @@ export default function DSCRegister() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="certificate_number">Certificate Number *</Label>
+                    <Label htmlFor="dsc_type">Type</Label>
                     <Input
-                      id="certificate_number"
-                      placeholder="Certificate number"
-                      value={formData.certificate_number}
-                      onChange={(e) => setFormData({ ...formData, certificate_number: e.target.value })}
-                      required
-                      data-testid="dsc-cert-number-input"
+                      id="dsc_type"
+                      placeholder="e.g. Class 3, Signature, Encryption"
+                      value={formData.dsc_type}
+                      onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })}
+                      data-testid="dsc-type-input"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="associated_with">Associated With *</Label>
+                    <Label htmlFor="dsc_password">Password</Label>
+                    <Input
+                      id="dsc_password"
+                      type="text"
+                      placeholder="DSC Password"
+                      value={formData.dsc_password}
+                      onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })}
+                      data-testid="dsc-password-input"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
                     <Input
                       id="associated_with"
                       placeholder="Firm or client name"
                       value={formData.associated_with}
                       onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                      required
                       data-testid="dsc-associated-input"
                     />
                   </div>
+                </div>
 
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="entity_type">Entity Type *</Label>
+                    <Label htmlFor="entity_type">Entity Type</Label>
                     <Select
                       value={formData.entity_type}
                       onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
@@ -681,17 +693,15 @@ export default function DSCRegister() {
                       <SelectTrigger data-testid="dsc-entity-type-select">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-60 overflow-y-auto">
                         <SelectItem value="firm">Firm</SelectItem>
                         <SelectItem value="client">Client</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="issue_date">Issue Date *</Label>
+                    <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="issue_date"
                       type="date"
@@ -701,9 +711,11 @@ export default function DSCRegister() {
                       data-testid="dsc-issue-date-input"
                     />
                   </div>
+                </div>
 
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="expiry_date">Expiry Date *</Label>
+                    <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="expiry_date"
                       type="date"
@@ -713,6 +725,7 @@ export default function DSCRegister() {
                       data-testid="dsc-expiry-date-input"
                     />
                   </div>
+                  <div></div>
                 </div>
 
                 <div className="space-y-2">
