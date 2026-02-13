@@ -122,15 +122,28 @@ Task management website for CA/CS Firms with comprehensive features for task man
 
 ## Last Updated
 Date: 2025-02-13
-Status: Task assignment UI updated with Assignee/Co-assignee and Department toggles. User management updated with multi-department selection.
+Status: Login page redesigned with logo colors, DSC Register updated with new fields
 
 ## Recent Updates (Feb 13, 2025)
-- Task form: Assignee + Co-assignee dropdowns (side by side)
-- Task form: Department toggle buttons (10 departments)
-- User form: Multi-select departments (Allotted)
-- Users table: Departments column added
-- All modals: Scrollable with max-h-[90vh] overflow-y-auto
+1. Task Dashboard:
+   - Quick status change buttons (To Do, Progress, Done)
+   - Equal size task cards with gradients
+   - Overdue tasks: Red gradient background
+   - High priority tasks: Orange gradient background
+
+2. Login Page Redesign:
+   - Blue/green gradient button matching logo colors
+   - Abstract background with floating shapes
+   - Dashboard preview on left side
+   - Forgot Password option added
+   - Password visibility toggle
+
+3. DSC Register Updates:
+   - Removed Certificate Number field
+   - Added Type field (optional)
+   - Added Password field (optional)
+   - Made Associated With optional
 
 ## Test Credentials
 - Email: admin@test.com
-- Password: admin123 (newly registered in current session)
+- Password: admin123
