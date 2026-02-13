@@ -181,7 +181,7 @@ export default function Login() {
         >
           {/* Logo */}
           <div className="text-center mb-8">
-            <img src="/logo.png" alt="TaskoSphere" className="h-16 mx-auto mb-2" />
+            <img src="/logo.png" alt="TaskoSphere" className="h-20 mx-auto mb-2" style={{ background: 'transparent' }} />
           </div>
 
           {showForgotPassword ? (
