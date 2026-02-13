@@ -175,8 +175,20 @@ export default function Users() {
       full_name: '',
       role: 'staff',
       profile_picture: '',
+      departments: [],
     });
     setEditingUser(null);
+  };
+
+  const toggleDepartment = (deptValue) => {
+    setFormData(prev => {
+      const currentDepts = prev.departments || [];
+      if (currentDepts.includes(deptValue)) {
+        return { ...prev, departments: currentDepts.filter(d => d !== deptValue) };
+      } else {
+        return { ...prev, departments: [...currentDepts, deptValue] };
+      }
+    });
   };
 
   const openPermissionsDialog = (userData) => {
