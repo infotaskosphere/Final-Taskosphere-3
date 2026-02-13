@@ -231,6 +231,160 @@ class TaskosphereAPITester:
             return response
         return []
 
+    def test_quick_status_change(self, task_id):
+        """Test quick status change functionality"""
+        if not task_id:
+            print("   ⚠️  Skipping - No task ID provided")
+            return False
+            
+        # Test status changes: pending -> in_progress -> completed -> pending
+        status_changes = [
+            ("pending", "To Do"),
+            ("in_progress", "In Progress"), 
+            ("completed", "Completed"),
+            ("pending", "To Do")  # Back to pending
+        ]
+        
+        for status, label in status_changes:
+            # First get the current task to preserve other fields
+            get_success, current_task = self.run_test(
+                f"Get Task for Status Update",
+                "GET",
+                f"tasks/{task_id}",
+                200
+            )
+            
+            if not get_success:
+                print(f"   ❌ Failed to get current task data")
+                return False
+            
+            # Update task with new status
+            update_data = {
+                "title": current_task.get("title"),
+                "description": current_task.get("description", ""),
+                "assigned_to": current_task.get("assigned_to"),
+                "sub_assignees": current_task.get("sub_assignees", []),
+                "due_date": current_task.get("due_date"),
+                "priority": current_task.get("priority"),
+                "status": status,
+                "category": current_task.get("category", "other"),
+                "client_id": current_task.get("client_id"),
+                "is_recurring": current_task.get("is_recurring", False),
+                "recurrence_pattern": current_task.get("recurrence_pattern", "monthly"),
+                "recurrence_interval": current_task.get("recurrence_interval", 1)
+            }
+            
+            success, response = self.run_test(
+                f"Quick Status Change to {label}",
+                "PUT",
+                f"tasks/{task_id}",
+                200,
+                data=update_data
+            )
+            
+            if success:
+                updated_status = response.get('status')
+                if updated_status == status:
+                    print(f"   ✅ Status changed to {label} ({status})")
+                else:
+                    print(f"   ❌ Status change failed. Expected: {status}, Got: {updated_status}")
+                    return False
+            else:
+                print(f"   ❌ Failed to change status to {status}")
+                return False
+        
+        return True
+
+    def test_task_priority_and_overdue_scenarios(self):
+        """Test creating tasks with different priorities and overdue scenarios"""
+        # Test high priority task
+        high_priority_task = {
+            "title": "High Priority Test Task",
+            "description": "Testing high priority task for orange gradient",
+            "priority": "high",
+            "status": "pending",
+            "category": "gst",
+            "due_date": "2024-12-31T23:59:59Z"
+        }
+        
+        success, response = self.run_test(
+            "Create High Priority Task",
+            "POST",
+            "tasks",
+            200,
+            data=high_priority_task
+        )
+        
+        high_priority_task_id = None
+        if success:
+            priority = response.get('priority')
+            if priority == 'high':
+                print(f"   ✅ High priority task created successfully")
+                high_priority_task_id = response.get('id')
+            else:
+                print(f"   ❌ Priority mismatch. Expected: high, Got: {priority}")
+        
+        # Test critical priority task
+        critical_priority_task = {
+            "title": "Critical Priority Test Task", 
+            "description": "Testing critical priority task for orange gradient",
+            "priority": "critical",
+            "status": "pending",
+            "category": "income_tax",
+            "due_date": "2024-12-31T23:59:59Z"
+        }
+        
+        success, response = self.run_test(
+            "Create Critical Priority Task",
+            "POST", 
+            "tasks",
+            200,
+            data=critical_priority_task
+        )
+        
+        critical_priority_task_id = None
+        if success:
+            priority = response.get('priority')
+            if priority == 'critical':
+                print(f"   ✅ Critical priority task created successfully")
+                critical_priority_task_id = response.get('id')
+            else:
+                print(f"   ❌ Priority mismatch. Expected: critical, Got: {priority}")
+        
+        # Test overdue task (past due date)
+        overdue_task = {
+            "title": "Overdue Test Task",
+            "description": "Testing overdue task for red gradient",
+            "priority": "medium",
+            "status": "pending", 
+            "category": "accounts",
+            "due_date": "2023-01-01T23:59:59Z"  # Past date
+        }
+        
+        success, response = self.run_test(
+            "Create Overdue Task",
+            "POST",
+            "tasks", 
+            200,
+            data=overdue_task
+        )
+        
+        overdue_task_id = None
+        if success:
+            due_date = response.get('due_date')
+            status = response.get('status')
+            if due_date and status == 'pending':
+                print(f"   ✅ Overdue task created successfully with due date: {due_date}")
+                overdue_task_id = response.get('id')
+            else:
+                print(f"   ❌ Overdue task creation issue")
+        
+        return {
+            'high_priority': high_priority_task_id,
+            'critical_priority': critical_priority_task_id, 
+            'overdue': overdue_task_id
+        }
+
 def main():
     # Setup
     tester = TaskosphereAPITester()
