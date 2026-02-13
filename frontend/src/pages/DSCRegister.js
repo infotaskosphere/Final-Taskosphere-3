@@ -982,7 +982,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
               Holder Name
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Certificate #
+              Type
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Associated With
@@ -1008,8 +1008,8 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 data-testid={`dsc-row-${dsc.id}`}
               >
                 <td className="px-6 py-4 font-medium text-slate-900">{dsc.holder_name}</td>
-                <td className="px-6 py-4 text-sm font-mono text-slate-600">{dsc.certificate_number}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with}</td>
+                <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_type || '-'}</td>
+                <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
                 </td>
