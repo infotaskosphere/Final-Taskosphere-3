@@ -825,43 +825,43 @@ export default function Tasks() {
                       )}
                     </div>
 
-                    {/* Quick Status Change Buttons */}
-                    <div className="flex items-center gap-1.5 mt-auto pt-3 border-t border-slate-200/50">
+                    {/* Quick Status Change Buttons - Consistent pill shape */}
+                    <div className="flex items-center gap-2 mt-auto pt-3 border-t border-slate-200/50">
                       <button
                         onClick={() => handleQuickStatusChange(task, 'pending')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
                           ${task.status === 'pending' 
-                            ? 'bg-amber-500 text-white shadow-sm' 
+                            ? 'bg-amber-500 text-white shadow-md' 
                             : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
                         title="Mark as To Do"
                         data-testid={`status-todo-${task.id}`}
                       >
                         <Clock className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">To Do</span>
+                        <span>To Do</span>
                       </button>
                       <button
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
                           ${task.status === 'in_progress' 
-                            ? 'bg-blue-500 text-white shadow-sm' 
+                            ? 'bg-blue-500 text-white shadow-md' 
                             : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
                         title="Mark as In Progress"
                         data-testid={`status-progress-${task.id}`}
                       >
                         <Play className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Progress</span>
+                        <span>Progress</span>
                       </button>
                       <button
                         onClick={() => handleQuickStatusChange(task, 'completed')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
                           ${task.status === 'completed' 
-                            ? 'bg-emerald-500 text-white shadow-sm' 
+                            ? 'bg-emerald-500 text-white shadow-md' 
                             : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
                         title="Mark as Completed"
                         data-testid={`status-done-${task.id}`}
                       >
                         <CheckCircle className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Done</span>
+                        <span>Done</span>
                       </button>
                     </div>
 
