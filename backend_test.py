@@ -414,8 +414,29 @@ def main():
     tester.test_create_task_with_department()
     tasks = tester.test_get_tasks()
     
+    task_id = None
     if users:
-        tester.test_create_task_with_assignees(users)
+        task_id = tester.test_create_task_with_assignees(users)
+
+    # Test new quick status change functionality
+    print("\n🔄 Testing Quick Status Change")
+    print("-" * 40)
+    
+    if task_id:
+        tester.test_quick_status_change(task_id)
+    else:
+        print("   ⚠️  Skipping quick status change - no task ID available")
+
+    # Test priority and overdue scenarios for gradient backgrounds
+    print("\n🎨 Testing Priority & Overdue Task Scenarios")
+    print("-" * 40)
+    
+    special_tasks = tester.test_task_priority_and_overdue_scenarios()
+    
+    # Test quick status change on special tasks
+    if special_tasks.get('high_priority'):
+        print("\n   Testing quick status change on high priority task:")
+        tester.test_quick_status_change(special_tasks['high_priority'])
 
     # Print results
     print("\n" + "=" * 50)
