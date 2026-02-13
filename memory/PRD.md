@@ -122,7 +122,14 @@ Task management website for CA/CS Firms with comprehensive features for task man
 
 ## Last Updated
 Date: 2025-02-13
-Status: Application restored from backup zip file - all features working
+Status: Task assignment UI updated with Assignee/Co-assignee and Department toggles. User management updated with multi-department selection.
+
+## Recent Updates (Feb 13, 2025)
+- Task form: Assignee + Co-assignee dropdowns (side by side)
+- Task form: Department toggle buttons (10 departments)
+- User form: Multi-select departments (Allotted)
+- Users table: Departments column added
+- All modals: Scrollable with max-h-[90vh] overflow-y-auto
 
 ## Test Credentials
 - Email: admin@test.com
