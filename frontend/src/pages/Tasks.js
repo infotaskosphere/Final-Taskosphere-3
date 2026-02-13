@@ -24,19 +24,22 @@ const COLORS = {
   lightGreen: '#5CCB5F',
 };
 
-// Predefined task categories for CA/CS firms
-const TASK_CATEGORIES = [
+// Department categories for CA/CS firms
+const DEPARTMENTS = [
   { value: 'gst', label: 'GST' },
-  { value: 'trademark', label: 'Trademark' },
-  { value: 'income_tax', label: 'Income Tax' },
-  { value: 'roc', label: 'ROC' },
-  { value: 'audit', label: 'Audit' },
+  { value: 'income_tax', label: 'INCOME TAX' },
+  { value: 'accounts', label: 'ACCOUNTS' },
   { value: 'tds', label: 'TDS' },
-  { value: 'company_law', label: 'Company Law' },
-  { value: 'rera', label: 'RERA' },
+  { value: 'roc', label: 'ROC' },
+  { value: 'trademark', label: 'TRADEMARK' },
+  { value: 'msme_smadhan', label: 'MSME SMADHAN' },
   { value: 'fema', label: 'FEMA' },
-  { value: 'other', label: 'Other' },
+  { value: 'dsc', label: 'DSC' },
+  { value: 'other', label: 'OTHER' },
 ];
+
+// Predefined task categories for CA/CS firms (alias for backward compatibility)
+const TASK_CATEGORIES = DEPARTMENTS;
 
 // Recurrence pattern options
 const RECURRENCE_PATTERNS = [
