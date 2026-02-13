@@ -140,6 +140,7 @@ export default function Users() {
       full_name: userToEdit.full_name,
       role: userToEdit.role,
       profile_picture: userToEdit.profile_picture || '',
+      departments: userToEdit.departments || [],
     });
     setDialogOpen(true);
   };
