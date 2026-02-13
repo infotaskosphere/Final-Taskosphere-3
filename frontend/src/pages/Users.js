@@ -25,6 +25,20 @@ const COLORS = {
   lightGreen: '#5CCB5F',
 };
 
+// Department categories for CA/CS firms
+const DEPARTMENTS = [
+  { value: 'gst', label: 'GST' },
+  { value: 'income_tax', label: 'INCOME TAX' },
+  { value: 'accounts', label: 'ACCOUNTS' },
+  { value: 'tds', label: 'TDS' },
+  { value: 'roc', label: 'ROC' },
+  { value: 'trademark', label: 'TRADEMARK' },
+  { value: 'msme_smadhan', label: 'MSME SMADHAN' },
+  { value: 'fema', label: 'FEMA' },
+  { value: 'dsc', label: 'DSC' },
+  { value: 'other', label: 'OTHER' },
+];
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
