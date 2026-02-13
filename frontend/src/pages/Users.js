@@ -8,9 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, MoreVertical } from 'lucide-react';
 import { format } from 'date-fns';
 import axios from 'axios';
 import { motion } from 'framer-motion';
@@ -21,22 +22,23 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
+  lightBlue: '#E0F2FE',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
 
-// Department categories for CA/CS firms
+// Department categories with colors
 const DEPARTMENTS = [
-  { value: 'gst', label: 'GST' },
-  { value: 'income_tax', label: 'INCOME TAX' },
-  { value: 'accounts', label: 'ACCOUNTS' },
-  { value: 'tds', label: 'TDS' },
-  { value: 'roc', label: 'ROC' },
-  { value: 'trademark', label: 'TRADEMARK' },
-  { value: 'msme_smadhan', label: 'MSME SMADHAN' },
-  { value: 'fema', label: 'FEMA' },
-  { value: 'dsc', label: 'DSC' },
-  { value: 'other', label: 'OTHER' },
+  { value: 'gst', label: 'GST', color: '#EF4444' },
+  { value: 'income_tax', label: 'IT', color: '#F59E0B' },
+  { value: 'accounts', label: 'ACC', color: '#10B981' },
+  { value: 'tds', label: 'TDS', color: '#3B82F6' },
+  { value: 'roc', label: 'ROC', color: '#8B5CF6' },
+  { value: 'trademark', label: 'TM', color: '#EC4899' },
+  { value: 'msme_smadhan', label: 'MSME', color: '#06B6D4' },
+  { value: 'fema', label: 'FEMA', color: '#F97316' },
+  { value: 'dsc', label: 'DSC', color: '#14B8A6' },
+  { value: 'other', label: 'OTHER', color: '#6B7280' },
 ];
 
 const containerVariants = {
@@ -49,6 +51,132 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
+// Department Pill Component - Sleek and Trendy
+const DeptPill = ({ dept, size = 'sm' }) => {
+  const deptInfo = DEPARTMENTS.find(d => d.value === dept);
+  if (!deptInfo) return null;
+  
+  return (
+    <span 
+      className={`inline-flex items-center font-semibold rounded-full ${
+        size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'
+      }`}
+      style={{ 
+        background: `${deptInfo.color}15`,
+        color: deptInfo.color,
+        border: `1px solid ${deptInfo.color}30`
+      }}
+    >
+      {deptInfo.label}
+    </span>
+  );
+};
+
+// User Card Component - Modern Grid Card
+const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS }) => {
+  const userDepts = userData.departments || [];
+  const [showActions, setShowActions] = useState(false);
+  
+  const getRoleIcon = (role) => {
+    switch(role) {
+      case 'admin': return <Crown className="h-3 w-3" />;
+      case 'manager': return <Briefcase className="h-3 w-3" />;
+      default: return <UserIcon className="h-3 w-3" />;
+    }
+  };
+  
+  const getRoleStyle = (role) => {
+    switch(role) {
+      case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
+      case 'manager': return { bg: 'bg-gradient-to-r from-blue-500 to-cyan-500', text: 'text-white' };
+      default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
+    }
+  };
+  
+  const roleStyle = getRoleStyle(userData.role);
+
+  return (
+    <motion.div 
+      variants={itemVariants}
+      className="group relative bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 hover:shadow-xl hover:border-blue-200 transition-all duration-300 hover:-translate-y-1"
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
+    >
+      {/* Action Menu */}
+      <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0 sm:opacity-0'}`}>
+        {userData.role !== 'admin' && (
+          <button
+            onClick={() => onPermissions(userData)}
+            className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors"
+            title="Permissions"
+          >
+            <Shield className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          onClick={() => onEdit(userData)}
+          className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
+          title="Edit"
+        >
+          <Edit className="h-4 w-4" />
+        </button>
+        {userData.id !== currentUserId && (
+          <button
+            onClick={() => onDelete(userData.id)}
+            className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Avatar & Name */}
+      <div className="flex items-start gap-3 sm:gap-4 mb-4">
+        <div 
+          className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+        >
+          {userData.full_name?.charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-slate-900 truncate text-sm sm:text-base">{userData.full_name}</h3>
+          <p className="text-xs sm:text-sm text-slate-500 truncate">{userData.email}</p>
+        </div>
+      </div>
+
+      {/* Role Badge */}
+      <div className="mb-4">
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${roleStyle.bg} ${roleStyle.text}`}>
+          {getRoleIcon(userData.role)}
+          {userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}
+        </span>
+      </div>
+
+      {/* Departments - Sleek Pills */}
+      <div className="space-y-2">
+        <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">Departments</p>
+        <div className="flex flex-wrap gap-1.5">
+          {userDepts.length > 0 ? (
+            <>
+              {userDepts.slice(0, 4).map((dept) => (
+                <DeptPill key={dept} dept={dept} size="sm" />
+              ))}
+              {userDepts.length > 4 && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">
+                  +{userDepts.length - 4}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-xs text-slate-400 italic">No departments assigned</span>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export default function Users() {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
@@ -58,6 +186,8 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
 
   const [formData, setFormData] = useState({
     email: '',
@@ -65,7 +195,7 @@ export default function Users() {
     full_name: '',
     role: 'staff',
     profile_picture: '',
-    departments: [], // Multiple departments
+    departments: [],
   });
 
   const [permissions, setPermissions] = useState({
@@ -111,6 +241,7 @@ export default function Users() {
         const updateData = {
           full_name: formData.full_name,
           role: formData.role,
+          departments: formData.departments,
         };
         await api.put(`/users/${editingUser.id}`, updateData);
         toast.success('User updated successfully!');
@@ -154,17 +285,6 @@ export default function Users() {
       fetchUsers();
     } catch (error) {
       toast.error('Failed to delete user');
-    }
-  };
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData({ ...formData, profile_picture: reader.result });
-      };
-      reader.readAsDataURL(file);
     }
   };
 
@@ -237,51 +357,52 @@ export default function Users() {
     }
   };
 
-  const getRoleBadge = (role) => {
-    const styles = {
-      admin: 'bg-purple-100 text-purple-700 border-purple-300',
-      manager: 'bg-blue-100 text-blue-700 border-blue-300',
-      staff: 'bg-gray-100 text-gray-700 border-gray-300',
-    };
-    return styles[role] || styles.staff;
-  };
+  // Filter users
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = !searchQuery || 
+      u.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesTab = activeTab === 'all' || u.role === activeTab;
+    
+    return matchesSearch && matchesTab;
+  });
 
-  const getPermissionStatus = (userData) => {
-    if (userData.role === 'admin') return { text: 'Full Access', color: 'text-purple-600' };
-    if (!userData.permissions) return { text: 'Default (Assigned Only)', color: 'text-slate-500' };
-    
-    const p = userData.permissions;
-    const hasCustom = p.can_view_all_tasks || p.can_view_all_clients || p.can_view_all_dsc || 
-                      p.can_view_all_duedates || p.can_view_reports || p.can_manage_users ||
-                      (p.assigned_clients && p.assigned_clients.length > 0);
-    
-    return hasCustom 
-      ? { text: 'Custom Permissions', color: 'text-emerald-600' }
-      : { text: 'Default (Assigned Only)', color: 'text-slate-500' };
+  // Stats
+  const stats = {
+    total: users.length,
+    admins: users.filter(u => u.role === 'admin').length,
+    managers: users.filter(u => u.role === 'manager').length,
+    staff: users.filter(u => u.role === 'staff').length,
   };
 
   if (user?.role !== 'admin') {
     return (
-      <div className="text-center py-12">
-        <Shield className="h-16 w-16 mx-auto text-red-500 mb-4" />
-        <h2 className="text-2xl font-bold text-gray-900">Access Denied</h2>
-        <p className="text-gray-600 mt-2">Only administrators can manage users.</p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mb-6">
+          <Shield className="h-10 w-10 text-red-500" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Access Denied</h2>
+        <p className="text-slate-600 max-w-md">Only administrators can manage users. Contact your admin for access.</p>
       </div>
     );
   }
 
   return (
     <motion.div 
-      className="space-y-6" 
+      className="space-y-4 sm:space-y-6" 
       data-testid="users-page"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
-      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* Header */}
+      <motion.div variants={itemVariants} className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>User Management</h1>
-          <p className="text-slate-600 mt-1">Add and manage user accounts with custom permissions</p>
+          <h1 className="text-2xl sm:text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+            Team Members
+          </h1>
+          <p className="text-slate-600 mt-1 text-sm sm:text-base">Manage your team and their access permissions</p>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={(open) => {
@@ -290,44 +411,24 @@ export default function Users() {
         }}>
           <DialogTrigger asChild>
             <Button
-              className="text-white rounded-lg px-6 shadow-lg transition-all hover:scale-105"
+              className="text-white rounded-xl px-4 sm:px-6 shadow-lg transition-all hover:scale-105 hover:shadow-xl w-full sm:w-auto"
               style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
               data-testid="add-user-btn"
             >
               <Plus className="mr-2 h-5 w-5" />
-              Add User
+              Add Member
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
             <DialogHeader>
-              <DialogTitle className="font-outfit text-2xl" style={{ color: COLORS.deepBlue }}>
-                {editingUser ? 'Edit User' : 'Add New User'}
+              <DialogTitle className="font-outfit text-xl sm:text-2xl" style={{ color: COLORS.deepBlue }}>
+                {editingUser ? 'Edit Member' : 'Add New Member'}
               </DialogTitle>
               <DialogDescription>
-                {editingUser ? 'Update user details below.' : 'Create a new user account with credentials.'}
+                {editingUser ? 'Update member details and departments.' : 'Create a new team member account.'}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="profile_picture">Profile Picture</Label>
-                <div className="flex items-center gap-4">
-                  {formData.profile_picture && (
-                    <img
-                      src={formData.profile_picture}
-                      alt="Profile"
-                      className="w-16 h-16 rounded-full object-cover border-2 border-slate-200"
-                    />
-                  )}
-                  <Input
-                    id="profile_picture"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    data-testid="user-profile-picture-input"
-                  />
-                </div>
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="full_name">Full Name <span className="text-red-500">*</span></Label>
                 <Input
@@ -336,6 +437,7 @@ export default function Users() {
                   value={formData.full_name}
                   onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                   required
+                  className="h-11 rounded-xl"
                   data-testid="user-name-input"
                 />
               </div>
@@ -350,6 +452,7 @@ export default function Users() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
                   disabled={editingUser}
+                  className="h-11 rounded-xl"
                   data-testid="user-email-input"
                 />
               </div>
@@ -364,6 +467,7 @@ export default function Users() {
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     required={!editingUser}
+                    className="h-11 rounded-xl"
                     data-testid="user-password-input"
                   />
                 </div>
@@ -375,22 +479,36 @@ export default function Users() {
                   value={formData.role}
                   onValueChange={(value) => setFormData({ ...formData, role: value })}
                 >
-                  <SelectTrigger data-testid="user-role-select">
+                  <SelectTrigger className="h-11 rounded-xl" data-testid="user-role-select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="admin">
+                      <div className="flex items-center gap-2">
+                        <Crown className="h-4 w-4 text-purple-500" />
+                        Admin
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="manager">
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="h-4 w-4 text-blue-500" />
+                        Manager
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="staff">
+                      <div className="flex items-center gap-2">
+                        <UserIcon className="h-4 w-4 text-slate-500" />
+                        Staff
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Department Selection - Multiple Selection with Toggle Buttons */}
-              <div className="space-y-2">
-                <Label>Departments (Allotted)</Label>
-                <p className="text-xs text-slate-500 mb-2">Select multiple departments this user will handle</p>
-                <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200 max-h-40 overflow-y-auto">
+              {/* Department Selection - Trendy Grid */}
+              <div className="space-y-3">
+                <Label>Departments</Label>
+                <div className="grid grid-cols-5 gap-2">
                   {DEPARTMENTS.map((dept) => {
                     const isSelected = (formData.departments || []).includes(dept.value);
                     return (
@@ -398,12 +516,16 @@ export default function Users() {
                         key={dept.value}
                         type="button"
                         onClick={() => toggleDepartment(dept.value)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all
-                          ${isSelected 
-                            ? 'text-white shadow-sm' 
-                            : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-300'
-                          }`}
-                        style={isSelected ? { background: COLORS.emeraldGreen } : {}}
+                        className={`p-2 rounded-xl text-xs font-semibold transition-all border-2 ${
+                          isSelected 
+                            ? 'shadow-md scale-105' 
+                            : 'border-transparent bg-slate-50 hover:bg-slate-100 text-slate-600'
+                        }`}
+                        style={isSelected ? { 
+                          background: `${dept.color}15`,
+                          borderColor: dept.color,
+                          color: dept.color
+                        } : {}}
                         data-testid={`user-dept-${dept.value}`}
                       >
                         {dept.label}
@@ -412,32 +534,29 @@ export default function Users() {
                   })}
                 </div>
                 {(formData.departments || []).length > 0 && (
-                  <p className="text-xs text-emerald-600 mt-1">
-                    {(formData.departments || []).length} department(s) selected
+                  <p className="text-xs text-emerald-600 font-medium">
+                    {(formData.departments || []).length} selected
                   </p>
                 )}
               </div>
 
-              <DialogFooter className="pt-4 border-t border-slate-200">
+              <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => {
-                    setDialogOpen(false);
-                    resetForm();
-                  }}
-                  data-testid="user-cancel-btn"
+                  onClick={() => { setDialogOpen(false); resetForm(); }}
+                  className="rounded-xl w-full sm:w-auto"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={loading}
-                  style={{ background: COLORS.deepBlue }}
-                  className="text-white"
+                  className="text-white rounded-xl w-full sm:w-auto"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
                   data-testid="user-submit-btn"
                 >
-                  {loading ? 'Saving...' : editingUser ? 'Update User' : 'Create User'}
+                  {loading ? 'Saving...' : editingUser ? 'Update' : 'Create'}
                 </Button>
               </DialogFooter>
             </form>
@@ -445,331 +564,201 @@ export default function Users() {
         </Dialog>
       </motion.div>
 
+      {/* Stats Cards */}
+      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
+              <UsersIcon className="h-5 w-5 text-slate-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
+              <p className="text-xs text-slate-500">Total</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
+              <Crown className="h-5 w-5 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{stats.admins}</p>
+              <p className="text-xs text-slate-500">Admins</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+              <Briefcase className="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{stats.managers}</p>
+              <p className="text-xs text-slate-500">Managers</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <UserIcon className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{stats.staff}</p>
+              <p className="text-xs text-slate-500">Staff</p>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Search & Filter Tabs */}
+      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search by name or email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 h-11 rounded-xl bg-white border-slate-200"
+          />
+        </div>
+        
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
+          <TabsList className="grid grid-cols-4 h-11 p-1 bg-slate-100 rounded-xl w-full sm:w-auto">
+            <TabsTrigger value="all" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              All
+            </TabsTrigger>
+            <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              Admins
+            </TabsTrigger>
+            <TabsTrigger value="manager" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              Managers
+            </TabsTrigger>
+            <TabsTrigger value="staff" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              Staff
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </motion.div>
+
+      {/* Users Grid */}
+      <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filteredUsers.length === 0 ? (
+          <div className="col-span-full text-center py-16">
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+              <UserIcon className="h-8 w-8 text-slate-400" />
+            </div>
+            <p className="text-slate-500 text-lg">No team members found</p>
+            <p className="text-slate-400 text-sm mt-1">Try adjusting your search or filters</p>
+          </div>
+        ) : (
+          filteredUsers.map((userData) => (
+            <UserCard
+              key={userData.id}
+              userData={userData}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onPermissions={openPermissionsDialog}
+              currentUserId={user.id}
+              COLORS={COLORS}
+            />
+          ))
+        )}
+      </motion.div>
+
       {/* Permissions Dialog */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
           <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <DialogTitle className="font-outfit text-xl sm:text-2xl flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
               <Shield className="h-6 w-6" />
-              Manage Permissions
+              Permissions
             </DialogTitle>
             <DialogDescription>
-              Configure data access permissions for {selectedUserForPermissions?.full_name}
+              Configure access for {selectedUserForPermissions?.full_name}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 py-4">
-            {/* Data Access Permissions */}
-            <Card className="border border-slate-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                  <Eye className="h-4 w-4" />
-                  Data Access Permissions
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Control what data this user can view across the system
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">View All Tasks</Label>
-                    <p className="text-xs text-slate-500">Can see tasks assigned to other users</p>
+          <div className="space-y-4 py-4">
+            {/* Data Access */}
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                <Eye className="h-4 w-4" />
+                Data Access
+              </h4>
+              <div className="space-y-2">
+                {[
+                  { key: 'can_view_all_tasks', label: 'View All Tasks' },
+                  { key: 'can_view_all_clients', label: 'View All Clients' },
+                  { key: 'can_view_all_dsc', label: 'View All DSC' },
+                  { key: 'can_view_all_duedates', label: 'View All Due Dates' },
+                  { key: 'can_view_reports', label: 'View Reports' },
+                  { key: 'can_manage_users', label: 'Manage Users' },
+                  { key: 'can_assign_tasks', label: 'Assign Tasks' },
+                ].map((perm) => (
+                  <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
+                    <span className="text-sm text-slate-700">{perm.label}</span>
+                    <Switch
+                      checked={permissions[perm.key]}
+                      onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })}
+                    />
                   </div>
-                  <Switch
-                    checked={permissions.can_view_all_tasks}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_all_tasks: checked })}
-                    data-testid="perm-view-all-tasks"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">View All Clients</Label>
-                    <p className="text-xs text-slate-500">Can see all client records</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_view_all_clients}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_all_clients: checked })}
-                    data-testid="perm-view-all-clients"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">View All DSC</Label>
-                    <p className="text-xs text-slate-500">Can see all DSC certificates</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_view_all_dsc}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_all_dsc: checked })}
-                    data-testid="perm-view-all-dsc"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">View All Due Dates</Label>
-                    <p className="text-xs text-slate-500">Can see all due date reminders</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_view_all_duedates}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_all_duedates: checked })}
-                    data-testid="perm-view-all-duedates"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">View Reports</Label>
-                    <p className="text-xs text-slate-500">Can access efficiency and analytics reports</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_view_reports}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_reports: checked })}
-                    data-testid="perm-view-reports"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <Label className="text-sm font-medium">Manage Users</Label>
-                    <p className="text-xs text-slate-500">Can create, edit, and delete user accounts</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_manage_users}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_manage_users: checked })}
-                    data-testid="perm-manage-users"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <Label className="text-sm font-medium">Assign Tasks</Label>
-                    <p className="text-xs text-slate-500">Can assign tasks to other staff members</p>
-                  </div>
-                  <Switch
-                    checked={permissions.can_assign_tasks}
-                    onCheckedChange={(checked) => setPermissions({ ...permissions, can_assign_tasks: checked })}
-                    data-testid="perm-assign-tasks"
-                  />
-                </div>
-              </CardContent>
-            </Card>
+                ))}
+              </div>
+            </div>
 
             {/* Assigned Clients */}
-            <Card className="border border-slate-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                  <UserIcon className="h-4 w-4" />
-                  Assigned Clients
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Select specific clients this user can access (in addition to their task assignments)
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {clients.length === 0 ? (
-                  <p className="text-sm text-slate-500 text-center py-4">No clients available</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                    {clients.map((client) => {
-                      const isAssigned = (permissions.assigned_clients || []).includes(client.id);
-                      return (
-                        <div
-                          key={client.id}
-                          onClick={() => toggleClientAssignment(client.id)}
-                          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all ${
-                            isAssigned 
-                              ? 'bg-emerald-50 border border-emerald-200' 
-                              : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
-                          }`}
-                          data-testid={`client-assign-${client.id}`}
-                        >
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
-                          }`}>
-                            {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-900 truncate">{client.company_name}</p>
-                            <p className="text-xs text-slate-500 truncate">{client.client_type}</p>
-                          </div>
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                <UserIcon className="h-4 w-4" />
+                Assigned Clients
+              </h4>
+              {clients.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-4">No clients available</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                  {clients.map((client) => {
+                    const isAssigned = (permissions.assigned_clients || []).includes(client.id);
+                    return (
+                      <div
+                        key={client.id}
+                        onClick={() => toggleClientAssignment(client.id)}
+                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                          isAssigned 
+                            ? 'bg-emerald-100 border-2 border-emerald-300' 
+                            : 'bg-white border-2 border-transparent hover:border-slate-200'
+                        }`}
+                      >
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                          isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'
+                        }`}>
+                          {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                        <span className="text-sm font-medium text-slate-700 truncate">{client.company_name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPermissionsDialogOpen(false)}
-            >
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
               Cancel
             </Button>
             <Button
               onClick={handleSavePermissions}
               disabled={loading}
+              className="text-white rounded-xl w-full sm:w-auto"
               style={{ background: COLORS.emeraldGreen }}
-              className="text-white"
-              data-testid="save-permissions-btn"
             >
               {loading ? 'Saving...' : 'Save Permissions'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Users Table */}
-      <motion.div variants={itemVariants}>
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader className="bg-slate-50 border-b border-slate-200">
-            <CardTitle className="text-sm font-medium text-slate-600 uppercase tracking-wider">
-              All Users ({users.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {users.length === 0 ? (
-              <div className="text-center py-12 text-slate-500" data-testid="no-users-message">
-                <UserIcon className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No users found. Add your first user!</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Name
-                      </th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Email
-                      </th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Role
-                      </th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Departments
-                      </th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Permissions
-                      </th>
-                      <th className="text-right text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {users.map((userData) => {
-                      const permStatus = getPermissionStatus(userData);
-                      const userDepts = userData.departments || [];
-                      return (
-                        <tr
-                          key={userData.id}
-                          className="hover:bg-slate-50 transition-colors"
-                          data-testid={`user-row-${userData.id}`}
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div 
-                                className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
-                                style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
-                              >
-                                {userData.full_name?.charAt(0).toUpperCase()}
-                              </div>
-                              <span className="font-medium text-slate-900">{userData.full_name}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{userData.email}</td>
-                          <td className="px-6 py-4">
-                            <Badge className={`text-xs px-2 py-1 border ${getRoleBadge(userData.role)}`}>
-                              {userData.role}
-                            </Badge>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-wrap gap-1 max-w-xs">
-                              {userDepts.length > 0 ? (
-                                userDepts.slice(0, 3).map((dept) => {
-                                  const deptLabel = DEPARTMENTS.find(d => d.value === dept)?.label || dept;
-                                  return (
-                                    <Badge 
-                                      key={dept} 
-                                      variant="outline" 
-                                      className="text-xs px-2 py-0.5"
-                                      style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
-                                    >
-                                      {deptLabel}
-                                    </Badge>
-                                  );
-                                })
-                              ) : (
-                                <span className="text-xs text-slate-400">No departments</span>
-                              )}
-                              {userDepts.length > 3 && (
-                                <Badge variant="outline" className="text-xs px-2 py-0.5 bg-slate-50">
-                                  +{userDepts.length - 3} more
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`text-sm ${permStatus.color}`}>
-                              {permStatus.text}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex justify-end gap-1">
-                              {userData.role !== 'admin' && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => openPermissionsDialog(userData)}
-                                  data-testid={`permissions-user-${userData.id}`}
-                                  className="hover:bg-emerald-50 hover:text-emerald-600"
-                                  title="Manage Permissions"
-                                >
-                                  <Settings className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEdit(userData)}
-                                data-testid={`edit-user-${userData.id}`}
-                                className="hover:bg-indigo-50 hover:text-indigo-600"
-                                title="Edit User"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              {userData.id !== user.id && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDelete(userData.id)}
-                                  data-testid={`delete-user-${userData.id}`}
-                                  className="hover:bg-red-50 hover:text-red-600"
-                                  title="Delete User"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
     </motion.div>
   );
 }
