@@ -65,6 +65,7 @@ export default function Users() {
     full_name: '',
     role: 'staff',
     profile_picture: '',
+    departments: [], // Multiple departments
   });
 
   const [permissions, setPermissions] = useState({
