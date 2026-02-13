@@ -744,23 +744,41 @@ export default function Tasks() {
           </motion.div>
         ) : (
           filteredTasks.map((task) => {
+            const taskIsOverdue = isOverdue(task);
             const displayStatus = getDisplayStatus(task);
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
             const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+            const cardGradient = getCardGradient(task, taskIsOverdue);
             
             return (
               <motion.div key={task.id} variants={itemVariants}>
                 <Card 
-                  className="border border-slate-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-1 bg-white overflow-hidden group"
+                  className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full flex flex-col
+                    ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
+                  style={{ background: cardGradient !== 'none' ? cardGradient : 'white' }}
                   data-testid={`task-card-${task.id}`}
                 >
-                  <CardContent className="p-4">
+                  <CardContent className="p-4 flex flex-col flex-1">
                     {/* Status & Priority Tags */}
                     <div className="flex items-center gap-2 mb-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusStyle.bg} ${statusStyle.text}`}>
+                      <span 
+                        className={`px-2 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
+                        style={{ 
+                          background: taskIsOverdue 
+                            ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
+                            : statusStyle.bg.replace('bg-', '').includes('amber') ? '#fef3c7' : '#dbeafe'
+                        }}
+                      >
                         {statusStyle.label}
                       </span>
-                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${priorityStyle.bg} ${priorityStyle.text}`}>
+                      <span 
+                        className={`px-2 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
+                        style={{ 
+                          background: (task.priority === 'high' || task.priority === 'critical')
+                            ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
+                            : priorityStyle.bg.replace('bg-', '').includes('blue') ? '#dbeafe' : '#f1f5f9'
+                        }}
+                      >
                         {priorityStyle.label}
                       </span>
                       {task.is_recurring && (
@@ -776,13 +794,17 @@ export default function Tasks() {
                       {task.title}
                     </h3>
 
-                    {/* Description */}
-                    {task.description && (
-                      <p className="text-sm text-slate-600 mb-3 line-clamp-2">{task.description}</p>
-                    )}
+                    {/* Description - Fixed height for equal cards */}
+                    <div className="min-h-[40px] mb-3">
+                      {task.description ? (
+                        <p className="text-sm text-slate-600 line-clamp-2">{task.description}</p>
+                      ) : (
+                        <p className="text-sm text-slate-400 italic">No description</p>
+                      )}
+                    </div>
 
-                    {/* Meta Info */}
-                    <div className="space-y-2 text-sm text-slate-500">
+                    {/* Meta Info - flex-1 to push footer down */}
+                    <div className="space-y-2 text-sm text-slate-500 flex-1">
                       {task.client_id && (
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4" />
@@ -801,8 +823,48 @@ export default function Tasks() {
                       )}
                     </div>
 
+                    {/* Quick Status Change Buttons */}
+                    <div className="flex items-center gap-1 mt-3 pt-3 border-t border-slate-200/50">
+                      <button
+                        onClick={() => handleQuickStatusChange(task, 'pending')}
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                          ${task.status === 'pending' 
+                            ? 'bg-amber-500 text-white shadow-sm' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
+                        title="Mark as To Do"
+                        data-testid={`status-todo-${task.id}`}
+                      >
+                        <Clock className="h-3 w-3" />
+                        To Do
+                      </button>
+                      <button
+                        onClick={() => handleQuickStatusChange(task, 'in_progress')}
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                          ${task.status === 'in_progress' 
+                            ? 'bg-blue-500 text-white shadow-sm' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
+                        title="Mark as In Progress"
+                        data-testid={`status-progress-${task.id}`}
+                      >
+                        <Play className="h-3 w-3" />
+                        Progress
+                      </button>
+                      <button
+                        onClick={() => handleQuickStatusChange(task, 'completed')}
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                          ${task.status === 'completed' 
+                            ? 'bg-emerald-500 text-white shadow-sm' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                        title="Mark as Completed"
+                        data-testid={`status-done-${task.id}`}
+                      >
+                        <CheckCircle className="h-3 w-3" />
+                        Done
+                      </button>
+                    </div>
+
                     {/* Category & Actions */}
-                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
                       <Badge 
                         variant="outline" 
                         className="text-xs"
