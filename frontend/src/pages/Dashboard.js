@@ -175,79 +175,79 @@ export default function Dashboard() {
         </Card>
       </motion.div>
 
-      {/* Key Metrics Row */}
-      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
+      {/* Key Metrics Row - Responsive with equal sizing */}
+      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
         {/* Total Tasks */}
         <Card 
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group"
+          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
           onClick={() => navigate('/tasks')}
           data-testid="stat-total-tasks"
         >
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
               <div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Active Tasks</p>
-                <p className="text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_tasks || 0}</p>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_tasks || 0}</p>
               </div>
               <div 
-                className="p-3 rounded-2xl group-hover:scale-110 transition-transform"
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: `${COLORS.deepBlue}15` }}
               >
-                <Briefcase className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
+                <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.deepBlue }} />
               </div>
             </div>
-            <div className="flex items-center gap-1 mt-3 text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View all tasks</span>
-              <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View all</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </CardContent>
         </Card>
 
         {/* Overdue/Pending */}
         <Card 
-          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group ${
+          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
             stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
           }`}
           onClick={() => navigate('/tasks')}
           data-testid="stat-overdue-tasks"
         >
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
               <div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue Tasks</p>
-                <p className={`text-4xl font-bold mt-2 font-outfit ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
+                <p className={`text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                   {stats?.overdue_tasks || 0}
                 </p>
               </div>
               <div 
-                className={`p-3 rounded-2xl group-hover:scale-110 transition-transform ${
+                className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0 ${
                   stats?.overdue_tasks > 0 ? 'bg-red-100' : 'bg-slate-100'
                 }`}
               >
-                <AlertCircle className={`h-6 w-6 ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`} />
+                <AlertCircle className={`h-5 w-5 sm:h-6 sm:w-6 ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`} />
               </div>
             </div>
-            <div className="flex items-center gap-1 mt-3 text-sm text-slate-500 group-hover:text-slate-700">
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
               <span>Review now</span>
-              <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </CardContent>
         </Card>
 
         {/* Pending Review */}
         <Card 
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group"
+          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
           onClick={() => navigate('/tasks')}
           data-testid="stat-pending-tasks"
         >
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
               <div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Pending Review</p>
-                <p className="text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>{stats?.pending_tasks || 0}</p>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Pending</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>{stats?.pending_tasks || 0}</p>
               </div>
               <div 
-                className="p-3 rounded-2xl group-hover:scale-110 transition-transform"
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
               >
                 <Clock className="h-6 w-6" style={{ color: COLORS.mediumBlue }} />
