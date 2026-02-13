@@ -180,8 +180,8 @@ export default function Login() {
           }}
         >
           {/* Logo */}
-          <div className="text-center mb-8">
-            <img src="/logo.png" alt="TaskoSphere" className="h-20 mx-auto mb-2" style={{ background: 'transparent' }} />
+          <div className="text-center mb-6 sm:mb-8">
+            <img src="/logo.png" alt="TaskoSphere" className="h-14 sm:h-16 lg:h-20 mx-auto mb-2" style={{ background: 'transparent' }} />
           </div>
 
           {showForgotPassword ? (
