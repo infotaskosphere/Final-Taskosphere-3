@@ -654,10 +654,10 @@ export default function Users() {
                         Role
                       </th>
                       <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Permissions
+                        Departments
                       </th>
                       <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-                        Created
+                        Permissions
                       </th>
                       <th className="text-right text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
                         Actions
@@ -667,6 +667,7 @@ export default function Users() {
                   <tbody className="divide-y divide-slate-100">
                     {users.map((userData) => {
                       const permStatus = getPermissionStatus(userData);
+                      const userDepts = userData.departments || [];
                       return (
                         <tr
                           key={userData.id}
@@ -691,12 +692,35 @@ export default function Users() {
                             </Badge>
                           </td>
                           <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {userDepts.length > 0 ? (
+                                userDepts.slice(0, 3).map((dept) => {
+                                  const deptLabel = DEPARTMENTS.find(d => d.value === dept)?.label || dept;
+                                  return (
+                                    <Badge 
+                                      key={dept} 
+                                      variant="outline" 
+                                      className="text-xs px-2 py-0.5"
+                                      style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
+                                    >
+                                      {deptLabel}
+                                    </Badge>
+                                  );
+                                })
+                              ) : (
+                                <span className="text-xs text-slate-400">No departments</span>
+                              )}
+                              {userDepts.length > 3 && (
+                                <Badge variant="outline" className="text-xs px-2 py-0.5 bg-slate-50">
+                                  +{userDepts.length - 3} more
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
                             <span className={`text-sm ${permStatus.color}`}>
                               {permStatus.text}
                             </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            {format(new Date(userData.created_at), 'MMM dd, yyyy')}
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-1">
