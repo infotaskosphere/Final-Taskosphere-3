@@ -121,5 +121,9 @@ Task management website for CA/CS Firms with comprehensive features for task man
 - Password: admin123
 
 ## Last Updated
-Date: 2025-02-12
-Status: Chat system with group messaging and file sharing implemented
+Date: 2025-02-13
+Status: Application restored from backup zip file - all features working
+
+## Test Credentials
+- Email: admin@test.com
+- Password: admin123 (newly registered in current session)
