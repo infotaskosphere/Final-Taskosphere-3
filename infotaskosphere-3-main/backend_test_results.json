@@ -1,0 +1,142 @@
+{
+  "summary": {
+    "total_tests": 22,
+    "passed_tests": 22,
+    "failed_tests": 0,
+    "success_rate": 100.0
+  },
+  "detailed_results": [
+    {
+      "test_name": "API Health Check",
+      "success": true,
+      "details": "Response: {'message': 'Taskosphere API', 'status': 'running'}",
+      "timestamp": "2026-02-12T14:07:22.863717"
+    },
+    {
+      "test_name": "User Registration (Admin)",
+      "success": true,
+      "details": "Admin registered with ID: 4845b563-dd00-439e-a244-7536d242c84a",
+      "timestamp": "2026-02-12T14:07:23.126126"
+    },
+    {
+      "test_name": "User Login",
+      "success": true,
+      "details": "Login successful",
+      "timestamp": "2026-02-12T14:07:23.652147"
+    },
+    {
+      "test_name": "Get Current User",
+      "success": true,
+      "details": "User: Admin User 140722",
+      "timestamp": "2026-02-12T14:07:23.692758"
+    },
+    {
+      "test_name": "Task Creation",
+      "success": true,
+      "details": "Task created with ID: e1464aee-16a6-4948-ab52-082c7cb3a26f",
+      "timestamp": "2026-02-12T14:07:23.783980"
+    },
+    {
+      "test_name": "Get All Tasks",
+      "success": true,
+      "details": "Retrieved 1 tasks",
+      "timestamp": "2026-02-12T14:07:23.823812"
+    },
+    {
+      "test_name": "Get Specific Task",
+      "success": true,
+      "details": "Retrieved task: Test Task for API Testing",
+      "timestamp": "2026-02-12T14:07:23.860718"
+    },
+    {
+      "test_name": "Task Update",
+      "success": true,
+      "details": "Task updated successfully",
+      "timestamp": "2026-02-12T14:07:23.936070"
+    },
+    {
+      "test_name": "Task Deletion",
+      "success": true,
+      "details": "Task deleted successfully",
+      "timestamp": "2026-02-12T14:07:23.971792"
+    },
+    {
+      "test_name": "DSC Creation",
+      "success": true,
+      "details": "DSC created with ID: 6fe5a852-aa52-4009-904f-1709c8630161",
+      "timestamp": "2026-02-12T14:07:24.023340"
+    },
+    {
+      "test_name": "Get All DSC",
+      "success": true,
+      "details": "Retrieved 1 DSC certificates",
+      "timestamp": "2026-02-12T14:07:24.059249"
+    },
+    {
+      "test_name": "DSC Update",
+      "success": true,
+      "details": "DSC updated successfully",
+      "timestamp": "2026-02-12T14:07:24.098475"
+    },
+    {
+      "test_name": "DSC Deletion",
+      "success": true,
+      "details": "DSC deleted successfully",
+      "timestamp": "2026-02-12T14:07:24.136295"
+    },
+    {
+      "test_name": "Attendance Punch In",
+      "success": true,
+      "details": "Punched in at: 2026-02-12T14:07:24.169251Z",
+      "timestamp": "2026-02-12T14:07:24.181898"
+    },
+    {
+      "test_name": "Get Today's Attendance",
+      "success": true,
+      "details": "Retrieved today's attendance",
+      "timestamp": "2026-02-12T14:07:24.215975"
+    },
+    {
+      "test_name": "Attendance Punch Out",
+      "success": true,
+      "details": "Punched out at: 2026-02-12T14:07:24.249251Z",
+      "timestamp": "2026-02-12T14:07:24.253482"
+    },
+    {
+      "test_name": "Get Attendance History",
+      "success": true,
+      "details": "Retrieved 1 attendance records",
+      "timestamp": "2026-02-12T14:07:24.292218"
+    },
+    {
+      "test_name": "Get Notifications",
+      "success": true,
+      "details": "Retrieved 0 notifications",
+      "timestamp": "2026-02-12T14:07:24.328524"
+    },
+    {
+      "test_name": "Check/Create Notifications",
+      "success": true,
+      "details": "Notification check completed",
+      "timestamp": "2026-02-12T14:07:24.375603"
+    },
+    {
+      "test_name": "Activity Logging",
+      "success": true,
+      "details": "Activity logged successfully",
+      "timestamp": "2026-02-12T14:07:24.422400"
+    },
+    {
+      "test_name": "Efficiency Reports",
+      "success": true,
+      "details": "Retrieved efficiency data for 1 users",
+      "timestamp": "2026-02-12T14:07:24.465627"
+    },
+    {
+      "test_name": "Get Users List",
+      "success": true,
+      "details": "Retrieved 3 users",
+      "timestamp": "2026-02-12T14:07:24.501680"
+    }
+  ]
+}
