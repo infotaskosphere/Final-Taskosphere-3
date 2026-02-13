@@ -224,7 +224,8 @@ export default function DSCRegister() {
   const resetForm = () => {
     setFormData({
       holder_name: '',
-      certificate_number: '',
+      dsc_type: '',
+      dsc_password: '',
       associated_with: '',
       entity_type: 'firm',
       issue_date: '',
