@@ -26,8 +26,9 @@ export default function DSCRegister() {
 
   const [formData, setFormData] = useState({
     holder_name: '',
-    certificate_number: '',
-    associated_with: '',
+    dsc_type: '', // Not compulsory
+    dsc_password: '', // Second field
+    associated_with: '', // Not compulsory
     entity_type: 'firm',
     issue_date: '',
     expiry_date: '',
