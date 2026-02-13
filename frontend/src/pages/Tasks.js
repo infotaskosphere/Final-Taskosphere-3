@@ -216,6 +216,32 @@ export default function Tasks() {
     }
   };
 
+  // Quick status update from task card
+  const handleQuickStatusChange = async (task, newStatus) => {
+    try {
+      const taskData = {
+        title: task.title,
+        description: task.description || '',
+        assigned_to: task.assigned_to,
+        sub_assignees: task.sub_assignees || [],
+        due_date: task.due_date,
+        priority: task.priority,
+        status: newStatus,
+        category: task.category || 'other',
+        client_id: task.client_id || '',
+        is_recurring: task.is_recurring || false,
+        recurrence_pattern: task.recurrence_pattern || 'monthly',
+        recurrence_interval: task.recurrence_interval || 1,
+      };
+      
+      await api.put(`/tasks/${task.id}`, taskData);
+      toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
+      fetchTasks();
+    } catch (error) {
+      toast.error('Failed to update task status');
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       title: '',
