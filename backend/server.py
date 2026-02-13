@@ -122,9 +122,10 @@ class DSCMovement(BaseModel):
 
 class DSCBase(BaseModel):
     holder_name: str
-    certificate_number: str
-    associated_with: str  # firm or client name
-    entity_type: str  # "firm" or "client"
+    dsc_type: Optional[str] = None  # Type of DSC (Class 3, Signature, Encryption, etc.)
+    dsc_password: Optional[str] = None  # DSC Password
+    associated_with: Optional[str] = None  # firm or client name (not compulsory)
+    entity_type: str = "firm"  # "firm" or "client"
     issue_date: datetime
     expiry_date: datetime
     notes: Optional[str] = None
