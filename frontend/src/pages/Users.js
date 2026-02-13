@@ -298,7 +298,7 @@ export default function Users() {
               Add User
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl" style={{ color: COLORS.deepBlue }}>
                 {editingUser ? 'Edit User' : 'Add New User'}
@@ -329,7 +329,7 @@ export default function Users() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="full_name">Full Name *</Label>
+                <Label htmlFor="full_name">Full Name <span className="text-red-500">*</span></Label>
                 <Input
                   id="full_name"
                   placeholder="John Doe"
@@ -341,7 +341,7 @@ export default function Users() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Email *</Label>
+                <Label htmlFor="email">Email <span className="text-red-500">*</span></Label>
                 <Input
                   id="email"
                   type="email"
@@ -356,7 +356,7 @@ export default function Users() {
 
               {!editingUser && (
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password *</Label>
+                  <Label htmlFor="password">Password <span className="text-red-500">*</span></Label>
                   <Input
                     id="password"
                     type="password"
@@ -370,7 +370,7 @@ export default function Users() {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="role">Role *</Label>
+                <Label htmlFor="role">Role <span className="text-red-500">*</span></Label>
                 <Select
                   value={formData.role}
                   onValueChange={(value) => setFormData({ ...formData, role: value })}
@@ -386,7 +386,39 @@ export default function Users() {
                 </Select>
               </div>
 
-              <DialogFooter>
+              {/* Department Selection - Multiple Selection with Toggle Buttons */}
+              <div className="space-y-2">
+                <Label>Departments (Allotted)</Label>
+                <p className="text-xs text-slate-500 mb-2">Select multiple departments this user will handle</p>
+                <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200 max-h-40 overflow-y-auto">
+                  {DEPARTMENTS.map((dept) => {
+                    const isSelected = (formData.departments || []).includes(dept.value);
+                    return (
+                      <button
+                        key={dept.value}
+                        type="button"
+                        onClick={() => toggleDepartment(dept.value)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all
+                          ${isSelected 
+                            ? 'text-white shadow-sm' 
+                            : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-300'
+                          }`}
+                        style={isSelected ? { background: COLORS.emeraldGreen } : {}}
+                        data-testid={`user-dept-${dept.value}`}
+                      >
+                        {dept.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(formData.departments || []).length > 0 && (
+                  <p className="text-xs text-emerald-600 mt-1">
+                    {(formData.departments || []).length} department(s) selected
+                  </p>
+                )}
+              </div>
+
+              <DialogFooter className="pt-4 border-t border-slate-200">
                 <Button
                   type="button"
                   variant="outline"
