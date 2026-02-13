@@ -732,9 +732,11 @@ export default function Tasks() {
         </div>
       </motion.div>
 
-      {/* Task Cards Grid */}
+      {/* Task Cards Grid - Responsive with consistent card sizing */}
       <motion.div 
-        className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-3'}
+        className={viewMode === 'grid' 
+          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
+          : 'space-y-3'}
         variants={containerVariants}
       >
         {filteredTasks.length === 0 ? (
@@ -751,18 +753,18 @@ export default function Tasks() {
             const cardGradient = getCardGradient(task, taskIsOverdue);
             
             return (
-              <motion.div key={task.id} variants={itemVariants}>
+              <motion.div key={task.id} variants={itemVariants} className="h-full">
                 <Card 
-                  className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full flex flex-col
+                  className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full rounded-2xl
                     ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
-                  style={{ background: cardGradient !== 'none' ? cardGradient : 'white' }}
+                  style={{ background: cardGradient !== 'none' ? cardGradient : 'white', minHeight: '320px' }}
                   data-testid={`task-card-${task.id}`}
                 >
-                  <CardContent className="p-4 flex flex-col flex-1">
+                  <CardContent className="p-4 sm:p-5 flex flex-col h-full">
                     {/* Status & Priority Tags */}
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
                       <span 
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
+                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
                         style={{ 
                           background: taskIsOverdue 
                             ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
@@ -772,7 +774,7 @@ export default function Tasks() {
                         {statusStyle.label}
                       </span>
                       <span 
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
+                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
                         style={{ 
                           background: (task.priority === 'high' || task.priority === 'critical')
                             ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
@@ -782,84 +784,84 @@ export default function Tasks() {
                         {priorityStyle.label}
                       </span>
                       {task.is_recurring && (
-                        <span className="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
                           <Repeat className="h-3 w-3 inline mr-1" />
                           Recurring
                         </span>
                       )}
                     </div>
 
-                    {/* Task Title */}
-                    <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2" style={{ color: COLORS.deepBlue }}>
+                    {/* Task Title - Fixed height */}
+                    <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[48px] text-sm sm:text-base" style={{ color: COLORS.deepBlue }}>
                       {task.title}
                     </h3>
 
                     {/* Description - Fixed height for equal cards */}
-                    <div className="min-h-[40px] mb-3">
+                    <div className="h-[44px] mb-3">
                       {task.description ? (
-                        <p className="text-sm text-slate-600 line-clamp-2">{task.description}</p>
+                        <p className="text-xs sm:text-sm text-slate-600 line-clamp-2">{task.description}</p>
                       ) : (
-                        <p className="text-sm text-slate-400 italic">No description</p>
+                        <p className="text-xs sm:text-sm text-slate-400 italic">No description</p>
                       )}
                     </div>
 
                     {/* Meta Info - flex-1 to push footer down */}
-                    <div className="space-y-2 text-sm text-slate-500 flex-1">
+                    <div className="space-y-1.5 text-xs sm:text-sm text-slate-500 flex-1 min-h-[60px]">
                       {task.client_id && (
                         <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4" />
-                          <span>{getClientName(task.client_id)}</span>
+                          <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="truncate">{getClientName(task.client_id)}</span>
                         </div>
                       )}
                       <div className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        <span>{getUserName(task.assigned_to)}</span>
+                        <User className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{getUserName(task.assigned_to)}</span>
                       </div>
                       {task.due_date && (
                         <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" />
+                          <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
                           <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
                         </div>
                       )}
                     </div>
 
                     {/* Quick Status Change Buttons */}
-                    <div className="flex items-center gap-1 mt-3 pt-3 border-t border-slate-200/50">
+                    <div className="flex items-center gap-1.5 mt-auto pt-3 border-t border-slate-200/50">
                       <button
                         onClick={() => handleQuickStatusChange(task, 'pending')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
                           ${task.status === 'pending' 
                             ? 'bg-amber-500 text-white shadow-sm' 
                             : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
                         title="Mark as To Do"
                         data-testid={`status-todo-${task.id}`}
                       >
-                        <Clock className="h-3 w-3" />
-                        To Do
+                        <Clock className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">To Do</span>
                       </button>
                       <button
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
                           ${task.status === 'in_progress' 
                             ? 'bg-blue-500 text-white shadow-sm' 
                             : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
                         title="Mark as In Progress"
                         data-testid={`status-progress-${task.id}`}
                       >
-                        <Play className="h-3 w-3" />
-                        Progress
+                        <Play className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Progress</span>
                       </button>
                       <button
                         onClick={() => handleQuickStatusChange(task, 'completed')}
-                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all
+                        className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-xs font-medium transition-all
                           ${task.status === 'completed' 
                             ? 'bg-emerald-500 text-white shadow-sm' 
                             : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
                         title="Mark as Completed"
                         data-testid={`status-done-${task.id}`}
                       >
-                        <CheckCircle className="h-3 w-3" />
-                        Done
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Done</span>
                       </button>
                     </div>
 
@@ -867,7 +869,7 @@ export default function Tasks() {
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
                       <Badge 
                         variant="outline" 
-                        className="text-xs"
+                        className="text-xs rounded-lg px-2.5 py-1"
                         style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
                       >
                         {getCategoryLabel(task.category)}
@@ -876,7 +878,7 @@ export default function Tasks() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 hover:bg-blue-50"
+                          className="h-8 w-8 rounded-lg hover:bg-blue-50"
                           onClick={() => handleEdit(task)}
                           data-testid={`edit-task-${task.id}`}
                         >
@@ -885,7 +887,7 @@ export default function Tasks() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 hover:bg-red-50"
+                          className="h-8 w-8 rounded-lg hover:bg-red-50"
                           onClick={() => handleDelete(task.id)}
                           data-testid={`delete-task-${task.id}`}
                         >
