@@ -196,9 +196,10 @@ export default function DSCRegister() {
     setEditingDSC(dsc);
     setFormData({
       holder_name: dsc.holder_name,
-      certificate_number: dsc.certificate_number,
-      associated_with: dsc.associated_with,
-      entity_type: dsc.entity_type,
+      dsc_type: dsc.dsc_type || '',
+      dsc_password: dsc.dsc_password || '',
+      associated_with: dsc.associated_with || '',
+      entity_type: dsc.entity_type || 'firm',
       issue_date: format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
       expiry_date: format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes: dsc.notes || '',
