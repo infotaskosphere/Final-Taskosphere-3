@@ -697,7 +697,7 @@ export default function StaffActivity() {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            await api.post(`/staff/send-reminder/${user.id}`);
+                            await api.post(`/send-reminder/${user.id}`);
                             toast.success(`Reminder sent to ${user.full_name}`);
                           } catch (error) {
                             toast.error("Failed to send reminder");
