@@ -1758,7 +1758,37 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+from datetime import datetime
+import pytz
 
+@app.middleware("http")
+async def auto_daily_reminder(request, call_next):
+
+    try:
+        india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
+        today_str = india_time.date().isoformat()
+
+        setting = await db.system_settings.find_one({"key": "last_reminder_date"})
+        last_date = setting["value"] if setting else None
+
+        # Trigger at 10:00 AM IST
+        if india_time.hour >= 10:
+            if last_date != today_str:
+                logger.info("Auto daily reminder triggered at 10:00 AM IST")
+
+                await send_pending_task_reminders_internal()
+
+                await db.system_settings.update_one(
+                    {"key": "last_reminder_date"},
+                    {"$set": {"value": today_str}},
+                    upsert=True
+                )
+
+    except Exception as e:
+        logger.error(f"Auto reminder middleware error: {str(e)}")
+
+    response = await call_next(request)
+    return response
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
