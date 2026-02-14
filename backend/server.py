@@ -839,7 +839,6 @@ async def get_my_attendance_summary(
         "monthly_summary": formatted_data
     }
 
-        },
         "total_hours_all_time": round(total_hours, 1),
         "total_days_all_time": total_days,
         "monthly_summary": monthly_summary[:12]  # Last 12 months
