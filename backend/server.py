@@ -950,23 +950,39 @@ async def get_staff_attendance_report(
     
     return sorted(upcoming, key=lambda x: x["days_remaining"])
 
-@api_router.put("/duedates/{due_date_id}", response_model=DueDate)
-async def update_due_date(due_date_id: str, due_date_data: DueDateCreate, current_user: User = Depends(get_current_user)):
-    existing = await db.due_dates.find_one({"id": due_date_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Due date not found")
-    
-    update_data = due_date_data.model_dump()
-    update_data["due_date"] = update_data["due_date"].isoformat()
-    
-    await db.due_dates.update_one({"id": due_date_id}, {"$set": update_data})
-    
-    updated = await db.due_dates.find_one({"id": due_date_id}, {"_id": 0})
-    if isinstance(updated["created_at"], str):
-        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
-    if isinstance(updated["due_date"], str):
-        updated["due_date"] = datetime.fromisoformat(updated["due_date"])
-    return DueDate(**updated)
+# ================= DUE DATE ROUTES =================
+
+@api_router.post("/duedates", response_model=DueDate)
+async def create_due_date(due_date_data: DueDateCreate, current_user: User = Depends(get_current_user)):
+    due_date = DueDate(
+        **due_date_data.model_dump(),
+        created_by=current_user.id
+    )
+
+    doc = due_date.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    doc["due_date"] = doc["due_date"].isoformat()
+
+    await db.due_dates.insert_one(doc)
+    return due_date
+
+
+@api_router.get("/duedates", response_model=List[DueDate])
+async def get_due_dates(current_user: User = Depends(get_current_user)):
+    query = {}
+
+    if current_user.role == "staff":
+        query["assigned_to"] = current_user.id
+
+    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
+    for dd in due_dates:
+        if isinstance(dd["created_at"], str):
+            dd["created_at"] = datetime.fromisoformat(dd["created_at"])
+        if isinstance(dd["due_date"], str):
+            dd["due_date"] = datetime.fromisoformat(dd["due_date"])
+
+    return due_dates
 
 @api_router.delete("/duedates/{due_date_id}")
 async def delete_due_date(due_date_id: str, current_user: User = Depends(get_current_user)):
