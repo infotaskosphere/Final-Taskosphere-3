@@ -877,11 +877,11 @@ async def get_staff_attendance_report(
                 "days_present": 0,
                 "records": []
             }
-        
-        duration = attendance.get("duration_minutes", 0)
-        staff_report[uid]["total_minutes"] += duration
-        staff_report[uid]["days_present"] += 1
-        staff_report[uid]["records"].append({
+        duration = attendance.get("duration_minutes")
+        if isinstance(duration, (int, float)):
+            staff_report[uid]["total_minutes"] += duration
+            staff_report[uid]["days_present"] += 1
+            staff_report[uid]["records"].append({
             "date": attendance["date"],
             "punch_in": attendance.get("punch_in"),
             "punch_out": attendance.get("punch_out"),
