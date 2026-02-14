@@ -841,7 +841,7 @@ async def get_my_attendance_summary(
 
 
     @api_router.get("/attendance/staff-report")
-async def get_staff_attendance_report(
+    async def get_staff_attendance_report(
     month: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
