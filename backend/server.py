@@ -847,26 +847,31 @@ async def get_staff_attendance_report(
     current_user: User = Depends(get_current_user)
 ):
     """Get all staff attendance report (admin only)"""
+
+    # Admin check
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
     now = datetime.now(timezone.utc)
     target_month = month or now.strftime("%Y-%m")
-    
+
     # Get all users
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     user_map = {u["id"]: u for u in users}
-    
-    # Get attendance for the month
+
+    # Get attendance records for selected month
     attendance_list = await db.attendance.find(
         {"date": {"$regex": f"^{target_month}"}},
         {"_id": 0}
     ).to_list(5000)
-    
+
     # Aggregate by user
     staff_report = {}
+
     for attendance in attendance_list:
         uid = attendance["user_id"]
+
+        # Initialize user record if not exists
         if uid not in staff_report:
             user_info = user_map.get(uid, {})
             staff_report[uid] = {
@@ -877,171 +882,52 @@ async def get_staff_attendance_report(
                 "days_present": 0,
                 "records": []
             }
+
         duration = attendance.get("duration_minutes")
+
+        # Safely add duration
         if isinstance(duration, (int, float)):
             staff_report[uid]["total_minutes"] += duration
-            staff_report[uid]["days_present"] += 1
-            staff_report[uid]["records"].append({
+
+        # Count day regardless of duration
+        staff_report[uid]["days_present"] += 1
+
+        # Add record
+        staff_report[uid]["records"].append({
             "date": attendance["date"],
             "punch_in": attendance.get("punch_in"),
             "punch_out": attendance.get("punch_out"),
             "duration_minutes": duration
         })
-    
-    # Convert to list and add formatted hours
+
+    # Convert to list and calculate formatted values
     result = []
+
     for uid, data in staff_report.items():
-        hours = data["total_minutes"] // 60
-        minutes = data["total_minutes"] % 60
+        total_minutes = data["total_minutes"]
+
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+
         data["total_hours"] = f"{hours}h {minutes}m"
-        data["avg_hours_per_day"] = round(data["total_minutes"] / data["days_present"] / 60, 1) if data["days_present"] > 0 else 0
+
+        if data["days_present"] > 0:
+            data["avg_hours_per_day"] = round(
+                (total_minutes / data["days_present"]) / 60, 1
+            )
+        else:
+            data["avg_hours_per_day"] = 0
+
         result.append(data)
-    
-    # Sort by total hours descending
+
+    # Sort by highest total minutes
     result.sort(key=lambda x: x["total_minutes"], reverse=True)
-    
+
     return {
         "month": target_month,
         "total_staff": len(result),
         "staff_report": result
     }
-
-# Notification routes
-@api_router.get("/notifications", response_model=List[Notification])
-async def get_notifications(current_user: User = Depends(get_current_user)):
-    notifications = await db.notifications.find(
-        {"user_id": current_user.id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    for notif in notifications:
-        if isinstance(notif["created_at"], str):
-            notif["created_at"] = datetime.fromisoformat(notif["created_at"])
-    return notifications
-
-@api_router.put("/notifications/{notification_id}/read")
-async def mark_notification_read(notification_id: str, current_user: User = Depends(get_current_user)):
-    await db.notifications.update_one(
-        {"id": notification_id, "user_id": current_user.id},
-        {"$set": {"is_read": True}}
-    )
-    return {"message": "Notification marked as read"}
-
-@api_router.post("/notifications/check")
-async def check_and_create_notifications(current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
-    now = datetime.now(timezone.utc)
-    
-    # Check tasks due soon
-    tasks = await db.tasks.find({}, {"_id": 0}).to_list(1000)
-    for task in tasks:
-        if task.get("due_date") and task["status"] != "completed":
-            due_date = datetime.fromisoformat(task["due_date"]) if isinstance(task["due_date"], str) else task["due_date"]
-            days_left = (due_date - now).days
-            
-            if days_left <= 3 and days_left >= 0:
-                existing = await db.notifications.find_one({
-                    "user_id": task["assigned_to"],
-                    "type": "task",
-                    "message": {"$regex": task["title"]}
-                })
-                
-                if not existing and task.get("assigned_to"):
-                    notif = Notification(
-                        user_id=task["assigned_to"],
-                        title="Task Due Soon",
-                        message=f"Task '{task['title']}' is due in {days_left} days",
-                        type="task"
-                    )
-                    doc = notif.model_dump()
-                    doc["created_at"] = doc["created_at"].isoformat()
-                    await db.notifications.insert_one(doc)
-    
-    # Check DSC expiry
-    dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
-    for dsc in dsc_list:
-        expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
-        days_left = (expiry_date - now).days
-        
-        if days_left <= 30 and days_left >= 0:
-            existing = await db.notifications.find_one({
-                "type": "dsc",
-                "message": {"$regex": dsc["certificate_number"]}
-            })
-            
-            if not existing:
-                # Send to all admins and managers
-                users = await db.users.find({"role": {"$in": ["admin", "manager"]}}, {"_id": 0}).to_list(100)
-                for user in users:
-                    notif = Notification(
-                        user_id=user["id"],
-                        title="DSC Expiring Soon",
-                        message=f"DSC {dsc['certificate_number']} for {dsc['holder_name']} expires in {days_left} days",
-                        type="dsc"
-                    )
-                    doc = notif.model_dump()
-                    doc["created_at"] = doc["created_at"].isoformat()
-                    await db.notifications.insert_one(doc)
-    
-    return {"message": "Notifications checked and created"}
-
-# Activity log routes
-@api_router.post("/activity")
-async def log_activity(activity_data: ActivityLogUpdate, current_user: User = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    existing = await db.activity_logs.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-    
-    if existing:
-        update_data = {}
-        if activity_data.screen_time_minutes is not None:
-            update_data["screen_time_minutes"] = existing.get("screen_time_minutes", 0) + activity_data.screen_time_minutes
-        if activity_data.tasks_completed is not None:
-            update_data["tasks_completed"] = existing.get("tasks_completed", 0) + activity_data.tasks_completed
-        
-        await db.activity_logs.update_one({"user_id": current_user.id, "date": today}, {"$set": update_data})
-    else:
-        activity = ActivityLog(
-            user_id=current_user.id,
-            date=today,
-            screen_time_minutes=activity_data.screen_time_minutes or 0,
-            tasks_completed=activity_data.tasks_completed or 0
-        )
-        await db.activity_logs.insert_one(activity.model_dump())
-    
-    return {"message": "Activity logged"}
-
-# Due Date Reminder routes
-@api_router.post("/duedates", response_model=DueDate)
-async def create_due_date(due_date_data: DueDateCreate, current_user: User = Depends(get_current_user)):
-    due_date = DueDate(**due_date_data.model_dump(), created_by=current_user.id)
-    
-    doc = due_date.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["due_date"] = doc["due_date"].isoformat()
-    if doc.get("recurrence_end_date"):
-        doc["recurrence_end_date"] = doc["recurrence_end_date"].isoformat()
-    
-    await db.due_dates.insert_one(doc)
-    return due_date
-
-@api_router.get("/duedates", response_model=List[DueDate])
-async def get_due_dates(current_user: User = Depends(get_current_user)):
-    query = {}
-    if current_user.role == "staff":
-        query["assigned_to"] = current_user.id
-    
-    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
-    for dd in due_dates:
-        if isinstance(dd["created_at"], str):
-            dd["created_at"] = datetime.fromisoformat(dd["created_at"])
-        if isinstance(dd["due_date"], str):
-            dd["due_date"] = datetime.fromisoformat(dd["due_date"])
-    return due_dates
-
-@api_router.get("/duedates/upcoming")
-async def get_upcoming_due_dates(days: int = 30, current_user: User = Depends(get_current_user)):
     """Get due dates in next N days"""
     now = datetime.now(timezone.utc)
     future_date = now + timedelta(days=days)
