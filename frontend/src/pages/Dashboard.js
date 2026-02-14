@@ -61,26 +61,35 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  fetchDashboardData();
+  fetchTodayAttendance();
+}, []);
 
-  const fetchDashboardData = async () => {
-    try {
-      const [statsRes, tasksRes, attendanceRes, dueDatesRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-        api.get('/attendance/today'),
-        api.get('/duedates/upcoming?days=120'),
-      ]);
+const fetchDashboardData = async () => {
+  try {
+    const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
+      api.get('/dashboard/stats'),
+      api.get('/tasks'),
+      api.get('/duedates/upcoming?days=120'),
+    ]);
 
-      setStats(statsRes.data);
-      setRecentTasks(tasksRes.data.slice(0, 5));
-      setTodayAttendance(attendanceRes.data);
-      setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-    }
-  };
+    setStats(statsRes.data);
+    setRecentTasks(tasksRes.data.slice(0, 5));
+    setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
+
+  } catch (error) {
+    console.error('Failed to fetch dashboard data:', error);
+  }
+};
+
+const fetchTodayAttendance = async () => {
+  try {
+    const res = await api.get('/attendance/today');
+    setTodayAttendance(res.data);
+  } catch (error) {
+    console.error('Failed to fetch attendance:', error);
+  }
+};
 
   const handlePunchAction = async (action) => {
     setLoading(true);
