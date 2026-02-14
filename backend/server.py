@@ -832,7 +832,7 @@ async def get_my_attendance_summary(
             "days_present": data["days_present"]
         })
 
-         return {
+    return {
         "current_month": current_month,
         "total_days": total_days,
         "total_minutes": total_minutes_all,
