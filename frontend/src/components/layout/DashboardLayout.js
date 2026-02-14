@@ -80,7 +80,7 @@ export const DashboardLayout = ({ children }) => {
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
     { path: '/clients', icon: Building2, label: 'Clients' },
     { path: '/dsc', icon: FileText, label: 'DSC Register' },
-    { path: '//duedates', icon: Calendar, label: 'Due Dates' },
+    { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/chat', icon: MessageCircle, label: 'Chat' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
