@@ -1,4 +1,6 @@
+import pytz
 import smtplib
+from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -1758,9 +1760,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-from datetime import datetime
-import pytz
-
 @app.middleware("http")
 async def auto_daily_reminder(request, call_next):
 
