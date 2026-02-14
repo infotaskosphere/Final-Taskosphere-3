@@ -1802,6 +1802,48 @@ async def get_notifications(current_user: User = Depends(get_current_user)):
 async def shutdown_db_client():
     client.close()
 
+# ================= INDIVIDUAL STAFF REMINDER =================
+@api_router.post("/send-reminder/{user_id}")
+async def send_reminder_to_user(
+    user_id: str,
+    current_user: User = Depends(get_current_user)
+):
 
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    tasks = await db.tasks.find(
+        {
+            "assigned_to": user_id,
+            "status": {"$ne": "completed"}
+        },
+        {"_id": 0}
+    ).to_list(1000)
+
+    if not tasks:
+        return {"message": "No pending tasks for this user"}
+
+    body = f"Hello {user.get('full_name')},\n\n"
+    body += "You have the following pending tasks:\n\n"
+
+    for t in tasks:
+        body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+
+    body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
+
+    send_email(
+        user["email"],
+        "Pending Task Reminder - TaskoSphere",
+        body
+    )
+
+    return {
+        "message": "Reminder sent successfully",
+        "task_count": len(tasks)
+    }
 # ================= INCLUDE ROUTER =================
 app.include_router(api_router)
