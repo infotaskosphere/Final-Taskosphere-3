@@ -545,7 +545,7 @@ const fetchTodayAttendance = async () => {
             </div>
             <div>
               <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.upcoming_due_dates || 0}</p>
-              <p className="text-sm text-slate-500">Due Dates</p>
+              <p className="text-sm text-slate-500">Compliance Calendar</p>
             </div>
           </CardContent>
         </Card>
