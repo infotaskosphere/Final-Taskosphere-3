@@ -846,6 +846,11 @@ async def get_staff_attendance_report(
     month: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
+    @api_router.get("/attendance/staff-report")
+async def get_staff_attendance_report(
+    month: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     """Get all staff attendance report (admin only)"""
 
     # Admin check
@@ -927,6 +932,8 @@ async def get_staff_attendance_report(
         "month": target_month,
         "total_staff": len(result),
         "staff_report": result
+    }
+
     }
     """Get due dates in next N days"""
     now = datetime.now(timezone.utc)
