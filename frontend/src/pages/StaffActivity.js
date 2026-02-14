@@ -294,64 +294,85 @@ export default function StaffActivity() {
         </Card>
       </motion.div>
 
-      {/* Tabs for Activity vs Attendance */}
-      <motion.div variants={itemVariants}>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="bg-slate-100 p-1 rounded-xl">
-            <TabsTrigger 
-              value="activity" 
-              className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm px-6"
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Activity Overview
-            </TabsTrigger>
-            <TabsTrigger 
-              value="attendance" 
-              className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm px-6"
-            >
-              <Calendar className="h-4 w-4 mr-2" />
-              Attendance Report
-            </TabsTrigger>
-          </TabsList>
+  {/* Tabs for Activity vs Attendance */}
+<motion.div variants={itemVariants}>
+  <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+    <TabsList className="bg-slate-100 p-1 rounded-xl">
+      
+      <TabsTrigger 
+        value="activity" 
+        className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm px-6"
+      >
+        <Activity className="h-4 w-4 mr-2" />
+        Activity Overview
+      </TabsTrigger>
 
-          {/* Activity Tab */}
-          <TabsContent value="activity" className="mt-6 space-y-6">
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Category Distribution */}
-              <Card className="border border-slate-200 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg font-outfit" style={{ color: COLORS.deepBlue }}>Activity by Category</CardTitle>
-                  <CardDescription>Time spent across different activity types</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {categoryData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <PieChart>
-                        <Pie
-                          data={categoryData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={90}
-                          paddingAngle={5}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        >
-                          {categoryData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => formatDuration(value)} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex items-center justify-center h-64 text-slate-500">
-                      <p>No activity data available</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+      <TabsTrigger 
+        value="attendance" 
+        className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm px-6"
+      >
+        <Calendar className="h-4 w-4 mr-2" />
+        Attendance Report
+      </TabsTrigger>
+
+      {/* NEW REMINDER TAB */}
+      <TabsTrigger 
+        value="reminder" 
+        className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm px-6"
+      >
+        <Mail className="h-4 w-4 mr-2" />
+        Send Reminder
+      </TabsTrigger>
+
+    </TabsList>
+
+    {/* ================= Activity Tab ================= */}
+    <TabsContent value="activity" className="mt-6 space-y-6">
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Category Distribution */}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle 
+              className="text-lg font-outfit" 
+              style={{ color: COLORS.deepBlue }}
+            >
+              Activity by Category
+            </CardTitle>
+            <CardDescription>
+              Time spent across different activity types
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {categoryData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={categoryData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({ name, percent }) => 
+                      `${name} ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {categoryData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => formatDuration(value)} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-64 text-slate-500">
+                <p>No activity data available</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
               {/* Top Apps */}
               <Card className="border border-slate-200 shadow-sm">
