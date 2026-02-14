@@ -1701,7 +1701,7 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
     send_email(admin_email, "Full Pending Task Report - TaskoSphere", report_body)
 
     return {"message": "Reminder emails sent successfully"}
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
