@@ -1643,7 +1643,64 @@ async def get_chat_users(current_user: User = Depends(get_current_user)):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
     
     return users
+@api_router.post("/send-pending-task-reminders")
+async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
 
+    # Only admin can trigger this
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    # Fetch all pending (not completed) tasks
+    tasks = await db.tasks.find(
+        {"status": {"$ne": "completed"}},
+        {"_id": 0}
+    ).to_list(1000)
+
+    if not tasks:
+        return {"message": "No pending tasks found"}
+
+    user_task_map = {}
+
+    # Group tasks by assigned user
+    for task in tasks:
+        assigned_to = task.get("assigned_to")
+        if not assigned_to:
+            continue
+
+        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
+        if not user:
+            continue
+
+        user_task_map.setdefault(user["email"], []).append(task)
+
+    # Send individual reminder emails
+    for email, task_list in user_task_map.items():
+        body = "Hello,\n\nYou have the following pending tasks:\n\n"
+
+        for t in task_list:
+            body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+
+        body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
+
+        send_email(email, "Pending Task Reminder - TaskoSphere", body)
+
+    # Send full report to admin
+    admin_email = os.getenv("ADMIN_EMAIL")
+
+    report_body = "Full Pending Task Report:\n\n"
+
+    for email, task_list in user_task_map.items():
+        report_body += f"\nEmployee: {email}\n"
+        report_body += "-" * 40 + "\n"
+
+        for t in task_list:
+            report_body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+
+        report_body += "\n"
+
+    send_email(admin_email, "Full Pending Task Report - TaskoSphere", report_body)
+
+    return {"message": "Reminder emails sent successfully"}
 app.include_router(api_router)
 
 app.add_middleware(
