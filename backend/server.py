@@ -841,11 +841,6 @@ if isinstance(duration, (int, float)):
         "monthly_summary": monthly_summary[:12]  # Last 12 months
     }
 
-@api_router.get("/attendance/staff-report")
-async def get_staff_attendance_report(
-    month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
     @api_router.get("/attendance/staff-report")
 async def get_staff_attendance_report(
     month: Optional[str] = None,
