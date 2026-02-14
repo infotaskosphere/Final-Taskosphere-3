@@ -1653,22 +1653,23 @@ async def get_chat_users(current_user: User = Depends(get_current_user)):
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
 
-    # Only admin can trigger this
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
 
-    # Fetch all pending (not completed) tasks
     tasks = await db.tasks.find(
         {"status": {"$ne": "completed"}},
         {"_id": 0}
     ).to_list(1000)
 
     if not tasks:
-        return {"message": "No pending tasks found"}
+        return {
+            "message": "No pending tasks found",
+            "emails_sent": 0,
+            "emails_failed": []
+        }
 
     user_task_map = {}
 
-    # Group tasks by assigned user
     for task in tasks:
         assigned_to = task.get("assigned_to")
         if not assigned_to:
@@ -1680,35 +1681,68 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
 
         user_task_map.setdefault(user["email"], []).append(task)
 
-    # Send individual reminder emails
+    success_count = 0
+    failed_emails = []
+
+    # Send individual reminders
     for email, task_list in user_task_map.items():
-        body = "Hello,\n\nYou have the following pending tasks:\n\n"
+        try:
+            body = "Hello,\n\nYou have the following pending tasks:\n\n"
 
-        for t in task_list:
-            body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+            for t in task_list:
+                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
 
-        body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
+            body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
 
-        send_email(email, "Pending Task Reminder - TaskoSphere", body)
+            sent = send_email(
+                email,
+                "Pending Task Reminder - TaskoSphere",
+                body
+            )
 
-    # Send full report to admin
-    admin_email = os.getenv("ADMIN_EMAIL")
+            if sent:
+                success_count += 1
+                logger.info(f"Reminder sent to {email}")
+            else:
+                failed_emails.append(email)
+                logger.warning(f"Reminder failed for {email}")
 
-    report_body = "Full Pending Task Report:\n\n"
+        except Exception as e:
+            failed_emails.append(email)
+            logger.error(f"Error sending reminder to {email}: {str(e)}")
 
-    for email, task_list in user_task_map.items():
-        report_body += f"\nEmployee: {email}\n"
-        report_body += "-" * 40 + "\n"
+    # Send summary report to admin (optional but useful)
+    try:
+        admin_email = os.getenv("ADMIN_EMAIL")
 
-        for t in task_list:
-            report_body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+        if admin_email:
+            report_body = "Full Pending Task Report:\n\n"
 
-        report_body += "\n"
+            for email, task_list in user_task_map.items():
+                report_body += f"\nEmployee: {email}\n"
+                report_body += "-" * 40 + "\n"
 
-    send_email(admin_email, "Full Pending Task Report - TaskoSphere", report_body)
+                for t in task_list:
+                    report_body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
 
-    return {"message": "Reminder emails sent successfully"}
+                report_body += "\n"
 
+            send_email(
+                admin_email,
+                "Full Pending Task Report - TaskoSphere",
+                report_body
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to send admin summary: {str(e)}")
+
+    return {
+        "message": "Reminder process completed",
+        "total_users": len(user_task_map),
+        "emails_sent": success_count,
+        "emails_failed": failed_emails
+    }
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
