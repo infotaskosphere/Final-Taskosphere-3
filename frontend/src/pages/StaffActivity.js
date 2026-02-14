@@ -648,6 +648,69 @@ export default function StaffActivity() {
               </CardContent>
             </Card>
           </TabsContent>
+                            {/* Reminder Tab */}
+          <TabsContent value="reminder" className="mt-6">
+            <Card className="border border-slate-200 shadow-sm">
+              <CardHeader>
+                <CardTitle 
+                  className="text-lg font-outfit" 
+                  style={{ color: COLORS.deepBlue }}
+                >
+                  Send Task Reminders
+                </CardTitle>
+                <CardDescription>
+                  Send pending task reminders to employees
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-6">
+
+                {/* Send to All */}
+                <Button
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  onClick={async () => {
+                    try {
+                      const res = await api.post('/send-pending-task-reminders');
+                      toast.success(
+                        `Reminder sent successfully. Emails Sent: ${res.data.emails_sent}`
+                      );
+                    } catch (error) {
+                      toast.error("Failed to send reminders");
+                    }
+                  }}
+                >
+                  Send Reminder to All Employees
+                </Button>
+
+                {/* Individual */}
+                <div className="border-t pt-4">
+                  <p className="text-sm text-slate-500 mb-3">
+                    Or send individually:
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {users.map((user) => (
+                      <Button
+                        key={user.id}
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            await api.post(`/staff/send-reminder/${user.id}`);
+                            toast.success(`Reminder sent to ${user.full_name}`);
+                          } catch (error) {
+                            toast.error("Failed to send reminder");
+                          }
+                        }}
+                      >
+                        Send to {user.full_name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </motion.div>
 
