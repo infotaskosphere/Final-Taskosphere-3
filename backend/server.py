@@ -782,59 +782,63 @@ async def get_attendance_history(current_user: User = Depends(get_current_user))
     return attendance_list
 
 @api_router.get("/attendance/my-summary")
-async def get_my_attendance_summary(current_user: User = Depends(get_current_user)):
+@api_router.get("/attendance/my-summary")
+async def get_my_attendance_summary(
+    current_user: User = Depends(get_current_user)
+):
     """Get current user's attendance summary with monthly hours"""
+
     now = datetime.now(timezone.utc)
     current_month = now.strftime("%Y-%m")
-    
-    # Get all attendance records for current user
+
     attendance_list = await db.attendance.find(
-        {"user_id": current_user.id}, 
+        {"user_id": current_user.id},
         {"_id": 0}
     ).sort("date", -1).to_list(1000)
-    
-    # Calculate monthly totals
-    monthly_data = {}
-    total_hours = 0
-    total_days = 0
-    
-    for attendance in attendance_list:
-        month = attendance["date"][:7]  # YYYY-MM format
-        
-        if month not in monthly_data:
-            monthly_data[month] = {"total_minutes": 0, "days_present": 0}
-     duration = attendance.get("duration_minutes")
 
-if isinstance(duration, (int, float)):
-    monthly_data[month]["total_minutes"] += duration
-        
-        total_hours += duration / 60
+    monthly_data = {}
+    total_minutes_all = 0
+    total_days = 0
+
+    for attendance in attendance_list:
+        month = attendance["date"][:7]
+
+        if month not in monthly_data:
+            monthly_data[month] = {
+                "total_minutes": 0,
+                "days_present": 0
+            }
+
+        duration = attendance.get("duration_minutes")
+
+        if isinstance(duration, (int, float)):
+            monthly_data[month]["total_minutes"] += duration
+            total_minutes_all += duration
+
+        monthly_data[month]["days_present"] += 1
         total_days += 1
-    
-    # Convert to list format
-    monthly_summary = []
-    for month, data in sorted(monthly_data.items(), reverse=True):
-        hours = data["total_minutes"] // 60
-        minutes = data["total_minutes"] % 60
-        monthly_summary.append({
+
+    formatted_data = []
+
+    for month, data in monthly_data.items():
+        minutes = data["total_minutes"]
+        hours = minutes // 60
+        mins = minutes % 60
+
+        formatted_data.append({
             "month": month,
-            "total_hours": f"{hours}h {minutes}m",
-            "total_minutes": data["total_minutes"],
-            "days_present": data["days_present"],
-            "avg_hours_per_day": round(data["total_minutes"] / data["days_present"] / 60, 1) if data["days_present"] > 0 else 0
+            "total_minutes": minutes,
+            "total_hours": f"{hours}h {mins}m",
+            "days_present": data["days_present"]
         })
-    
-    # Current month stats
-    current_month_data = monthly_data.get(current_month, {"total_minutes": 0, "days_present": 0})
-    current_hours = current_month_data["total_minutes"] // 60
-    current_minutes = current_month_data["total_minutes"] % 60
-    
+
     return {
-        "current_month": {
-            "month": current_month,
-            "total_hours": f"{current_hours}h {current_minutes}m",
-            "total_minutes": current_month_data["total_minutes"],
-            "days_present": current_month_data["days_present"]
+        "current_month": current_month,
+        "total_days": total_days,
+        "total_minutes": total_minutes_all,
+        "monthly_summary": formatted_data
+    }
+
         },
         "total_hours_all_time": round(total_hours, 1),
         "total_days_all_time": total_days,
