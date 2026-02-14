@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button"
 import { Mail } from "lucide-react";
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
