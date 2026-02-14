@@ -1652,6 +1652,7 @@ async def get_chat_users(current_user: User = Depends(get_current_user)):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
     
     return users
+# ================= MANUAL FULL REMINDER =================
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
 
@@ -1686,7 +1687,6 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
     success_count = 0
     failed_emails = []
 
-    # Send individual reminders
     for email, task_list in user_task_map.items():
         try:
             body = "Hello,\n\nYou have the following pending tasks:\n\n"
@@ -1704,39 +1704,12 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
 
             if sent:
                 success_count += 1
-                logger.info(f"Reminder sent to {email}")
             else:
                 failed_emails.append(email)
-                logger.warning(f"Reminder failed for {email}")
 
         except Exception as e:
             failed_emails.append(email)
             logger.error(f"Error sending reminder to {email}: {str(e)}")
-
-    # Send summary report to admin (optional but useful)
-    try:
-        admin_email = os.getenv("ADMIN_EMAIL")
-
-        if admin_email:
-            report_body = "Full Pending Task Report:\n\n"
-
-            for email, task_list in user_task_map.items():
-                report_body += f"\nEmployee: {email}\n"
-                report_body += "-" * 40 + "\n"
-
-                for t in task_list:
-                    report_body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
-
-                report_body += "\n"
-
-            send_email(
-                admin_email,
-                "Full Pending Task Report - TaskoSphere",
-                report_body
-            )
-
-    except Exception as e:
-        logger.error(f"Failed to send admin summary: {str(e)}")
 
     return {
         "message": "Reminder process completed",
@@ -1744,22 +1717,52 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_sent": success_count,
         "emails_failed": failed_emails
     }
-    
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+# ================= INTERNAL FUNCTION FOR AUTO REMINDER =================
+async def send_pending_task_reminders_internal():
+
+    tasks = await db.tasks.find(
+        {"status": {"$ne": "completed"}},
+        {"_id": 0}
+    ).to_list(1000)
+
+    if not tasks:
+        return
+
+    user_task_map = {}
+
+    for task in tasks:
+        assigned_to = task.get("assigned_to")
+        if not assigned_to:
+            continue
+
+        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
+        if not user:
+            continue
+
+        user_task_map.setdefault(user["email"], []).append(task)
+
+    for email, task_list in user_task_map.items():
+        try:
+            body = "Hello,\n\nYou have the following pending tasks:\n\n"
+
+            for t in task_list:
+                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+
+            body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
+
+            send_email(
+                email,
+                "Daily Pending Task Reminder - TaskoSphere",
+                body
+            )
+
+        except Exception as e:
+            logger.error(f"Auto reminder failed for {email}: {str(e)}")
+
+
+# ================= AUTO DAILY REMINDER (ONLY ONE) =================
 @app.middleware("http")
 async def auto_daily_reminder(request, call_next):
 
@@ -1770,18 +1773,16 @@ async def auto_daily_reminder(request, call_next):
         setting = await db.system_settings.find_one({"key": "last_reminder_date"})
         last_date = setting["value"] if setting else None
 
-        # Trigger at 10:00 AM IST
-        if india_time.hour >= 10:
-            if last_date != today_str:
-                logger.info("Auto daily reminder triggered at 10:00 AM IST")
+        if india_time.hour >= 10 and last_date != today_str:
+            logger.info("Auto daily reminder triggered at 10:00 AM IST")
 
-                await send_pending_task_reminders_internal()
+            await send_pending_task_reminders_internal()
 
-                await db.system_settings.update_one(
-                    {"key": "last_reminder_date"},
-                    {"$set": {"value": today_str}},
-                    upsert=True
-                )
+            await db.system_settings.update_one(
+                {"key": "last_reminder_date"},
+                {"$set": {"value": today_str}},
+                upsert=True
+            )
 
     except Exception as e:
         logger.error(f"Auto reminder middleware error: {str(e)}")
@@ -1789,40 +1790,18 @@ async def auto_daily_reminder(request, call_next):
     response = await call_next(request)
     return response
 
-@app.middleware("http")
-async def auto_daily_reminder(request, call_next):
 
-    try:
-        india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
-        today_str = india_time.date().isoformat()
-
-        setting = await db.system_settings.find_one({"key": "last_reminder_date"})
-        last_date = setting["value"] if setting else None
-
-        # Trigger at 10:00 AM IST
-        if india_time.hour >= 10:
-            if last_date != today_str:
-                logger.info("Auto daily reminder triggered at 10:00 AM IST")
-
-                await send_pending_task_reminders_internal()
-
-                await db.system_settings.update_one(
-                    {"key": "last_reminder_date"},
-                    {"$set": {"value": today_str}},
-                    upsert=True
-                )
-
-    except Exception as e:
-        logger.error(f"Auto reminder middleware error: {str(e)}")
-
-    response = await call_next(request)
-    return response
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-
+# ================= NOTIFICATIONS =================
 @api_router.get("/notifications")
 async def get_notifications(current_user: User = Depends(get_current_user)):
     return []
 
+
+# ================= SHUTDOWN =================
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
+
+
+# ================= INCLUDE ROUTER =================
 app.include_router(api_router)
