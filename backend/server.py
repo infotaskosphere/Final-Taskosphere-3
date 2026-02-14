@@ -1820,7 +1820,8 @@ async def auto_daily_reminder(request, call_next):
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-    @api_router.get("/notifications")
+
+@api_router.get("/notifications")
 async def get_notifications(current_user: User = Depends(get_current_user)):
     return []
 
