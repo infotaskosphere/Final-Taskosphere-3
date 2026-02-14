@@ -395,18 +395,25 @@ def create_access_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 # Email helper function
 def send_email(to_email: str, subject: str, body: str):
-    msg = MIMEMultipart()
-    msg["From"] = os.getenv("EMAIL_USER")
-    msg["To"] = to_email
-    msg["Subject"] = subject
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    sender_email = os.getenv("SENDER_EMAIL")
 
-    msg.attach(MIMEText(body, "plain"))
+    if not sendgrid_key or not sender_email:
+        raise Exception("SendGrid environment variables not configured")
 
-    server = smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT")))
-    server.starttls()
-    server.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
-    server.sendmail(os.getenv("EMAIL_USER"), to_email, msg.as_string())
-    server.quit()
+    message = Mail(
+        from_email=sender_email,
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=body
+    )
+
+    try:
+        sg = SendGridAPIClient(sendgrid_key)
+        response = sg.send(message)
+        return response.status_code == 202
+    except Exception as e:
+        raise Exception(f"SendGrid error: {str(e)}")
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
