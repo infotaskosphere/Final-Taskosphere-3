@@ -928,7 +928,6 @@ async def get_my_attendance_summary(
         "staff_report": result
     }
 
-    }
     """Get due dates in next N days"""
     now = datetime.now(timezone.utc)
     future_date = now + timedelta(days=days)
