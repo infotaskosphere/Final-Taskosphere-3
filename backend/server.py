@@ -803,11 +803,10 @@ async def get_my_attendance_summary(current_user: User = Depends(get_current_use
         
         if month not in monthly_data:
             monthly_data[month] = {"total_minutes": 0, "days_present": 0}
-        
-        duration = attendance.get("duration_minutes", 0)
-       if duration is not None:
-           monthly_data[month]["total_minutes"] += duration
-        monthly_data[month]["days_present"] += 1
+     duration = attendance.get("duration_minutes")
+
+if isinstance(duration, (int, float)):
+    monthly_data[month]["total_minutes"] += duration
         
         total_hours += duration / 60
         total_days += 1
