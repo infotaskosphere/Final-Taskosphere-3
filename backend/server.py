@@ -393,6 +393,20 @@ def create_access_token(data: dict):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+# Email helper function
+def send_email(to_email: str, subject: str, body: str):
+    msg = MIMEMultipart()
+    msg["From"] = os.getenv("EMAIL_USER")
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(body, "plain"))
+
+    server = smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT")))
+    server.starttls()
+    server.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+    server.sendmail(os.getenv("EMAIL_USER"), to_email, msg.as_string())
+    server.quit()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
