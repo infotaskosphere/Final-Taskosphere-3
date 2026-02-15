@@ -882,6 +882,47 @@ async def record_document_movement(
     )
 
     return {"message": "Movement recorded successfully"}
+@api_router.put("/documents/{document_id}/movement/{movement_id}")
+async def update_document_movement(
+    document_id: str,
+    movement_id: str,
+    update_data: DocumentMovementRequest,
+    current_user: User = Depends(get_current_user)
+):
+    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    movement_log = document.get("movement_log", [])
+    movement_found = False
+
+    for i, movement in enumerate(movement_log):
+        if movement.get("id") == movement_id:
+            movement_log[i]["movement_type"] = update_data.movement_type
+            movement_log[i]["person_name"] = update_data.person_name
+            movement_log[i]["notes"] = update_data.notes
+            movement_log[i]["edited_by"] = current_user.full_name
+            movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
+            movement_found = True
+            break
+
+    if not movement_found:
+        raise HTTPException(status_code=404, detail="Movement entry not found")
+
+    # Update current status based on latest movement
+    new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+
+    await db.documents.update_one(
+        {"id": document_id},
+        {
+            "$set": {
+                "current_status": new_status,
+                "movement_log": movement_log
+            }
+        }
+    )
+
+    return {"message": "Movement updated successfully"}
 
 # Attendance routes
 @api_router.post("/attendance", response_model=Attendance)
