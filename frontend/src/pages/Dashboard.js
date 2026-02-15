@@ -319,7 +319,7 @@ const fetchTodayAttendance = async () => {
                   </p>
                   {todayAttendance?.punch_out && (
                     <p className="text-sm text-blue-100/80">
-                      Out: {format(new Date(todayAttendance.punch_out), 'hh:mm a')} • {todayAttendance.duration_minutes}min
+                      Out: {format(new Date(todayAttendance.punch_out), 'hh:mm a')} ��� {todayAttendance.duration_minutes}min
                     </p>
                   )}
                 </div>
@@ -400,7 +400,7 @@ const fetchTodayAttendance = async () => {
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-slate-900 truncate">{task.title}</h4>
                         <p className="text-sm text-slate-500">
-                          {task.category || 'General'} • Updated {task.updated_at ? format(new Date(task.updated_at), 'MMM d') : 'recently'}
+                          {task.category || 'General'} ��� Updated {task.updated_at ? format(new Date(task.updated_at), 'MMM d') : 'recently'}
                         </p>
                       </div>
                       <Badge className={`${statusStyle.bg} ${statusStyle.text} border-0 text-xs shrink-0`}>
