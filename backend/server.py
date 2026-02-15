@@ -742,6 +742,101 @@ async def update_dsc_movement(
     )
     
     return {"message": "Movement updated successfully", "movement_log": movement_log}
+# ================= DOCUMENT REGISTER ROUTES =================
+# ================= DOCUMENT ROUTES =================
+
+@api_router.post("/documents", response_model=Document)
+async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
+    document = Document(**document_data.model_dump(), created_by=current_user.id)
+
+    doc = document.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+
+    if doc.get("issue_date"):
+        doc["issue_date"] = doc["issue_date"].isoformat()
+    if doc.get("valid_upto"):
+        doc["valid_upto"] = doc["valid_upto"].isoformat()
+
+    await db.documents.insert_one(doc)
+    return document
+
+
+@api_router.get("/documents", response_model=List[Document])
+async def get_documents(current_user: User = Depends(get_current_user)):
+    documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
+
+    for d in documents:
+        if isinstance(d["created_at"], str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+        if d.get("issue_date") and isinstance(d["issue_date"], str):
+            d["issue_date"] = datetime.fromisoformat(d["issue_date"])
+        if d.get("valid_upto") and isinstance(d["valid_upto"], str):
+            d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
+
+    return documents
+
+
+@api_router.put("/documents/{document_id}", response_model=Document)
+async def update_document(document_id: str, document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
+    update_data = document_data.model_dump()
+
+    if update_data.get("issue_date"):
+        update_data["issue_date"] = update_data["issue_date"].isoformat()
+    if update_data.get("valid_upto"):
+        update_data["valid_upto"] = update_data["valid_upto"].isoformat()
+
+    await db.documents.update_one({"id": document_id}, {"$set": update_data})
+
+    updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
+
+    if isinstance(updated["created_at"], str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+
+    return Document(**updated)
+
+
+@api_router.delete("/documents/{document_id}")
+async def delete_document(document_id: str, current_user: User = Depends(get_current_user)):
+    result = await db.documents.delete_one({"id": document_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return {"message": "Document deleted successfully"}
+
+
+@api_router.post("/documents/{document_id}/movement")
+async def record_document_movement(
+    document_id: str,
+    movement_data: DocumentMovementRequest,
+    current_user: User = Depends(get_current_user)
+):
+    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    movement = {
+        "id": str(uuid.uuid4()),
+        "movement_type": movement_data.movement_type,
+        "person_name": movement_data.person_name,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "notes": movement_data.notes,
+        "recorded_by": current_user.full_name
+    }
+
+    movement_log = document.get("movement_log", [])
+    movement_log.append(movement)
+
+    await db.documents.update_one(
+        {"id": document_id},
+        {
+            "$set": {
+                "current_status": movement_data.movement_type,
+                "movement_log": movement_log
+            }
+        }
+    )
+
+    return {"message": "Movement recorded successfully"}
 
 # Attendance routes
 @api_router.post("/attendance", response_model=Attendance)
