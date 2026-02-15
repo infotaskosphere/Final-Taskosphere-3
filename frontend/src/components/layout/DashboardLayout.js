@@ -1,576 +1,254 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import api from '@/lib/api';
-import { toast } from 'sonner';
-import { 
-  CheckSquare, 
-  FileText, 
-  Clock, 
-  TrendingUp, 
-  AlertCircle, 
-  LogIn, 
-  LogOut, 
-  Calendar, 
-  Users, 
-  Key, 
-  Briefcase,
-  ArrowUpRight,
+import { useActivityTracker } from '@/hooks/useActivityTracker';
+import {
+  LayoutDashboard,
+  CheckSquare,
+  FileText,
+  Clock,
+  BarChart3,
+  Users,
+  LogOut,
+  Menu,
+  X,
   Building2,
-  ChevronRight,
-  Target,
-  Activity
+  Calendar,
+  Activity,
+  MessageCircle,
+  ChevronDown
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { Badge } from '@/components/ui/badge';
-import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import NotificationBell from './NotificationBell';
 
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
+  lightBlue: '#E0F2FE',
+  skyBlue: '#7DD3FC',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
 };
 
-// Animation variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06 }
-  }
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
-};
-
-export default function DashboardLayout() {
-  const { user } = useAuth();
+export const DashboardLayout = ({ children }) => {
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [todayAttendance, setTodayAttendance] = useState(null);
-  const [recentTasks, setRecentTasks] = useState([]);
-  const [upcomingDueDates, setUpcomingDueDates] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  
+  // Enable activity tracking for all users
+  useActivityTracker(true);
 
+  // Handle responsive behavior
   useEffect(() => {
-  fetchDashboardData();
-  fetchTodayAttendance();
-}, []);
+    const handleResize = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      // Auto-collapse sidebar on mobile
+      if (mobile) {
+        setSidebarOpen(false);
+      } else {
+        setSidebarOpen(true);
+      }
+    };
 
-const fetchDashboardData = async () => {
-  try {
-    const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-      api.get('/dashboard/stats'),
-      api.get('/tasks'),
-      api.get('/duedates/upcoming?days=120'),
-    ]);
+    // Initial check
+    handleResize();
 
-    setStats(statsRes.data);
-    setRecentTasks(tasksRes.data.slice(0, 5));
-    setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
+    // Listen for resize
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-  } catch (error) {
-    console.error('Failed to fetch dashboard data:', error);
-  }
-};
-
-const fetchTodayAttendance = async () => {
-  try {
-    const res = await api.get('/attendance/today');
-    setTodayAttendance(res.data);
-  } catch (error) {
-    console.error('Failed to fetch attendance:', error);
-  }
-};
-
-  const handlePunchAction = async (action) => {
-    setLoading(true);
-    try {
-      await api.post('/attendance', { action });
-      toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-      const res = await api.get('/attendance/today');
-      setTodayAttendance(res.data);
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to record attendance');
-    } finally {
-      setLoading(false);
+  // Close sidebar when clicking a nav item on mobile
+  const handleNavClick = () => {
+    if (isMobile) {
+      setSidebarOpen(false);
     }
   };
 
-  const getStatusStyle = (status) => {
-    const styles = {
-      completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-      in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' },
-      pending: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-400' },
-    };
-    return styles[status] || styles.pending;
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
   };
 
-  const getPriorityStyle = (priority) => {
-    const styles = {
-      high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
-      medium: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
-      low: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
-    };
-    return styles[priority] || styles.medium;
-  };
+  const navItems = [
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
+    { path: '/clients', icon: Building2, label: 'Clients' },
+    { path: '/dsc', icon: FileText, label: 'DSC Register' },
+    { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
+    { path: '/attendance', icon: Clock, label: 'Attendance' },
+    { path: '/chat', icon: MessageCircle, label: 'Chat' },
+    { path: '/reports', icon: BarChart3, label: 'Reports' },
+  ];
 
-  const completionRate = stats?.total_tasks > 0 
-    ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100) 
-    : 0;
-
-  // Find next deadline
-  const nextDeadline = upcomingDueDates.length > 0 
-    ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
-    : null;
+  if (user?.role === 'admin') {
+    navItems.push({ path: '/users', icon: Users, label: 'Users' });
+    navItems.push({ path: '/staff-activity', icon: Activity, label: 'Staff Activity' });
+  }
 
   return (
-    <motion.div 
-      className="space-y-10 font-sans text-slate-900" 
-      data-testid="dashboard-page"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
-      {/* Welcome Banner */}
-      <motion.div variants={itemVariants}>
-        <Card 
-          className="border-0 shadow-lg overflow-hidden relative"
-          style={{ 
-            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
-          }}
-        >
-          <div 
-            className="absolute top-0 right-0 w-72 h-72 rounded-full opacity-20 -mr-16 -mt-16"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
-          />
-          <CardContent className="p-8 relative">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-              <div>
-                <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight text-slate-900" style={{ color: COLORS.deepBlue }}>
-                  Welcome back, {user?.full_name?.split(' ')[0]}
-                </h1>
-                <p className="text-slate-600 mt-2 text-lg">
-                  Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
-                </p>
-              </div>
-              
-              {nextDeadline && (
-                <div 
-                  className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
-                  style={{ borderColor: COLORS.mediumBlue, backgroundColor: 'white' }}
-                  onClick={() => navigate('/duedates')}
-                  data-testid="next-deadline-card"
-                >
-                  <Calendar className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
-                  <div>
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Next Filing Deadline</p>
-                    <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
-                      {format(new Date(nextDeadline.due_date), 'MMM d')}: {nextDeadline.title.slice(0, 15)}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+    <div className="min-h-screen bg-slate-50">
+      {/* Mobile Overlay */}
+      {isMobile && sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-      {/* Key Metrics Row - Responsive with equal sizing */}
-      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
-        {/* Total Tasks */}
-        <Card 
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-          onClick={() => navigate('/tasks')}
-          data-testid="stat-total-tasks"
-        >
-          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_tasks || 0}</p>
-              </div>
-              <div 
-                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                style={{ backgroundColor: `${COLORS.deepBlue}15` }}
+      {/* Sidebar - Responsive with Light Blue Gradient */}
+      <aside
+        className={`fixed left-0 top-0 h-full border-r border-blue-200 shadow-lg transition-all duration-300 z-50
+          ${sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-0 lg:translate-x-0'}
+        `}
+        style={{
+          background: `linear-gradient(180deg, ${COLORS.lightBlue} 0%, #F0F9FF 50%, #E0F7FA 100%)`
+        }}
+      >
+        <div className="flex flex-col h-full">
+          {/* Logo Header - Fixed */}
+          <div className="p-4 lg:p-6 border-b border-blue-100/50">
+            <div className="flex items-center justify-between">
+              <img src="/logo.png" alt="Taskosphere" className="h-10 sm:h-12 lg:h-14" style={{ background: 'transparent' }} />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden text-slate-600 hover:bg-blue-100"
+                data-testid="sidebar-close-btn"
               >
-                <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.deepBlue }} />
-              </div>
+                <X className="h-5 w-5" />
+              </Button>
             </div>
-            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View all</span>
-              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Overdue/Pending */}
-        <Card 
-          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
-            stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
-          }`}
-          onClick={() => navigate('/tasks')}
-          data-testid="stat-overdue-tasks"
-        >
-          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-                <p className={`text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                  {stats?.overdue_tasks || 0}
-                </p>
-              </div>
-              <div 
-                className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0 ${
-                  stats?.overdue_tasks > 0 ? 'bg-red-100' : 'bg-slate-100'
-                }`}
-              >
-                <AlertCircle className={`h-5 w-5 sm:h-6 sm:w-6 ${stats?.overdue_tasks > 0 ? 'text-red-600' : 'text-slate-400'}`} />
-              </div>
-            </div>
-            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-              <span>Review now</span>
-              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Pending Review */}
-        <Card 
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-          onClick={() => navigate('/tasks')}
-          data-testid="stat-pending-tasks"
-        >
-          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Pending</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>{stats?.pending_tasks || 0}</p>
-              </div>
-              <div 
-                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
-              >
-                <Clock className="h-6 w-6" style={{ color: COLORS.mediumBlue }} />
-              </div>
-            </div>
-            <div className="flex items-center gap-1 mt-3 text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View pending</span>
-              <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Completion Rate */}
-        <Card 
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group"
-          onClick={() => navigate('/reports')}
-          data-testid="stat-completion-rate"
-        >
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Completion Rate</p>
-                <p className="text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>{completionRate}%</p>
-              </div>
-              <div 
-                className="p-3 rounded-2xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
-              >
-                <Target className="h-6 w-6" style={{ color: COLORS.emeraldGreen }} />
-              </div>
-            </div>
-            <div className="flex items-center gap-1 mt-3 text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View reports</span>
-              <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Attendance Widget */}
-      <motion.div variants={itemVariants}>
-        <Card 
-          className="border-0 shadow-lg overflow-hidden cursor-pointer"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }} 
-          onClick={() => navigate('/attendance')}
-          data-testid="attendance-widget"
-        >
-          <CardContent className="p-6">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex items-center space-x-4">
-                <div className="w-14 h-14 bg-white/20 backdrop-blur rounded-2xl flex items-center justify-center">
-                  <Clock className="h-7 w-7 text-white" />
-                </div>
-                <div className="text-white">
-                  <h3 className="text-xl font-semibold font-outfit">Today's Attendance</h3>
-                  <p className="text-blue-100">
-                    {todayAttendance?.punch_in
-                      ? `Punched in at ${format(new Date(todayAttendance.punch_in), 'hh:mm a')}`
-                      : 'Not punched in yet'}
-                  </p>
-                  {todayAttendance?.punch_out && (
-                    <p className="text-sm text-blue-100/80">
-                      Out: {format(new Date(todayAttendance.punch_out), 'hh:mm a')} • {todayAttendance.duration_minutes}min
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-3" onClick={(e) => e.stopPropagation()}>
-                {!todayAttendance?.punch_in ? (
-                  <Button
-                    onClick={() => handlePunchAction('punch_in')}
-                    disabled={loading}
-                    size="lg"
-                    className="rounded-xl px-8 font-medium shadow-lg transition-all hover:shadow-xl hover:scale-105 active:scale-95"
-                    style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`, color: 'white' }}
-                    data-testid="punch-in-btn"
+          {/* Scrollable Navigation */}
+          <div className="flex-1 overflow-y-auto py-4 px-3 lg:px-4">
+            <nav className="space-y-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={handleNavClick}
+                    data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
+                    className={`flex items-center space-x-3 px-3 lg:px-4 py-2.5 lg:py-3 rounded-xl transition-all duration-200 ${
+                      isActive
+                        ? 'text-white shadow-lg'
+                        : 'text-slate-700 hover:bg-blue-100/70 hover:text-slate-900'
+                    }`}
+                    style={isActive ? { 
+                      background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` 
+                    } : {}}
                   >
-                    <LogIn className="mr-2 h-5 w-5" />
-                    Punch In
-                  </Button>
-                ) : (
-                  !todayAttendance?.punch_out && (
-                    <Button
-                      onClick={() => handlePunchAction('punch_out')}
-                      disabled={loading}
-                      size="lg"
-                      className="bg-white/20 backdrop-blur text-white hover:bg-white/30 rounded-xl px-8 font-medium transition-all hover:scale-105 active:scale-95"
-                      data-testid="punch-out-btn"
+                    <Icon className="h-5 w-5 flex-shrink-0" />
+                    <span className="font-medium text-sm lg:text-base truncate">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Footer - Fixed at bottom */}
+          <div className="p-3 lg:p-4 border-t border-blue-100/50 bg-gradient-to-t from-blue-50/80 to-transparent">
+            <p className="text-xs text-slate-500 text-center">�� 2025 TaskoSphere</p>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content - Responsive margin */}
+      <div className={`transition-all duration-300 ${sidebarOpen && !isMobile ? 'lg:ml-64' : 'ml-0'}`}>
+        {/* Header with User Profile & Logout on Right */}
+        <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200">
+          <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 lg:py-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                data-testid="sidebar-toggle-btn"
+                className="hover:bg-slate-100 h-9 w-9 lg:h-10 lg:w-10"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <div>
+                <h2 
+                  className="text-lg sm:text-xl lg:text-2xl font-bold font-outfit truncate max-w-[150px] sm:max-w-none"
+                  style={{ color: COLORS.deepBlue }}
+                >
+                  {navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard'}
+                </h2>
+              </div>
+            </div>
+
+            {/* Right Side - Notifications, User Name & Logout */}
+            <div className="flex items-center space-x-1 sm:space-x-3">
+              <NotificationBell />
+              
+              {/* User Profile Dropdown with Logout */}
+              <div className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-full hover:bg-slate-100 transition-colors"
+                  data-testid="user-menu-btn"
+                >
+                  <div 
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-md flex-shrink-0"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+                  >
+                    {user?.full_name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="hidden md:block text-left">
+                    <p className="text-sm font-semibold text-slate-900 truncate max-w-[120px] lg:max-w-[150px]" data-testid="header-user-name">{user?.full_name}</p>
+                    <p className="text-xs text-slate-500 capitalize">{user?.role}</p>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform hidden sm:block ${userMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Dropdown Menu */}
+                {userMenuOpen && (
+                  <div 
+                    className="absolute right-0 top-full mt-2 w-48 sm:w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50"
+                  >
+                    <div className="px-4 py-3 border-b border-slate-100">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{user?.full_name}</p>
+                      <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center space-x-3 px-4 py-3 text-left text-red-600 hover:bg-red-50 transition-colors"
+                      data-testid="logout-btn"
                     >
-                      <LogOut className="mr-2 h-5 w-5" />
-                      Punch Out
-                    </Button>
-                  )
+                      <LogOut className="h-5 w-5" />
+                      <span className="font-medium">Logout</span>
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+          </div>
+        </header>
 
-      {/* Two Column Section */}
-      <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-6" variants={itemVariants}>
-        {/* Recent Task Updates */}
-        <Card className="border border-slate-200 shadow-sm" data-testid="recent-tasks-card">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                <Activity className="h-5 w-5" />
-                Recent Task Updates
-              </CardTitle>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-sm hover:bg-slate-100"
-                onClick={() => navigate('/tasks')}
-                data-testid="view-all-tasks-btn"
-              >
-                View All Tasks <ArrowUpRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-            <p className="text-sm text-slate-500">Latest task updates across the firm</p>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {recentTasks.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
-                <CheckSquare className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No tasks yet. Create your first task!</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {recentTasks.map((task) => {
-                  const statusStyle = getStatusStyle(task.status);
-                  return (
-                    <div
-                      key={task.id}
-                      className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer"
-                      onClick={() => navigate('/tasks')}
-                      data-testid={`task-item-${task.id}`}
-                    >
-                      <div className={`w-2 h-2 rounded-full mt-2 ${statusStyle.dot}`} />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-slate-900 truncate">{task.title}</h4>
-                        <p className="text-sm text-slate-500">
-                          {task.category || 'General'} • Updated {task.updated_at ? format(new Date(task.updated_at), 'MMM d') : 'recently'}
-                        </p>
-                      </div>
-                      <Badge className={`${statusStyle.bg} ${statusStyle.text} border-0 text-xs shrink-0`}>
-                        {task.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Page Content - Responsive padding */}
+        <main className="p-3 sm:p-4 md:p-6 lg:p-8">
+          <div className="max-w-7xl mx-auto w-full">{children}</div>
+        </main>
+      </div>
 
-        {/* Urgent Deadlines */}
-        <Card className="border border-slate-200 shadow-sm" data-testid="due-dates-widget">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                <AlertCircle className="h-5 w-5 text-red-500" />
-                Urgent Deadlines
-              </CardTitle>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-sm hover:bg-slate-100"
-                onClick={() => navigate('/duedates')}
-                data-testid="view-all-duedates-btn"
-              >
-                View Calendar <ArrowUpRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-            <p className="text-sm text-slate-500">Upcoming regulatory and client dates</p>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {upcomingDueDates.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
-                <Calendar className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No upcoming deadlines</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {upcomingDueDates.slice(0, 4).map((dd) => {
-                  const isUrgent = dd.days_remaining <= 7;
-                  const isOverdue = dd.days_remaining < 0;
-                  return (
-                    <div
-                      key={dd.id}
-                      className={`p-3 rounded-xl border cursor-pointer transition-colors ${
-                        isOverdue 
-                          ? 'bg-red-50 border-red-200 hover:bg-red-100' 
-                          : isUrgent 
-                          ? 'bg-amber-50 border-amber-200 hover:bg-amber-100'
-                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                      }`}
-                      onClick={() => navigate('/duedates')}
-                      data-testid={`deadline-item-${dd.id}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-slate-900 truncate">{dd.title}</h4>
-                          <p className="text-sm text-slate-500">
-                            <span className={`font-medium ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : ''}`}>
-                              {isOverdue ? 'HIGH' : isUrgent ? 'HIGH' : 'MEDIUM'}
-                            </span>
-                            {' '} Due: {format(new Date(dd.due_date), 'MMM d, yyyy')}
-                          </p>
-                        </div>
-                        <Badge 
-                          className={`shrink-0 ${
-                            isOverdue 
-                              ? 'bg-red-500 text-white' 
-                              : isUrgent 
-                              ? 'bg-amber-500 text-white'
-                              : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {isOverdue ? 'overdue' : `${dd.days_remaining}d`}
-                        </Badge>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Quick Access Row */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
-        <Card 
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/clients')}
-          data-testid="quick-clients"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div 
-              className="p-3 rounded-xl group-hover:scale-110 transition-transform"
-              style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
-            >
-              <Building2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_clients || 0}</p>
-              <p className="text-sm text-slate-500">Clients</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/dsc')}
-          data-testid="quick-dsc"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div 
-              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
-              }`}
-            >
-              <Key className={`h-5 w-5 ${stats?.expiring_dsc_count > 0 ? 'text-red-600' : 'text-slate-500'}`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_dsc || 0}</p>
-              <p className="text-sm text-slate-500">DSC Certificates</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/duedates')}
-          data-testid="quick-duedates"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div 
-              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
-              }`}
-            >
-              <Calendar className={`h-5 w-5 ${stats?.upcoming_due_dates > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.upcoming_due_dates || 0}</p>
-              <p className="text-sm text-slate-500">Compliance Calendar</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {user?.role === 'admin' && (
-          <Card 
-            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-            onClick={() => navigate('/users')}
-            data-testid="quick-users"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div 
-                className="p-3 rounded-xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
-              >
-                <Users className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
-              </div>
-              <div>
-                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.team_workload?.length || 0}</p>
-                <p className="text-sm text-slate-500">Team Members</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </motion.div>
-    </motion.div>
+      {/* Click outside to close user menu */}
+      {userMenuOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setUserMenuOpen(false)}
+        />
+      )}
+    </div>
   );
-}
+};
