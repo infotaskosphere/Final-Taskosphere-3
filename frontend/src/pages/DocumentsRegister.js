@@ -213,11 +213,17 @@ export default function DocumentsRegister() {
   const handleDelete = async (documentId) => {
     if (!window.confirm('Are you sure you want to delete this document?')) return;
 
-    try {
-      await api.delete(`/documents/${documentId}`);
-      toast.success('document deleted successfully!');
-      fetchdocument();
-    }
+    const handleDelete = async (documentId) => {
+  if (!window.confirm('Are you sure you want to delete this document?')) return;
+
+  try {
+    await api.delete(`/documents/${documentId}`);
+    toast.success('document deleted successfully!');
+    fetchdocument();
+  } catch (error) {
+    toast.error('Failed to delete document');
+  }
+};
 ///// PART 2 START
 
   const getdocumentStatus = (expiryDate) => {
