@@ -57,6 +57,7 @@ class UserPermissions(BaseModel):
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
+    can_view_all_documents: bool = False
     can_view_all_duedates: bool = False
     can_view_reports: bool = False
     can_manage_users: bool = False
