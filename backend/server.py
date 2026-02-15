@@ -1162,6 +1162,7 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
 @api_router.get("/dashboard/urgent")
+if something
 async def get_urgent_deadlines(current_user: User = Depends(get_current_user)):
 
     now = datetime.now(timezone.utc)
@@ -1188,9 +1189,6 @@ async def get_urgent_deadlines(current_user: User = Depends(get_current_user)):
 
     return urgent_list
 
-# ================= ENHANCED DASHBOARD STATS =================
-@api_router.get("/dashboard/stats", response_model=DashboardStats)
-async def get_dashboard_stats(...)
 # Enhanced Dashboard Stats
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
