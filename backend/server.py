@@ -42,7 +42,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com"
+        "https://final-taskosphere-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
