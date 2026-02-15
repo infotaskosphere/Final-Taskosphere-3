@@ -789,9 +789,11 @@ export default function DocumentsRegister() {
             </CardContent>
           </Card>
         </TabsContent>
-
       </Tabs>
-// Document Table Component (1:1 DSC Structure)
+    </div>
+  );
+}
+
 function DocumentTable({
   documentList,
   onEdit,
