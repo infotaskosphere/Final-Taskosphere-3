@@ -100,6 +100,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+        <Route
+         path="/documents"
+         element={
+           <ProtectedRoute>
+             <DocumentsRegister />
+           </ProtectedRoute>
+        }
+      />
       <Route
         path="/attendance"
         element={
