@@ -70,7 +70,7 @@ const fetchDashboardData = async () => {
     const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
       api.get('/dashboard/stats'),
       api.get('/tasks'),
-      api.get('/duedates/upcoming?days=120'),
+      api.get('/duedates/upcoming?days=30'),
     ]);
 
     setStats(statsRes.data);
