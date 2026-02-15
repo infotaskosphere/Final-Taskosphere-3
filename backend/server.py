@@ -1305,8 +1305,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         team_workload=[],
         compliance_status=compliance_status
     )
-
-    )
     
     doc = group.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
