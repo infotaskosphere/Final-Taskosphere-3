@@ -122,7 +122,50 @@ const fetchTodayAttendance = async () => {
     };
     return styles[priority] || styles.medium;
   };
+  const getDeadlineColor = (daysLeft) => {
+  // Overdue or Due Today
+  if (daysLeft <= 0) {
+    return {
+      bg: 'bg-red-50 border-red-200 hover:bg-red-100',
+      badge: 'bg-red-500 text-white',
+      text: 'text-red-600'
+    };
+  }
 
+  // 1–7 days → Orange
+  if (daysLeft <= 7) {
+    return {
+      bg: 'bg-orange-50 border-orange-200 hover:bg-orange-100',
+      badge: 'bg-orange-500 text-white',
+      text: 'text-orange-600'
+    };
+  }
+
+  // 8–15 days → Yellow
+  if (daysLeft <= 15) {
+    return {
+      bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100',
+      badge: 'bg-yellow-500 text-white',
+      text: 'text-yellow-600'
+    };
+  }
+
+  // 31+ days → Green
+  if (daysLeft >= 31) {
+    return {
+      bg: 'bg-green-100 border-green-300 hover:bg-green-200',
+      badge: 'bg-green-600 text-white',
+      text: 'text-green-700'
+    };
+  }
+
+  // Everything else (16–30 days)
+  return {
+    bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100',
+    badge: 'bg-yellow-500 text-white',
+    text: 'text-yellow-600'
+  };
+};
   const completionRate = stats?.total_tasks > 0 
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100) 
     : 0;
