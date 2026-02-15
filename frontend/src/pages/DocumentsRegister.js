@@ -708,7 +708,6 @@ export default function DocumentsRegister() {
 
               /* New Document Form */
 
-              <
          {/* IN / OUT Tabs */}
       <Tabs defaultValue="in" className="w-full">
 
