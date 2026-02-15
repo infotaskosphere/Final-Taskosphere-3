@@ -1017,8 +1017,6 @@ async def get_upcoming_due_dates(
     days: int = 30,
     current_user: User = Depends(get_current_user)
 ):
-    """Get due dates within given number of days (default 30)"""
-
     now = datetime.now(timezone.utc)
     future_date = now + timedelta(days=days)
 
@@ -1033,22 +1031,16 @@ async def get_upcoming_due_dates(
 
     for dd in due_dates:
         dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
-        days_remaining = (dd_date - now).days
 
-        if days_remaining <= days:
+        if now <= dd_date <= future_date:
+            if isinstance(dd["created_at"], str):
+                dd["created_at"] = datetime.fromisoformat(dd["created_at"])
+
             dd["due_date"] = dd_date
-            dd["days_remaining"] = days_remaining
+            dd["days_remaining"] = (dd_date - now).days
             upcoming.append(dd)
 
     return sorted(upcoming, key=lambda x: x["days_remaining"])
-
-
-@api_router.delete("/duedates/{due_date_id}")
-async def delete_due_date(due_date_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.due_dates.delete_one({"id": due_date_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Due date not found")
-    return {"message": "Due date deleted successfully"}
 
 # Reports routes
 @api_router.get("/reports/efficiency")
