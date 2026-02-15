@@ -1097,7 +1097,7 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
 @api_router.put("/clients/{client_id}", response_model=Client)
 async def update_client(
     client_id: str,
-    client_data: ClientUpdate,
+    client_data: ClientCreate,
     current_user: User = Depends(get_current_user)
 ):
 
