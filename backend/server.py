@@ -42,12 +42,14 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com"
+        "https://final-taskosphere-frontend.onrender.com",
+        "http://final-taskosphere-frontend.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 api_router = APIRouter(prefix="/api")
 
 # Models
