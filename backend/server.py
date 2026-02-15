@@ -1161,6 +1161,36 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
     
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
+@api_router.get("/dashboard/urgent")
+async def get_urgent_deadlines(current_user: User = Depends(get_current_user)):
+
+    now = datetime.now(timezone.utc)
+    next_30_days = now + timedelta(days=30)
+
+    query = {"status": "pending"}
+
+    if current_user.role == "staff":
+        query["assigned_to"] = current_user.id
+
+    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
+    urgent_list = []
+
+    for dd in due_dates:
+        dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
+
+        if now <= dd_date <= next_30_days:
+            dd["due_date"] = dd_date
+            dd["days_remaining"] = (dd_date - now).days
+            urgent_list.append(dd)
+
+    urgent_list.sort(key=lambda x: x["days_remaining"])
+
+    return urgent_list
+
+# ================= ENHANCED DASHBOARD STATS =================
+@api_router.get("/dashboard/stats", response_model=DashboardStats)
+async def get_dashboard_stats(...)
 # Enhanced Dashboard Stats
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
