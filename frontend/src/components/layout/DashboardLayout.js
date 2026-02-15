@@ -13,7 +13,7 @@ import {
   Key,
 } from "lucide-react";
 
-export default function DashboardLayout() {
+export function DashboardLayout() {
   const menuItems = [
     { name: "Dashboard", icon: LayoutDashboard, path: "/" },
     { name: "Tasks", icon: CheckSquare, path: "/tasks" },
@@ -31,9 +31,10 @@ export default function DashboardLayout() {
     <div className="flex h-screen bg-slate-100">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col px-4 py-6">
-        {/* Logo */}
+
+        {/* Logo Section */}
         <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
+          <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-lg shadow">
             TS
           </div>
           <h1 className="text-xl font-semibold tracking-tight">
