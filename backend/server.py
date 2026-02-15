@@ -1099,6 +1099,12 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
         raise HTTPException(status_code=404, detail="Client not found")
     
 # ================= UPDATE CLIENT =================
+@api_router.put("/clients/{client_id}", response_model=Client)
+async def update_client(
+    client_id: str,
+    client_data: ClientUpdate,
+    current_user: User = Depends(get_current_user)
+):
 
 update_data = client_data.model_dump()
 
