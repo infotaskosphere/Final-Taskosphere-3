@@ -682,7 +682,7 @@ export default function DocumentsRegister() {
                                       Edit
                                     </Button>
                                   </div>
-
+                                        
                                 </div>
 
                               )}
