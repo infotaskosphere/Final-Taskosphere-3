@@ -1,3 +1,4 @@
+import DashboardLayout from '@/components/layout/DashboardLayout'
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,7 +32,7 @@ const COLORS = {
   lightGreen: '#5CCB5F',
 };
 
-export const DashboardLayout = ({ children }) => {
+  const DashboardLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -252,3 +253,5 @@ export const DashboardLayout = ({ children }) => {
     </div>
   );
 };
+
+export default DashboardLayout;
