@@ -707,8 +707,7 @@ export default function DocumentsRegister() {
             ) : (
 
               /* New Document Form */
-
-         {/* IN / OUT Tabs */}
+              /* IN / OUT Tabs */
       <Tabs defaultValue="in" className="w-full">
 
         <TabsList className="grid w-full max-w-md grid-cols-2">
