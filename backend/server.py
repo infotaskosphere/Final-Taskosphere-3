@@ -1101,22 +1101,33 @@ async def update_client(
     current_user: User = Depends(get_current_user)
 ):
 
-update_data = client_data.model_dump()
+    # Check if client exists
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
 
-if update_data.get("birthday"):
-    update_data["birthday"] = update_data["birthday"].isoformat()
+    update_data = client_data.model_dump()
 
-await db.clients.update_one({"id": client_id}, {"$set": update_data})
+    if update_data.get("birthday"):
+        update_data["birthday"] = update_data["birthday"].isoformat()
 
-updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    await db.clients.update_one(
+        {"id": client_id},
+        {"$set": update_data}
+    )
 
-if isinstance(updated["created_at"], str):
-    updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+    updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
 
-if updated.get("birthday") and isinstance(updated["birthday"], str):
-    updated["birthday"] = date.fromisoformat(updated["birthday"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found")
 
-return Client(**updated)
+    if isinstance(updated.get("created_at"), str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+
+    if updated.get("birthday") and isinstance(updated["birthday"], str):
+        updated["birthday"] = date.fromisoformat(updated["birthday"])
+
+    return Client(**updated)
 
 
 # ================= DELETE CLIENT =================
