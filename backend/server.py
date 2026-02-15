@@ -1749,4 +1749,44 @@ async def send_reminder_to_user(
         "task_count": len(tasks)
     }
 # ================= INCLUDE ROUTER =================
+# ================= STAFF ACTIVITY =================
+
+@api_router.post("/activity/log")
+async def log_staff_activity(
+    activity_data: StaffActivityCreate,
+    current_user: User = Depends(get_current_user)
+):
+    activity = StaffActivityLog(
+        user_id=current_user.id,
+        **activity_data.model_dump()
+    )
+
+    doc = activity.model_dump()
+    doc["timestamp"] = doc["timestamp"].isoformat()
+
+    await db.staff_activity.insert_one(doc)
+
+    return {"message": "Activity logged successfully"}
+
+
+@api_router.get("/activity/summary")
+async def get_activity_summary(
+    current_user: User = Depends(get_current_user)
+):
+    activities = await db.staff_activity.find({}, {"_id": 0}).to_list(1000)
+    return activities
+
+
+@api_router.get("/activity/user/{user_id}")
+async def get_user_activity(
+    user_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    activities = await db.staff_activity.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).to_list(1000)
+
+    return activities
+
 app.include_router(api_router)
