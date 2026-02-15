@@ -1092,12 +1092,7 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         client["birthday"] = date.fromisoformat(client["birthday"])
     return Client(**client)
 
-@api_router.put("/clients/{client_id}", response_model=Client)
-async def update_client(client_id: str, client_data: ClientCreate, current_user: User = Depends(get_current_user)):
-    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
+
 # ================= UPDATE CLIENT =================
 @api_router.put("/clients/{client_id}", response_model=Client)
 async def update_client(
