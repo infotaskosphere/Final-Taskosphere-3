@@ -790,7 +790,6 @@ export default function DocumentsRegister() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
   );
 }
 
