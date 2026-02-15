@@ -12,8 +12,6 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional
@@ -44,14 +42,12 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com",
-        "http://final-taskosphere-frontend.onrender.com",
+        "https://final-taskosphere-frontend.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 api_router = APIRouter(prefix="/api")
 
 # Models
@@ -344,12 +340,12 @@ def send_birthday_email(recipient_email: str, client_name: str):
     <html>
         <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;">
             <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h1 style="color: #4F46E5; text-align: center;">🎉 Happy Birthday! 🎉</h1>
+                <h1 style="color: #4F46E5; text-align: center;">���� Happy Birthday! ����</h1>
                 <p style="font-size: 16px; line-height: 1.6; color: #333;">
                     Dear {client_name},
                 </p>
                 <p style="font-size: 16px; line-height: 1.6; color: #333;">
-                    On behalf of our entire team, we wish you a very Happy Birthday! 🎂
+                    On behalf of our entire team, we wish you a very Happy Birthday! ����
                 </p>
                 <p style="font-size: 16px; line-height: 1.6; color: #333;">
                     We appreciate your continued trust and partnership. May this year bring you prosperity, success, and happiness.
@@ -1096,45 +1092,24 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         client["birthday"] = date.fromisoformat(client["birthday"])
     return Client(**client)
 
-
-# ================= UPDATE CLIENT =================
 @api_router.put("/clients/{client_id}", response_model=Client)
-async def update_client(
-    client_id: str,
-    client_data: ClientCreate,
-    current_user: User = Depends(get_current_user)
-):
-
-    # Check if client exists
+async def update_client(client_id: str, client_data: ClientCreate, current_user: User = Depends(get_current_user)):
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Client not found")
-
+    
     update_data = client_data.model_dump()
-
     if update_data.get("birthday"):
         update_data["birthday"] = update_data["birthday"].isoformat()
-
-    await db.clients.update_one(
-        {"id": client_id},
-        {"$set": update_data}
-    )
-
+    
+    await db.clients.update_one({"id": client_id}, {"$set": update_data})
+    
     updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
-
-    if not updated:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    if isinstance(updated.get("created_at"), str):
+    if isinstance(updated["created_at"], str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
-
     if updated.get("birthday") and isinstance(updated["birthday"], str):
         updated["birthday"] = date.fromisoformat(updated["birthday"])
-
     return Client(**updated)
-
-
-# ================= DELETE CLIENT =================
 
 @api_router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, current_user: User = Depends(get_current_user)):
@@ -1143,9 +1118,7 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Client not found")
     return {"message": "Client deleted successfully"}
 
-
-# ================= SEND BIRTHDAY EMAIL =================
-
+# Birthday Email routes
 @api_router.post("/clients/{client_id}/send-birthday-email")
 async def send_client_birthday_email(
     client_id: str,
@@ -1153,108 +1126,72 @@ async def send_client_birthday_email(
     current_user: User = Depends(get_current_user)
 ):
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-
+    
     background_tasks.add_task(
         send_birthday_email,
         client["email"],
         client["contact_person"]
     )
-
+    
     return {"message": "Birthday email queued for delivery"}
-
-
-# ================= UPCOMING BIRTHDAYS =================
 
 @api_router.get("/clients/upcoming-birthdays")
 async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
-
+    """Get clients with birthdays in the next N days"""
     clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
-
+    
     today = date.today()
     upcoming = []
-
+    
     for client in clients:
         if client.get("birthday"):
             bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-
+            # Get birthday this year
             this_year_bday = bday.replace(year=today.year)
-
             if this_year_bday < today:
+                # If birthday passed, check next year
                 this_year_bday = bday.replace(year=today.year + 1)
-
+            
             days_until = (this_year_bday - today).days
-
             if 0 <= days_until <= days:
                 client["days_until_birthday"] = days_until
                 upcoming.append(client)
-
+    
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
-
-# ================= URGENT DEADLINES =================
-
-@api_router.get("/dashboard/urgent")
-async def get_urgent_deadlines(current_user: User = Depends(get_current_user)):
-
-    now = datetime.now(timezone.utc)
-    next_30_days = now + timedelta(days=30)
-
-    query = {"status": "pending"}
-
-    if current_user.role == "staff":
-        query["assigned_to"] = current_user.id
-
-    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
-
-    urgent_list = []
-
-    for dd in due_dates:
-        dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
-
-        if now <= dd_date <= next_30_days:
-            dd["due_date"] = dd_date
-            dd["days_remaining"] = (dd_date - now).days
-            urgent_list.append(dd)
-
-    urgent_list.sort(key=lambda x: x["days_remaining"])
-
-    return urgent_list
-
-
-# ================= DASHBOARD STATS =================
-
+# Enhanced Dashboard Stats
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
-
+    """Get comprehensive dashboard statistics"""
     now = datetime.now(timezone.utc)
-
+    
+    # Task statistics
     task_query = {} if current_user.role != "staff" else {"assigned_to": current_user.id}
     tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
-
+    
     total_tasks = len(tasks)
     completed_tasks = len([t for t in tasks if t["status"] == "completed"])
     pending_tasks = len([t for t in tasks if t["status"] == "pending"])
-
+    
     overdue_tasks = 0
     for task in tasks:
         if task.get("due_date") and task["status"] != "completed":
             due_date = datetime.fromisoformat(task["due_date"]) if isinstance(task["due_date"], str) else task["due_date"]
             if due_date < now:
                 overdue_tasks += 1
-
+    
+    # DSC statistics
     dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
     total_dsc = len(dsc_list)
-
+    
     expiring_dsc_count = 0
     expiring_dsc_list = []
-
     for dsc in dsc_list:
         expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
         days_left = (expiry_date - now).days
-
+        # Include expired (negative days) and expiring within 90 days
         if days_left <= 90:
             expiring_dsc_count += 1
             expiring_dsc_list.append({
@@ -1265,48 +1202,63 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 "days_left": days_left,
                 "status": "expired" if days_left < 0 else "expiring"
             })
-
+    
+    # Client statistics
     client_query = {} if current_user.role != "staff" else {"assigned_to": current_user.id}
     clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
     total_clients = len(clients)
-
+    
+    # Upcoming birthdays (next 7 days)
     today = date.today()
     upcoming_birthdays = 0
-
     for client in clients:
         if client.get("birthday"):
             bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
             this_year_bday = bday.replace(year=today.year)
-
             if this_year_bday < today:
                 this_year_bday = bday.replace(year=today.year + 1)
-
-            if 0 <= (this_year_bday - today).days <= 7:
+            days_until = (this_year_bday - today).days
+            if 0 <= days_until <= 7:
                 upcoming_birthdays += 1
-
+    
+    # Upcoming due dates (next 30 days)
     upcoming_due_dates_count = 0
     due_dates = await db.due_dates.find({"status": "pending"}, {"_id": 0}).to_list(1000)
-
     for dd in due_dates:
         dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
-        if (dd_date - now).days <= 120:
+        days_until_due = (dd_date - now).days
+        # Include overdue (negative) and due within 120 days
+        if days_until_due <= 120:
             upcoming_due_dates_count += 1
-
+    
+    # Team workload (tasks per user)
+    team_workload = []
+    if current_user.role != "staff":
+        users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+        for user in users:
+            user_tasks = [t for t in tasks if t.get("assigned_to") == user["id"]]
+            team_workload.append({
+                "user_id": user["id"],
+                "user_name": user["full_name"],
+                "total_tasks": len(user_tasks),
+                "pending_tasks": len([t for t in user_tasks if t["status"] == "pending"]),
+                "completed_tasks": len([t for t in user_tasks if t["status"] == "completed"])
+            })
+    
+    # Compliance status (based on overdue tasks and expiring DSC)
     compliance_score = 100
-
     if total_tasks > 0:
         compliance_score -= (overdue_tasks / total_tasks) * 50
-
     if total_dsc > 0:
         compliance_score -= (expiring_dsc_count / total_dsc) * 30
-
+    
     compliance_status = {
         "score": max(0, int(compliance_score)),
         "status": "good" if compliance_score >= 80 else "warning" if compliance_score >= 50 else "critical",
         "overdue_tasks": overdue_tasks,
         "expiring_certificates": expiring_dsc_count
     }
-
+    
     return DashboardStats(
         total_tasks=total_tasks,
         completed_tasks=completed_tasks,
@@ -1318,8 +1270,155 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         total_clients=total_clients,
         upcoming_birthdays=upcoming_birthdays,
         upcoming_due_dates=upcoming_due_dates_count,
-        team_workload=[],
+        team_workload=team_workload,
         compliance_status=compliance_status
+    )
+
+# Staff Activity Tracking Endpoints
+@api_router.post("/activity/log")
+async def log_staff_activity(activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)):
+    """Log staff activity (app/website usage)"""
+    activity = StaffActivityLog(
+        user_id=current_user.id,
+        **activity_data.model_dump()
+    )
+    
+    doc = activity.model_dump()
+    doc["timestamp"] = doc["timestamp"].isoformat()
+    
+    await db.staff_activity.insert_one(doc)
+    return {"message": "Activity logged successfully"}
+
+@api_router.get("/activity/summary")
+async def get_activity_summary(
+    user_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Get staff activity summary (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    query = {}
+    if user_id:
+        query["user_id"] = user_id
+    
+    if date_from:
+        query["timestamp"] = {"$gte": date_from}
+    if date_to:
+        if "timestamp" in query:
+            query["timestamp"]["$lte"] = date_to
+        else:
+            query["timestamp"] = {"$lte": date_to}
+    
+    activities = await db.staff_activity.find(query, {"_id": 0}).to_list(5000)
+    
+    # Aggregate by user and app
+    user_summary = {}
+    for activity in activities:
+        uid = activity["user_id"]
+        if uid not in user_summary:
+            user_summary[uid] = {
+                "user_id": uid,
+                "total_duration": 0,
+                "apps": {},
+                "categories": {}
+            }
+        
+        user_summary[uid]["total_duration"] += activity.get("duration_seconds", 0)
+        
+        app_name = activity["app_name"]
+        if app_name not in user_summary[uid]["apps"]:
+            user_summary[uid]["apps"][app_name] = {"count": 0, "duration": 0}
+        user_summary[uid]["apps"][app_name]["count"] += 1
+        user_summary[uid]["apps"][app_name]["duration"] += activity.get("duration_seconds", 0)
+        
+        category = activity.get("category", "other")
+        if category not in user_summary[uid]["categories"]:
+            user_summary[uid]["categories"][category] = 0
+        user_summary[uid]["categories"][category] += activity.get("duration_seconds", 0)
+    
+    # Add user names
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+    user_map = {u["id"]: u["full_name"] for u in users}
+    
+    result = []
+    for uid, data in user_summary.items():
+        data["user_name"] = user_map.get(uid, "Unknown")
+        data["apps_list"] = sorted(
+            [{"name": k, **v} for k, v in data["apps"].items()],
+            key=lambda x: x["duration"],
+            reverse=True
+        )
+        result.append(data)
+    
+    return result
+
+@api_router.get("/activity/user/{user_id}")
+async def get_user_activity(
+    user_id: str,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed activity for a specific user (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    activities = await db.staff_activity.find(
+        {"user_id": user_id}, 
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(limit)
+    
+    return activities
+
+# Update user permissions endpoint
+@api_router.put("/users/{user_id}/permissions")
+async def update_user_permissions(
+    user_id: str,
+    permissions: UserPermissions,
+    current_user: User = Depends(get_current_user)
+):
+    """Update user permissions (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"permissions": permissions.model_dump()}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "Permissions updated successfully"}
+
+# ============ CHAT & MESSAGING ENDPOINTS ============
+
+# Create a new chat group
+@api_router.post("/chat/groups", response_model=ChatGroup)
+async def create_chat_group(group_data: ChatGroupCreate, current_user: User = Depends(get_current_user)):
+    """Create a new chat group or direct message"""
+    # Ensure creator is in members
+    members = list(set(group_data.members + [current_user.id]))
+    
+    # For direct chats, check if one already exists
+    if group_data.is_direct and len(members) == 2:
+        existing = await db.chat_groups.find_one({
+            "is_direct": True,
+            "members": {"$all": members, "$size": 2}
+        }, {"_id": 0})
+        if existing:
+            if isinstance(existing["created_at"], str):
+                existing["created_at"] = datetime.fromisoformat(existing["created_at"])
+            return ChatGroup(**existing)
+    
+    group = ChatGroup(
+        name=group_data.name,
+        description=group_data.description,
+        members=members,
+        created_by=current_user.id,
+        is_direct=group_data.is_direct
     )
     
     doc = group.model_dump()
@@ -1749,43 +1848,4 @@ async def send_reminder_to_user(
         "task_count": len(tasks)
     }
 # ================= INCLUDE ROUTER =================
-@api_router.get("/activity/summary")
-async def get_activity_summary(
-    current_user: User = Depends(get_current_user)
-):
-    activities = await db.staff_activity.find({}, {"_id": 0}).to_list(5000)
-
-    user_summary = {}
-
-    for activity in activities:
-        uid = activity["user_id"]
-
-        if uid not in user_summary:
-            user_summary[uid] = {
-                "user_id": uid,
-                "total_duration": 0,
-                "apps": {},
-                "categories": {}
-            }
-
-        user_summary[uid]["total_duration"] += activity.get("duration_seconds", 0)
-
-        app_name = activity.get("app_name", "Unknown")
-        if app_name not in user_summary[uid]["apps"]:
-            user_summary[uid]["apps"][app_name] = {
-                "count": 0,
-                "duration": 0
-            }
-
-        user_summary[uid]["apps"][app_name]["count"] += 1
-        user_summary[uid]["apps"][app_name]["duration"] += activity.get("duration_seconds", 0)
-
-        category = activity.get("category", "other")
-        if category not in user_summary[uid]["categories"]:
-            user_summary[uid]["categories"][category] = 0
-
-        user_summary[uid]["categories"][category] += activity.get("duration_seconds", 0)
-
-    return list(user_summary.values())
-
 app.include_router(api_router)
