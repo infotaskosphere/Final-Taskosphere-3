@@ -1,4 +1,3 @@
-import { FileText } from "lucide-react";
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -81,6 +80,7 @@ const COLORS = {
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
     { path: '/clients', icon: Building2, label: 'Clients' },
     { path: '/dsc', icon: FileText, label: 'DSC Register' },
+    { path: '/documents', icon: FileText, label: 'Documents Register' },
     { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/chat', icon: MessageCircle, label: 'Chat' },
