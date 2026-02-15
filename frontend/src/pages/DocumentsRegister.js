@@ -1,3 +1,5 @@
+///// PART 1 START
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,13 +24,13 @@ export default function DocumentsRegister() {
   const [editingdocument, setEditingdocument] = useState(null);
   const [selecteddocument, setSelecteddocument] = useState(null);
   const [editingMovement, setEditingMovement] = useState(null);
-  const [searchQuery, setSearchQuery] = useState(''); // Search state
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
     document_name: '',
-    document_type: '', // Not compulsory
-    document_password: '', // Second field
-    associated_with: '', // Not compulsory
+    document_type: '',
+    document_password: '',
+    associated_with: '',
     entity_type: 'firm',
     issue_date: '',
     valid_upto: '',
@@ -53,7 +55,7 @@ export default function DocumentsRegister() {
 
   const fetchdocument = async () => {
     try {
-      const response = await api.get('/document');
+      const response = await api.get('/documents');
       setdocumentList(response.data);
     } catch (error) {
       toast.error('Failed to fetch document');
@@ -72,10 +74,10 @@ export default function DocumentsRegister() {
       };
 
       if (editingdocument) {
-        await api.put(`/document/${editingdocument.id}`, documentData);
+        await api.put(`/documents/${editingdocument.id}`, documentData);
         toast.success('document updated successfully!');
       } else {
-        await api.post('/document', documentData);
+        await api.post('/documents', documentData);
         toast.success('document added successfully!');
       }
 
@@ -94,7 +96,7 @@ export default function DocumentsRegister() {
     setLoading(true);
 
     try {
-      await api.post(`/document/${selecteddocument.id}/movement`, movementData);
+      await api.post(`/documents/${selecteddocument.id}/movement`, movementData);
       toast.success(`document marked as ${movementData.movement_type}!`);
       setMovementDialogOpen(false);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
@@ -117,14 +119,12 @@ export default function DocumentsRegister() {
     setLogDialogOpen(true);
   };
 
-  // Helper to get document current IN/OUT status
   const getdocumentInOutStatus = (document) => {
     if (!document) return 'OUT';
     if (document.current_status) return document.current_status;
     return document.current_location === 'with_company' ? 'IN' : 'OUT';
   };
 
-  // Handle movement from within the edit modal
   const handleMovementInModal = async () => {
     if (!editingdocument || !movementData.person_name) return;
     setLoading(true);
@@ -132,20 +132,22 @@ export default function DocumentsRegister() {
     try {
       const currentStatus = getdocumentInOutStatus(editingdocument);
       const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
-      await api.post(`/document/${editingdocument.id}/movement`, {
+
+      await api.post(`/documents/${editingdocument.id}/movement`, {
         ...movementData,
         movement_type: newType,
       });
+
       toast.success(`document marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-      
-      // Refresh the document data and update editingdocument
-      const response = await api.get('/document');
+
+      const response = await api.get('/documents');
       setdocumentList(response.data);
       const updateddocument = response.data.find(d => d.id === editingdocument.id);
       if (updateddocument) {
         setEditingdocument(updateddocument);
       }
+
     } catch (error) {
       toast.error('Failed to record movement');
     } finally {
@@ -153,28 +155,28 @@ export default function DocumentsRegister() {
     }
   };
 
-  // Handle updating an existing movement log entry
   const handleUpdateMovement = async (movementId) => {
     if (!editingdocument || !editMovementData.person_name) return;
     setLoading(true);
 
     try {
-      await api.put(`/document/${editingdocument.id}/movement/${movementId}`, {
+      await api.put(`/documents/${editingdocument.id}/movement/${movementId}`, {
         movement_id: movementId,
         movement_type: editMovementData.movement_type,
         person_name: editMovementData.person_name,
         notes: editMovementData.notes,
       });
+
       toast.success('Movement log updated successfully!');
       setEditingMovement(null);
-      
-      // Refresh the document data and update editingdocument
-      const response = await api.get('/document');
+
+      const response = await api.get('/documents');
       setdocumentList(response.data);
       const updateddocument = response.data.find(d => d.id === editingdocument.id);
       if (updateddocument) {
         setEditingdocument(updateddocument);
       }
+
     } catch (error) {
       toast.error('Failed to update movement');
     } finally {
@@ -182,9 +184,8 @@ export default function DocumentsRegister() {
     }
   };
 
-  // Start editing a movement
   const startEditingMovement = (movement) => {
-    setEditingMovement(movement.id || movement.timestamp); // Use id or timestamp as fallback
+    setEditingMovement(movement.id || movement.timestamp);
     setEditMovementData({
       movement_type: movement.movement_type,
       person_name: movement.person_name,
@@ -204,8 +205,8 @@ export default function DocumentsRegister() {
       valid_upto: format(new Date(document.valid_upto), 'yyyy-MM-dd'),
       notes: document.notes || '',
     });
-    setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
-    setEditingMovement(null); // Reset editing movement
+    setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
+    setEditingMovement(null);
     setDialogOpen(true);
   };
 
@@ -213,27 +214,11 @@ export default function DocumentsRegister() {
     if (!window.confirm('Are you sure you want to delete this document?')) return;
 
     try {
-      await api.delete(`/document/${documentId}`);
+      await api.delete(`/documents/${documentId}`);
       toast.success('document deleted successfully!');
       fetchdocument();
-    } catch (error) {
-      toast.error('Failed to delete document');
     }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      document_name: '',
-      document_type: '',
-      document_password: '',
-      associated_with: '',
-      entity_type: 'firm',
-      issue_date: '',
-      valid_upto: '',
-      notes: '',
-    });
-    setEditingdocument(null);
-  };
+///// PART 2 START
 
   const getdocumentStatus = (expiryDate) => {
     const now = new Date();
@@ -250,7 +235,6 @@ export default function DocumentsRegister() {
     return { color: 'bg-emerald-500', text: `${daysLeft}d left`, textColor: 'text-emerald-700' };
   };
 
-  // Filter by search query
   const filterBySearch = (document) => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
@@ -261,718 +245,558 @@ export default function DocumentsRegister() {
     );
   };
 
-  const indocument = documentList.filter(document => getdocumentInOutStatus(document) === 'IN' && filterBySearch(document));
-  const outdocument = documentList.filter(document => getdocumentInOutStatus(document) === 'OUT' && filterBySearch(document));
+  const indocument = documentList.filter(document =>
+    getdocumentInOutStatus(document) === 'IN' && filterBySearch(document)
+  );
+
+  const outdocument = documentList.filter(document =>
+    getdocumentInOutStatus(document) === 'OUT' && filterBySearch(document)
+  );
 
   return (
     <div className="space-y-6" data-testid="document-page">
+
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-900">document Register</h1>
-          <p className="text-slate-600 mt-1">Manage digital signature certificates with IN/OUT tracking</p>
+          <h1 className="text-3xl font-bold font-outfit text-slate-900">
+            Documents Register
+          </h1>
+          <p className="text-slate-600 mt-1">
+            Manage office documents with IN/OUT tracking
+          </p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}
+        >
           <DialogTrigger asChild>
-            <Button
-              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
-              data-testid="add-document-btn"
-            >
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95">
               <Plus className="mr-2 h-5 w-5" />
-              Add document
+              Add Document
             </Button>
           </DialogTrigger>
+
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl">
-                {editingdocument ? 'Edit document' : 'Add New document'}
+                {editingdocument ? 'Edit Document' : 'Add New Document'}
               </DialogTitle>
               <DialogDescription>
-                {editingdocument ? 'Update document details and track IN/OUT status.' : 'Fill in the details to add a new document certificate.'}
+                {editingdocument
+                  ? 'Update document details and track IN/OUT status.'
+                  : 'Fill in the details to add a new document.'}
               </DialogDescription>
             </DialogHeader>
-            
-            {/* Show tabs only when editing */}
+
             {editingdocument ? (
               <Tabs defaultValue="details" className="w-full">
+
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="details">Details</TabsTrigger>
                   <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
                   <TabsTrigger value="history">History</TabsTrigger>
                 </TabsList>
-                
                 <TabsContent value="details" className="mt-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="document_name">Holder Name <span className="text-red-500">*</span></Label>
+                        <Label>Document Name *</Label>
                         <Input
-                          id="document_name"
-                          placeholder="Name of certificate holder"
                           value={formData.document_name}
-                          onChange={(e) => setFormData({ ...formData, document_name: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, document_name: e.target.value })
+                          }
                           required
-                          data-testid="document-holder-name-input"
                         />
                       </div>
+
                       <div className="space-y-2">
-                        <Label htmlFor="document_type">Type</Label>
+                        <Label>Document Type</Label>
                         <Input
-                          id="document_type"
-                          placeholder="e.g. Class 3, Signature, Encryption"
                           value={formData.document_type}
-                          onChange={(e) => setFormData({ ...formData, document_type: e.target.value })}
-                          data-testid="document-type-input"
+                          onChange={(e) =>
+                            setFormData({ ...formData, document_type: e.target.value })
+                          }
                         />
                       </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="document_password">Password</Label>
+                        <Label>Password</Label>
                         <Input
-                          id="document_password"
-                          type="text"
-                          placeholder="document Password"
                           value={formData.document_password}
-                          onChange={(e) => setFormData({ ...formData, document_password: e.target.value })}
-                          data-testid="document-password-input"
+                          onChange={(e) =>
+                            setFormData({ ...formData, document_password: e.target.value })
+                          }
                         />
                       </div>
+
                       <div className="space-y-2">
-                        <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
+                        <Label>Associated With</Label>
                         <Input
-                          id="associated_with"
-                          placeholder="Firm or client name"
                           value={formData.associated_with}
-                          onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                          data-testid="document-associated-input"
+                          onChange={(e) =>
+                            setFormData({ ...formData, associated_with: e.target.value })
+                          }
                         />
                       </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="entity_type">Entity Type</Label>
+                        <Label>Entity Type</Label>
                         <Select
                           value={formData.entity_type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
+                          onValueChange={(value) =>
+                            setFormData({ ...formData, entity_type: value })
+                          }
                         >
-                          <SelectTrigger data-testid="document-entity-type-select">
+                          <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="max-h-60 overflow-y-auto">
+                          <SelectContent>
                             <SelectItem value="firm">Firm</SelectItem>
                             <SelectItem value="client">Client</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
+
                       <div className="space-y-2">
-                        <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
+                        <Label>Issue Date *</Label>
                         <Input
-                          id="issue_date"
                           type="date"
                           value={formData.issue_date}
-                          onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, issue_date: e.target.value })
+                          }
                           required
-                          data-testid="document-issue-date-input"
                         />
                       </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="valid_upto">Expiry Date <span className="text-red-500">*</span></Label>
+                        <Label>Valid Upto *</Label>
                         <Input
-                          id="valid_upto"
                           type="date"
                           value={formData.valid_upto}
-                          onChange={(e) => setFormData({ ...formData, valid_upto: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, valid_upto: e.target.value })
+                          }
                           required
-                          data-testid="document-expiry-date-input"
                         />
                       </div>
-                      <div></div>
                     </div>
+
                     <div className="space-y-2">
-                      <Label htmlFor="notes">Notes</Label>
+                      <Label>Notes</Label>
                       <Textarea
-                        id="notes"
-                        placeholder="Additional notes"
                         value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                        onChange={(e) =>
+                          setFormData({ ...formData, notes: e.target.value })
+                        }
                         rows={2}
-                        data-testid="document-notes-input"
                       />
                     </div>
+
                     <DialogFooter>
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => {
-                          setDialogOpen(false);
-                          resetForm();
-                        }}
-                        data-testid="document-cancel-btn"
+                        onClick={() => setDialogOpen(false)}
                       >
                         Cancel
                       </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700"
-                        data-testid="document-submit-btn"
-                      >
-                        {loading ? 'Saving...' : 'Update document'}
+                      <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700">
+                        {loading ? 'Saving...' : 'Update Document'}
                       </Button>
                     </DialogFooter>
+
                   </form>
                 </TabsContent>
-                
+
                 <TabsContent value="status" className="mt-4 space-y-4">
-                  {/* Current Status Display */}
-                  <Card className={`p-4 ${getdocumentInOutStatus(editingdocument) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-slate-600">Current Status</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {getdocumentInOutStatus(editingdocument) === 'IN' ? (
-                            <>
-                              <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
-                              <Badge className="bg-emerald-600 text-white">IN - Available</Badge>
-                            </>
-                          ) : (
-                            <>
-                              <ArrowUpCircle className="h-5 w-5 text-red-600" />
-                              <Badge className="bg-red-600 text-white">OUT - Taken</Badge>
-                            </>
-                          )}
-                        </div>
-                      </div>
+
+                  <Card
+                    className={`p-4 ${
+                      getdocumentInOutStatus(editingdocument) === 'IN'
+                        ? 'bg-emerald-50 border-emerald-200'
+                        : 'bg-red-50 border-red-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {getdocumentInOutStatus(editingdocument) === 'IN' ? (
+                        <>
+                          <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
+                          <Badge className="bg-emerald-600 text-white">
+                            IN - Available
+                          </Badge>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUpCircle className="h-5 w-5 text-red-600" />
+                          <Badge className="bg-red-600 text-white">
+                            OUT - Taken
+                          </Badge>
+                        </>
+                      )}
                     </div>
                   </Card>
-                  
-                  {/* Quick Movement Form */}
+
                   <Card className="p-4">
-                    <h4 className="font-medium text-slate-900 mb-3">
-                      {getdocumentInOutStatus(editingdocument) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                    <h4 className="font-medium mb-3">
+                      {getdocumentInOutStatus(editingdocument) === 'IN'
+                        ? 'Mark as OUT'
+                        : 'Mark as IN'}
                     </h4>
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      handleMovementInModal();
-                    }} className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_person">
-                          {getdocumentInOutStatus(editingdocument) === 'IN' ? 'Taken By *' : 'Delivered By *'}
-                        </Label>
-                        <Input
-                          id="inline_person"
-                          placeholder="Enter person name"
-                          value={movementData.person_name}
-                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_notes">Notes</Label>
-                        <Input
-                          id="inline_notes"
-                          placeholder="Optional notes"
-                          value={movementData.notes}
-                          onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                        />
-                      </div>
+
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleMovementInModal();
+                      }}
+                      className="space-y-3"
+                    >
+                      <Input
+                        placeholder="Person Name"
+                        value={movementData.person_name}
+                        onChange={(e) =>
+                          setMovementData({
+                            ...movementData,
+                            person_name: e.target.value,
+                          })
+                        }
+                        required
+                      />
+
+                      <Input
+                        placeholder="Notes"
+                        value={movementData.notes}
+                        onChange={(e) =>
+                          setMovementData({
+                            ...movementData,
+                            notes: e.target.value,
+                          })
+                        }
+                      />
+
                       <Button
                         type="submit"
-                        disabled={loading}
-                        className={getdocumentInOutStatus(editingdocument) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
+                        className={
+                          getdocumentInOutStatus(editingdocument) === 'IN'
+                            ? 'bg-red-600 hover:bg-red-700 w-full'
+                            : 'bg-emerald-600 hover:bg-emerald-700 w-full'
+                        }
                       >
-                        {getdocumentInOutStatus(editingdocument) === 'IN' ? (
-                          <>
-                            <ArrowUpCircle className="h-4 w-4 mr-2" />
-                            Mark as OUT
-                          </>
-                        ) : (
-                          <>
-                            <ArrowDownCircle className="h-4 w-4 mr-2" />
-                            Mark as IN
-                          </>
-                        )}
+                        {getdocumentInOutStatus(editingdocument) === 'IN'
+                          ? 'Mark as OUT'
+                          : 'Mark as IN'}
                       </Button>
                     </form>
                   </Card>
+
                 </TabsContent>
-                
+
+///// PART 3 CONTINUES IN NEXT MESSAGE
                 <TabsContent value="history" className="mt-4">
+
                   <div className="space-y-3 max-h-80 overflow-y-auto">
-                    {editingdocument?.movement_log && editingdocument.movement_log.length > 0 ? (
-                      editingdocument.movement_log.slice().reverse().map((movement, index) => {
-                        const movementKey = movement.id || movement.timestamp;
-                        const isEditing = editingMovement === movementKey;
-                        
-                        return (
-                          <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                            {isEditing ? (
-                              // Editing mode
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-3">
-                                  <Label className="text-sm font-medium">Status:</Label>
+
+                    {editingdocument?.movement_log &&
+                    editingdocument.movement_log.length > 0 ? (
+
+                      editingdocument.movement_log
+                        .slice()
+                        .reverse()
+                        .map((movement, index) => {
+
+                          const movementKey = movement.id;
+                          const isEditing = editingMovement === movementKey;
+
+                          return (
+                            <Card
+                              key={movementKey}
+                              className={`p-3 ${
+                                movement.movement_type === 'IN'
+                                  ? 'bg-emerald-50 border-emerald-200'
+                                  : 'bg-red-50 border-red-200'
+                              }`}
+                            >
+
+                              {isEditing ? (
+
+                                <div className="space-y-3">
+
                                   <div className="flex gap-2">
                                     <Button
-                                      type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}
+                                      variant={
+                                        editMovementData.movement_type === 'IN'
+                                          ? 'default'
+                                          : 'outline'
+                                      }
+                                      className={
+                                        editMovementData.movement_type === 'IN'
+                                          ? 'bg-emerald-600'
+                                          : ''
+                                      }
+                                      onClick={() =>
+                                        setEditMovementData({
+                                          ...editMovementData,
+                                          movement_type: 'IN',
+                                        })
+                                      }
                                     >
-                                      <ArrowDownCircle className="h-4 w-4 mr-1" />
                                       IN
                                     </Button>
+
                                     <Button
-                                      type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}
+                                      variant={
+                                        editMovementData.movement_type === 'OUT'
+                                          ? 'default'
+                                          : 'outline'
+                                      }
+                                      className={
+                                        editMovementData.movement_type === 'OUT'
+                                          ? 'bg-red-600'
+                                          : ''
+                                      }
+                                      onClick={() =>
+                                        setEditMovementData({
+                                          ...editMovementData,
+                                          movement_type: 'OUT',
+                                        })
+                                      }
                                     >
-                                      <ArrowUpCircle className="h-4 w-4 mr-1" />
                                       OUT
                                     </Button>
                                   </div>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label className="text-xs">Person Name</Label>
+
                                   <Input
-                                    size="sm"
                                     value={editMovementData.person_name}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
-                                    placeholder="Person name"
+                                    onChange={(e) =>
+                                      setEditMovementData({
+                                        ...editMovementData,
+                                        person_name: e.target.value,
+                                      })
+                                    }
+                                    placeholder="Person Name"
                                   />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label className="text-xs">Notes</Label>
+
                                   <Input
-                                    size="sm"
                                     value={editMovementData.notes}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })}
-                                    placeholder="Notes (optional)"
+                                    onChange={(e) =>
+                                      setEditMovementData({
+                                        ...editMovementData,
+                                        notes: e.target.value,
+                                      })
+                                    }
+                                    placeholder="Notes"
                                   />
-                                </div>
-                                <div className="flex gap-2 justify-end">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setEditingMovement(null)}
-                                  >
-                                    Cancel
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-indigo-600 hover:bg-indigo-700"
-                                    onClick={() => handleUpdateMovement(movement.id)}
-                                    disabled={loading || !editMovementData.person_name}
-                                  >
-                                    {loading ? 'Saving...' : 'Save'}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              // Display mode
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    {movement.movement_type === 'IN' ? (
-                                      <Badge className="bg-emerald-600 text-xs">IN</Badge>
-                                    ) : (
-                                      <Badge className="bg-red-600 text-xs">OUT</Badge>
-                                    )}
-                                    <span className="text-sm font-medium">{movement.person_name}</span>
-                                  </div>
-                                  {movement.notes && (
-                                    <p className="text-xs text-slate-600">{movement.notes}</p>
-                                  )}
-                                  {movement.edited_at && (
-                                    <p className="text-xs text-slate-400 mt-1">
-                                      Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-end gap-2">
-                                  <div className="text-xs text-slate-500">
-                                    {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
-                                  </div>
-                                  {movement.id && (
+
+                                  <div className="flex justify-end gap-2">
                                     <Button
-                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setEditingMovement(null)}
+                                    >
+                                      Cancel
+                                    </Button>
+
+                                    <Button
+                                      size="sm"
+                                      className="bg-indigo-600"
+                                      onClick={() =>
+                                        handleUpdateMovement(movement.id)
+                                      }
+                                    >
+                                      Save
+                                    </Button>
+                                  </div>
+
+                                </div>
+
+                              ) : (
+
+                                <div className="flex justify-between items-start">
+
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <Badge
+                                        className={
+                                          movement.movement_type === 'IN'
+                                            ? 'bg-emerald-600'
+                                            : 'bg-red-600'
+                                        }
+                                      >
+                                        {movement.movement_type}
+                                      </Badge>
+
+                                      <span className="font-medium">
+                                        {movement.person_name}
+                                      </span>
+                                    </div>
+
+                                    {movement.notes && (
+                                      <p className="text-xs text-slate-600">
+                                        {movement.notes}
+                                      </p>
+                                    )}
+
+                                    {movement.edited_at && (
+                                      <p className="text-xs text-slate-400 mt-1">
+                                        Edited by {movement.edited_by}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-col items-end gap-2">
+                                    <span className="text-xs text-slate-500">
+                                      {format(
+                                        new Date(movement.timestamp),
+                                        'MMM dd, yyyy hh:mm a'
+                                      )}
+                                    </span>
+
+                                    <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
-                                      onClick={() => startEditingMovement(movement)}
+                                      onClick={() =>
+                                        startEditingMovement(movement)
+                                      }
                                     >
-                                      <Edit className="h-3 w-3 mr-1" />
                                       Edit
                                     </Button>
-                                  )}
+                                  </div>
+
                                 </div>
-                              </div>
-                            )}
-                          </Card>
-                        );
-                      })
+
+                              )}
+
+                            </Card>
+                          );
+                        })
+
                     ) : (
+
                       <div className="text-center py-8 text-slate-500">
                         <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                         <p>No movement history yet</p>
                       </div>
+
                     )}
+
                   </div>
+
                 </TabsContent>
               </Tabs>
             ) : (
-              /* New document Form */
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="document_name">Holder Name <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="document_name"
-                      placeholder="Name of certificate holder"
-                      value={formData.document_name}
-                      onChange={(e) => setFormData({ ...formData, document_name: e.target.value })}
-                      required
-                      data-testid="document-holder-name-input"
-                    />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="document_type">Type</Label>
-                    <Input
-                      id="document_type"
-                      placeholder="e.g. Class 3, Signature, Encryption"
-                      value={formData.document_type}
-                      onChange={(e) => setFormData({ ...formData, document_type: e.target.value })}
-                      data-testid="document-type-input"
-                    />
-                  </div>
-                </div>
+              /* New Document Form */
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="document_password">Password</Label>
-                    <Input
-                      id="document_password"
-                      type="text"
-                      placeholder="document Password"
-                      value={formData.document_password}
-                      onChange={(e) => setFormData({ ...formData, document_password: e.target.value })}
-                      data-testid="document-password-input"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                    <Input
-                      id="associated_with"
-                      placeholder="Firm or client name"
-                      value={formData.associated_with}
-                      onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                      data-testid="document-associated-input"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="entity_type">Entity Type</Label>
-                    <Select
-                      value={formData.entity_type}
-                      onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                    >
-                      <SelectTrigger data-testid="document-entity-type-select">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60 overflow-y-auto">
-                        <SelectItem value="firm">Firm</SelectItem>
-                        <SelectItem value="client">Client</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="issue_date"
-                      type="date"
-                      value={formData.issue_date}
-                      onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                      required
-                      data-testid="document-issue-date-input"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="valid_upto">Expiry Date <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="valid_upto"
-                      type="date"
-                      value={formData.valid_upto}
-                      onChange={(e) => setFormData({ ...formData, valid_upto: e.target.value })}
-                      required
-                      data-testid="document-expiry-date-input"
-                    />
-                  </div>
-                  <div></div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    placeholder="Additional notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    rows={2}
-                    data-testid="document-notes-input"
-                  />
-                </div>
-
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setDialogOpen(false);
-                      resetForm();
-                    }}
-                    data-testid="document-cancel-btn"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-700"
-                    data-testid="document-submit-btn"
-                  >
-                    {loading ? 'Saving...' : 'Add document'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            )}
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Search Bar */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-        <Input
-          type="text"
-          placeholder="Search by holder name, certificate number, or company..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
-          data-testid="document-search-input"
-        />
-      </div>
-
-      {/* IN/OUT Tabs */}
+              <
+         {/* IN / OUT Tabs */}
       <Tabs defaultValue="in" className="w-full">
+
         <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="in" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
+          <TabsTrigger 
+            value="in" 
+            className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white"
+          >
             <ArrowDownCircle className="h-4 w-4 mr-2" />
             IN ({indocument.length})
           </TabsTrigger>
-          <TabsTrigger value="out" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
+
+          <TabsTrigger 
+            value="out" 
+            className="data-[state=active]:bg-red-500 data-[state=active]:text-white"
+          >
             <ArrowUpCircle className="h-4 w-4 mr-2" />
             OUT ({outdocument.length})
           </TabsTrigger>
         </TabsList>
 
+
+        {/* IN TAB */}
         <TabsContent value="in" className="mt-6">
           <Card className="border border-emerald-200 bg-emerald-50/30">
             <CardHeader className="bg-emerald-50 border-b border-emerald-200">
               <CardTitle className="text-sm font-medium text-emerald-700 uppercase tracking-wider flex items-center gap-2">
                 <ArrowDownCircle className="h-4 w-4" />
-                document IN - Available ({indocument.length})
+                DOCUMENTS IN — Available ({indocument.length})
               </CardTitle>
             </CardHeader>
+
             <CardContent className="p-0">
               {indocument.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <p>No document certificates currently IN</p>
+                  <p>No documents currently IN</p>
                 </div>
               ) : (
-                <documentTable documentList={indocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getdocumentStatus={getdocumentStatus} type="IN" />
+                <DocumentTable
+                  documentList={indocument}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onMovement={openMovementDialog}
+                  onViewLog={openLogDialog}
+                  getdocumentStatus={getdocumentStatus}
+                  type="IN"
+                />
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
+
+        {/* OUT TAB */}
         <TabsContent value="out" className="mt-6">
           <Card className="border border-red-200 bg-red-50/30">
             <CardHeader className="bg-red-50 border-b border-red-200">
               <CardTitle className="text-sm font-medium text-red-700 uppercase tracking-wider flex items-center gap-2">
                 <ArrowUpCircle className="h-4 w-4" />
-                document OUT - Taken ({outdocument.length})
+                DOCUMENTS OUT — Taken ({outdocument.length})
               </CardTitle>
             </CardHeader>
+
             <CardContent className="p-0">
               {outdocument.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <p>No document certificates currently OUT</p>
+                  <p>No documents currently OUT</p>
                 </div>
               ) : (
-                <documentTable documentList={outdocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getdocumentStatus={getdocumentStatus} type="OUT" />
+                <DocumentTable
+                  documentList={outdocument}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onMovement={openMovementDialog}
+                  onViewLog={openLogDialog}
+                  getdocumentStatus={getdocumentStatus}
+                  type="OUT"
+                />
               )}
             </CardContent>
           </Card>
         </TabsContent>
+
       </Tabs>
-
-      {/* Movement Dialog */}
-      <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl">
-              Mark document as {movementData.movement_type}
-            </DialogTitle>
-            <DialogDescription>
-              {movementData.movement_type === 'IN' 
-                ? 'Record when document is delivered/returned' 
-                : 'Record when document is taken out'}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleMovement} className="space-y-4">
-            <div className="space-y-2">
-              <Label>document Certificate</Label>
-              <p className="text-sm font-medium">{selecteddocument?.certificate_number} - {selecteddocument?.document_name}</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="person_name">
-                {movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
-              </Label>
-              <Input
-                id="person_name"
-                placeholder="Enter person name"
-                value={movementData.person_name}
-                onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="movement_notes">Notes</Label>
-              <Textarea
-                id="movement_notes"
-                placeholder="Additional notes"
-                value={movementData.notes}
-                onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                rows={2}
-              />
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading}
-                className={movementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
-              >
-                {loading ? 'Recording...' : `Mark as ${movementData.movement_type}`}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Movement Log Dialog */}
-      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
-              <History className="h-6 w-6" />
-              Movement Log
-            </DialogTitle>
-            <DialogDescription>
-              {selecteddocument?.certificate_number} - {selecteddocument?.document_name}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {selecteddocument?.movement_log && selecteddocument.movement_log.length > 0 ? (
-              selecteddocument.movement_log.map((movement, index) => (
-                <Card key={index} className={`p-4 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        {movement.movement_type === 'IN' ? (
-                          <Badge className="bg-emerald-600">IN</Badge>
-                        ) : (
-                          <Badge className="bg-red-600">OUT</Badge>
-                        )}
-                        <span className="text-sm font-medium">{movement.person_name}</span>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Recorded by: {movement.recorded_by}
-                      </p>
-                      {movement.notes && (
-                        <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-500">
-                        {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {format(new Date(movement.timestamp), 'hh:mm a')}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="text-center py-8 text-slate-500">
-                <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No movement history yet</p>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* document Expiry Alert */}
-      {documentList.filter(document => getdocumentStatus(document.valid_upto).color !== 'bg-emerald-500').length > 0 && (
-        <Card className="border-2 border-orange-200 bg-orange-50">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-orange-900">Attention Required</h3>
-                <p className="text-sm text-orange-700 mt-1">
-                  {documentList.filter(document => getdocumentStatus(document.valid_upto).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
-                  {documentList.filter(document => getdocumentStatus(document.valid_upto).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// document Table Component
-function documentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, getdocumentStatus, type }) {
+// Document Table Component (1:1 DSC Structure)
+function DocumentTable({
+  documentList,
+  onEdit,
+  onDelete,
+  onMovement,
+  onViewLog,
+  getdocumentStatus,
+  type,
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -998,65 +822,96 @@ function documentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
             </th>
           </tr>
         </thead>
+
         <tbody className="divide-y divide-slate-100 bg-white">
           {documentList.map((document) => {
             const status = getdocumentStatus(document.valid_upto);
+
             return (
               <tr
                 key={document.id}
                 className="hover:bg-slate-50 transition-colors"
-                data-testid={`document-row-${document.id}`}
               >
-                <td className="px-6 py-4 font-medium text-slate-900">{document.document_name}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{document.document_type || '-'}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{document.associated_with || '-'}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {format(new Date(document.valid_upto), 'MMM dd, yyyy')}
+                <td className="px-6 py-4 font-medium text-slate-900">
+                  {document.document_name}
                 </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  {document.document_type || "-"}
+                </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  {document.associated_with || "-"}
+                </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  {format(new Date(document.valid_upto), "MMM dd, yyyy")}
+                </td>
+
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${status.color}`}></div>
-                    <span className={`text-sm font-medium ${status.textColor}`}>{status.text}</span>
+                    <div className={`w-2 h-2 rounded-full ${status.color}`} />
+                    <span
+                      className={`text-sm font-medium ${status.textColor}`}
+                    >
+                      {status.text}
+                    </span>
                   </div>
                 </td>
+
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
+
+                    {/* Movement Log */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onViewLog(document)}
                       className="hover:bg-slate-100"
-                      title="View Movement Log"
                     >
                       <History className="h-4 w-4" />
                     </Button>
+
+                    {/* IN/OUT Toggle */}
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onMovement(document, type === 'IN' ? 'OUT' : 'IN')}
-                      className={type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
-                      title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                      onClick={() =>
+                        onMovement(document, type === "IN" ? "OUT" : "IN")
+                      }
+                      className={
+                        type === "IN"
+                          ? "hover:bg-red-50 hover:text-red-600"
+                          : "hover:bg-emerald-50 hover:text-emerald-600"
+                      }
                     >
-                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                      {type === "IN" ? (
+                        <ArrowUpCircle className="h-4 w-4" />
+                      ) : (
+                        <ArrowDownCircle className="h-4 w-4" />
+                      )}
                     </Button>
+
+                    {/* Edit */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onEdit(document)}
-                      data-testid={`edit-document-${document.id}`}
                       className="hover:bg-indigo-50 hover:text-indigo-600"
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
+
+                    {/* Delete */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onDelete(document.id)}
-                      data-testid={`delete-document-${document.id}`}
                       className="hover:bg-red-50 hover:text-red-600"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+
                   </div>
                 </td>
               </tr>
