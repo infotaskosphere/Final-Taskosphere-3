@@ -742,9 +742,54 @@ async def update_dsc_movement(
     )
     
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-# ================= DOCUMENT REGISTER ROUTES =================
-# ================= DOCUMENT ROUTES =================
+    # ===================== DOCUMENT MODELS =====================
 
+class DocumentMovement(BaseModel):
+    movement_type: str  # "IN" or "OUT"
+    person_name: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    notes: Optional[str] = None
+
+
+class DocumentBase(BaseModel):
+    document_name: str
+    document_type: Optional[str] = None
+    holder_name: Optional[str] = None
+    associated_with: Optional[str] = None
+    entity_type: str = "firm"  # firm or client
+    issue_date: Optional[datetime] = None
+    valid_upto: Optional[datetime] = None
+    notes: Optional[str] = None
+
+    current_status: str = "IN"
+    current_location: str = "with_company"
+    movement_log: List[dict] = []
+
+
+class DocumentCreate(DocumentBase):
+    pass
+
+
+class Document(DocumentBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DocumentMovementRequest(BaseModel):
+    movement_type: str  # IN / OUT
+    person_name: str
+    notes: Optional[str] = None
+
+
+class DocumentMovementUpdateRequest(BaseModel):
+    movement_id: str
+    movement_type: str
+    person_name: Optional[str] = None
+    notes: Optional[str] = None
+    
+# ================= DOCUMENT REGISTER ROUTES =================
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
     document = Document(**document_data.model_dump(), created_by=current_user.id)
