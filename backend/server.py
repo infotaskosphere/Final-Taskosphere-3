@@ -1012,6 +1012,37 @@ async def get_due_dates(current_user: User = Depends(get_current_user)):
 
     return due_dates
 
+@api_router.get("/duedates/upcoming")
+async def get_upcoming_due_dates(
+    days: int = 30,
+    current_user: User = Depends(get_current_user)
+):
+    """Get due dates within given number of days (default 30)"""
+
+    now = datetime.now(timezone.utc)
+    future_date = now + timedelta(days=days)
+
+    query = {"status": "pending"}
+
+    if current_user.role == "staff":
+        query["assigned_to"] = current_user.id
+
+    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
+    upcoming = []
+
+    for dd in due_dates:
+        dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
+        days_remaining = (dd_date - now).days
+
+        if days_remaining <= days:
+            dd["due_date"] = dd_date
+            dd["days_remaining"] = days_remaining
+            upcoming.append(dd)
+
+    return sorted(upcoming, key=lambda x: x["days_remaining"])
+
+
 @api_router.delete("/duedates/{due_date_id}")
 async def delete_due_date(due_date_id: str, current_user: User = Depends(get_current_user)):
     result = await db.due_dates.delete_one({"id": due_date_id})
