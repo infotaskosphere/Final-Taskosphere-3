@@ -414,13 +414,13 @@ const fetchTodayAttendance = async () => {
           </CardContent>
         </Card>
 
-        {/* Urgent Deadlines */}
+        {/* Upcoming Deadlines */}
         <Card className="border border-slate-200 shadow-sm" data-testid="due-dates-widget">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
                 <AlertCircle className="h-5 w-5 text-red-500" />
-                Urgent Deadlines
+                Upcoming Deadlines
               </CardTitle>
               <Button 
                 variant="ghost" 
@@ -443,7 +443,7 @@ const fetchTodayAttendance = async () => {
             ) : (
               <div className="space-y-3">
                 {upcomingDueDates.slice(0, 4).map((dd) => {
-                  const isUrgent = dd.days_remaining <= 7;
+                  const isUpcoming = dd.days_remaining <= 7;
                   const isOverdue = dd.days_remaining < 0;
                   return (
                     <div
@@ -451,7 +451,7 @@ const fetchTodayAttendance = async () => {
                       className={`p-3 rounded-xl border cursor-pointer transition-colors ${
                         isOverdue 
                           ? 'bg-red-50 border-red-200 hover:bg-red-100' 
-                          : isUrgent 
+                          : isUpcoming 
                           ? 'bg-amber-50 border-amber-200 hover:bg-amber-100'
                           : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                       }`}
@@ -462,8 +462,8 @@ const fetchTodayAttendance = async () => {
                         <div className="flex-1 min-w-0">
                           <h4 className="font-medium text-slate-900 truncate">{dd.title}</h4>
                           <p className="text-sm text-slate-500">
-                            <span className={`font-medium ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : ''}`}>
-                              {isOverdue ? 'HIGH' : isUrgent ? 'HIGH' : 'MEDIUM'}
+                            <span className={`font-medium ${isOverdue ? 'text-red-600' : isUpcoming ? 'text-amber-600' : ''}`}>
+                              {isOverdue ? 'HIGH' : isUpcoming ? 'HIGH' : 'MEDIUM'}
                             </span>
                             {' '} Due: {format(new Date(dd.due_date), 'MMM d, yyyy')}
                           </p>
@@ -472,7 +472,7 @@ const fetchTodayAttendance = async () => {
                           className={`shrink-0 ${
                             isOverdue 
                               ? 'bg-red-500 text-white' 
-                              : isUrgent 
+                              : isUpcoming 
                               ? 'bg-amber-500 text-white'
                               : 'bg-slate-200 text-slate-700'
                           }`}
