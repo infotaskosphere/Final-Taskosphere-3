@@ -1749,44 +1749,43 @@ async def send_reminder_to_user(
         "task_count": len(tasks)
     }
 # ================= INCLUDE ROUTER =================
-# ================= STAFF ACTIVITY =================
-
-@api_router.post("/activity/log")
-async def log_staff_activity(
-    activity_data: StaffActivityCreate,
-    current_user: User = Depends(get_current_user)
-):
-    activity = StaffActivityLog(
-        user_id=current_user.id,
-        **activity_data.model_dump()
-    )
-
-    doc = activity.model_dump()
-    doc["timestamp"] = doc["timestamp"].isoformat()
-
-    await db.staff_activity.insert_one(doc)
-
-    return {"message": "Activity logged successfully"}
-
-
 @api_router.get("/activity/summary")
 async def get_activity_summary(
     current_user: User = Depends(get_current_user)
 ):
-    activities = await db.staff_activity.find({}, {"_id": 0}).to_list(1000)
-    return activities
+    activities = await db.staff_activity.find({}, {"_id": 0}).to_list(5000)
 
+    user_summary = {}
 
-@api_router.get("/activity/user/{user_id}")
-async def get_user_activity(
-    user_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    activities = await db.staff_activity.find(
-        {"user_id": user_id},
-        {"_id": 0}
-    ).to_list(1000)
+    for activity in activities:
+        uid = activity["user_id"]
 
-    return activities
+        if uid not in user_summary:
+            user_summary[uid] = {
+                "user_id": uid,
+                "total_duration": 0,
+                "apps": {},
+                "categories": {}
+            }
+
+        user_summary[uid]["total_duration"] += activity.get("duration_seconds", 0)
+
+        app_name = activity.get("app_name", "Unknown")
+        if app_name not in user_summary[uid]["apps"]:
+            user_summary[uid]["apps"][app_name] = {
+                "count": 0,
+                "duration": 0
+            }
+
+        user_summary[uid]["apps"][app_name]["count"] += 1
+        user_summary[uid]["apps"][app_name]["duration"] += activity.get("duration_seconds", 0)
+
+        category = activity.get("category", "other")
+        if category not in user_summary[uid]["categories"]:
+            user_summary[uid]["categories"][category] = 0
+
+        user_summary[uid]["categories"][category] += activity.get("duration_seconds", 0)
+
+    return list(user_summary.values())
 
 app.include_router(api_router)
