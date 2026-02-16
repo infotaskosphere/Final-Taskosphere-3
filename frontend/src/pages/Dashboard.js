@@ -672,11 +672,17 @@ const fetchTodayAttendance = async () => {
             return (
               <div
                 key={member.user_id}
-                className={`flex items-center justify-between p-3 rounded-xl transition
-                  ${isTop
-                    ? "bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-300 shadow-md"
-                    : "bg-slate-50 hover:bg-slate-100"
+                className={`flex items-center justify-between p-3 rounded-xl transition border
+                  ${
+                    isTop
+                      ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md"
+                      : isSecond
+                      ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300"
+                      : isThird
+                      ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300"
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100"
                   }`}
+
               >
                 <div className="flex items-center gap-3">
 
