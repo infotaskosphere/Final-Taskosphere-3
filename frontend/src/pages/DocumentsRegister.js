@@ -934,7 +934,7 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
-   </div>
+    </div>
   );
 }
 function DocumentTable({
