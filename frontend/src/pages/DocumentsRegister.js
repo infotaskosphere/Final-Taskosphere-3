@@ -934,8 +934,10 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
+    
     </div>
   );
+
 }
 function DocumentTable({
   DocumentList,
