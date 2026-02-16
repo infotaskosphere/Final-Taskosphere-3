@@ -839,7 +839,7 @@ export default function DSCRegister() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl">
-              Mark DSC as {movementData.movement_Document Type}
+              Mark Document as {movementData.movement_Document Type}
             </DialogTitle>
             <DialogDescription>
               {movementData.movement_Document Type === 'IN' 
