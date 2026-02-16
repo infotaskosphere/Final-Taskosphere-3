@@ -43,7 +43,7 @@ const [movementData, setMovementData] = useState({
 
 
   const [editMovementData, setEditMovementData] = useState({
-    movement_Document Type: 'IN',
+    movement_document_type: 'IN',
     person_name: '',
     notes: '',
   });
@@ -98,7 +98,7 @@ const [movementData, setMovementData] = useState({
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
       toast.success(`DSC marked as ${movementData.movement_Document Type}!`);
       setMovementDialogOpen(false);
-      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
+      setMovementData({ movement_document_type: 'IN', person_name: '', notes: '' });
       fetchDSC();
     } catch (error) {
       toast.error('Failed to record movement');
@@ -138,7 +138,7 @@ const [movementData, setMovementData] = useState({
         movement_Document Type: newDocument Type,
       });
       toast.success(`DSC marked as ${newDocument Type}!`);
-      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
+      setMovementData({ movement_document_type: 'IN', person_name: '', notes: '' });
       
       // Refresh the DSC data and update editingDSC
       const response = await api.get('/dsc');
@@ -205,7 +205,7 @@ const [movementData, setMovementData] = useState({
       expiry_date: format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes: dsc.notes || '',
     });
-    setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' }); // Reset movement data
+    setMovementData({ movement_document_type: 'IN', person_name: '', notes: '' }); // Reset movement data
     setEditingMovement(null); // Reset editing movement
     setDialogOpen(true);
   };
@@ -524,7 +524,7 @@ const [movementData, setMovementData] = useState({
                                       size="sm"
                                       variant={editMovementData.movement_Document Type === 'IN' ? 'default' : 'outline'}
                                       className={editMovementData.movement_Document Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document Type: 'IN' })}
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_document_type: 'IN' })}
                                     >
                                       <ArrowDownCircle className="h-4 w-4 mr-1" />
                                       IN
