@@ -26,23 +26,23 @@ export default function DSCRegister() {
 
   const [formData, setFormData] = useState({
     holder_name: '',
-    dsc_type: '', // Not compulsory
-    dsc_password: '', // Second field
+    dsc_Document Type: '', // Not compulsory
+    dsc_Access Code: '', // Second field
     associated_with: '', // Not compulsory
-    entity_type: 'firm',
+    entity_Document Type: 'firm',
     issue_date: '',
     expiry_date: '',
     notes: '',
   });
 
   const [movementData, setMovementData] = useState({
-    movement_type: 'IN',
+    movement_Document Type: 'IN',
     person_name: '',
     notes: '',
   });
 
   const [editMovementData, setEditMovementData] = useState({
-    movement_type: 'IN',
+    movement_Document Type: 'IN',
     person_name: '',
     notes: '',
   });
@@ -95,9 +95,9 @@ export default function DSCRegister() {
 
     try {
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
-      toast.success(`DSC marked as ${movementData.movement_type}!`);
+      toast.success(`DSC marked as ${movementData.movement_Document Type}!`);
       setMovementDialogOpen(false);
-      setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
+      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
       fetchDSC();
     } catch (error) {
       toast.error('Failed to record movement');
@@ -106,9 +106,9 @@ export default function DSCRegister() {
     }
   };
 
-  const openMovementDialog = (dsc, type) => {
+  const openMovementDialog = (dsc, Document Type) => {
     setSelectedDSC(dsc);
-    setMovementData({ ...movementData, movement_type: type });
+    setMovementData({ ...movementData, movement_Document Type: Document Type });
     setMovementDialogOpen(true);
   };
 
@@ -131,13 +131,13 @@ export default function DSCRegister() {
 
     try {
       const currentStatus = getDSCInOutStatus(editingDSC);
-      const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
+      const newDocument Type = currentStatus === 'IN' ? 'OUT' : 'IN';
       await api.post(`/dsc/${editingDSC.id}/movement`, {
         ...movementData,
-        movement_type: newType,
+        movement_Document Type: newDocument Type,
       });
-      toast.success(`DSC marked as ${newType}!`);
-      setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
+      toast.success(`DSC marked as ${newDocument Type}!`);
+      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
       
       // Refresh the DSC data and update editingDSC
       const response = await api.get('/dsc');
@@ -161,7 +161,7 @@ export default function DSCRegister() {
     try {
       await api.put(`/dsc/${editingDSC.id}/movement/${movementId}`, {
         movement_id: movementId,
-        movement_type: editMovementData.movement_type,
+        movement_Document Type: editMovementData.movement_Document Type,
         person_name: editMovementData.person_name,
         notes: editMovementData.notes,
       });
@@ -186,7 +186,7 @@ export default function DSCRegister() {
   const startEditingMovement = (movement) => {
     setEditingMovement(movement.id || movement.timestamp); // Use id or timestamp as fallback
     setEditMovementData({
-      movement_type: movement.movement_type,
+      movement_Document Type: movement.movement_Document Type,
       person_name: movement.person_name,
       notes: movement.notes || '',
     });
@@ -196,15 +196,15 @@ export default function DSCRegister() {
     setEditingDSC(dsc);
     setFormData({
       holder_name: dsc.holder_name,
-      dsc_type: dsc.dsc_type || '',
-      dsc_password: dsc.dsc_password || '',
+      dsc_Document Type: dsc.dsc_Document Type || '',
+      dsc_Access Code: dsc.dsc_Access Code || '',
       associated_with: dsc.associated_with || '',
-      entity_type: dsc.entity_type || 'firm',
+      entity_Document Type: dsc.entity_Document Type || 'firm',
       issue_date: format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
       expiry_date: format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes: dsc.notes || '',
     });
-    setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
+    setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' }); // Reset movement data
     setEditingMovement(null); // Reset editing movement
     setDialogOpen(true);
   };
@@ -224,10 +224,10 @@ export default function DSCRegister() {
   const resetForm = () => {
     setFormData({
       holder_name: '',
-      dsc_type: '',
-      dsc_password: '',
+      dsc_Document Type: '',
+      dsc_Access Code: '',
       associated_with: '',
-      entity_type: 'firm',
+      entity_Document Type: 'firm',
       issue_date: '',
       expiry_date: '',
       notes: '',
@@ -256,7 +256,7 @@ export default function DSCRegister() {
     const query = searchQuery.toLowerCase();
     return (
       dsc.holder_name?.toLowerCase().includes(query) ||
-      dsc.dsc_type?.toLowerCase().includes(query) ||
+      dsc.dsc_Document Type?.toLowerCase().includes(query) ||
       dsc.associated_with?.toLowerCase().includes(query)
     );
   };
@@ -308,7 +308,7 @@ export default function DSCRegister() {
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
                         <Input
                           id="holder_name"
                           placeholder="Name of certificate holder"
@@ -319,26 +319,26 @@ export default function DSCRegister() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="dsc_type">Type</Label>
+                        <Label htmlFor="dsc_Document Type">Document Type</Label>
                         <Input
-                          id="dsc_type"
+                          id="dsc_Document Type"
                           placeholder="e.g. Class 3, Signature, Encryption"
-                          value={formData.dsc_type}
-                          onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })}
-                          data-testid="dsc-type-input"
+                          value={formData.dsc_Document Type}
+                          onChange={(e) => setFormData({ ...formData, dsc_Document Type: e.target.value })}
+                          data-testid="dsc-Document Type-input"
                         />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="dsc_password">Password</Label>
+                        <Label htmlFor="dsc_Access Code">Access Code</Label>
                         <Input
-                          id="dsc_password"
-                          type="text"
-                          placeholder="DSC Password"
-                          value={formData.dsc_password}
-                          onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })}
-                          data-testid="dsc-password-input"
+                          id="dsc_Access Code"
+                          Document Type="text"
+                          placeholder="DSC Access Code"
+                          value={formData.dsc_Access Code}
+                          onChange={(e) => setFormData({ ...formData, dsc_Access Code: e.target.value })}
+                          data-testid="dsc-Access Code-input"
                         />
                       </div>
                       <div className="space-y-2">
@@ -354,12 +354,12 @@ export default function DSCRegister() {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="entity_type">Entity Type</Label>
+                        <Label htmlFor="entity_Document Type">Entity Document Type</Label>
                         <Select
-                          value={formData.entity_type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
+                          value={formData.entity_Document Type}
+                          onValueChange={(value) => setFormData({ ...formData, entity_Document Type: value })}
                         >
-                          <SelectTrigger data-testid="dsc-entity-type-select">
+                          <SelectTrigger data-testid="dsc-entity-Document Type-select">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="max-h-60 overflow-y-auto">
@@ -372,7 +372,7 @@ export default function DSCRegister() {
                         <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                         <Input
                           id="issue_date"
-                          type="date"
+                          Document Type="date"
                           value={formData.issue_date}
                           onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
                           required
@@ -385,7 +385,7 @@ export default function DSCRegister() {
                         <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                         <Input
                           id="expiry_date"
-                          type="date"
+                          Document Type="date"
                           value={formData.expiry_date}
                           onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                           required
@@ -407,7 +407,7 @@ export default function DSCRegister() {
                     </div>
                     <DialogFooter>
                       <Button
-                        type="button"
+                        Document Type="button"
                         variant="outline"
                         onClick={() => {
                           setDialogOpen(false);
@@ -418,7 +418,7 @@ export default function DSCRegister() {
                         Cancel
                       </Button>
                       <Button
-                        type="submit"
+                        Document Type="submit"
                         disabled={loading}
                         className="bg-indigo-600 hover:bg-indigo-700"
                         data-testid="dsc-submit-btn"
@@ -483,7 +483,7 @@ export default function DSCRegister() {
                         />
                       </div>
                       <Button
-                        type="submit"
+                        Document Type="submit"
                         disabled={loading}
                         className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
                       >
@@ -511,7 +511,7 @@ export default function DSCRegister() {
                         const isEditing = editingMovement === movementKey;
                         
                         return (
-                          <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                          <Card key={index} className={`p-3 ${movement.movement_Document Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                             {isEditing ? (
                               // Editing mode
                               <div className="space-y-3">
@@ -519,21 +519,21 @@ export default function DSCRegister() {
                                   <Label className="text-sm font-medium">Status:</Label>
                                   <div className="flex gap-2">
                                     <Button
-                                      type="button"
+                                      Document Type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}
+                                      variant={editMovementData.movement_Document Type === 'IN' ? 'default' : 'outline'}
+                                      className={editMovementData.movement_Document Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document Type: 'IN' })}
                                     >
                                       <ArrowDownCircle className="h-4 w-4 mr-1" />
                                       IN
                                     </Button>
                                     <Button
-                                      type="button"
+                                      Document Type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}
+                                      variant={editMovementData.movement_Document Type === 'OUT' ? 'default' : 'outline'}
+                                      className={editMovementData.movement_Document Type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document Type: 'OUT' })}
                                     >
                                       <ArrowUpCircle className="h-4 w-4 mr-1" />
                                       OUT
@@ -560,7 +560,7 @@ export default function DSCRegister() {
                                 </div>
                                 <div className="flex gap-2 justify-end">
                                   <Button
-                                    type="button"
+                                    Document Type="button"
                                     size="sm"
                                     variant="outline"
                                     onClick={() => setEditingMovement(null)}
@@ -568,7 +568,7 @@ export default function DSCRegister() {
                                     Cancel
                                   </Button>
                                   <Button
-                                    type="button"
+                                    Document Type="button"
                                     size="sm"
                                     className="bg-indigo-600 hover:bg-indigo-700"
                                     onClick={() => handleUpdateMovement(movement.id)}
@@ -583,7 +583,7 @@ export default function DSCRegister() {
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
-                                    {movement.movement_type === 'IN' ? (
+                                    {movement.movement_Document Type === 'IN' ? (
                                       <Badge className="bg-emerald-600 text-xs">IN</Badge>
                                     ) : (
                                       <Badge className="bg-red-600 text-xs">OUT</Badge>
@@ -605,7 +605,7 @@ export default function DSCRegister() {
                                   </div>
                                   {movement.id && (
                                     <Button
-                                      type="button"
+                                      Document Type="button"
                                       size="sm"
                                       variant="ghost"
                                       className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
@@ -635,7 +635,7 @@ export default function DSCRegister() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                    <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
                     <Input
                       id="holder_name"
                       placeholder="Name of certificate holder"
@@ -647,27 +647,27 @@ export default function DSCRegister() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="dsc_type">Type</Label>
+                    <Label htmlFor="dsc_Document Type">Document Type</Label>
                     <Input
-                      id="dsc_type"
+                      id="dsc_Document Type"
                       placeholder="e.g. Class 3, Signature, Encryption"
-                      value={formData.dsc_type}
-                      onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })}
-                      data-testid="dsc-type-input"
+                      value={formData.dsc_Document Type}
+                      onChange={(e) => setFormData({ ...formData, dsc_Document Type: e.target.value })}
+                      data-testid="dsc-Document Type-input"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="dsc_password">Password</Label>
+                    <Label htmlFor="dsc_Access Code">Access Code</Label>
                     <Input
-                      id="dsc_password"
-                      type="text"
-                      placeholder="DSC Password"
-                      value={formData.dsc_password}
-                      onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })}
-                      data-testid="dsc-password-input"
+                      id="dsc_Access Code"
+                      Document Type="text"
+                      placeholder="DSC Access Code"
+                      value={formData.dsc_Access Code}
+                      onChange={(e) => setFormData({ ...formData, dsc_Access Code: e.target.value })}
+                      data-testid="dsc-Access Code-input"
                     />
                   </div>
 
@@ -685,12 +685,12 @@ export default function DSCRegister() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="entity_type">Entity Type</Label>
+                    <Label htmlFor="entity_Document Type">Entity Document Type</Label>
                     <Select
-                      value={formData.entity_type}
-                      onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
+                      value={formData.entity_Document Type}
+                      onValueChange={(value) => setFormData({ ...formData, entity_Document Type: value })}
                     >
-                      <SelectTrigger data-testid="dsc-entity-type-select">
+                      <SelectTrigger data-testid="dsc-entity-Document Type-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
@@ -704,7 +704,7 @@ export default function DSCRegister() {
                     <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="issue_date"
-                      type="date"
+                      Document Type="date"
                       value={formData.issue_date}
                       onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
                       required
@@ -718,7 +718,7 @@ export default function DSCRegister() {
                     <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="expiry_date"
-                      type="date"
+                      Document Type="date"
                       value={formData.expiry_date}
                       onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                       required
@@ -742,7 +742,7 @@ export default function DSCRegister() {
 
                 <DialogFooter>
                   <Button
-                    type="button"
+                    Document Type="button"
                     variant="outline"
                     onClick={() => {
                       setDialogOpen(false);
@@ -753,7 +753,7 @@ export default function DSCRegister() {
                     Cancel
                   </Button>
                   <Button
-                    type="submit"
+                    Document Type="submit"
                     disabled={loading}
                     className="bg-indigo-600 hover:bg-indigo-700"
                     data-testid="dsc-submit-btn"
@@ -771,8 +771,8 @@ export default function DSCRegister() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
-          type="text"
-          placeholder="Search by holder name, certificate number, or company..."
+          Document Type="text"
+          placeholder="Search by Document Name, certificate number, or company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
@@ -807,7 +807,7 @@ export default function DSCRegister() {
                   <p>No DSC certificates currently IN</p>
                 </div>
               ) : (
-                <DSCTable dscList={inDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN" />
+                <DSCTable dscList={inDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="IN" />
               )}
             </CardContent>
           </Card>
@@ -827,7 +827,7 @@ export default function DSCRegister() {
                   <p>No DSC certificates currently OUT</p>
                 </div>
               ) : (
-                <DSCTable dscList={outDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="OUT" />
+                <DSCTable dscList={outDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="OUT" />
               )}
             </CardContent>
           </Card>
@@ -839,10 +839,10 @@ export default function DSCRegister() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl">
-              Mark DSC as {movementData.movement_type}
+              Mark DSC as {movementData.movement_Document Type}
             </DialogTitle>
             <DialogDescription>
-              {movementData.movement_type === 'IN' 
+              {movementData.movement_Document Type === 'IN' 
                 ? 'Record when DSC is delivered/returned' 
                 : 'Record when DSC is taken out'}
             </DialogDescription>
@@ -855,7 +855,7 @@ export default function DSCRegister() {
 
             <div className="space-y-2">
               <Label htmlFor="person_name">
-                {movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
+                {movementData.movement_Document Type === 'IN' ? 'Delivered By *' : 'Taken By *'}
               </Label>
               <Input
                 id="person_name"
@@ -878,15 +878,15 @@ export default function DSCRegister() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
+              <Button Document Type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
                 Cancel
               </Button>
               <Button
-                type="submit"
+                Document Type="submit"
                 disabled={loading}
-                className={movementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
+                className={movementData.movement_Document Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
               >
-                {loading ? 'Recording...' : `Mark as ${movementData.movement_type}`}
+                {loading ? 'Recording...' : `Mark as ${movementData.movement_Document Type}`}
               </Button>
             </DialogFooter>
           </form>
@@ -908,11 +908,11 @@ export default function DSCRegister() {
           <div className="space-y-3">
             {selectedDSC?.movement_log && selectedDSC.movement_log.length > 0 ? (
               selectedDSC.movement_log.map((movement, index) => (
-                <Card key={index} className={`p-4 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                <Card key={index} className={`p-4 ${movement.movement_Document Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        {movement.movement_type === 'IN' ? (
+                        {movement.movement_Document Type === 'IN' ? (
                           <Badge className="bg-emerald-600">IN</Badge>
                         ) : (
                           <Badge className="bg-red-600">OUT</Badge>
@@ -920,7 +920,7 @@ export default function DSCRegister() {
                         <span className="text-sm font-medium">{movement.person_name}</span>
                       </div>
                       <p className="text-sm text-slate-600">
-                        {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
+                        {movement.movement_Document Type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
                       </p>
                       <p className="text-xs text-slate-500">
                         Recorded by: {movement.recorded_by}
@@ -972,17 +972,17 @@ export default function DSCRegister() {
 }
 
 // DSC Table Component
-function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, Document Type }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Holder Name
+              Document Name
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Type
+              Document Type
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Associated With
@@ -1008,7 +1008,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 data-testid={`dsc-row-${dsc.id}`}
               >
                 <td className="px-6 py-4 font-medium text-slate-900">{dsc.holder_name}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_type || '-'}</td>
+                <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_Document Type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
@@ -1033,11 +1033,11 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
-                      title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                      onClick={() => onMovement(dsc, Document Type === 'IN' ? 'OUT' : 'IN')}
+                      className={Document Type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
+                      title={Document Type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     >
-                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                      {Document Type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
                     </Button>
                     <Button
                       variant="ghost"
