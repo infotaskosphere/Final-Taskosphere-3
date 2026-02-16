@@ -737,9 +737,7 @@ setFormData({
                       required
                       data-testid="Document-issue-date-input"
                     />
-                  </div>
-                </div>
-
+                
                 <Input
                   id="valid_upto"
                   type="date"
