@@ -319,7 +319,7 @@ export default function DocumentRegister() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="Document_type">Type</Label>
+                        <Label htmlFor="Document_type">Nature of Document</Label>
                         <Input
                           id="Document_type"
                           placeholder="e.g. Class 3, Signature, Encryption"
@@ -647,7 +647,7 @@ export default function DocumentRegister() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="Document_type">Type</Label>
+                    <Label htmlFor="Document_type">Nature of Document</Label>
                     <Input
                       id="Document_type"
                       placeholder="e.g. Class 3, Signature, Encryption"
