@@ -870,76 +870,8 @@ export default function DocumentRegister() {
           </form>
         </DialogContent>
       </Dialog>
-      {/* MOVEMENT LOG DIALOG */}
-      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
-              <History className="h-6 w-6" />
-              Movement Log
-            </DialogTitle>
-            <DialogDescription>
-              {selectedDocument?.holder_name}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            {selectedDocument?.movement_log &&
-            selectedDocument.movement_log.length > 0 ? (
-              selectedDocument.movement_log.map((movement, index) => (
-                <Card
-                  key={index}
-                  className={`p-4 ${
-                    movement.movement_type === 'IN'
-                      ? 'bg-emerald-50 border-emerald-200'
-                      : 'bg-red-50 border-red-200'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <Badge
-                        className={
-                          movement.movement_type === 'IN'
-                            ? 'bg-emerald-600'
-                            : 'bg-red-600'
-                        }
-                      >
-                        {movement.movement_type}
-                      </Badge>
-                      <span className="ml-2 font-medium">
-                        {movement.person_name}
-                      </span>
-
-                      {movement.notes && (
-                        <p className="text-sm text-slate-600 mt-2">
-                          {movement.notes}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="text-right text-xs text-slate-500">
-                      {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
-                      <br />
-                      {format(new Date(movement.timestamp), 'hh:mm a')}
-                    </div>
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="text-center py-8 text-slate-500">
-                <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No movement history yet</p>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    
-    </div>
-  );
-
-}
-function DocumentTable({
+     {/* MOVEMENT LOG DIALOG */}
+      function DocumentTable({
   DocumentList,
   onEdit,
   onDelete,
