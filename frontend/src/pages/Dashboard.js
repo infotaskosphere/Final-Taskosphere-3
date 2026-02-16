@@ -542,80 +542,91 @@ const fetchTodayAttendance = async () => {
 
       {/* Staff Efficiency Ranking */}
 <motion.div variants={itemVariants}>
-  <Card className="border border-slate-200 shadow-sm" data-testid="staff-ranking-card">
-    <CardHeader className="pb-2">
+  <Card 
+    className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+    data-testid="staff-ranking-card"
+  >
+    {/* Header */}
+    <CardHeader className="pb-3 border-b border-slate-100">
       <div className="flex items-center justify-between">
-        <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-          <TrendingUp className="h-5 w-5" />
+        <CardTitle className="text-lg font-semibold flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-blue-600" />
           Staff Efficiency Ranking
         </CardTitle>
 
         {user.role === "admin" && (
           <div className="flex gap-2">
             {["all", "monthly", "weekly"].map(p => (
-              <Button
+              <button
                 key={p}
-                size="sm"
-                variant={rankingPeriod === p ? "default" : "outline"}
                 onClick={() => setRankingPeriod(p)}
+                className={`px-3 py-1 text-xs rounded-full border transition ${
+                  rankingPeriod === p
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
               >
                 {p.toUpperCase()}
-              </Button>
+              </button>
             ))}
           </div>
         )}
       </div>
-      <p className="text-sm text-slate-500">
-        Performance based on hours worked, completion rate and task efficiency
+
+      <p className="text-xs text-slate-500 mt-1">
+        Based on hours worked, completion rate & speed
       </p>
     </CardHeader>
 
-    <CardContent className="pt-4">
+    {/* Body */}
+    <CardContent className="p-4">
       {rankings.length === 0 ? (
-        <div className="text-center py-6 text-slate-500">
+        <div className="text-center py-8 text-slate-400 text-sm">
           No ranking data available
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
           {rankings.slice(0, 5).map((member) => (
             <div
               key={member.user_id}
-              className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
+              className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition"
             >
               <div className="flex items-center gap-3">
-              <div className="text-sm font-semibold text-slate-600 w-6">
-                #{member.rank}
-              </div>
+                
+                {/* Rank */}
+                <div className="text-sm font-semibold text-slate-600 w-6">
+                  #{member.rank}
+                </div>
 
-              <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 flex-shrink-0">
-                {member.profile_picture ? (
-                  <img
-                    src={member.profile_picture}
-                    alt={member.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div
-                    className="w-full h-full flex items-center justify-center text-xs font-semibold text-white"
-                    style={{ background: '#1FAF5A' }}
-                   >
-                    {member.name?.charAt(0)}
-                   </div>
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 flex-shrink-0">
+                  {member.profile_picture ? (
+                    <img
+                      src={member.profile_picture}
+                      alt={member.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-white bg-emerald-500">
+                      {member.name?.charAt(0)}
+                    </div>
                   )}
                 </div>
 
+                {/* Name + Role */}
                 <div>
-                <p className="font-medium text-slate-900 text-sm">
-                  {member.name}
-                </p>
-                <p className="text-xs text-slate-500 capitalize">
-                  {member.role}
-                </p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {member.name}
+                  </p>
+                  <p className="text-xs text-slate-500 capitalize">
+                    {member.role}
+                  </p>
                 </div>
-
               </div>
+
+              {/* Score */}
               <div className="text-right">
-                <p className="font-semibold text-slate-900">
+                <p className="text-sm font-semibold text-slate-900">
                   {member.score}%
                 </p>
                 <p className="text-xs text-slate-500">
@@ -626,9 +637,22 @@ const fetchTodayAttendance = async () => {
           ))}
         </div>
       )}
+
+      {/* View All */}
+      {rankings.length > 5 && (
+        <div className="text-right mt-4">
+          <button
+            onClick={() => navigate('/reports')}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            View All Rankings →
+          </button>
+        </div>
+      )}
     </CardContent>
   </Card>
 </motion.div>
+
 
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
