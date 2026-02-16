@@ -43,10 +43,11 @@ const [movementData, setMovementData] = useState({
 
 
   const [editMovementData, setEditMovementData] = useState({
-    movement_Document Type: 'IN',
-    person_name: '',
-    notes: '',
-  });
+  movement_type: 'IN',
+  person_name: '',
+  notes: '',
+});
+
 
   useEffect(() => {
     fetchDSC();
