@@ -194,6 +194,8 @@ export default function Users() {
   full_name: '',
   role: 'staff',
   profile_picture: '',
+  phone: '',
+  birthdate: ''
   departments: [],
 });
   const handlePhotoUpload = async (file) => {
@@ -285,6 +287,8 @@ export default function Users() {
       full_name: userToEdit.full_name,
       role: userToEdit.role,
       profile_picture: userToEdit.profile_picture || '',
+      phone: userToEdit.phone || '',
+      birthdate: userToEdit.birthdate || '',
       departments: userToEdit.departments || [],
     });
     setDialogOpen(true);
@@ -487,6 +491,28 @@ export default function Users() {
                   data-testid="user-email-input"
                 />
               </div>
+              <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                type="text"
+                placeholder="Enter phone number"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="h-11 rounded-xl"
+              />
+            </div>
+
+            <div className="space-y-2">
+            <Label htmlFor="birthdate">Birthdate</Label>
+            <Input
+              id="birthdate"
+              type="date"
+              value={formData.birthdate}
+              onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
+              className="h-11 rounded-xl"
+            />
+          </div>
 
               {!editingUser && (
                 <div className="space-y-2">
