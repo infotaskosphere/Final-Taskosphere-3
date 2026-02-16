@@ -308,7 +308,7 @@ export default function DocumentRegister() {
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
                         <Input
                           id="holder_name"
                           placeholder="Name of certificate holder"
@@ -635,7 +635,7 @@ export default function DocumentRegister() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                    <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
                     <Input
                       id="holder_name"
                       placeholder="Name of certificate holder"
@@ -772,7 +772,7 @@ export default function DocumentRegister() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
           type="text"
-          placeholder="Search by holder name, certificate number, or company..."
+          placeholder="Search by Document Name, certificate number, or company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
@@ -979,7 +979,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Holder Name
+              Document Name
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Type
