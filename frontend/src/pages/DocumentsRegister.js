@@ -934,10 +934,9 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
-              
-         </div>
-       );
-     }
+   </div>
+  );
+}
 function DocumentTable({
   DocumentList,
   onEdit,
