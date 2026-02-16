@@ -39,7 +39,19 @@ export default function DocumentRegister() {
   setEditingDocument(document);
   setDialogOpen(true);
   };
+  
+  const handleDelete = async (documentId) => {
+  if (!window.confirm('Are you sure you want to delete this Document?')) return;
 
+  try {
+    await api.delete(`/documents/${documentId}`);
+    toast.success('Document deleted successfully!');
+    fetchDocument();
+  } catch (error) {
+    toast.error('Failed to delete Document');
+  }
+};
+  
   const [movementData, setMovementData] = useState({
   movement_type: 'IN',
   person_name: '',
