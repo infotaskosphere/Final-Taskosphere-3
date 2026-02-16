@@ -68,7 +68,7 @@ export default function DocumentRegister() {
       const DocumentData = {
   ...formData,
   issue_date: new Date(formData.issue_date).toISOString(),
-  expiry_date: formData.expiry_date
+  valid_upto: formData.expiry_date
     ? new Date(formData.expiry_date).toISOString()
     : null,
 };
@@ -203,7 +203,7 @@ export default function DocumentRegister() {
       associated_with: Document.associated_with || '',
       entity_type: Document.entity_type || 'firm',
       issue_date: format(new Date(Document.issue_date), 'yyyy-MM-dd'),
-      expiry_date: format(new Date(Document.expiry_date), 'yyyy-MM-dd'),
+      expiry_date: format(new Date(Document.valid_upto), 'yyyy-MM-dd'),
       notes: Document.notes || '',
     });
     setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
@@ -950,7 +950,7 @@ export default function DocumentRegister() {
       </Dialog>
 
       {/* Document Expiry Alert */}
-      {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color !== 'bg-emerald-500').length > 0 && (
+      {DocumentList.filter(Document => getDocumentStatus(Document.valid_upto).color !== 'bg-emerald-500').length > 0 && (
         <Card className="border-2 border-orange-200 bg-orange-50">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
@@ -958,8 +958,8 @@ export default function DocumentRegister() {
               <div>
                 <h3 className="font-semibold text-orange-900">Attention Required</h3>
                 <p className="text-sm text-orange-700 mt-1">
-                  {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
-                  {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
+                  {DocumentList.filter(Document => getDocumentStatus(Document.valid_upto).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
+                  {DocumentList.filter(Document => getDocumentStatus(Document.valid_upto).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
                 </p>
               </div>
             </div>
@@ -999,7 +999,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {DocumentList.map((Document) => {
-            const status = getDocumentStatus(Document.expiry_date);
+            const status = getDocumentStatus(Document.valid_upto);
             return (
               <tr
                 key={Document.id}
@@ -1010,7 +1010,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {format(new Date(Document.expiry_date), 'MMM dd, yyyy')}
+                  {format(new Date(Document.valid_upto), 'MMM dd, yyyy')}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
