@@ -23,6 +23,9 @@ from jose import jwt, JWTError
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
