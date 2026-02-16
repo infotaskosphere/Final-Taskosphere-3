@@ -932,11 +932,10 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
-    </Card>
-      )}
+    )}
     </div>
   );
-}
+  }
 
 // Document Table Component
 function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, getDocumentStatus, type }) {
