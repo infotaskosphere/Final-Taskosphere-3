@@ -1056,6 +1056,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`Document-row-${Document.id}`}
               >
+
                 <td className="px-6 py-4 text-sm font-medium text-slate-500">
                   {index + 1}
                 </td
