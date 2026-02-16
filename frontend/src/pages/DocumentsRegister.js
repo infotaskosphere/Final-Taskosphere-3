@@ -63,7 +63,21 @@ export default function DocumentRegister() {
     person_name: '',
     notes: '',
   });
+  
+  const resetForm = () => {
+  setFormData({
+    holder_name: '',
+    Document_type: '',
+    Document_password: '',
+    associated_with: '',
+    entity_type: 'firm',
+    issue_date: '',
+    valid_upto: '',
+    notes: '',
+  });
 
+  setEditingDocument(null);
+};
   useEffect(() => {
     fetchDocument();
   }, []);
