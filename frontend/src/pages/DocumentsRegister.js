@@ -1023,30 +1023,39 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead className="bg-slate-50 border-b border-slate-200">
-          <tr>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              S.No
-            </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Document Name
-            </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Type
-            </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Associated With
-            </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Expiry Date
-            </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Status
-            </th>
-            <th className="text-right text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Actions
-            </th>
-          </tr>
-        </thead>
+          <thead className="bg-slate-50 border-b border-slate-200">
+  <tr>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      S.No
+    </th>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Document Name
+    </th>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Type
+    </th>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Associated With
+    </th>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Expiry Date
+    </th>
+
+    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Status
+    </th>
+
+    <th className="text-right text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+      Actions
+    </th>
+
+  </tr>
+</thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {DocumentList.map((Document, index) => {
             const status = getDocumentStatus(Document.valid_upto);
