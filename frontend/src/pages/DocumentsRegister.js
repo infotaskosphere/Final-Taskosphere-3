@@ -1051,7 +1051,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
           {DocumentList.map((Document, index) => {
             const status = getDocumentStatus(Document.valid_upto);
             return (
-                <tr key={Document.id} className="hover:bg-slate-50 transition-colors" data-testid={`Document-row-${Document.id}`}>
+              <tr key={Document.id}>                
                 <td className="px-6 py-4 text-sm font-medium text-slate-500">
                   {index + 1}
                 </td
