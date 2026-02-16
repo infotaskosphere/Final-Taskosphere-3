@@ -384,26 +384,24 @@ setFormData({
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-  <div className="space-y-2">
-    <Label htmlFor="valid_upto">
-      Valid Upto
-    </Label>
-    <Input
-      id="valid_upto"
-      name="valid_upto"
-      type="date"
-      value={formData.valid_upto}
-      onChange={(e) =>
-        setFormData({ ...formData, valid_upto: e.target.value })
-      }
-      data-testid="Document-valid-upto-input"
-    />
-  </div>
-  <div></div>
-</div>
-                      <div></div>
-                    </div>
+                   <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                   <Label htmlFor="valid_upto">
+                    Valid Upto
+                   </Label>
+                   <Input
+                    id="valid_upto"
+                    name="valid_upto"
+                    type="date"
+                    value={formData.valid_upto}
+                    onChange={(e) =>
+                      setFormData({ ...formData, valid_upto: e.target.value })
+                      }
+                  data-testid="Document-valid-upto-input"
+                 />
+               </div>
+               <div></div>
+             </div>
                     <div className="space-y-2">
                       <Label htmlFor="notes">Notes</Label>
                       <Textarea
