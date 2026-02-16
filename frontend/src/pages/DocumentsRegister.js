@@ -954,7 +954,6 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {DocumentList.map((Document) => {
-            const status = getDocumentStatus(Document.expiry_date);
             return (
               <tr
                 key={Document.id}
@@ -965,14 +964,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {format(new Date(Document.expiry_date), 'MMM dd, yyyy')}
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${status.color}`}></div>
-                    <span className={`text-sm font-medium ${status.textColor}`}>{status.text}</span>
-                  </div>
-                </td>
+               
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     <Button
