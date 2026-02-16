@@ -356,110 +356,182 @@ export default function DocumentRegister() {
                           value={formData.issue_date}
                           onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
                           required
-                          data-testid="Document-issue-date-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="notes">Notes</Label>
-                      <Textarea
-                        id="notes"
-                        placeholder="Additional notes"
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        rows={2}
-                        data-testid="Document-notes-input"
-                      />
-                    </div>
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setDialogOpen(false);
-                          resetForm();
-                        }}
-                        data-testid="Document-cancel-btn"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700"
-                        data-testid="Document-submit-btn"
-                      >
-                        {loading ? 'Saving...' : 'Update Document'}
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </TabsContent>
-                
-                <TabsContent value="status" className="mt-4 space-y-4">
-                  {/* Current Status Display */}
-                  <Card className={`p-4 ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-slate-600">Current Status</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {getDocumentInOutStatus(editingDocument) === 'IN' ? (
+                          <div className="grid grid-cols-2 gap-4">
+  <div className="space-y-2">
+    <Label htmlFor="entity_type">Entity Type</Label>
+    <Select
+      value={formData.entity_type}
+      onValueChange={(value) =>
+        setFormData({ ...formData, entity_type: value })
+      }
+    >
+      <SelectTrigger data-testid="Document-entity-type-select">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="max-h-60 overflow-y-auto">
+        <SelectItem value="firm">Firm</SelectItem>
+        <SelectItem value="client">Client</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+
+  <div className="space-y-2">
+    <Label htmlFor="issue_date">
+      Issue Date <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="issue_date"
+      type="date"
+      value={formData.issue_date}
+      onChange={(e) =>
+        setFormData({ ...formData, issue_date: e.target.value })
+      }
+      required
+      data-testid="Document-issue-date-input"
+    />
+  </div>
+</div>
+
+<div className="space-y-2">
+  <Label htmlFor="notes">Notes</Label>
+  <Textarea
+    id="notes"
+    placeholder="Additional notes"
+    value={formData.notes}
+    onChange={(e) =>
+      setFormData({ ...formData, notes: e.target.value })
+    }
+    rows={2}
+    data-testid="Document-notes-input"
+  />
+</div>
+
+<DialogFooter>
+  <Button
+    type="button"
+    variant="outline"
+    onClick={() => {
+      setDialogOpen(false);
+      resetForm();
+    }}
+    data-testid="Document-cancel-btn"
+  >
+    Cancel
+  </Button>
+
+  <Button
+    type="submit"
+    disabled={loading}
+    className="bg-indigo-600 hover:bg-indigo-700"
+    data-testid="Document-submit-btn"
+  >
+    {loading ? "Saving..." : "Update Document"}
+  </Button>
+</DialogFooter>
+</form>
+</TabsContent>
+
+<TabsContent value="status" className="mt-4 space-y-4">
+  <Card
+    className={`p-4 ${
+      getDocumentInOutStatus(editingDocument) === "IN"
+        ? "bg-emerald-50 border-emerald-200"
+        : "bg-red-50 border-red-200"
+    }`}
+  >
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm text-slate-600">Current Status</p>
+
+        <div className="flex items-center gap-2 mt-1">
+          {getDocumentInOutStatus(editingDocument) === "IN" ? (
+            <>
+              <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
+              <Badge className="bg-emerald-600 text-white">
+                IN - Available
+              </Badge>
+            </>
+          ) : (
+            <>
+              <ArrowUpCircle className="h-5 w-5 text-red-600" />
+              <Badge className="bg-red-600 text-white">
+                OUT - Taken
+              </Badge>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  </Card>
+
+  <Card className="p-4">
+    <h4 className="font-medium text-slate-900 mb-3">
+      {getDocumentInOutStatus(editingDocument) === "IN"
+        ? "Mark as OUT"
+        : "Mark as IN"}
+    </h4>
+
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleMovementInModal();
+      }}
+      className="space-y-3"
+    >
+      <div className="space-y-2">
+        <Label htmlFor="inline_person">
+          {getDocumentInOutStatus(editingDocument) === "IN"
+            ? "Taken By *"
+            : "Delivered By *"}
+        </Label>
+        <Input
+          id="inline_person"
+          placeholder="Enter person name"
+          value={movementData.person_name}
+          onChange={(e) =>
+            setMovementData({
+              ...movementData,
+              person_name: e.target.value,
+            })
+          }
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="inline_notes">Notes</Label>
+        <Input
+          id="inline_notes"
+          placeholder="Optional notes"
+          value={movementData.notes}
+          onChange={(e) =>
+            setMovementData({
+              ...movementData,
+              notes: e.target.value,
+            })
+          }
+        />
+      </div>
+
+      <Button
+        type="submit"
+        disabled={loading}
+        className={`w-full ${
+          getDocumentInOutStatus(editingDocument) === "IN"
+            ? "bg-red-600 hover:bg-red-700"
+            : "bg-emerald-600 hover:bg-emerald-700"
+        }`}
+      >
+        {getDocumentInOutStatus(editingDocument) === "IN"
+          ? "Confirm OUT"
+          : "Confirm IN"}
+      </Button>
+    </form>
+  </Card>
+</TabsContent>
+  </>
+  ) : (
                             <>
-                              <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
-                              <Badge className="bg-emerald-600 text-white">IN - Available</Badge>
-                            </>
-                          ) : (
-                            <>
-                              <ArrowUpCircle className="h-5 w-5 text-red-600" />
-                              <Badge className="bg-red-600 text-white">OUT - Taken</Badge>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                  
-                  {/* Quick Movement Form */}
-                  <Card className="p-4">
-                    <h4 className="font-medium text-slate-900 mb-3">
-                      {getDocumentInOutStatus(editingDocument) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
-                    </h4>
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      handleMovementInModal();
-                    }} className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_person">
-                          {getDocumentInOutStatus(editingDocument) === 'IN' ? 'Taken By *' : 'Delivered By *'}
-                        </Label>
-                        <Input
-                          id="inline_person"
-                          placeholder="Enter person name"
-                          value={movementData.person_name}
-                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_notes">Notes</Label>
-                        <Input
-                          id="inline_notes"
-                          placeholder="Optional notes"
-                          value={movementData.notes}
-                          onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className={getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
-                      >
-                        {getDocumentInOutStatus(editingDocument) === 'IN' ? (
-                          <>
-                            <ArrowUpCircle className="h-4 w-4 mr-2" />
-                            Mark as OUT
-                          </>
-                        ) : (
-                          <>
                             <ArrowDownCircle className="h-4 w-4 mr-2" />
                             Mark as IN
                           </>
