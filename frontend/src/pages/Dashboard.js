@@ -577,7 +577,7 @@ const fetchTodayAttendance = async () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {rankings.map((member) => (
+          {rankings.slice(0, 5).map((member) => (
             <div
               key={member.user_id}
               className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
