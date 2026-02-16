@@ -265,11 +265,11 @@ export default function DocumentRegister() {
   const outDSC = dscList.filter(dsc => getDSCInOutStatus(dsc) === 'OUT' && filterBySearch(dsc));
 
   return (
-    <div className="space-y-6" data-testid="dsc-page">
+    <div className="space-y-6" data-testid="documents-page">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-900">DSC Register</h1>
-          <p className="text-slate-600 mt-1">Manage digital signature certificates with IN/OUT tracking</p>
+          <h1 className="text-3xl font-bold font-outfit text-slate-900">Documents Register</h1>
+          <p className="text-slate-600 mt-1">Manage documents with IN/OUT tracking</p>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={(open) => {
