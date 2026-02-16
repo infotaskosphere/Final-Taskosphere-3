@@ -612,7 +612,6 @@ const fetchTodayAttendance = async () => {
                   {member.role}
                 </p>
                 </div>
-               </div>
 
               </div>
               <div className="text-right">
