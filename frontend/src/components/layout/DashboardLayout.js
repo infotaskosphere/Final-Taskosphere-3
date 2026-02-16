@@ -159,7 +159,7 @@ const COLORS = {
 
           {/* Footer - Fixed at bottom */}
           <div className="p-3 lg:p-4 border-t border-blue-100/50 bg-gradient-to-t from-blue-50/80 to-transparent">
-            <p className="text-xs text-slate-500 text-center">�� 2025 TaskoSphere</p>
+            <p className="text-xs text-slate-500 text-center">© 2026 TaskoSphere</p>
           </div>
         </div>
       </aside>
