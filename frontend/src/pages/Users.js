@@ -209,6 +209,15 @@ export default function Users() {
   birthdate: '',
   departments: [],
 });
+  const [permissions, setPermissions] = useState({
+  can_view_all_tasks: false,
+  can_view_all_clients: false,
+  can_view_all_dsc: false,
+  can_view_all_duedates: false,
+  can_view_reports: false,
+  can_manage_users: false,
+  can_assign_tasks: false,
+  assigned_clients: [],
   const handlePhotoUpload = async (file) => {
   const formDataCloud = new FormData();
   formDataCloud.append("file", file);
