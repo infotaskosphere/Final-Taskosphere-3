@@ -1451,7 +1451,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             expiring_dsc_list.append({
                 "id": dsc["id"],
                 "holder_name": dsc["holder_name"],
-                "certificate_number": dsc["certificate_number"],
+                "certificate_number": dsc.get("certificate_number", "N/A"),
                 "expiry_date": dsc["expiry_date"],
                 "days_left": days_left,
                 "status": "expired" if days_left < 0 else "expiring"
