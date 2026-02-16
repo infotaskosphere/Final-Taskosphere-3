@@ -1025,6 +1025,9 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+              S.No
+            </th>
+            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Document Name
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
