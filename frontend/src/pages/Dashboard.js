@@ -476,8 +476,14 @@ const fetchTodayAttendance = async () => {
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-slate-900 truncate">{task.title}</h4>
                         <p className="text-sm text-slate-500">
-                          {task.category || 'General'} ��� Updated {task.updated_at ? format(new Date(task.updated_at), 'MMM d') : 'recently'}
-                        </p>
+                          {task.category || 'General'} • Updated{" "}
+                          <span className="text-red-600 font-semibold">
+                          {task.updated_at
+                            ? format(new Date(task.updated_at), 'dd MMM yyyy')
+                            : 'recently'}
+                      </span>
+                      </p>
+
                       </div>
                       <Badge className={`${statusStyle.bg} ${statusStyle.text} border-0 text-xs shrink-0`}>
                         {task.status.replace('_', ' ')}
