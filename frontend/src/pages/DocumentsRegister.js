@@ -291,7 +291,7 @@ export default function DSCRegister() {
                 {editingDSC ? 'Edit DSC' : 'Add New DSC'}
               </DialogTitle>
               <DialogDescription>
-                {editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new DSC certificate.'}
+                {editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new Document.'}
               </DialogDescription>
             </DialogHeader>
             
@@ -849,7 +849,7 @@ export default function DSCRegister() {
           </DialogHeader>
           <form onSubmit={handleMovement} className="space-y-4">
             <div className="space-y-2">
-              <Label>DSC Certificate</Label>
+              <Label>Document</Label>
               <p className="text-sm font-medium">{selectedDSC?.certificate_number} - {selectedDSC?.holder_name}</p>
             </div>
 
