@@ -70,7 +70,6 @@ export default function Dashboard() {
 const fetchDashboardData = async () => {
   try {
     const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-    setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
       api.get('/dashboard/stats'),
       api.get('/tasks'),
       api.get('/duedates/upcoming?days=30'),
@@ -79,6 +78,12 @@ const fetchDashboardData = async () => {
     setStats(statsRes.data);
     setRecentTasks(tasksRes.data.slice(0, 5));
     setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
+
+  // Fetch Rankings
+const rankingRes = await api.get(
+  `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+);
+setRankings(rankingRes.data.rankings);
 
   } catch (error) {
     console.error('Failed to fetch dashboard data:', error);
