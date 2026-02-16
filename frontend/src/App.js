@@ -1,3 +1,4 @@
+import Chat from '@/pages/Chat';
 import React from 'react';
 import DocumentsRegister from "./pages/DocumentsRegister";
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
