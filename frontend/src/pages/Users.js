@@ -196,7 +196,33 @@ export default function Users() {
   profile_picture: '',
   departments: [],
 });
-  
+  const handlePhotoUpload = async (file) => {
+  const formDataCloud = new FormData();
+  formDataCloud.append("file", file);
+  formDataCloud.append("upload_preset", "taskosphere_unsigned");
+
+  try {
+    const res = await fetch(
+      "https://api.cloudinary.com/v1_1/dbb4263pa/image/upload",
+      {
+        method: "POST",
+        body: formDataCloud,
+      }
+    );
+
+    const data = await res.json();
+
+    if (data.secure_url) {
+      setFormData(prev => ({
+        ...prev,
+        profile_picture: data.secure_url
+      }));
+    }
+  } catch (error) {
+    console.error("Image upload failed:", error);
+  }
+};
+
   useEffect(() => {
     fetchUsers();
     fetchClients();
