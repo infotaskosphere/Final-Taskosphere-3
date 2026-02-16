@@ -220,38 +220,6 @@ useEffect(() => {
     });
   };
 
-// ===== SAVE DOCUMENT (ADD / UPDATE) =====
-const handleSubmit = async () => {
-  try {
-    setLoading(true);
-
-    if (editingDocument) {
-      // ===== UPDATE EXISTING DOCUMENT =====
-      await api.put(`/documents/${editingDocument._id}`, formData);
-    } else {
-      // ===== CREATE NEW DOCUMENT =====
-      await api.post('/documents', formData);
-    }
-
-    // Refresh document list
-    const response = await api.get('/documents');
-    setDocumentList(response.data);
-
-    // Reset everything
-    setDialogOpen(false);
-    setEditingDocument(null);
-
-    setFormData({
-      holder_name: '',
-      Document_type: '',
-      Document_password: '',
-      associated_with: '',
-      entity_type: 'Firm',
-      issue_date: '',
-      valid_upto: '',
-      notes: '',
-    });
-
   } catch (error) {
     console.error('Error saving document:', error);
     toast.error('Failed to save document');
