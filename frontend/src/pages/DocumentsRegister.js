@@ -38,7 +38,7 @@ export default function DocumentRegister() {
   const handleEdit = (document) => {
   setEditingDocument(document);
   setDialogOpen(true);
-  });
+  };
 
   const handleEdit = (document) => {
   setEditingDocument(document);
