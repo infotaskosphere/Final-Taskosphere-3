@@ -31,7 +31,7 @@ export default function DocumentRegister() {
     associated_with: '', // Not compulsory
     entity_type: 'firm',
     issue_date: '',
-    expiry_date: '',
+    valid_upto: '',
     notes: '',
   });
 
@@ -69,7 +69,7 @@ export default function DocumentRegister() {
   ...formData,
   issue_date: new Date(formData.issue_date).toISOString(),
   valid_upto: formData.expiry_date
-    ? new Date(formData.expiry_date).toISOString()
+    ? new Date(formData.valid_upto).toISOString()
     : null,
 };
 
@@ -195,17 +195,19 @@ export default function DocumentRegister() {
   };
 
   const handleEdit = (Document) => {
-    setEditingDocument(Document);
-    setFormData({
-      holder_name: Document.holder_name,
-      Document_type: Document.Document_type || '',
-      Document_password: Document.Document_password || '',
-      associated_with: Document.associated_with || '',
-      entity_type: Document.entity_type || 'firm',
-      issue_date: format(new Date(Document.issue_date), 'yyyy-MM-dd'),
-      expiry_date: format(new Date(Document.valid_upto), 'yyyy-MM-dd'),
-      notes: Document.notes || '',
-    });
+setFormData({
+  holder_name: Document.holder_name || '',
+  Document_type: Document.Document_type || '',
+  Document_password: Document.Document_password || '',
+  associated_with: Document.associated_with || '',
+  entity_type: Document.entity_type || 'firm',
+  issue_date: format(new Date(Document.issue_date), 'yyyy-MM-dd'),
+  valid_upto: Document.valid_upto
+    ? format(new Date(Document.valid_upto), 'yyyy-MM-dd')
+    : "",
+  notes: Document.notes || '',
+});
+
     setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
     setEditingMovement(null); // Reset editing movement
     setDialogOpen(true);
@@ -231,7 +233,7 @@ export default function DocumentRegister() {
       associated_with: '',
       entity_type: 'firm',
       issue_date: '',
-      expiry_date: '',
+      valid_upto: '',
       notes: '',
     });
     setEditingDocument(null);
@@ -387,8 +389,8 @@ export default function DocumentRegister() {
                         <Input
                           id="expiry_date"
                           type="date"
-                          value={formData.expiry_date}
-                          onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
+                          value={formData.valid_upto}
+                          onChange={(e) => setFormData({ ...formData, valid_upto: e.target.value })}
                           required
                           data-testid="Document-expiry-date-input"
                         />
