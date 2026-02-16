@@ -735,15 +735,15 @@ setFormData({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Input
-                      id="expiry_date"
-                      type="date"
-                      value={formData.expiry_date}
-                      onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                      data-testid="Document-expiry-date-input"
-                    />
+                <Input
+                  id="valid_upto"
+                  type="date"
+                  value={formData.valid_upto}
+                  onChange={(e) =>
+                    setFormData({ ...formData, valid_upto: e.target.value })
+                  }
+                  data-testid="Document-valid-upto-input"
+                />
                   </div>
                   <div></div>
                 </div>
