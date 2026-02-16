@@ -745,8 +745,7 @@ setFormData({
                   data-testid="Document-valid-upto-input"
                 />
                   </div>
-                  <div></div>
-                </div>
+                  </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
