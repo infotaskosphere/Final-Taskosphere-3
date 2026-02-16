@@ -978,6 +978,9 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
       <table className="w-full">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
+           <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+              S.No
+            </th> 
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Holder Name
             </th>
@@ -999,7 +1002,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
-          {dscList.map((dsc) => {
+          {dscList.map((dsc, index) => {
             const status = getDSCStatus(dsc.expiry_date);
             return (
               <tr
@@ -1007,6 +1010,9 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`dsc-row-${dsc.id}`}
               >
+                <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                  {index + 1}
+                </td
                 <td className="px-6 py-4 font-medium text-slate-900">{dsc.holder_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with || '-'}</td>
