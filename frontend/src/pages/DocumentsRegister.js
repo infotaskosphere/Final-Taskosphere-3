@@ -983,3 +983,5 @@ export default function DocumentRegister() {
     </div>
   );
 }
+
+}
