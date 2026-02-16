@@ -40,11 +40,6 @@ export default function DocumentRegister() {
   setDialogOpen(true);
   };
 
-  const handleEdit = (document) => {
-  setEditingDocument(document);
-  setDialogOpen(true);
-};
-
   const [editMovementData, setEditMovementData] = useState({
     movement_type: 'IN',
     person_name: '',
