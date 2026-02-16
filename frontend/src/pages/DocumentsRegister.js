@@ -1048,7 +1048,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
-          {DocumentList.map((Document) => {
+          {DocumentList.map((Document, index) => {
             const status = getDocumentStatus(Document.valid_upto);
             return (
               <tr
@@ -1056,6 +1056,9 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`Document-row-${Document.id}`}
               >
+                <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                  {index + 1}
+                </td
                 <td className="px-6 py-4 font-medium text-slate-900">{Document.holder_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
