@@ -50,6 +50,25 @@ export default function DocumentRegister() {
   useEffect(() => {
     fetchDocument();
   }, []);
+  // ✅ Prefill form when editing document
+useEffect(() => {
+  if (editingDocument) {
+    setFormData({
+      holder_name: editingDocument.holder_name || '',
+      Document_type: editingDocument.Document_type || '',
+      Document_password: editingDocument.Document_password || '',
+      associated_with: editingDocument.associated_with || '',
+      entity_type: editingDocument.entity_type || 'firm',
+      issue_date: editingDocument.issue_date
+        ? format(new Date(editingDocument.issue_date), 'yyyy-MM-dd')
+        : '',
+      valid_upto: editingDocument.valid_upto
+        ? format(new Date(editingDocument.valid_upto), 'yyyy-MM-dd')
+        : '',
+      notes: editingDocument.notes || '',
+    });
+  }
+}, [editingDocument]);
 
   const fetchDocument = async () => {
     try {
