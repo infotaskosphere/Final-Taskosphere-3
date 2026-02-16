@@ -407,57 +407,7 @@ const fetchTodayAttendance = async () => {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Staff Ranking Section */}
-<motion.div variants={itemVariants}>
-  <Card className="border border-slate-200 shadow-sm">
-    <CardHeader>
-      <CardTitle className="text-lg font-outfit">
-        🏆 Staff Efficiency Ranking
-      </CardTitle>
-    </CardHeader>
-
-    <CardContent>
-
-      {/* Admin Filter Only */}
-      {user.role === "admin" && (
-        <div className="flex gap-3 mb-4">
-          {["all", "monthly", "weekly"].map(p => (
-            <Button
-              key={p}
-              variant={rankingPeriod === p ? "default" : "outline"}
-              onClick={() => setRankingPeriod(p)}
-            >
-              {p.toUpperCase()}
-            </Button>
-          ))}
-        </div>
-      )}
-
-      {rankings.map(userRank => (
-        <div key={userRank.user_id} className="mb-4">
-          <div className="flex justify-between text-sm mb-1">
-            <span>
-              #{userRank.rank} {userRank.name} ({userRank.role})
-            </span>
-            <span>{userRank.score}%</span>
-          </div>
-
-          <div className="w-full bg-slate-200 rounded-full h-3">
-            <div
-              className="h-3 rounded-full"
-              style={{
-                width: `${userRank.score}%`,
-                backgroundColor: '#1F6FB2'
-              }}
-            />
-          </div>
-        </div>
-      ))}
-
-    </CardContent>
-  </Card>
-</motion.div>
-
+    
       {/* Two Column Section */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-6" variants={itemVariants}>
         {/* Recent Task Updates */}
