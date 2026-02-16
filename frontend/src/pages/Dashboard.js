@@ -583,16 +583,37 @@ const fetchTodayAttendance = async () => {
               className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
             >
               <div className="flex items-center gap-3">
-                <div className="text-base font-semibold text-slate-600">
-                  #{member.rank}
+              <div className="text-sm font-semibold text-slate-600 w-6">
+                #{member.rank}
+              </div>
+
+              <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 flex-shrink-0">
+                {member.profile_picture ? (
+                  <img
+                    src={member.profile_picture}
+                    alt={member.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-xs font-semibold text-white"
+                    style={{ background: '#1FAF5A' }}
+                   >
+                    {member.name?.charAt(0)}
+                   </div>
+                  )}
                 </div>
+
                 <div>
-                  <p className="font-medium text-slate-900">
-                    {member.name}
-                  </p>
-                  <p className="text-xs text-slate-500 capitalize">
-                    {member.role}
-                  </p>
+                <p className="font-medium text-slate-900 text-sm">
+                  {member.name}
+                </p>
+                <p className="text-xs text-slate-500 capitalize">
+                  {member.role}
+                </p>
+                </div>
+               </div>
+
                 </div>
               </div>
 
