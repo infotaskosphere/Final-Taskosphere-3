@@ -308,7 +308,7 @@ export default function DocumentRegister() {
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="holder_name">Name of Document Holder <span className="text-red-500">*</span></Label>
                         <Input
                           id="holder_name"
                           placeholder="Name of certificate holder"
@@ -635,7 +635,7 @@ export default function DocumentRegister() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="holder_name">Document Name <span className="text-red-500">*</span></Label>
+                    <Label htmlFor="holder_name">Name of Document Holder <span className="text-red-500">*</span></Label>
                     <Input
                       id="holder_name"
                       placeholder="Name of certificate holder"
