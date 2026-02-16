@@ -218,6 +218,7 @@ export default function Users() {
   can_manage_users: false,
   can_assign_tasks: false,
   assigned_clients: [],
+});
   const handlePhotoUpload = async (file) => {
   const formDataCloud = new FormData();
   formDataCloud.append("file", file);
