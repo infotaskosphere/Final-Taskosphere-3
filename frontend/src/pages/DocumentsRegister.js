@@ -31,7 +31,6 @@ export default function DocumentRegister() {
     associated_with: '', // Not compulsory
     entity_type: 'firm',
     issue_date: '',
-    expiry_date: '',
     notes: '',
   });
 
