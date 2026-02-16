@@ -26,16 +26,15 @@ export default function DocumentRegister() {
 
   const [formData, setFormData] = useState({
   holder_name: '',
-  dsc_Document Type: '',
-  dsc_Access Code: '',
+  dsc_type: '',
+  dsc_password: '',
   associated_with: '',
-  entity_Document Type: 'firm',
+  entity_type: 'firm',
   issue_date: '',
   expiry_date: '',
   notes: '',
 });
 
-  });
 const [movementData, setMovementData] = useState({
   movement_type: 'IN',
   person_name: '',
