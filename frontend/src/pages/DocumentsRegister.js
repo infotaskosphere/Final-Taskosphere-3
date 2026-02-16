@@ -67,7 +67,6 @@ export default function DocumentRegister() {
       const DocumentData = {
         ...formData,
         issue_date: new Date(formData.issue_date).toISOString(),
-        expiry_date: new Date(formData.expiry_date).toISOString(),
       };
 
       if (editingDocument) {
@@ -200,7 +199,6 @@ export default function DocumentRegister() {
       associated_with: Document.associated_with || '',
       entity_type: Document.entity_type || 'firm',
       issue_date: format(new Date(Document.issue_date), 'yyyy-MM-dd'),
-      expiry_date: format(new Date(Document.expiry_date), 'yyyy-MM-dd'),
       notes: Document.notes || '',
     });
     setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
@@ -228,7 +226,6 @@ export default function DocumentRegister() {
       associated_with: '',
       entity_type: 'firm',
       issue_date: '',
-      expiry_date: '',
       notes: '',
     });
     setEditingDocument(null);
@@ -236,7 +233,6 @@ export default function DocumentRegister() {
 
   const getDocumentStatus = (expiryDate) => {
     const now = new Date();
-    const expiry = new Date(expiryDate);
     const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 
     if (daysLeft < 0) {
@@ -704,12 +700,12 @@ export default function DocumentRegister() {
                   <div className="space-y-2">
                     <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                     <Input
-                      id="expiry_date"
+                     
                       type="date"
-                      value={formData.expiry_date}
+                     
                       onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                       required
-                      data-testid="Document-expiry-date-input"
+                     
                     />
                   </div>
                   <div></div>
@@ -936,23 +932,7 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Document Expiry Alert */}
-      {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color !== 'bg-emerald-500').length > 0 && (
-        <Card className="border-2 border-orange-200 bg-orange-50">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-orange-900">Attention Required</h3>
-                <p className="text-sm text-orange-700 mt-1">
-                  {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
-                  {DocumentList.filter(Document => getDocumentStatus(Document.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    </Card>
       )}
     </div>
   );
