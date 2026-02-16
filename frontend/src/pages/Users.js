@@ -455,6 +455,23 @@ export default function Users() {
                   data-testid="user-name-input"
                 />
               </div>
+              <div className="space-y-2">
+              <Label>Profile Photo</Label>
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handlePhotoUpload(e.target.files[0])}
+                className="h-11 rounded-xl"
+              />
+
+              {formData.profile_picture && (
+              <img
+               src={formData.profile_picture}
+               alt="Preview"
+               className="w-20 h-20 rounded-xl object-cover border mt-2"
+             />
+           )}
+         </div>
 
               <div className="space-y-2">
                 <Label htmlFor="email">Email <span className="text-red-500">*</span></Label>
