@@ -959,7 +959,7 @@ export default function DSCRegister() {
               <div>
                 <h3 className="font-semibold text-orange-900">Attention Required</h3>
                 <p className="text-sm text-orange-700 mt-1">
-                  {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
+                  {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-red-500').length} document(s) validity or expiring within 7 days.
                   {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
                 </p>
               </div>
