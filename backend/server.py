@@ -43,12 +43,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://final-taskosphere-frontend.onrender.com",
+        "http://final-taskosphere-frontend.onrender.com",
         "http://localhost:3000",
         "http://localhost:5173",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"], # This allows GET, POST, PUT, DELETE, OPTIONS, etc.
+    allow_headers=["*"], # This allows Authorization and Content-Type headers
 )
 api_router = APIRouter(prefix="/api")
 
