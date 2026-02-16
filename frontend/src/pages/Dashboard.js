@@ -61,11 +61,26 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [rankings, setRankings] = useState([]);
   const [rankingPeriod, setRankingPeriod] = useState("all");
+  const [chatMessages, setChatMessages] = useState([]);
+  const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   
   useEffect(() => {
   fetchDashboardData();
   fetchTodayAttendance();
 }, [rankingPeriod]);
+  useEffect(() => {
+  const interval = setInterval(() => {
+    api.get('/chat/notifications').then(res => {
+      if (res.data.length > chatMessages.length) {
+        notificationAudio.current.play();
+      }
+      setChatMessages(res.data);
+    });
+  }, 10000); // every 10 seconds
+
+  return () => clearInterval(interval);
+}, [chatMessages]);
+
 
 const fetchDashboardData = async () => {
   try {
@@ -84,6 +99,16 @@ const rankingRes = await api.get(
   `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
 );
 setRankings(rankingRes.data.rankings);
+
+    // Fetch Chat Notifications
+const chatRes = await api.get('/chat/notifications');
+
+if (chatRes.data.length > chatMessages.length) {
+  notificationAudio.play();
+}
+
+setChatMessages(chatRes.data);
+
 
   } catch (error) {
     console.error('Failed to fetch dashboard data:', error);
@@ -538,7 +563,49 @@ const fetchTodayAttendance = async () => {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+        {/* Chat Notifications */}
+<Card className="border border-slate-200 shadow-sm rounded-2xl" data-testid="chat-notifications-widget">
+  <CardHeader className="pb-2 border-b border-slate-100">
+    <div className="flex items-center justify-between">
+      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+        <Activity className="h-5 w-5 text-emerald-600" />
+        New Messages
+      </CardTitle>
+      <Badge className="bg-emerald-500 text-white">
+        {chatMessages.length}
+      </Badge>
+    </div>
+    <p className="text-xs text-slate-500 mt-1">
+      Recent unread conversations
+    </p>
+  </CardHeader>
+
+  <CardContent className="p-4">
+    {chatMessages.length === 0 ? (
+      <div className="text-center py-6 text-slate-400 text-sm">
+        No new messages
+      </div>
+    ) : (
+      <div className="space-y-3">
+        {chatMessages.slice(0,4).map((msg) => (
+          <div
+            key={msg.id}
+            className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 animate-pulse cursor-pointer hover:bg-emerald-100 transition"
+            onClick={() => navigate('/chat')}
+          >
+            <p className="text-sm font-semibold text-slate-900">
+              {msg.sender_name}
+            </p>
+            <p className="text-xs text-slate-600 truncate">
+              {msg.message}
+            </p>
+          </div>
+        ))}
+      </div>
+    )}
+  </CardContent>
+</Card>
+</motion.div>
 
       {/* Staff Efficiency Ranking */}
 <motion.div variants={itemVariants}>
