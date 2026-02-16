@@ -381,18 +381,6 @@ export default function DocumentRegister() {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="expiry_date"
-                          type="date"
-                          value={formData.expiry_date}
-                          onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                          required
-                          data-testid="Document-expiry-date-input"
-                        />
-                      </div>
-                      <div></div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="notes">Notes</Label>
