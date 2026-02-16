@@ -497,7 +497,12 @@ useEffect(() => {
                           id="inline_person"
                           placeholder="Enter person name"
                           value={movementData.person_name}
-                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
+                          onChange={(e) =>
+                            setMovementData((prev) => ({
+                               ...prev,
+                               person_name: e.target.value,
+                             }))
+                          }
                           required
                         />
                       </div>
@@ -858,14 +863,14 @@ useEffect(() => {
       </Tabs>
 
       {/* Movement Dialog */}
-      <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
+      <Dialog open={movementDialogOpen && movementData} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl">
-              Mark Document as {movementData.movement_type}
+              Mark Document as {movementData?.movement_type}
             </DialogTitle>
             <DialogDescription>
-              {movementData.movement_type === 'IN' 
+              {movementData?.movement_type === 'IN' 
                 ? 'Record when Document is delivered/returned' 
                 : 'Record when Document is taken out'}
             </DialogDescription>
@@ -878,12 +883,12 @@ useEffect(() => {
 
             <div className="space-y-2">
               <Label htmlFor="person_name">
-                {movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
+                {movementData?.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
               </Label>
               <Input
                 id="person_name"
                 placeholder="Enter person name"
-                value={movementData.person_name}
+                value={movementData?.person_name || ''}
                 onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
                 required
               />
@@ -907,7 +912,7 @@ useEffect(() => {
               <Button
                 type="submit"
                 disabled={loading}
-                className={movementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
+                className={movementData?.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
               >
                 {loading ? 'Recording...' : `Mark as ${movementData.movement_type}`}
               </Button>
