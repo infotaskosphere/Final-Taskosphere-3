@@ -564,7 +564,11 @@ const fetchTodayAttendance = async () => {
           </CardContent>
         </Card>
         {/* Chat Notifications */}
-<Card className="border border-slate-200 shadow-sm rounded-2xl" data-testid="chat-notifications-widget">
+<Card
+  className="border border-slate-200 shadow-sm rounded-2xl cursor-pointer hover:shadow-md hover:border-slate-300 transition-all duration-200"
+  data-testid="chat-notifications-widget"
+  onClick={() => navigate('/chat')}
+>
   <CardHeader className="pb-2 border-b border-slate-100">
     <div className="flex items-center justify-between">
       <CardTitle className="text-lg font-semibold flex items-center gap-2">
