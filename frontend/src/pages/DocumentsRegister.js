@@ -374,7 +374,7 @@ setFormData({
         setFormData({ ...formData, entity_type: value })
       }
     >
-      <SelectTrigger data-testid="Document-entity-type-select">
+      <SelectTrigger id="entity_type" data-testid="Document-entity-type-select">
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="max-h-60 overflow-y-auto">
@@ -717,7 +717,7 @@ setFormData({
                       value={formData.entity_type}
                       onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
                     >
-                      <SelectTrigger data-testid="Document-entity-type-select">
+                      <SelectTrigger id="entity_type" data-testid="Document-entity-type-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
