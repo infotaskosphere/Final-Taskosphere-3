@@ -309,7 +309,6 @@ export default function DocumentRegister() {
                           data-testid="Document-type-input"
                         />
                       </div>
-                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="Document_password">Password</Label>
@@ -784,7 +783,7 @@ export default function DocumentRegister() {
                   <p>No Document certificates currently OUT</p>
                 </div>
               ) : (
-                <DocumentTable DocumentList={outDocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDocumentStatus={getDocumentStatus} type="OUT" />
+                <DocumentTable DocumentList={outDocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} type="OUT" />
               )}
             </CardContent>
           </Card>
@@ -949,7 +948,6 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 <td className="px-6 py-4 font-medium text-slate-900">{Document.holder_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     <Button
