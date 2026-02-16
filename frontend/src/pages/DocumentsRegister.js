@@ -1063,7 +1063,7 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
               <tr key={Document.id}>                
                 <td className="px-6 py-4 text-sm font-medium text-slate-500">
                   {index + 1}
-                </td
+                </td>
                 <td className="px-6 py-4 font-medium text-slate-900">{Document.holder_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
