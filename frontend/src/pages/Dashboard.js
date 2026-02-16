@@ -614,9 +614,7 @@ const fetchTodayAttendance = async () => {
                 </div>
                </div>
 
-                </div>
               </div>
-
               <div className="text-right">
                 <p className="font-semibold text-slate-900">
                   {member.score}%
