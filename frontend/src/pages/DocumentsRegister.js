@@ -695,7 +695,7 @@ export default function DocumentRegister() {
                     data-testid="Document-notes-input"
                   />
                 </div>
-
+                </form>
                 <DialogFooter>
                   <Button
                     type="button"
