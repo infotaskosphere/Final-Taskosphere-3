@@ -2101,5 +2101,131 @@ async def send_reminder_to_user(
         "message": "Reminder sent successfully",
         "task_count": len(tasks)
     }
+
+    # ================= STAFF RANKING ROUTE =================
+
+@api_router.get("/staff/rankings")
+async def get_staff_rankings(
+    period: str = "all",
+    current_user: User = Depends(get_current_user)
+):
+
+    # Allow Admin, Manager, Staff to view
+    if current_user.role not in ["admin", "manager", "staff"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Only Admin can change period
+    if current_user.role != "admin":
+        period = "all"
+
+    now = datetime.now(timezone.utc)
+    start_date = None
+
+    # Date filtering
+    if period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now.replace(day=1)
+
+    # Get only Manager & Staff (exclude Admin)
+    users = await db.users.find(
+        {"role": {"$in": ["manager", "staff"]}},
+        {"_id": 0, "password": 0}
+    ).to_list(1000)
+
+    rankings = []
+
+    for user in users:
+        uid = user["id"]
+
+        # ================= ATTENDANCE =================
+        attendance_records = await db.attendance.find(
+            {"user_id": uid},
+            {"_id": 0}
+        ).to_list(1000)
+
+        total_minutes = 0
+
+        for record in attendance_records:
+            record_date = datetime.strptime(record["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if start_date and record_date < start_date:
+                continue
+            total_minutes += record.get("duration_minutes", 0)
+
+        work_score = min(total_minutes / (60 * 160), 1) * 100  # normalize
+
+        # ================= TASKS =================
+        tasks = await db.tasks.find(
+            {"assigned_to": uid},
+            {"_id": 0}
+        ).to_list(1000)
+
+        filtered_tasks = []
+
+        for task in tasks:
+            created = task.get("created_at")
+
+            if isinstance(created, str):
+                created = datetime.fromisoformat(created)
+
+            if start_date and created < start_date:
+                continue
+
+            filtered_tasks.append(task)
+
+        total_tasks = len(filtered_tasks)
+        completed_tasks = len([t for t in filtered_tasks if t["status"] == "completed"])
+
+        completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+
+        # ================= SPEED =================
+        completion_times = []
+
+        for task in filtered_tasks:
+            if task["status"] == "completed":
+                created = task.get("created_at")
+                updated = task.get("updated_at")
+
+                if isinstance(created, str):
+                    created = datetime.fromisoformat(created)
+                if isinstance(updated, str):
+                    updated = datetime.fromisoformat(updated)
+
+                diff = (updated - created).total_seconds()
+                completion_times.append(diff)
+
+        if completion_times:
+            avg_seconds = sum(completion_times) / len(completion_times)
+            speed_score = max(0, 100 - (avg_seconds / 86400) * 10)
+        else:
+            speed_score = 0
+
+        # ================= FINAL SCORE =================
+        efficiency = (
+            0.35 * work_score +
+            0.40 * completion_percent +
+            0.25 * speed_score
+        )
+
+        rankings.append({
+            "user_id": uid,
+            "name": user["full_name"],
+            "role": user["role"],
+            "score": round(efficiency, 2),
+            "hours_worked": round(total_minutes / 60, 2),
+            "completion_percent": round(completion_percent, 2),
+        })
+
+    rankings.sort(key=lambda x: x["score"], reverse=True)
+
+    for i, r in enumerate(rankings):
+        r["rank"] = i + 1
+
+    return {
+        "period": period,
+        "rankings": rankings
+    }
+
+
 # ================= INCLUDE ROUTER =================
 app.include_router(api_router)
