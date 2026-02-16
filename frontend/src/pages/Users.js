@@ -189,6 +189,7 @@ export default function Users() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
 
+  const handlePhotoUpload = async (file) => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
