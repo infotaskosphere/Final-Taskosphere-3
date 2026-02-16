@@ -65,16 +65,21 @@ export default function DocumentRegister() {
     setLoading(true);
 
     try {
-      const DocumentData = {
-  ...formData,
+ const DocumentData = {
+  document_name: formData.holder_name,   // ✅ required by backend
+  Document_type: formData.Document_type,
+  Document_password: formData.Document_password,
+  associated_with: formData.associated_with,
+  entity_type: formData.entity_type,
   issue_date: formData.issue_date
     ? new Date(formData.issue_date).toISOString()
     : null,
   valid_upto: formData.valid_upto
     ? new Date(formData.valid_upto).toISOString()
     : null,
+  notes: formData.notes || ""
 };
-
+      
       if (editingDocument) {
         await api.put(`/documents/${editingDocument.id}`, DocumentData);
         toast.success('Document updated successfully!');
