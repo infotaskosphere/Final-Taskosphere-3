@@ -231,20 +231,6 @@ export default function DocumentRegister() {
     setEditingDocument(null);
   };
 
-  const getDocumentStatus = (expiryDate) => {
-    const now = new Date();
-    const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-
-    if (daysLeft < 0) {
-      return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
-    } else if (daysLeft <= 7) {
-      return { color: 'bg-red-500', text: `${daysLeft}d left`, textColor: 'text-red-700' };
-    } else if (daysLeft <= 30) {
-      return { color: 'bg-yellow-500', text: `${daysLeft}d left`, textColor: 'text-yellow-700' };
-    }
-    return { color: 'bg-emerald-500', text: `${daysLeft}d left`, textColor: 'text-emerald-700' };
-  };
-
   // Filter by search query
   const filterBySearch = (Document) => {
     if (!searchQuery.trim()) return true;
@@ -778,7 +764,7 @@ export default function DocumentRegister() {
                   <p>No Document certificates currently IN</p>
                 </div>
               ) : (
-                <DocumentTable DocumentList={inDocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDocumentStatus={getDocumentStatus} type="IN" />
+                <DocumentTable DocumentList={inDocument} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} type="IN" />
               )}
             </CardContent>
           </Card>
@@ -926,7 +912,7 @@ export default function DocumentRegister() {
   }
 
 // Document Table Component
-function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, getDocumentStatus, type }) {
+function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, type }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -964,7 +950,6 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
-               
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     <Button
