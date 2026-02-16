@@ -288,7 +288,7 @@ export default function DocumentRegister() {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl">
-                {editingDSC ? 'Edit DSC' : 'Add New DSC'}
+                {editingDSC ? 'Edit Document' : 'Add New Document'}
               </DialogTitle>
               <DialogDescription>
                 {editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new Document.'}
