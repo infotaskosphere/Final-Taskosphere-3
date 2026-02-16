@@ -66,10 +66,12 @@ export default function DocumentRegister() {
 
     try {
       const DocumentData = {
-        ...formData,
-        issue_date: new Date(formData.issue_date).toISOString(),
-        expiry_date: new Date(formData.expiry_date).toISOString(),
-      };
+  ...formData,
+  issue_date: new Date(formData.issue_date).toISOString(),
+  expiry_date: formData.expiry_date
+    ? new Date(formData.expiry_date).toISOString()
+    : null,
+};
 
       if (editingDocument) {
         await api.put(`/documents/${editingDocument.id}`, DocumentData);
@@ -721,7 +723,6 @@ export default function DocumentRegister() {
                       type="date"
                       value={formData.expiry_date}
                       onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                      required
                       data-testid="Document-expiry-date-input"
                     />
                   </div>
