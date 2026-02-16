@@ -617,7 +617,7 @@ const fetchTodayAttendance = async () => {
 </Card>
 </motion.div>
 
-      {/* Staff Efficiency Ranking */}
+      {/* Star Performers */}
 <motion.div variants={itemVariants}>
   <Card 
     className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
@@ -627,8 +627,8 @@ const fetchTodayAttendance = async () => {
     <CardHeader className="pb-3 border-b border-slate-100">
       <div className="flex items-center justify-between">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
-          <TrendingUp className="h-5 w-5 text-blue-600" />
-          Staff Efficiency Ranking
+          <TrendingUp className="h-5 w-5 text-yellow-500" />
+          Star Performers
         </CardTitle>
 
         {user.role === "admin" && (
@@ -651,7 +651,7 @@ const fetchTodayAttendance = async () => {
       </div>
 
       <p className="text-xs text-slate-500 mt-1">
-        Based on hours worked, completion rate & speed
+        Recognizing top contributors based on performance metrics
       </p>
     </CardHeader>
 
@@ -663,55 +663,75 @@ const fetchTodayAttendance = async () => {
         </div>
       ) : (
         <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-          {rankings.slice(0, 5).map((member) => (
-            <div
-              key={member.user_id}
-              className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition"
-            >
-              <div className="flex items-center gap-3">
-                
-                {/* Rank */}
-                <div className="text-sm font-semibold text-slate-600 w-6">
-                  #{member.rank}
+          {rankings.slice(0, 5).map((member, index) => {
+
+            const isTop = index === 0;
+            const isSecond = index === 1;
+            const isThird = index === 2;
+
+            return (
+              <div
+                key={member.user_id}
+                className={`flex items-center justify-between p-3 rounded-xl transition
+                  ${isTop
+                    ? "bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-300 shadow-md"
+                    : "bg-slate-50 hover:bg-slate-100"
+                  }`}
+              >
+                <div className="flex items-center gap-3">
+
+                  {/* Rank Badge */}
+                  <div className="w-7 text-sm font-semibold">
+                    {isTop && "🥇"}
+                    {isSecond && "🥈"}
+                    {isThird && "🥉"}
+                    {!isTop && !isSecond && !isThird && `#${member.rank}`}
+                  </div>
+
+                  {/* Avatar */}
+                  <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
+                    ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
+                  `}>
+                    {member.profile_picture ? (
+                      <img
+                        src={member.profile_picture}
+                        alt={member.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div
+                        className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white
+                          ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
+                        `}
+                      >
+                        {member.name?.charAt(0)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Name + Role */}
+                  <div>
+                    <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                      {member.name}
+                    </p>
+                    <p className="text-xs text-slate-500 capitalize">
+                      {member.role}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Avatar */}
-                <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 flex-shrink-0">
-                  {member.profile_picture ? (
-                    <img
-                      src={member.profile_picture}
-                      alt={member.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-white bg-emerald-500">
-                      {member.name?.charAt(0)}
-                    </div>
-                  )}
-                </div>
-
-                {/* Name + Role */}
-                <div>
-                  <p className="text-sm font-medium text-slate-900">
-                    {member.name}
+                {/* Score */}
+                <div className="text-right">
+                  <p className={`text-sm font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                    {member.score}%
                   </p>
-                  <p className="text-xs text-slate-500 capitalize">
-                    {member.role}
+                  <p className="text-xs text-slate-500">
+                    {member.hours_worked}h worked
                   </p>
                 </div>
               </div>
-
-              {/* Score */}
-              <div className="text-right">
-                <p className="text-sm font-semibold text-slate-900">
-                  {member.score}%
-                </p>
-                <p className="text-xs text-slate-500">
-                  {member.hours_worked}h worked
-                </p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -729,7 +749,6 @@ const fetchTodayAttendance = async () => {
     </CardContent>
   </Card>
 </motion.div>
-
 
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
