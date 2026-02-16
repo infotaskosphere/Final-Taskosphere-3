@@ -2211,6 +2211,7 @@ async def get_staff_rankings(
             "user_id": uid,
             "name": user["full_name"],
             "role": user["role"],
+            "profile_picture": user.get("profile_picture"),
             "score": round(efficiency, 2),
             "hours_worked": round(total_minutes / 60, 2),
             "completion_percent": round(completion_percent, 2),
