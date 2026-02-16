@@ -772,7 +772,7 @@ export default function DSCRegister() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
           Document Type="text"
-          placeholder="Search by Document Name, certificate number, or company..."
+          placeholder="Search by Document Name, type, or client..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
