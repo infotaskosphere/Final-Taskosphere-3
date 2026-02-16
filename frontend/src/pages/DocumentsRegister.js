@@ -386,12 +386,14 @@ setFormData({
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
+                        <Label htmlFor="valid_upto">
+                          Valid Upto
+                        </Label>
                         <Input
                           id="expiry_date"
-                          type="date"
+                          id="expiry_date"
                           value={formData.valid_upto}
                           onChange={(e) => setFormData({ ...formData, valid_upto: e.target.value })}
-                          required
                           data-testid="Document-expiry-date-input"
                         />
                       </div>
