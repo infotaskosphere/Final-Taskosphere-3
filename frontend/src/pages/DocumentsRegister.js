@@ -210,54 +210,6 @@ useEffect(() => {
     }
   };
 
-  // Start editing a movement
-  const startEditingMovement = (movement) => {
-    setEditingMovement(movement.id || movement.timestamp); // Use id or timestamp as fallback
-    setEditMovementData({
-      movement_type: movement.movement_type,
-      person_name: movement.person_name,
-      notes: movement.notes || '',
-    });
-  };
-
-  } catch (error) {
-    console.error('Error saving document:', error);
-    toast.error('Failed to save document');
-  } finally {
-    setLoading(false);
-  }
-};
-
-  setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-  setEditingMovement(null);
-  setDialogOpen(true);
-};
-
-  const handleDelete = async (DocumentId) => {
-    if (!window.confirm('Are you sure you want to delete this Document?')) return;
-
-    try {
-      await api.delete(`/documents/${DocumentId}`);
-      toast.success('Document deleted successfully!');
-      fetchDocument();
-    } catch (error) {
-      toast.error('Failed to delete Document');
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      holder_name: '',
-      Document_type: '',
-      Document_password: '',
-      associated_with: '',
-      entity_type: 'firm',
-      issue_date: '',
-      valid_upto: '',
-      notes: '',
-    });
-    setEditingDocument(null);
-  };
 
   const getDocumentStatus = (expiryDate) => {
   // ✅ If no expiry date provided
