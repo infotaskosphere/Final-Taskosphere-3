@@ -206,7 +206,7 @@ export default function Users() {
   role: 'staff',
   profile_picture: '',
   phone: '',
-  birthdate: ''
+  birthdate: '',
   departments: [],
 });
   const handlePhotoUpload = async (file) => {
