@@ -804,7 +804,7 @@ export default function DSCRegister() {
             <CardContent className="p-0">
               {inDSC.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <p>No DSC certificates currently IN</p>
+                  <p>No documents currently IN</p>
                 </div>
               ) : (
                 <DSCTable dscList={inDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="IN" />
@@ -824,7 +824,7 @@ export default function DSCRegister() {
             <CardContent className="p-0">
               {outDSC.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <p>No DSC certificates currently OUT</p>
+                  <p>No documents currently OUT</p>
                 </div>
               ) : (
                 <DSCTable dscList={outDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="OUT" />
