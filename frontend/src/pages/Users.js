@@ -188,7 +188,14 @@ export default function Users() {
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
-
+  const [formData, setFormData] = useState({
+  email: '',
+  password: '',
+  full_name: '',
+  role: 'staff',
+  profile_picture: '',
+  departments: [],
+});
   
   useEffect(() => {
     fetchUsers();
