@@ -540,6 +540,78 @@ const fetchTodayAttendance = async () => {
         </Card>
       </motion.div>
 
+      {/* Staff Efficiency Ranking */}
+<motion.div variants={itemVariants}>
+  <Card className="border border-slate-200 shadow-sm" data-testid="staff-ranking-card">
+    <CardHeader className="pb-2">
+      <div className="flex items-center justify-between">
+        <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+          <TrendingUp className="h-5 w-5" />
+          Staff Efficiency Ranking
+        </CardTitle>
+
+        {user.role === "admin" && (
+          <div className="flex gap-2">
+            {["all", "monthly", "weekly"].map(p => (
+              <Button
+                key={p}
+                size="sm"
+                variant={rankingPeriod === p ? "default" : "outline"}
+                onClick={() => setRankingPeriod(p)}
+              >
+                {p.toUpperCase()}
+              </Button>
+            ))}
+          </div>
+        )}
+      </div>
+      <p className="text-sm text-slate-500">
+        Performance based on hours worked, completion rate and task efficiency
+      </p>
+    </CardHeader>
+
+    <CardContent className="pt-4">
+      {rankings.length === 0 ? (
+        <div className="text-center py-6 text-slate-500">
+          No ranking data available
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rankings.map((member) => (
+            <div
+              key={member.user_id}
+              className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="text-base font-semibold text-slate-600">
+                  #{member.rank}
+                </div>
+                <div>
+                  <p className="font-medium text-slate-900">
+                    {member.name}
+                  </p>
+                  <p className="text-xs text-slate-500 capitalize">
+                    {member.role}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <p className="font-semibold text-slate-900">
+                  {member.score}%
+                </p>
+                <p className="text-xs text-slate-500">
+                  {member.hours_worked}h worked
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </CardContent>
+  </Card>
+</motion.div>
+
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card 
