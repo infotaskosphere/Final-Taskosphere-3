@@ -97,9 +97,9 @@ const [movementData, setMovementData] = useState({
 
     try {
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
-      toast.success(`DSC marked as ${movementData.movement_Document Type}!`);
+      toast.success(`DSC marked as ${movementData.movement_type}!`);
       setMovementDialogOpen(false);
-      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
+      setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
       fetchDSC();
     } catch (error) {
       toast.error('Failed to record movement');
@@ -108,9 +108,9 @@ const [movementData, setMovementData] = useState({
     }
   };
 
-  const openMovementDialog = (dsc, Document Type) => {
+  const openMovementDialog = (dsc, type) => {
     setSelectedDSC(dsc);
-    setMovementData({ ...movementData, movement_Document Type: Document Type });
+    setMovementData({ ...movementData, movement_type: type });
     setMovementDialogOpen(true);
   };
 
