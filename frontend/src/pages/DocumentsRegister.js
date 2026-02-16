@@ -322,7 +322,7 @@ export default function DocumentRegister() {
                         <Label htmlFor="Document_type">Nature of Document</Label>
                         <Input
                           id="Document_type"
-                          placeholder="e.g. Class 3, Signature, Encryption"
+                          placeholder="Enter nature of document"
                           value={formData.Document_type}
                           onChange={(e) => setFormData({ ...formData, Document_type: e.target.value })}
                           data-testid="Document-type-input"
@@ -650,7 +650,7 @@ export default function DocumentRegister() {
                     <Label htmlFor="Document_type">Nature of Document</Label>
                     <Input
                       id="Document_type"
-                      placeholder="e.g. Class 3, Signature, Encryption"
+                      placeholder="Enter nature of document"
                       value={formData.Document_type}
                       onChange={(e) => setFormData({ ...formData, Document_type: e.target.value })}
                       data-testid="Document-type-input"
