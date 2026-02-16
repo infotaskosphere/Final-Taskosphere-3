@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, History, Search } from 'lucide-react';
 import { format } from 'date-fns';
 
-export default function DSCRegister() {
+export default function DocumentRegister() {
   const [dscList, setDscList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -282,7 +282,7 @@ export default function DSCRegister() {
               data-testid="add-dsc-btn"
             >
               <Plus className="mr-2 h-5 w-5" />
-              Add DSC
+              Add Document
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -758,7 +758,7 @@ export default function DSCRegister() {
                     className="bg-indigo-600 hover:bg-indigo-700"
                     data-testid="dsc-submit-btn"
                   >
-                    {loading ? 'Saving...' : 'Add DSC'}
+                    {loading ? 'Saving...' : 'Add Document'}
                   </Button>
                 </DialogFooter>
               </form>
