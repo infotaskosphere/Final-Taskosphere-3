@@ -25,14 +25,15 @@ export default function DocumentRegister() {
   const [searchQuery, setSearchQuery] = useState(''); // Search state
 
   const [formData, setFormData] = useState({
-    holder_name: '',
-    dsc_Document Type: '', // Not compulsory
-    dsc_Access Code: '', // Second field
-    associated_with: '', // Not compulsory
-    entity_Document Type: 'firm',
-    issue_date: '',
-    expiry_date: '',
-    notes: '',
+  holder_name: '',
+  dsc_Document Type: '',
+  dsc_Access Code: '',
+  associated_with: '',
+  entity_Document Type: 'firm',
+  issue_date: '',
+  expiry_date: '',
+  notes: '',
+});
   });
 
   const [movementData, setMovementData] = useState({
