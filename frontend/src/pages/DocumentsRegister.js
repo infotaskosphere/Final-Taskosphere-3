@@ -67,8 +67,10 @@ export default function DocumentRegister() {
     try {
       const DocumentData = {
   ...formData,
-  issue_date: new Date(formData.issue_date).toISOString(),
-  valid_upto: formData.expiry_date
+  issue_date: formData.issue_date
+    ? new Date(formData.issue_date).toISOString()
+    : null,
+  valid_upto: formData.valid_upto
     ? new Date(formData.valid_upto).toISOString()
     : null,
 };
