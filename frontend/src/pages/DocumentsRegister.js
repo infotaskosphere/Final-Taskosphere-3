@@ -792,7 +792,6 @@ export default function DocumentRegister() {
 
     </div>
   );
-}
       {/* MOVEMENT DIALOG */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
