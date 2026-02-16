@@ -53,7 +53,7 @@ export default function DocumentRegister() {
 
   const fetchDocument = async () => {
     try {
-      const response = await api.get('/ds');
+      const response = await api.get('/dsc');
       setDocumentList(response.data);
     } catch (error) {
       toast.error('Failed to fetch Document');
@@ -72,10 +72,10 @@ export default function DocumentRegister() {
       };
 
       if (editingDocument) {
-        await api.put(`/ds/${editingDocument.id}`, DocumentData);
+        await api.put(`/dsc/${editingDocument.id}`, DocumentData);
         toast.success('Document updated successfully!');
       } else {
-        await api.post('/ds', DocumentData);
+        await api.post('/dsc', DocumentData);
         toast.success('Document added successfully!');
       }
 
@@ -94,7 +94,7 @@ export default function DocumentRegister() {
     setLoading(true);
 
     try {
-      await api.post(`/ds/${selectedDocument.id}/movement`, movementData);
+      await api.post(`/dsc/${selectedDocument.id}/movement`, movementData);
       toast.success(`Document marked as ${movementData.movement_type}!`);
       setMovementDialogOpen(false);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
@@ -132,7 +132,7 @@ export default function DocumentRegister() {
     try {
       const currentStatus = getDocumentInOutStatus(editingDocument);
       const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
-      await api.post(`/ds/${editingDocument.id}/movement`, {
+      await api.post(`/dsc/${editingDocument.id}/movement`, {
         ...movementData,
         movement_type: newType,
       });
@@ -140,7 +140,7 @@ export default function DocumentRegister() {
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
       
       // Refresh the Document data and update editingDocument
-      const response = await api.get('/ds');
+      const response = await api.get('/dsc');
       setDocumentList(response.data);
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) {
@@ -159,7 +159,7 @@ export default function DocumentRegister() {
     setLoading(true);
 
     try {
-      await api.put(`/ds/${editingDocument.id}/movement/${movementId}`, {
+      await api.put(`/dsc/${editingDocument.id}/movement/${movementId}`, {
         movement_id: movementId,
         movement_type: editMovementData.movement_type,
         person_name: editMovementData.person_name,
@@ -169,7 +169,7 @@ export default function DocumentRegister() {
       setEditingMovement(null);
       
       // Refresh the Document data and update editingDocument
-      const response = await api.get('/ds');
+      const response = await api.get('/dsc');
       setDocumentList(response.data);
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) {
@@ -213,7 +213,7 @@ export default function DocumentRegister() {
     if (!window.confirm('Are you sure you want to delete this Document?')) return;
 
     try {
-      await api.delete(`/ds/${DocumentId}`);
+      await api.delete(`/dsc/${DocumentId}`);
       toast.success('Document deleted successfully!');
       fetchDocument();
     } catch (error) {
