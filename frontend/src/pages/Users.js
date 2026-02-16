@@ -189,27 +189,7 @@ export default function Users() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
 
-  const handlePhotoUpload = async (file) => {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    full_name: '',
-    role: 'staff',
-    profile_picture: '',
-    departments: [],
-  });
-
-  const [permissions, setPermissions] = useState({
-    can_view_all_tasks: false,
-    can_view_all_clients: false,
-    can_view_all_dsc: false,
-    can_view_all_duedates: false,
-    can_view_reports: false,
-    can_manage_users: false,
-    can_assign_tasks: false,
-    assigned_clients: [],
-  });
-
+  
   useEffect(() => {
     fetchUsers();
     fetchClients();
