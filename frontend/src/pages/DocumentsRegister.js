@@ -180,7 +180,7 @@ export default function DocumentRegister() {
       // Refresh the Document data and update editingDocument
       const response = await api.get('/documents');
       setDocumentList(response.data);
-      const updatedDocument = response.data.find(d => d.id === editingDocument.id);
+      const updatedDocument = response.data.find(d => d._id === editingDocument._id);
       if (updatedDocument) {
         setEditingDocument(updatedDocument);
       }
@@ -201,24 +201,50 @@ export default function DocumentRegister() {
     });
   };
 
-  const handleEdit = (Document) => {
-setFormData({
-  holder_name: Document.holder_name || '',
-  Document_type: Document.Document_type || '',
-  Document_password: Document.Document_password || '',
-  associated_with: Document.associated_with || '',
-  entity_type: Document.entity_type || 'firm',
-  issue_date: format(new Date(Document.issue_date), 'yyyy-MM-dd'),
-  valid_upto: Document.valid_upto
-    ? format(new Date(Document.valid_upto), 'yyyy-MM-dd')
-    : "",
-  notes: Document.notes || '',
-});
+// ===== SAVE DOCUMENT (ADD / UPDATE) =====
+const handleSubmit = async () => {
+  try {
+    setLoading(true);
 
-    setMovementData({ movement_type: 'IN', person_name: '', notes: '' }); // Reset movement data
-    setEditingMovement(null); // Reset editing movement
-    setDialogOpen(true);
-  };
+    if (editingDocument) {
+      // ===== UPDATE EXISTING DOCUMENT =====
+      await api.put(`/documents/${editingDocument._id}`, formData);
+    } else {
+      // ===== CREATE NEW DOCUMENT =====
+      await api.post('/documents', formData);
+    }
+
+    // Refresh document list
+    const response = await api.get('/documents');
+    setDocumentList(response.data);
+
+    // Reset everything
+    setDialogOpen(false);
+    setEditingDocument(null);
+
+    setFormData({
+      holder_name: '',
+      Document_type: '',
+      Document_password: '',
+      associated_with: '',
+      entity_type: 'Firm',
+      issue_date: '',
+      valid_upto: '',
+      notes: '',
+    });
+
+  } catch (error) {
+    console.error('Error saving document:', error);
+    toast.error('Failed to save document');
+  } finally {
+    setLoading(false);
+  }
+};
+
+  setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
+  setEditingMovement(null);
+  setDialogOpen(true);
+};
 
   const handleDelete = async (DocumentId) => {
     if (!window.confirm('Are you sure you want to delete this Document?')) return;
@@ -247,19 +273,50 @@ setFormData({
   };
 
   const getDocumentStatus = (expiryDate) => {
-    const now = new Date();
-    const expiry = new Date(expiryDate);
-    const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+  // ✅ If no expiry date provided
+  if (!expiryDate) {
+    return {
+      color: 'bg-gray-400',
+      text: 'No Expiry',
+      textColor: 'text-gray-600',
+    };
+  }
 
-    if (daysLeft < 0) {
-      return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
-    } else if (daysLeft <= 7) {
-      return { color: 'bg-red-500', text: `${daysLeft}d left`, textColor: 'text-red-700' };
-    } else if (daysLeft <= 30) {
-      return { color: 'bg-yellow-500', text: `${daysLeft}d left`, textColor: 'text-yellow-700' };
-    }
-    return { color: 'bg-emerald-500', text: `${daysLeft}d left`, textColor: 'text-emerald-700' };
-  };
+  const now = new Date();
+  const expiry = new Date(expiryDate);
+
+  // Normalize time (avoid time mismatch issues)
+  now.setHours(0, 0, 0, 0);
+  expiry.setHours(0, 0, 0, 0);
+
+  const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+
+  if (daysLeft < 0) {
+    return {
+      color: 'bg-red-500',
+      text: 'Expired',
+      textColor: 'text-red-700',
+    };
+  } else if (daysLeft <= 7) {
+    return {
+      color: 'bg-red-500',
+      text: `${daysLeft}d left`,
+      textColor: 'text-red-700',
+    };
+  } else if (daysLeft <= 30) {
+    return {
+      color: 'bg-yellow-500',
+      text: `${daysLeft}d left`,
+      textColor: 'text-yellow-700',
+    };
+  } else {
+    return {
+      color: 'bg-green-500',
+      text: 'Active',
+      textColor: 'text-green-700',
+    };
+  }
+};
 
   // Filter by search query
   const filterBySearch = (Document) => {
@@ -1033,7 +1090,9 @@ function DocumentTable({ DocumentList, onEdit, onDelete, onMovement, onViewLog, 
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.Document_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Document.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {format(new Date(Document.valid_upto), 'MMM dd, yyyy')}
+                  {Document.valid_upto
+                    ? format(new Date(Document.valid_upto), 'MMM dd, yyyy')
+                    : '-'}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
