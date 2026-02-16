@@ -34,13 +34,14 @@ export default function DocumentRegister() {
   expiry_date: '',
   notes: '',
 });
-  });
 
-  const [movementData, setMovementData] = useState({
-    movement_Document Type: 'IN',
-    person_name: '',
-    notes: '',
   });
+const [movementData, setMovementData] = useState({
+  movement_type: 'IN',
+  person_name: '',
+  notes: '',
+});
+
 
   const [editMovementData, setEditMovementData] = useState({
     movement_Document Type: 'IN',
