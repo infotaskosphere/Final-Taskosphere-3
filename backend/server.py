@@ -8,7 +8,7 @@ from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
