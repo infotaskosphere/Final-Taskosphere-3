@@ -798,7 +798,7 @@ export default function DSCRegister() {
             <CardHeader className="bg-emerald-50 border-b border-emerald-200">
               <CardTitle className="text-sm font-medium text-emerald-700 uppercase tracking-wider flex items-center gap-2">
                 <ArrowDownCircle className="h-4 w-4" />
-                DSC IN - Available ({inDSC.length})
+                Document IN - Available ({inDSC.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -818,7 +818,7 @@ export default function DSCRegister() {
             <CardHeader className="bg-red-50 border-b border-red-200">
               <CardTitle className="text-sm font-medium text-red-700 uppercase tracking-wider flex items-center gap-2">
                 <ArrowUpCircle className="h-4 w-4" />
-                DSC OUT - Taken ({outDSC.length})
+                Document OUT - Taken ({outDSC.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
