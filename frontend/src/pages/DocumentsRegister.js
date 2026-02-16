@@ -133,13 +133,13 @@ const [movementData, setMovementData] = useState({
 
     try {
       const currentStatus = getDSCInOutStatus(editingDSC);
-      const newDocument Type = currentStatus === 'IN' ? 'OUT' : 'IN';
+      const newDocument_Type = currentStatus === 'IN' ? 'OUT' : 'IN';
       await api.post(`/dsc/${editingDSC.id}/movement`, {
         ...movementData,
-        movement_Document Type: newDocument Type,
+        movement_Document_Type: newDocument_Type,
       });
-      toast.success(`DSC marked as ${newDocument Type}!`);
-      setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' });
+      toast.success(`DSC marked as ${newDocument_Type}!`);
+      setMovementData({ movement_Document_Type: 'IN', person_name: '', notes: '' });
       
       // Refresh the DSC data and update editingDSC
       const response = await api.get('/dsc');
@@ -163,7 +163,7 @@ const [movementData, setMovementData] = useState({
     try {
       await api.put(`/dsc/${editingDSC.id}/movement/${movementId}`, {
         movement_id: movementId,
-        movement_Document Type: editMovementData.movement_Document Type,
+        movement_Document_Type: editMovementData.movement_Document_Type,
         person_name: editMovementData.person_name,
         notes: editMovementData.notes,
       });
@@ -188,7 +188,7 @@ const [movementData, setMovementData] = useState({
   const startEditingMovement = (movement) => {
     setEditingMovement(movement.id || movement.timestamp); // Use id or timestamp as fallback
     setEditMovementData({
-      movement_Document Type: movement.movement_Document Type,
+      movement_Document_Type: movement.movement_Document_Type,
       person_name: movement.person_name,
       notes: movement.notes || '',
     });
@@ -198,15 +198,15 @@ const [movementData, setMovementData] = useState({
     setEditingDSC(dsc);
     setFormData({
       holder_name: dsc.holder_name,
-      dsc_Document Type: dsc.dsc_Document Type || '',
+      dsc_Document_Type: dsc.dsc_Document_Type || '',
       dsc_Access Code: dsc.dsc_Access Code || '',
       associated_with: dsc.associated_with || '',
-      entity_Document Type: dsc.entity_Document Type || 'firm',
+      entity_Document_Type: dsc.entity_Document_Type || 'firm',
       issue_date: format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
       expiry_date: format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes: dsc.notes || '',
     });
-    setMovementData({ movement_Document Type: 'IN', person_name: '', notes: '' }); // Reset movement data
+    setMovementData({ movement_Document_Type: 'IN', person_name: '', notes: '' }); // Reset movement data
     setEditingMovement(null); // Reset editing movement
     setDialogOpen(true);
   };
@@ -226,10 +226,10 @@ const [movementData, setMovementData] = useState({
   const resetForm = () => {
     setFormData({
       holder_name: '',
-      dsc_Document Type: '',
+      dsc_Document_Type: '',
       dsc_Access Code: '',
       associated_with: '',
-      entity_Document Type: 'firm',
+      entity_Document_Type: 'firm',
       issue_date: '',
       expiry_date: '',
       notes: '',
@@ -258,7 +258,7 @@ const [movementData, setMovementData] = useState({
     const query = searchQuery.toLowerCase();
     return (
       dsc.holder_name?.toLowerCase().includes(query) ||
-      dsc.dsc_Document Type?.toLowerCase().includes(query) ||
+      dsc.dsc_Document_Type?.toLowerCase().includes(query) ||
       dsc.associated_with?.toLowerCase().includes(query)
     );
   };
@@ -321,13 +321,13 @@ const [movementData, setMovementData] = useState({
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="dsc_Document Type">Document Type</Label>
+                        <Label htmlFor="dsc_Document_Type">Document_Type</Label>
                         <Input
-                          id="dsc_Document Type"
+                          id="dsc_Document_Type"
                           placeholder="e.g. Class 3, Signature, Encryption"
-                          value={formData.dsc_Document Type}
-                          onChange={(e) => setFormData({ ...formData, dsc_Document Type: e.target.value })}
-                          data-testid="dsc-Document Type-input"
+                          value={formData.dsc_Document_Type}
+                          onChange={(e) => setFormData({ ...formData, dsc_Document_Type: e.target.value })}
+                          data-testid="dsc-Document_Type-input"
                         />
                       </div>
                     </div>
@@ -336,7 +336,7 @@ const [movementData, setMovementData] = useState({
                         <Label htmlFor="dsc_Access Code">Access Code</Label>
                         <Input
                           id="dsc_Access Code"
-                          Document Type="text"
+                          Document_Type="text"
                           placeholder="DSC Access Code"
                           value={formData.dsc_Access Code}
                           onChange={(e) => setFormData({ ...formData, dsc_Access Code: e.target.value })}
@@ -356,12 +356,12 @@ const [movementData, setMovementData] = useState({
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="entity_Document Type">Entity Document Type</Label>
+                        <Label htmlFor="entity_Document_Type">Entity Document_Type</Label>
                         <Select
-                          value={formData.entity_Document Type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_Document Type: value })}
+                          value={formData.entity_Document_Type}
+                          onValueChange={(value) => setFormData({ ...formData, entity_Document_Type: value })}
                         >
-                          <SelectTrigger data-testid="dsc-entity-Document Type-select">
+                          <SelectTrigger data-testid="dsc-entity-Document_Type-select">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="max-h-60 overflow-y-auto">
@@ -374,7 +374,7 @@ const [movementData, setMovementData] = useState({
                         <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                         <Input
                           id="issue_date"
-                          Document Type="date"
+                          Document_Type="date"
                           value={formData.issue_date}
                           onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
                           required
@@ -387,7 +387,7 @@ const [movementData, setMovementData] = useState({
                         <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                         <Input
                           id="expiry_date"
-                          Document Type="date"
+                          Document_Type="date"
                           value={formData.expiry_date}
                           onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                           required
@@ -409,7 +409,7 @@ const [movementData, setMovementData] = useState({
                     </div>
                     <DialogFooter>
                       <Button
-                        Document Type="button"
+                        Document_Type="button"
                         variant="outline"
                         onClick={() => {
                           setDialogOpen(false);
@@ -420,7 +420,7 @@ const [movementData, setMovementData] = useState({
                         Cancel
                       </Button>
                       <Button
-                        Document Type="submit"
+                        Document_Type="submit"
                         disabled={loading}
                         className="bg-indigo-600 hover:bg-indigo-700"
                         data-testid="dsc-submit-btn"
@@ -485,7 +485,7 @@ const [movementData, setMovementData] = useState({
                         />
                       </div>
                       <Button
-                        Document Type="submit"
+                        Document_Type="submit"
                         disabled={loading}
                         className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
                       >
@@ -513,7 +513,7 @@ const [movementData, setMovementData] = useState({
                         const isEditing = editingMovement === movementKey;
                         
                         return (
-                          <Card key={index} className={`p-3 ${movement.movement_Document Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                          <Card key={index} className={`p-3 ${movement.movement_Document_Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                             {isEditing ? (
                               // Editing mode
                               <div className="space-y-3">
@@ -521,21 +521,21 @@ const [movementData, setMovementData] = useState({
                                   <Label className="text-sm font-medium">Status:</Label>
                                   <div className="flex gap-2">
                                     <Button
-                                      Document Type="button"
+                                      Document_Type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_Document Type === 'IN' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_Document Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document Type: 'IN' })}
+                                      variant={editMovementData.movement_Document_Type === 'IN' ? 'default' : 'outline'}
+                                      className={editMovementData.movement_Document_Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document_Type: 'IN' })}
                                     >
                                       <ArrowDownCircle className="h-4 w-4 mr-1" />
                                       IN
                                     </Button>
                                     <Button
-                                      Document Type="button"
+                                      Document_Type="button"
                                       size="sm"
-                                      variant={editMovementData.movement_Document Type === 'OUT' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_Document Type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document Type: 'OUT' })}
+                                      variant={editMovementData.movement_Document_Type === 'OUT' ? 'default' : 'outline'}
+                                      className={editMovementData.movement_Document_Type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_Document_Type: 'OUT' })}
                                     >
                                       <ArrowUpCircle className="h-4 w-4 mr-1" />
                                       OUT
@@ -562,7 +562,7 @@ const [movementData, setMovementData] = useState({
                                 </div>
                                 <div className="flex gap-2 justify-end">
                                   <Button
-                                    Document Type="button"
+                                    Document_Type="button"
                                     size="sm"
                                     variant="outline"
                                     onClick={() => setEditingMovement(null)}
@@ -570,7 +570,7 @@ const [movementData, setMovementData] = useState({
                                     Cancel
                                   </Button>
                                   <Button
-                                    Document Type="button"
+                                    Document_Type="button"
                                     size="sm"
                                     className="bg-indigo-600 hover:bg-indigo-700"
                                     onClick={() => handleUpdateMovement(movement.id)}
@@ -585,7 +585,7 @@ const [movementData, setMovementData] = useState({
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
-                                    {movement.movement_Document Type === 'IN' ? (
+                                    {movement.movement_Document_Type === 'IN' ? (
                                       <Badge className="bg-emerald-600 text-xs">IN</Badge>
                                     ) : (
                                       <Badge className="bg-red-600 text-xs">OUT</Badge>
@@ -607,7 +607,7 @@ const [movementData, setMovementData] = useState({
                                   </div>
                                   {movement.id && (
                                     <Button
-                                      Document Type="button"
+                                      Document_Type="button"
                                       size="sm"
                                       variant="ghost"
                                       className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
@@ -649,13 +649,13 @@ const [movementData, setMovementData] = useState({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="dsc_Document Type">Document Type</Label>
+                    <Label htmlFor="dsc_Document_Type">Document_Type</Label>
                     <Input
-                      id="dsc_Document Type"
+                      id="dsc_Document_Type"
                       placeholder="e.g. Class 3, Signature, Encryption"
-                      value={formData.dsc_Document Type}
-                      onChange={(e) => setFormData({ ...formData, dsc_Document Type: e.target.value })}
-                      data-testid="dsc-Document Type-input"
+                      value={formData.dsc_Document_Type}
+                      onChange={(e) => setFormData({ ...formData, dsc_Document_Type: e.target.value })}
+                      data-testid="dsc-Document_Type-input"
                     />
                   </div>
                 </div>
@@ -665,7 +665,7 @@ const [movementData, setMovementData] = useState({
                     <Label htmlFor="dsc_Access Code">Access Code</Label>
                     <Input
                       id="dsc_Access Code"
-                      Document Type="text"
+                      Document_Type="text"
                       placeholder="DSC Access Code"
                       value={formData.dsc_Access Code}
                       onChange={(e) => setFormData({ ...formData, dsc_Access Code: e.target.value })}
@@ -687,12 +687,12 @@ const [movementData, setMovementData] = useState({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="entity_Document Type">Entity Document Type</Label>
+                    <Label htmlFor="entity_Document_Type">Entity Document_Type</Label>
                     <Select
-                      value={formData.entity_Document Type}
-                      onValueChange={(value) => setFormData({ ...formData, entity_Document Type: value })}
+                      value={formData.entity_Document_Type}
+                      onValueChange={(value) => setFormData({ ...formData, entity_Document_Type: value })}
                     >
-                      <SelectTrigger data-testid="dsc-entity-Document Type-select">
+                      <SelectTrigger data-testid="dsc-entity-Document_Type-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
@@ -706,7 +706,7 @@ const [movementData, setMovementData] = useState({
                     <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="issue_date"
-                      Document Type="date"
+                      Document_Type="date"
                       value={formData.issue_date}
                       onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
                       required
@@ -720,7 +720,7 @@ const [movementData, setMovementData] = useState({
                     <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
                     <Input
                       id="expiry_date"
-                      Document Type="date"
+                      Document_Type="date"
                       value={formData.expiry_date}
                       onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
                       required
@@ -744,7 +744,7 @@ const [movementData, setMovementData] = useState({
 
                 <DialogFooter>
                   <Button
-                    Document Type="button"
+                    Document_Type="button"
                     variant="outline"
                     onClick={() => {
                       setDialogOpen(false);
@@ -755,7 +755,7 @@ const [movementData, setMovementData] = useState({
                     Cancel
                   </Button>
                   <Button
-                    Document Type="submit"
+                    Document_Type="submit"
                     disabled={loading}
                     className="bg-indigo-600 hover:bg-indigo-700"
                     data-testid="dsc-submit-btn"
@@ -773,7 +773,7 @@ const [movementData, setMovementData] = useState({
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
-          Document Type="text"
+          Document_Type="text"
           placeholder="Search by Document Name, type, or client..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -809,7 +809,7 @@ const [movementData, setMovementData] = useState({
                   <p>No documents currently IN</p>
                 </div>
               ) : (
-                <DSCTable dscList={inDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="IN" />
+                <DSCTable dscList={inDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document_Type="IN" />
               )}
             </CardContent>
           </Card>
@@ -829,7 +829,7 @@ const [movementData, setMovementData] = useState({
                   <p>No documents currently OUT</p>
                 </div>
               ) : (
-                <DSCTable dscList={outDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document Type="OUT" />
+                <DSCTable dscList={outDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog} onViewLog={openLogDialog} getDSCStatus={getDSCStatus} Document_Type="OUT" />
               )}
             </CardContent>
           </Card>
@@ -841,10 +841,10 @@ const [movementData, setMovementData] = useState({
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl">
-              Mark Document as {movementData.movement_Document Type}
+              Mark Document as {movementData.movement_Document_Type}
             </DialogTitle>
             <DialogDescription>
-              {movementData.movement_Document Type === 'IN' 
+              {movementData.movement_Document_Type === 'IN' 
                 ? 'Record when DSC is delivered/returned' 
                 : 'Record when DSC is taken out'}
             </DialogDescription>
@@ -857,7 +857,7 @@ const [movementData, setMovementData] = useState({
 
             <div className="space-y-2">
               <Label htmlFor="person_name">
-                {movementData.movement_Document Type === 'IN' ? 'Delivered By *' : 'Taken By *'}
+                {movementData.movement_Document_Type === 'IN' ? 'Delivered By *' : 'Taken By *'}
               </Label>
               <Input
                 id="person_name"
@@ -880,15 +880,15 @@ const [movementData, setMovementData] = useState({
             </div>
 
             <DialogFooter>
-              <Button Document Type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
+              <Button Document_Type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
                 Cancel
               </Button>
               <Button
-                Document Type="submit"
+                Document_Type="submit"
                 disabled={loading}
-                className={movementData.movement_Document Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
+                className={movementData.movement_Document_Type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
               >
-                {loading ? 'Recording...' : `Mark as ${movementData.movement_Document Type}`}
+                {loading ? 'Recording...' : `Mark as ${movementData.movement_Document_Type}`}
               </Button>
             </DialogFooter>
           </form>
@@ -910,11 +910,11 @@ const [movementData, setMovementData] = useState({
           <div className="space-y-3">
             {selectedDSC?.movement_log && selectedDSC.movement_log.length > 0 ? (
               selectedDSC.movement_log.map((movement, index) => (
-                <Card key={index} className={`p-4 ${movement.movement_Document Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                <Card key={index} className={`p-4 ${movement.movement_Document_Type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        {movement.movement_Document Type === 'IN' ? (
+                        {movement.movement_Document_Type === 'IN' ? (
                           <Badge className="bg-emerald-600">IN</Badge>
                         ) : (
                           <Badge className="bg-red-600">OUT</Badge>
@@ -922,7 +922,7 @@ const [movementData, setMovementData] = useState({
                         <span className="text-sm font-medium">{movement.person_name}</span>
                       </div>
                       <p className="text-sm text-slate-600">
-                        {movement.movement_Document Type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
+                        {movement.movement_Document_Type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
                       </p>
                       <p className="text-xs text-slate-500">
                         Recorded by: {movement.recorded_by}
@@ -974,7 +974,7 @@ const [movementData, setMovementData] = useState({
 }
 
 // DSC Table Component
-function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, Document Type }) {
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, Document_Type }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -984,7 +984,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
               Document Name
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
-              Document Type
+              Document_Type
             </th>
             <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
               Associated With
@@ -1010,7 +1010,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 data-testid={`dsc-row-${dsc.id}`}
               >
                 <td className="px-6 py-4 font-medium text-slate-900">{dsc.holder_name}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_Document Type || '-'}</td>
+                <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_Document_Type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
@@ -1035,11 +1035,11 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onMovement(dsc, Document Type === 'IN' ? 'OUT' : 'IN')}
-                      className={Document Type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
-                      title={Document Type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                      onClick={() => onMovement(dsc, Document_Type === 'IN' ? 'OUT' : 'IN')}
+                      className={Document_Type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
+                      title={Document_Type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     >
-                      {Document Type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                      {Document_Type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
                     </Button>
                     <Button
                       variant="ghost"
