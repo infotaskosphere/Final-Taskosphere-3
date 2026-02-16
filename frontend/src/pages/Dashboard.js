@@ -409,7 +409,7 @@ const fetchTodayAttendance = async () => {
       </motion.div>
     
       {/* Two Column Section */}
-      <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-6" variants={itemVariants}>
+      <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-6" variants={itemVariants}>
         {/* Recent Task Updates */}
         <Card className="border border-slate-200 shadow-sm" data-testid="recent-tasks-card">
           <CardHeader className="pb-2">
