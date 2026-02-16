@@ -133,12 +133,23 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 
       {/* Avatar & Name */}
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
-        <div 
-          className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg flex-shrink-0"
-          style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
-        >
-          {userData.full_name?.charAt(0).toUpperCase()}
-        </div>
+      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
+        {userData.profile_picture ? (
+          <img
+            src={userData.profile_picture}
+            alt={userData.full_name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div
+            className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
+            style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+          >
+            {userData.full_name?.charAt(0).toUpperCase()}
+          </div>
+        )}
+      </div>
+
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-slate-900 truncate text-sm sm:text-base">{userData.full_name}</h3>
           <p className="text-xs sm:text-sm text-slate-500 truncate">{userData.email}</p>
