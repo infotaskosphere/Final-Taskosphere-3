@@ -1218,7 +1218,7 @@ async def get_upcoming_due_dates(
 
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     upcoming = []
 
     for dd in due_dates:
