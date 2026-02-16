@@ -357,74 +357,63 @@ setFormData({
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="entity_type">Entity Type</Label>
-                        <Select
-                          value={formData.entity_type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                        >
-                          <SelectTrigger data-testid="Document-entity-type-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60 overflow-y-auto">
-                            <SelectItem value="firm">Firm</SelectItem>
-                            <SelectItem value="client">Client</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    <div className="grid grid-cols-2 gap-4">
-  {/* Issue Date */}
-                  <div className="space-y-2">
-                    <Label htmlFor="issue_date">
-                     Issue Date <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                     id="issue_date"
-                     type="date"
-                     value={formData.issue_date}
-                     onChange={(e) =>
-                       setFormData({ ...formData, issue_date: e.target.value })
-                     }
-                     required
-                     data-testid="Document-issue-date-input"
-                    />
-                  </div>
 
-  {/* Valid Upto */}
-                <div className="space-y-2">
-                  <Label htmlFor="valid_upto">
-                   Valid Upto
-                  </Label>
-                  <Input
-                   id="valid_upto"
-                   type="date"
-                   value={formData.valid_upto}
-                   onChange={(e) =>
-                    setFormData({ ...formData, valid_upto: e.target.value })
-                   }
-                   data-testid="Document-valid-upto-input"
-                   />
-                </div>
-                     
-              </div>
-                   <div className="grid grid-cols-2 gap-4">
-                   <div className="space-y-2">
-                   <Label htmlFor="valid_upto">
-                    Valid Upto
-                   </Label>
-                   <Input
-                    id="valid_upto"
-                    name="valid_upto"
-                    type="date"
-                    value={formData.valid_upto}
-                    onChange={(e) =>
-                      setFormData({ ...formData, valid_upto: e.target.value })
-                      }
-                  data-testid="Document-valid-upto-input"
-                 />
-               </div>
-               <div></div>
-             </div>
+  {/* Entity Type */}
+  <div className="space-y-2">
+    <Label htmlFor="entity_type">Entity Type</Label>
+    <Select
+      value={formData.entity_type}
+      onValueChange={(value) =>
+        setFormData({ ...formData, entity_type: value })
+      }
+    >
+      <SelectTrigger data-testid="Document-entity-type-select">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="max-h-60 overflow-y-auto">
+        <SelectItem value="firm">Firm</SelectItem>
+        <SelectItem value="client">Client</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+
+  {/* Issue Date */}
+  <div className="space-y-2">
+    <Label htmlFor="issue_date">
+      Issue Date <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="issue_date"
+      type="date"
+      value={formData.issue_date}
+      onChange={(e) =>
+        setFormData({ ...formData, issue_date: e.target.value })
+      }
+      required
+      data-testid="Document-issue-date-input"
+    />
+  </div>
+
+</div>
+
+{/* Valid Upto Row */}
+<div className="grid grid-cols-2 gap-4">
+  <div className="space-y-2">
+    <Label htmlFor="valid_upto">
+      Valid Upto
+    </Label>
+    <Input
+      id="valid_upto"
+      type="date"
+      value={formData.valid_upto}
+      onChange={(e) =>
+        setFormData({ ...formData, valid_upto: e.target.value })
+      }
+      data-testid="Document-valid-upto-input"
+    />
+  </div>
+  <div></div>
+</div>
                     <div className="space-y-2">
                       <Label htmlFor="notes">Notes</Label>
                       <Textarea
