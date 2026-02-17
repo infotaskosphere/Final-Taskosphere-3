@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,13 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, MoreVertical } from 'lucide-react';
+import { 
+  Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, 
+  CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, 
+  MoreVertical, Mail, Phone, Calendar, Camera 
+} from 'lucide-react';
 import { format } from 'date-fns';
-import axios from 'axios';
 import { motion } from 'framer-motion';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Brand Colors
 const COLORS = {
@@ -51,7 +52,6 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
-// Department Pill Component
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -72,7 +72,6 @@ const DeptPill = ({ dept, size = 'sm' }) => {
   );
 };
 
-// User Card Component
 const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS, isAdmin }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
@@ -102,7 +101,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      {/* Action Menu */}
       <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0 sm:opacity-0'}`}>
         {userData.role !== 'admin' && (
           <button
@@ -131,7 +129,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
         )}
       </div>
 
-      {/* Avatar & Name */}
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -165,7 +162,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
         </div>
       </div>
 
-      {/* Departments */}
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => (
@@ -174,7 +170,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
         </div>
       )}
 
-      {/* Details */}
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -186,7 +181,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
         </p>
         <p className="flex items-center gap-2">
           <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
-          Joined {format(new Date(userData.created_at), 'MMM dd, yyyy')}
+          Joined {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
         </p>
       </div>
     </motion.div>
@@ -222,7 +217,6 @@ export default function Users() {
     can_manage_users: false,
     can_assign_tasks: false,
     assigned_clients: [],
-    // NEW: Added default values for new permissions
     can_view_staff_activity: false,
     can_view_attendance_reports: false,
     can_send_reminders: false,
@@ -239,7 +233,7 @@ export default function Users() {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
-      setUsers(response.data);
+      setUsers(response.data || []);
     } catch (error) {
       toast.error('Failed to fetch users');
     }
@@ -248,7 +242,7 @@ export default function Users() {
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
-      setClients(response.data);
+      setClients(response.data || []);
     } catch (error) {
       console.error('Failed to fetch clients');
     }
@@ -295,12 +289,11 @@ export default function Users() {
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      let response;
       if (selectedUser) {
-        response = await api.put(`/users/${selectedUser.id}`, formData);
+        await api.put(`/users/${selectedUser.id}`, formData);
         toast.success('User updated successfully');
       } else {
-        response = await api.post('/auth/register', formData);
+        await api.post('/auth/register', formData);
         toast.success('User created successfully');
       }
       setDialogOpen(false);
@@ -366,8 +359,8 @@ export default function Users() {
   };
 
   const filteredUsers = users.filter(u => {
-    const matchesSearch = u.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          u.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
@@ -387,12 +380,11 @@ export default function Users() {
   return (
     <motion.div 
       className="space-y-6" 
-      variants={containerVariants}
       initial="hidden"
       animate="visible"
+      variants={containerVariants}
     >
-      {/* Header */}
-      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Team Members</h1>
           <p className="text-slate-600 mt-1">Manage your team and their permissions</p>
@@ -402,12 +394,13 @@ export default function Users() {
             <Button 
               className="rounded-xl font-medium text-white w-full md:w-auto"
               style={{ background: COLORS.deepBlue }}
+              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', profile_picture: '' }); }}
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Team Member
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-xl sm:text-2xl" style={{ color: COLORS.deepBlue }}>
                 {selectedUser ? 'Edit Team Member' : 'Add New Team Member'}
@@ -417,7 +410,6 @@ export default function Users() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              {/* Profile Picture */}
               <div className="flex justify-center">
                 <div className="relative">
                   <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-200 flex items-center justify-center">
@@ -427,23 +419,13 @@ export default function Users() {
                       <UserIcon className="h-12 w-12 text-slate-400" />
                     )}
                   </div>
-                  <label 
-                    htmlFor="profile-upload"
-                    className="absolute bottom-0 right-0 bg-white rounded-full p-2 shadow cursor-pointer"
-                  >
+                  <label htmlFor="profile-upload" className="absolute bottom-0 right-0 bg-white rounded-full p-2 shadow cursor-pointer">
                     <Camera className="h-4 w-4 text-slate-600" />
-                    <input
-                      id="profile-upload"
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleProfilePictureChange}
-                    />
+                    <input id="profile-upload" type="file" accept="image/*" className="hidden" onChange={handleProfilePictureChange} />
                   </label>
                 </div>
               </div>
 
-              {/* Basic Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="full_name">Full Name</Label>
@@ -469,9 +451,7 @@ export default function Users() {
               <div>
                 <Label>Role</Label>
                 <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="staff">Staff</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
@@ -480,7 +460,6 @@ export default function Users() {
                 </Select>
               </div>
 
-              {/* Departments */}
               <div>
                 <Label>Departments</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-2">
@@ -489,15 +468,9 @@ export default function Users() {
                       key={dept.value}
                       onClick={() => handleDepartmentChange(dept.value)}
                       className={`flex items-center justify-center p-2 rounded-xl cursor-pointer transition-all ${
-                        formData.departments.includes(dept.value)
-                          ? 'text-white font-semibold' 
-                          : 'bg-white border border-slate-200 hover:border-slate-300'
+                        formData.departments.includes(dept.value) ? 'text-white font-semibold' : 'bg-white border border-slate-200 hover:border-slate-300'
                       }`}
-                      style={{
-                        background: formData.departments.includes(dept.value) 
-                          ? `linear-gradient(135deg, ${dept.color} 0%, ${dept.color}CC 100%)`
-                          : undefined
-                      }}
+                      style={{ background: formData.departments.includes(dept.value) ? `linear-gradient(135deg, ${dept.color} 0%, ${dept.color}CC 100%)` : undefined }}
                     >
                       {dept.label}
                     </div>
@@ -506,52 +479,30 @@ export default function Users() {
               </div>
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="text-white rounded-xl w-full sm:w-auto"
-                style={{ background: COLORS.emeraldGreen }}
-              >
+              <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
+              <Button onClick={handleSubmit} disabled={loading} className="text-white rounded-xl w-full sm:w-auto" style={{ background: COLORS.emeraldGreen }}>
                 {loading ? 'Saving...' : selectedUser ? 'Update' : 'Create'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </motion.div>
+      </div>
 
-      {/* Search & Filters */}
-      <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input 
-            placeholder="Search by name or email..." 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 rounded-xl"
-          />
+          <Input placeholder="Search by name or email..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 rounded-xl" />
         </div>
-        <Tabs defaultValue="all" className="w-full md:w-auto">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
           <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
-            <TabsTrigger value="all" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
-              All ({users.length})
-            </TabsTrigger>
-            <TabsTrigger value="admin" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
-              Admins ({users.filter(u => u.role === 'admin').length})
-            </TabsTrigger>
-            <TabsTrigger value="manager" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
-              Managers ({users.filter(u => u.role === 'manager').length})
-            </TabsTrigger>
-            <TabsTrigger value="staff" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
-              Staff ({users.filter(u => u.role === 'staff').length})
-            </TabsTrigger>
+            <TabsTrigger value="all">All ({users.length})</TabsTrigger>
+            <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
+            <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
+            <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
           </TabsList>
         </Tabs>
-      </motion.div>
+      </div>
 
-      {/* Users Grid */}
       <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredUsers.length === 0 ? (
           <div className="col-span-full text-center py-16">
@@ -559,136 +510,76 @@ export default function Users() {
               <UserIcon className="h-8 w-8 text-slate-400" />
             </div>
             <p className="text-slate-500 text-lg">No team members found</p>
-            <p className="text-slate-400 text-sm mt-1">Try adjusting your search or filters</p>
           </div>
         ) : (
           filteredUsers.map((userData) => (
-            <UserCard
-              key={userData.id}
-              userData={userData}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onPermissions={openPermissionsDialog}
-              currentUserId={user.id}
-              COLORS={COLORS}
-              isAdmin={isAdmin}
-            />
+            <UserCard key={userData.id} userData={userData} onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog} currentUserId={user.id} COLORS={COLORS} isAdmin={isAdmin} />
           ))
         )}
       </motion.div>
 
-      {/* Permissions Dialog */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-outfit text-xl sm:text-2xl flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-              <Shield className="h-6 w-6" />
-              Permissions
+              <Shield className="h-6 w-6" /> Permissions
             </DialogTitle>
-            <DialogDescription>
-              Configure access for {selectedUserForPermissions?.full_name}
-            </DialogDescription>
+            <DialogDescription>Configure access for {selectedUserForPermissions?.full_name}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Data Access */}
             <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
-                <Eye className="h-4 w-4" />
-                Data Access
-              </h4>
-              <div className="space-y-2">
-                {[
-                  { key: 'can_view_all_tasks', label: 'View All Tasks' },
-                  { key: 'can_view_all_clients', label: 'View All Clients' },
-                  { key: 'can_view_all_dsc', label: 'View All DSC' },
-                  { key: 'can_view_all_duedates', label: 'View All Due Dates' },
-                  { key: 'can_view_reports', label: 'View Reports' },
-                  { key: 'can_manage_users', label: 'Manage Users' },
-                  { key: 'can_assign_tasks', label: 'Assign Tasks' },
-                ].map((perm) => (
-                  <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
-                    <span className="text-sm text-slate-700">{perm.label}</span>
-                    <Switch
-                      checked={permissions[perm.key]}
-                      onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* NEW: Staff Management Section (for admin-exclusive tabs in StaffActivity.js) */}
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
-                <UsersIcon className="h-4 w-4" />
-                Staff Management
-              </h4>
-              <div className="space-y-2">
-                {[
-                  { key: 'can_view_staff_activity', label: 'View Staff Activity' },
-                  { key: 'can_view_attendance_reports', label: 'View Attendance Reports' },
-                  { key: 'can_send_reminders', label: 'Send Task Reminders' },
-                ].map((perm) => (
-                  <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
-                    <span className="text-sm text-slate-700">{perm.label}</span>
-                    <Switch
-                      checked={permissions[perm.key]}
-                      onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Assigned Clients */}
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
-                <UserIcon className="h-4 w-4" />
-                Assigned Clients
-              </h4>
-              {clients.length === 0 ? (
-                <p className="text-sm text-slate-500 text-center py-4">No clients available</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                  {clients.map((client) => {
-                    const isAssigned = (permissions.assigned_clients || []).includes(client.id);
-                    return (
-                      <div
-                        key={client.id}
-                        onClick={() => toggleClientAssignment(client.id)}
-                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
-                          isAssigned 
-                            ? 'bg-emerald-100 border-2 border-emerald-300' 
-                            : 'bg-white border-2 border-transparent hover:border-slate-200'
-                        }`}
-                      >
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                          isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'
-                        }`}>
-                          {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                        </div>
-                        <span className="text-sm font-medium text-slate-700 truncate">{client.company_name}</span>
-                      </div>
-                    );
-                  })}
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Data Access</h4>
+              {[
+                { key: 'can_view_all_tasks', label: 'View All Tasks' },
+                { key: 'can_view_all_clients', label: 'View All Clients' },
+                { key: 'can_view_all_dsc', label: 'View All DSC' },
+                { key: 'can_view_all_duedates', label: 'View All Due Dates' },
+                { key: 'can_view_reports', label: 'View Reports' },
+                { key: 'can_manage_users', label: 'Manage Users' },
+                { key: 'can_assign_tasks', label: 'Assign Tasks' },
+              ].map((perm) => (
+                <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
+                  <span className="text-sm text-slate-700">{perm.label}</span>
+                  <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
                 </div>
-              )}
+              ))}
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UsersIcon className="h-4 w-4" /> Staff Management</h4>
+              {[
+                { key: 'can_view_staff_activity', label: 'View Staff Activity' },
+                { key: 'can_view_attendance_reports', label: 'View Attendance Reports' },
+                { key: 'can_send_reminders', label: 'Send Task Reminders' },
+              ].map((perm) => (
+                <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
+                  <span className="text-sm text-slate-700">{perm.label}</span>
+                  <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UserIcon className="h-4 w-4" /> Assigned Clients</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {clients.map((client) => {
+                  const isAssigned = (permissions.assigned_clients || []).includes(client.id);
+                  return (
+                    <div key={client.id} onClick={() => toggleClientAssignment(client.id)} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${isAssigned ? 'bg-emerald-100 border-2 border-emerald-300' : 'bg-white border-2 border-transparent hover:border-slate-200'}`}>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                        {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                      </div>
+                      <span className="text-sm font-medium text-slate-700 truncate">{client.company_name}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSavePermissions}
-              disabled={loading}
-              className="text-white rounded-xl w-full sm:w-auto"
-              style={{ background: COLORS.emeraldGreen }}
-            >
-              {loading ? 'Saving...' : 'Save Permissions'}
-            </Button>
+            <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
+            <Button onClick={handleSavePermissions} disabled={loading} className="text-white rounded-xl w-full sm:w-auto" style={{ background: COLORS.emeraldGreen }}>{loading ? 'Saving...' : 'Save Permissions'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
