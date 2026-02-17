@@ -66,6 +66,20 @@ const PRIORITY_STYLES = {
   critical: { bg: 'bg-red-100', text: 'text-red-700', label: 'CRITICAL' },
 };
 
+// Category colors
+const CATEGORY_STYLES = {
+  gst: { bg: 'bg-green-100', text: 'text-green-700' },
+  income_tax: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+  accounts: { bg: 'bg-purple-100', text: 'text-purple-700' },
+  tds: { bg: 'bg-teal-100', text: 'text-teal-700' },
+  roc: { bg: 'bg-orange-100', text: 'text-orange-700' },
+  trademark: { bg: 'bg-pink-100', text: 'text-pink-700' },
+  msme_smadhan: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+  fema: { bg: 'bg-lime-100', text: 'text-lime-700' },
+  dsc: { bg: 'bg-amber-100', text: 'text-amber-700' },
+  other: { bg: 'bg-gray-100', text: 'text-gray-700' },
+};
+
 // Card gradient styles based on status/priority
 const getCardGradient = (task, isOverdue) => {
   if (isOverdue) {
@@ -105,6 +119,7 @@ export default function Tasks() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterAssignee, setFilterAssignee] = useState('all');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -306,7 +321,8 @@ export default function Tasks() {
     const matchesStatus = filterStatus === 'all' || getDisplayStatus(task) === filterStatus;
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category === filterCategory;
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory;
+    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
 
   // Stats
@@ -483,21 +499,12 @@ export default function Tasks() {
                         key={dept.value}
                         type="button"
                         onClick={() => setFormData({ ...formData, category: dept.value })}
-                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2
-                          ${isSelected 
-                            ? 'text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-                          }`}
-                        style={isSelected ? { background: COLORS.mediumBlue } : {}}
-                        data-testid={`dept-${dept.value}`}
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                          isSelected 
+                            ? 'bg-blue-600 text-white shadow-md' 
+                            : 'bg-slate-100 text-slate-700 hover:bg-blue-100 hover:text-blue-700'
+                        }`}
                       >
-                        {isSelected && (
-                          <Switch 
-                            checked={true} 
-                            className="h-4 w-7 pointer-events-none"
-                            style={{ background: 'rgba(255,255,255,0.3)' }}
-                          />
-                        )}
                         {dept.label}
                       </button>
                     );
@@ -505,51 +512,32 @@ export default function Tasks() {
                 </div>
               </div>
 
-              {/* Priority and Status Row */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="priority">Priority</Label>
-                  <Select
-                    value={formData.priority}
-                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
-                  >
-                    <SelectTrigger className="border-slate-300" data-testid="task-priority-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="critical">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value) => setFormData({ ...formData, status: value })}
-                  >
-                    <SelectTrigger className="border-slate-300" data-testid="task-status-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">To Do</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              {/* Priority */}
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select
+                  value={formData.priority}
+                  onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                >
+                  <SelectTrigger className="border-slate-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* Recurring Task Section */}
-              <div className="border rounded-lg p-4 bg-slate-50 space-y-4">
+              {/* Recurring Task */}
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Repeat className="h-4 w-4 text-slate-600" />
-                    <Label htmlFor="is_recurring" className="font-medium">Recurring Task</Label>
-                  </div>
+                  <Label htmlFor="is_recurring" className="flex items-center gap-2">
+                    <Repeat className="h-4 w-4" />
+                    Recurring Task
+                  </Label>
                   <Switch
                     id="is_recurring"
                     checked={formData.is_recurring}
@@ -711,6 +699,20 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
+          {(user?.role === 'admin' || user?.role === 'manager') && (
+            <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+              <SelectTrigger className="w-36 bg-white">
+                <SelectValue placeholder="All Users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Users</SelectItem>
+                {users.map(u => (
+                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           <div className="flex border rounded-lg overflow-hidden">
             <Button
               variant="ghost"
@@ -750,6 +752,7 @@ export default function Tasks() {
             const displayStatus = getDisplayStatus(task);
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
             const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+            const categoryStyle = CATEGORY_STYLES[task.category] || CATEGORY_STYLES.other;
             const cardGradient = getCardGradient(task, taskIsOverdue);
             
             return (
@@ -782,6 +785,12 @@ export default function Tasks() {
                         }}
                       >
                         {priorityStyle.label}
+                      </span>
+                      <span 
+                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${categoryStyle.text}`}
+                        style={{ background: categoryStyle.bg.replace('bg-', '#') + ' linear-gradient(135deg, transparent 0%, transparent 100%)' }}
+                      >
+                        {getCategoryLabel(task.category)}
                       </span>
                       {task.is_recurring && (
                         <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
