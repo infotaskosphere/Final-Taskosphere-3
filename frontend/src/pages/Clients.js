@@ -11,16 +11,17 @@
       --gray: #6b7280;
       --light: #f3f4f6;
       --border: #d1d5db;
+      --red: #ef4444;
     }
 
     * { box-sizing: border-box; margin:0; padding:0; }
     body {
-      font-family: -apple-system, BlinkMacOSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #f1f5f9;
       padding: 40px;
+      min-height: 100vh;
     }
 
-    /* Modal Overlay */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -35,10 +36,10 @@
       background: white;
       border-radius: 12px;
       width: 100%;
-      max-width: 780px;
-      max-height: 92vh;
+      max-width: 820px;
+      max-height: 94vh;
       overflow-y: auto;
-      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
     }
 
     .modal-header {
@@ -47,20 +48,27 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      position: sticky;
+      top: 0;
+      background: white;
+      z-index: 10;
     }
 
     .modal-title {
-      font-size: 1.35rem;
+      font-size: 1.4rem;
       font-weight: 600;
       color: #111827;
     }
 
     .close-btn {
-      font-size: 1.6rem;
+      font-size: 1.8rem;
       color: var(--gray);
       cursor: pointer;
       line-height: 1;
+      padding: 4px 8px;
     }
+
+    .close-btn:hover { color: #374151; }
 
     .tabs {
       display: flex;
@@ -68,77 +76,71 @@
     }
 
     .tab {
-      padding: 14px 24px;
+      padding: 14px 28px;
       font-weight: 500;
       color: var(--gray);
       cursor: pointer;
       border-bottom: 3px solid transparent;
-      transition: all 0.15s;
+      transition: all 0.15s ease;
     }
 
     .tab.active {
       color: var(--primary-dark);
       border-bottom-color: var(--primary);
-      background: rgba(99,102,241,0.04);
+      background: rgba(99,102,241,0.05);
     }
 
     .tab-content {
       padding: 24px;
     }
 
-    .hidden { display: none; }
+    .hidden { display: none !important; }
 
-    /* Form styling */
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 20px 24px;
+      gap: 22px 26px;
     }
 
-    .form-group.full {
-      grid-column: 1 / -1;
-    }
+    .form-group.full { grid-column: 1 / -1; }
 
     label {
       display: block;
       margin-bottom: 6px;
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-weight: 500;
       color: #374151;
     }
 
-    .required::after {
-      content: " *";
-      color: #ef4444;
-    }
+    .required::after { content: " *"; color: var(--red); }
 
     input, select, textarea {
       width: 100%;
       padding: 10px 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      font-size: 0.95rem;
+      font-size: 0.97rem;
     }
 
     input:focus, select:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
     }
 
     .services-grid {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 8px;
+      gap: 10px 14px;
+      margin-top: 10px;
     }
 
     .service-chip {
-      padding: 8px 14px;
+      padding: 8px 16px;
       background: var(--light);
       border: 1px solid var(--border);
       border-radius: 999px;
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       cursor: pointer;
       user-select: none;
       transition: all 0.15s;
@@ -152,16 +154,15 @@
 
     .csv-area {
       border: 2px dashed #d1d5db;
-      border-radius: 8px;
-      padding: 60px 20px;
+      border-radius: 10px;
+      padding: 70px 20px;
       text-align: center;
-      margin: 20px 0;
-      background: #f9fafb;
+      margin: 24px 0;
+      background: #fafafa;
+      transition: border-color 0.2s;
     }
 
-    .csv-area:hover {
-      border-color: var(--primary);
-    }
+    .csv-area:hover { border-color: var(--primary); }
 
     .btn {
       padding: 10px 20px;
@@ -169,64 +170,48 @@
       font-weight: 500;
       cursor: pointer;
       border: none;
-      font-size: 0.95rem;
+      font-size: 0.96rem;
     }
 
-    .btn-primary {
-      background: var(--primary);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-dark);
-    }
-
-    .btn-secondary {
-      background: #e5e7eb;
-      color: #374151;
-    }
-
-    .btn-secondary:hover {
-      background: #d1d5db;
-    }
-
-    .btn-outline {
-      background: white;
-      border: 1px solid #4b5563;
-      color: #4b5563;
-    }
-
-    .btn-outline:hover {
-      background: #f3f4f6;
-    }
+    .btn-primary     { background: var(--primary); color: white; }
+    .btn-primary:hover   { background: var(--primary-dark); }
+    .btn-secondary   { background: #e5e7eb; color: #374151; }
+    .btn-secondary:hover { background: #d1d5db; }
+    .btn-outline     { background: white; border: 1px solid #4b5563; color: #4b5563; }
+    .btn-outline:hover   { background: #f3f4f6; }
 
     .modal-footer {
-      padding: 16px 24px;
+      padding: 18px 24px;
       border-top: 1px solid var(--border);
       display: flex;
       justify-content: flex-end;
       gap: 12px;
+      position: sticky;
+      bottom: 0;
+      background: white;
+      z-index: 10;
     }
 
-    .add-contact-btn, .add-dsc-btn {
+    .add-more-btn {
       color: var(--primary);
       background: none;
       border: 1px solid var(--primary);
       margin-top: 12px;
+      padding: 8px 16px;
     }
+
+    hr { margin: 32px 0; border-color: #e5e7eb; }
   </style>
 </head>
 <body>
 
-<!-- Trigger button (for demo) -->
 <button class="btn btn-primary" onclick="openModal()">Open Add Client Modal</button>
 
-<!-- Modal -->
 <div id="clientModal" class="modal-overlay" style="display:none;">
   <div class="modal">
     <div class="modal-header">
       <h2 class="modal-title">Add New Client</h2>
-      <span class="close-btn" onclick="closeModal()">×</span>
+      <span class="close-btn" onclick="closeModal()" title="Close">×</span>
     </div>
 
     <div class="tabs">
@@ -234,10 +219,8 @@
       <div class="tab" data-tab="csv">Add via CSV</div>
     </div>
 
-    <!-- Single Client Form -->
     <div id="single-tab" class="tab-content">
-
-      <h3 style="margin:0 0 16px; font-size:1.15rem;">Basic Information</h3>
+      <h3>Basic Information</h3>
       <div class="form-grid">
         <div class="form-group">
           <label class="required">Company Name</label>
@@ -267,39 +250,27 @@
         </div>
       </div>
 
-      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+      <hr />
 
-      <h3 style="margin:0 0 16px; font-size:1.15rem;">Contact Persons</h3>
-      <div style="margin-bottom:16px;">
+      <h3>Contact Persons</h3>
+      <div style="margin-bottom:20px;">
         <div class="form-grid">
-          <div class="form-group">
-            <label>Full Name</label>
-            <input type="text" placeholder="Full Name" />
-          </div>
-          <div class="form-group">
-            <label>Designation</label>
-            <input type="text" placeholder="Designation" />
-          </div>
-          <div class="form-group">
-            <label>Email</label>
-            <input type="email" placeholder="Email" />
-          </div>
-          <div class="form-group">
-            <label>Phone</label>
-            <input type="tel" placeholder="Phone" />
-          </div>
+          <div class="form-group"><label>Full Name</label><input type="text" placeholder="Full Name" /></div>
+          <div class="form-group"><label>Designation</label><input type="text" placeholder="Designation" /></div>
+          <div class="form-group"><label>Email</label><input type="email" placeholder="Email" /></div>
+          <div class="form-group"><label>Phone</label><input type="tel" placeholder="Phone" /></div>
         </div>
-        <button class="btn add-contact-btn">+ Add Another Contact</button>
+        <button class="btn add-more-btn">+ Add Another Contact</button>
       </div>
 
-      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+      <hr />
 
-      <h3 style="margin:0 0 16px; font-size:1.15rem;">DSC Details</h3>
-      <button class="btn add-dsc-btn">+ Add DSC</button>
+      <h3>DSC Details</h3>
+      <button class="btn add-more-btn">+ Add DSC</button>
 
-      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+      <hr />
 
-      <h3 style="margin:0 0 12px; font-size:1.15rem;">Services *</h3>
+      <h3>Services *</h3>
       <div class="services-grid">
         <div class="service-chip selected">GST</div>
         <div class="service-chip">Trademark</div>
@@ -314,7 +285,7 @@
         <div class="service-chip">Other</div>
       </div>
 
-      <div style="margin:24px 0;">
+      <div style="margin:28px 0 20px;">
         <label>Assign To</label>
         <select>
           <option>Unassigned</option>
@@ -327,28 +298,20 @@
         <label>Notes</label>
         <textarea rows="4" placeholder="Any additional notes..."></textarea>
       </div>
-
     </div>
 
-    <!-- CSV Tab -->
     <div id="csv-tab" class="tab-content hidden">
-
-      <h3 style="margin-bottom:16px;">Bulk Add Clients via CSV</h3>
-      
+      <h3>Bulk Add Clients via CSV</h3>
       <div class="csv-area">
-        <p style="font-size:1.1rem; margin-bottom:8px; color:#4b5563;">
+        <p style="font-size:1.15rem; margin-bottom:12px; color:#4b5563;">
           Drag & drop your CSV file here
         </p>
-        <p style="color:var(--gray); margin:8px 0 16px;">
-          or
-        </p>
+        <p style="color:var(--gray); margin:12px 0 20px;">or</p>
         <button class="btn btn-primary">Choose CSV File</button>
       </div>
-
-      <p style="color:var(--gray); font-size:0.9rem; margin:16px 0;">
+      <p style="color:var(--gray); font-size:0.93rem;">
         Download <a href="#" style="color:var(--primary);">sample CSV format</a> to see the required columns.
       </p>
-
     </div>
 
     <div class="modal-footer">
@@ -361,30 +324,31 @@
 </div>
 
 <script>
-  const modal = document.getElementById('clientModal');
-  const tabs = document.querySelectorAll('.tab');
-  const contents = {
-    single: document.getElementById('single-tab'),
-    csv: document.getElementById('csv-tab')
-  };
-  const singleOnly = document.querySelectorAll('.single-only');
-  const csvOnly = document.querySelectorAll('.csv-only');
+  const modal       = document.getElementById('clientModal');
+  const tabs        = document.querySelectorAll('.tab');
+  const singleTab   = document.getElementById('single-tab');
+  const csvTab      = document.getElementById('csv-tab');
+  const singleBtns  = document.querySelectorAll('.single-only');
+  const csvBtns     = document.querySelectorAll('.csv-only');
 
   function openModal() {
+    if (!modal) return console.error("Modal element not found");
     modal.style.display = 'flex';
+    console.log("Modal opened");
   }
 
   function closeModal() {
     modal.style.display = 'none';
+    console.log("Modal closed");
   }
 
-  function updateFooter(tab) {
-    if (tab === 'single') {
-      singleOnly.forEach(el => el.style.display = 'inline-block');
-      csvOnly.forEach(el => el.style.display = 'none');
+  function updateFooter(tabName) {
+    if (tabName === 'single') {
+      singleBtns.forEach(b => b.style.display = '');
+      csvBtns.forEach(b => b.style.display = 'none');
     } else {
-      singleOnly.forEach(el => el.style.display = 'none');
-      csvOnly.forEach(el => el.style.display = 'inline-block');
+      singleBtns.forEach(b => b.style.display = 'none');
+      csvBtns.forEach(b => b.style.display = '');
     }
   }
 
@@ -394,30 +358,29 @@
       tabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
 
-      Object.values(contents).forEach(c => c.classList.add('hidden'));
-      contents[tab.dataset.tab].classList.remove('hidden');
+      singleTab.classList.toggle('hidden', tab.dataset.tab !== 'single');
+      csvTab.classList.toggle('hidden', tab.dataset.tab !== 'csv');
 
       updateFooter(tab.dataset.tab);
+      console.log(`Switched to tab: ${tab.dataset.tab}`);
     });
   });
 
-  // Initial footer state
-  updateFooter('single');
-
-  // Service chip toggle (demo)
+  // Service chips toggle
   document.querySelectorAll('.service-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       chip.classList.toggle('selected');
     });
   });
 
-  // Close when clicking overlay
+  // Close on overlay click
   modal.addEventListener('click', e => {
     if (e.target === modal) closeModal();
   });
 
-  // Demo logs (console only, as per "same logs")
-  console.log('Modal initialized');
+  // Initial state
+  updateFooter('single');
+  console.log("Add Client modal script initialized");
 </script>
 </body>
 </html>
