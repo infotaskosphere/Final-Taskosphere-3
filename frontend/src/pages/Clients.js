@@ -22,7 +22,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress'; // ← shadcn progress (add if missing: npx shadcn-ui@latest add progress)
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Mail, Cake, X, UserPlus, FileText } from 'lucide-react';
@@ -52,10 +51,7 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
 
-  // CSV import states
   const [importLoading, setImportLoading] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importResult, setImportResult] = useState(null); // { success, failed, errors }
 
   const fileInputRef = useRef(null);
 
@@ -98,25 +94,47 @@ export default function Clients() {
   };
 
   // ────────────────────────────────────────────────
-  //                   CSV IMPORT
+  //                   CSV FUNCTIONS
   // ────────────────────────────────────────────────
 
   const downloadTemplate = () => {
     const headers = [
-      'company_name','client_type','email','phone','birthday',
-      'contact_name_1','contact_designation_1','contact_email_1','contact_phone_1',
-      'contact_name_2','contact_designation_2','contact_email_2','contact_phone_2',
-      'services','notes'
+      'company_name',
+      'client_type',
+      'email',
+      'phone',
+      'birthday',
+      'contact_name_1',
+      'contact_designation_1',
+      'contact_email_1',
+      'contact_phone_1',
+      'contact_name_2',
+      'contact_designation_2',
+      'contact_email_2',
+      'contact_phone_2',
+      'services',
+      'notes'
     ];
 
-    const example = [
-      'ABC Enterprises','proprietor','company@example.com','+919876543210','2025-04-15',
-      'Rahul Sharma','Director','rahul@abc.com','+919812345678',
-      'Priya Patel','Manager','priya@abc.com','+918923456789',
-      'GST,Income Tax,Other: Consulting','Prefers WhatsApp communication'
+    const exampleRow = [
+      'ABC Enterprises',
+      'proprietor',
+      'company@example.com',
+      '+919876543210',
+      '2025-04-15',
+      'Rahul Sharma',
+      'Director',
+      'rahul@abc.com',
+      '+919812345678',
+      'Priya Patel',
+      'Manager',
+      'priya@abc.com',
+      '+918923456789',
+      'GST,Income Tax,Other: Consulting',
+      'Prefers WhatsApp communication'
     ];
 
-    const csvContent = [headers.join(','), example.map(v => `"${v}"`).join(',')].join('\n');
+    const csvContent = [headers.join(','), exampleRow.map(v => `"${v}"`).join(',')].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -133,52 +151,30 @@ export default function Clients() {
     if (!file) return;
 
     setImportLoading(true);
-    setImportProgress(0);
-    setImportResult(null);
 
     Papa.parse(file, {
       header: true,
-      skipEmptyLines: 'greedy',
+      skipEmptyLines: true,
       complete: async (results) => {
-        if (results.errors.length > 0 && results.errors.some(e => e.type !== 'FieldMismatch')) {
-          toast.error('Invalid CSV structure. Please use the template.');
-          setImportLoading(false);
-          return;
-        }
-
         const rows = results.data;
-        const total = rows.length;
-        let processed = 0;
+        let successCount = 0;
         const errors = [];
-        const created = [];
 
         for (let i = 0; i < rows.length; i++) {
-          processed++;
-          setImportProgress(Math.round((processed / total) * 100));
-
           const row = rows[i];
-          const rowNum = i + 2;
-          const rowErrors = [];
-
-          // Basic validation
-          if (!row.company_name?.trim()) rowErrors.push('Company name required');
-          if (!row.email?.trim()) rowErrors.push('Email required');
-          else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) rowErrors.push('Invalid email');
-          if (!row.phone?.trim()) rowErrors.push('Phone required');
-
-          if (rowErrors.length > 0) {
-            errors.push(`Row ${rowNum}: ${rowErrors.join(', ')} (${row.company_name || '—'})`);
-            continue;
-          }
 
           try {
+            if (!row.company_name?.trim()) throw new Error('Missing company_name');
+            if (!row.email?.trim()) throw new Error('Missing email');
+            if (!row.phone?.trim()) throw new Error('Missing phone');
+
             const contact_persons = [];
             if (row.contact_name_1?.trim()) {
               contact_persons.push({
                 name: row.contact_name_1.trim(),
                 designation: row.contact_designation_1?.trim() || '',
                 email: row.contact_email_1?.trim() || '',
-                phone: row.contact_phone_1?.trim() || '',
+                phone: row.contact_phone_1?.trim() || ''
               });
             }
             if (row.contact_name_2?.trim()) {
@@ -186,7 +182,7 @@ export default function Clients() {
                 name: row.contact_name_2.trim(),
                 designation: row.contact_designation_2?.trim() || '',
                 email: row.contact_email_2?.trim() || '',
-                phone: row.contact_phone_2?.trim() || '',
+                phone: row.contact_phone_2?.trim() || ''
               });
             }
 
@@ -196,8 +192,8 @@ export default function Clients() {
 
             const clientData = {
               company_name: row.company_name.trim(),
-              client_type: CLIENT_TYPES.some(t => t.value === (row.client_type || '').trim().toLowerCase())
-                ? (row.client_type || '').trim().toLowerCase()
+              client_type: CLIENT_TYPES.some(t => t.value === (row.client_type || '').trim())
+                ? (row.client_type || '').trim()
                 : 'proprietor',
               email: row.email.trim(),
               phone: row.phone.trim(),
@@ -210,43 +206,34 @@ export default function Clients() {
             };
 
             await api.post('/clients', clientData);
-            created.push(clientData.company_name);
+            successCount++;
           } catch (err) {
-            const msg = err.response?.data?.detail || err.message || 'Server error';
-            errors.push(`Row ${rowNum}: ${msg} (${row.company_name || '—'})`);
+            errors.push(`Row ${i + 2}: ${err.message || err.response?.data?.detail || 'Unknown error'}`);
           }
         }
 
         setImportLoading(false);
-        setImportProgress(100);
 
-        const result = {
-          success: created.length,
-          failed: errors.length,
-          errors,
-        };
-
-        setImportResult(result);
-
-        if (created.length > 0) {
-          toast.success(`${created.length} client${created.length === 1 ? '' : 's'} imported successfully`);
+        if (successCount > 0) {
+          toast.success(`${successCount} client(s) imported successfully!`);
           fetchClients();
         }
-
         if (errors.length > 0) {
-          toast.warning(`${errors.length} row${errors.length === 1 ? '' : 's'} failed`);
+          toast.error(`Some rows failed:\n${errors.join('\n')}`);
         }
+
+        if (fileInputRef.current) fileInputRef.current.value = '';
       },
-      error: (err) => {
+      error: (error) => {
         setImportLoading(false);
-        toast.error('Failed to read CSV file');
-        console.error(err);
-      },
+        toast.error('Failed to parse CSV file');
+        console.error(error);
+      }
     });
   };
 
   // ────────────────────────────────────────────────
-  //               ORIGINAL FUNCTIONS (unchanged)
+  //                ORIGINAL FUNCTIONS
   // ────────────────────────────────────────────────
 
   const handleSubmit = async (e) => {
@@ -426,7 +413,6 @@ export default function Clients() {
 
   return (
     <div className="space-y-6" data-testid="clients-page">
-      {/* Header – original layout preserved */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold font-outfit text-slate-900">Client Management</h1>
@@ -434,7 +420,6 @@ export default function Clients() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          {/* CSV buttons – same position as in your screenshot */}
           <Button
             variant="outline"
             onClick={downloadTemplate}
@@ -466,7 +451,6 @@ export default function Clients() {
               </Button>
             </DialogTrigger>
 
-            {/* Dialog content remains EXACTLY as in your original file */}
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-outfit text-2xl">
@@ -479,12 +463,30 @@ export default function Clients() {
 
               <form onSubmit={handleSubmit} className="space-y-6">
                 {/* ────────────────────────────────────────────────
-                    YOUR ORIGINAL FORM CONTENT GOES HERE – DO NOT CHANGE
-                    (Basic Information, Contact Persons, DSC Details, Services, Assign To, Notes)
+                    YOUR ORIGINAL FORM CONTENT (unchanged)
                 ──────────────────────────────────────────────── */}
-                {/* ... paste your full existing form fields here ... */}
+                {/* Basic Information, Contact Persons, DSC Details, Services, Assign To, Notes */}
+                {/* ... insert your existing form fields here ... */}
 
-                <DialogFooter>
+                {/* Dialog Footer – now with 4 buttons as requested */}
+                <DialogFooter className="flex flex-wrap gap-3 justify-end sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={downloadTemplate}
+                  >
+                    CSV Format
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importLoading}
+                  >
+                    {importLoading ? 'Uploading...' : 'Add CSV'}
+                  </Button>
+
                   <Button
                     type="button"
                     variant="outline"
@@ -492,15 +494,14 @@ export default function Clients() {
                       setDialogOpen(false);
                       resetForm();
                     }}
-                    data-testid="client-cancel-btn"
                   >
                     Cancel
                   </Button>
+
                   <Button
                     type="submit"
                     disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-700"
-                    data-testid="client-submit-btn"
+                    className="bg-indigo-600 hover:bg-indigo-700 min-w-[120px]"
                   >
                     {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
                   </Button>
@@ -509,7 +510,7 @@ export default function Clients() {
             </DialogContent>
           </Dialog>
 
-          {/* Hidden CSV file input */}
+          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -520,54 +521,7 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* Progress bar – appears below header during import */}
-      {importLoading && (
-        <div className="mt-4 space-y-2 max-w-md">
-          <div className="flex justify-between text-sm text-muted-foreground">
-            <span>Processing CSV import...</span>
-            <span>{importProgress}%</span>
-          </div>
-          <Progress value={importProgress} className="h-2" />
-        </div>
-      )}
-
-      {/* Import result summary – appears after import finishes */}
-      {importResult && (
-        <div className="mt-6 p-4 border rounded-lg bg-slate-50">
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="font-medium">Import Summary</h3>
-            <Button variant="ghost" size="sm" onClick={() => setImportResult(null)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 text-sm">
-            <div>
-              <p className="font-medium text-green-700">Imported successfully</p>
-              <p className="text-lg font-semibold">{importResult.success}</p>
-            </div>
-            <div>
-              <p className="font-medium text-red-700">Failed rows</p>
-              <p className="text-lg font-semibold">{importResult.failed}</p>
-            </div>
-          </div>
-
-          {importResult.errors?.length > 0 && (
-            <div className="text-sm max-h-60 overflow-auto bg-white p-3 rounded border border-red-200">
-              <ul className="list-disc pl-5 space-y-1 text-red-800">
-                {importResult.errors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ────────────────────────────────────────────────
-          YOUR ORIGINAL CLIENTS GRID / CARDS RENDERING
-          (keep exactly as in your file)
-      ──────────────────────────────────────────────── */}
+      {/* Clients Grid – your original layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {clients.length === 0 ? (
           <Card className="col-span-full border border-slate-200">
@@ -582,7 +536,25 @@ export default function Clients() {
               className="border border-slate-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
               data-testid={`client-card-${client.id}`}
             >
-              {/* YOUR ORIGINAL CARD CONTENT HERE */}
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <CardTitle className="text-lg font-semibold text-slate-900">
+                      {client.company_name}
+                    </CardTitle>
+                    <p className="text-sm text-slate-500 mt-1">
+                      {getClientTypeLabel(client.client_type)}
+                    </p>
+                  </div>
+                  {client.birthday && (
+                    <Cake className="h-5 w-5 text-pink-500" />
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {/* YOUR ORIGINAL CARD CONTENT – keep as is */}
+                {/* ... */}
+              </CardContent>
             </Card>
           ))
         )}
