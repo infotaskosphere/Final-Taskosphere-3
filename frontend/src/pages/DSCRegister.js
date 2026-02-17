@@ -974,29 +974,29 @@ export default function DSCRegister() {
 // DSC Table Component
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
   return (
-    <div>
-      <table className="w-full table-auto">
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-auto border-collapse">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-           <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
               S.No
             </th> 
-            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
               Holder Name
             </th>
-            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
               Type
             </th>
-            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
               Associated With
             </th>
-            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
               Expiry Date
             </th>
-            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-32">
               Status
             </th>
-            <th className="px-6 py-2 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">
               Actions
             </th>
           </tr>
@@ -1010,47 +1010,51 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`dsc-row-${dsc.id}`}
               >
-                <td className="px-6 py-2 text-sm font-medium text-slate-500 whitespace-nowrap">
+                <td className="px-4 py-3 text-sm text-slate-500">
                   {index + 1}
                 </td>
                 
-                <td className="px-6 py-2 font-medium text-slate-900 whitespace-nowrap">
+                <td className="px-4 py-3 text-sm font-medium text-slate-900 break-words leading-tight">
                   {dsc.holder_name}
                 </td>
 
-                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-4 py-3 text-sm text-slate-600 truncate">
                   {dsc.dsc_type || '-'}
                 </td>
 
-                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">
                   {dsc.associated_with || '-'}
                 </td>
 
-                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
                 </td>
-                <td className="px-6 py-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${status.color}`}></div>
-                    <span className={`text-sm font-medium ${status.textColor}`}>{status.text}</span>
+                
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-1.5 h-1.5 rounded-full ${status.color}`}></div>
+                    <span className={`text-[12px] font-medium leading-none ${status.textColor}`}>
+                      {status.text}
+                    </span>
                   </div>
                 </td>
-                <td className="px-6 py-2 text-right">
-                  <div className="flex justify-end gap-2">
+
+                <td className="px-4 py-3 text-right">
+                  <div className="flex justify-end gap-1">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onViewLog(dsc)}
-                      className="hover:bg-slate-100"
-                      title="View Movement Log"
+                      className="h-8 w-8 p-0 hover:bg-slate-100"
+                      title="View Log"
                     >
-                      <History className="h-4 w-4" />
+                      <History className="h-4 w-4 text-slate-500" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={type === 'IN' ? 'hover:bg-red-50 hover:text-red-600' : 'hover:bg-emerald-50 hover:text-emerald-600'}
+                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     >
                       {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
@@ -1059,8 +1063,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                       variant="ghost"
                       size="sm"
                       onClick={() => onEdit(dsc)}
-                      data-testid={`edit-dsc-${dsc.id}`}
-                      className="hover:bg-indigo-50 hover:text-indigo-600"
+                      className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600"
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
@@ -1068,8 +1071,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                       variant="ghost"
                       size="sm"
                       onClick={() => onDelete(dsc.id)}
-                      data-testid={`delete-dsc-${dsc.id}`}
-                      className="hover:bg-red-50 hover:text-red-600"
+                      className="h-8 w-8 p-0 hover:bg-red-50 text-red-600"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
