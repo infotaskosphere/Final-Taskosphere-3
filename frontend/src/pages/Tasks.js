@@ -756,92 +756,84 @@ export default function Tasks() {
             return (
               <motion.div key={task.id} variants={itemVariants} className="h-full">
                 <Card 
-                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1]
+                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1] min-h-[300px]
                     ${taskIsOverdue ? 'bg-red-50/40 border-red-100' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/40 border-orange-100' : 'bg-white'}`}
                 >
                   {/* 1. TOP BADGE ROW */}
-                  <div className="px-5 pt-5 pb-2 flex gap-2 flex-wrap">
-                    <Badge variant="secondary" className={`${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] px-3 border-none uppercase font-bold`}>
+                  <div className="px-4 pt-4 pb-2 flex gap-1.5 flex-wrap">
+                    <Badge variant="secondary" className={`${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap`}>
                       {statusStyle.label}
                     </Badge>
-                    <Badge variant="secondary" className={`${priorityStyle.bg} ${priorityStyle.text} rounded-full text-[10px] px-3 border-none uppercase font-bold`}>
+                    <Badge variant="secondary" className={`${priorityStyle.bg} ${priorityStyle.text} rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap`}>
                       {priorityStyle.label}
                     </Badge>
-                    <Badge variant="secondary" className="bg-slate-100 text-slate-600 rounded-full text-[10px] px-3 border-none uppercase font-bold">
+                    <Badge variant="secondary" className="bg-slate-100 text-slate-600 rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap">
                       {task.category?.toUpperCase() || 'OTHER'}
                     </Badge>
                   </div>
 
-                  {/* 2. CONTENT AREA (Clean Middle) */}
-                  <div className="px-5 py-3 space-y-3 flex-1 overflow-hidden flex flex-col justify-center">
+                  {/* 2. CONTENT AREA */}
+                  <div className="px-4 py-2 space-y-2 flex-1 overflow-hidden flex flex-col justify-center">
                     <div>
-                      <h3 className="text-base font-bold text-slate-800 leading-tight line-clamp-2">{task.title}</h3>
-                      <p className="text-[11px] text-slate-500 mt-1 uppercase font-medium leading-relaxed truncate">
+                      <h3 className="text-sm sm:text-base font-bold text-slate-800 leading-tight line-clamp-2">
+                        {task.title}
+                      </h3>
+                      <p className="text-[10px] text-slate-500 mt-1 uppercase font-semibold truncate">
                         {getClientName(task.client_id)}
                       </p>
                     </div>
 
-                    <div className="space-y-1.5 pt-2">
+                    <div className="space-y-1">
                       <div className="flex items-center gap-2 text-slate-500">
-                        <User className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="text-[11px] font-medium truncate">{getUserName(task.assigned_to)}</span>
+                        <User className="h-3 w-3 flex-shrink-0" />
+                        <span className="text-[10px] font-medium truncate max-w-[150px]">
+                          {getUserName(task.assigned_to)}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2 text-slate-500">
-                        <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="text-[11px] font-medium">{task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}</span>
+                        <Calendar className="h-3 w-3 flex-shrink-0" />
+                        <span className="text-[10px] font-medium">
+                          {task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}
+                        </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 3. SEPARATED ACTION FOOTER (Bottom Block) */}
-                  <div className="bg-white/95 px-4 py-4 border-t border-slate-100/50 flex flex-col gap-4 mt-auto">
-                    {/* Status Pills Row */}
+                  {/* 3. SEPARATED ACTION FOOTER */}
+                  <div className="bg-white/95 px-3 py-3 border-t border-slate-100 flex flex-col gap-3 mt-auto">
                     <div className="flex justify-between items-center gap-1 bg-slate-50 p-1 rounded-2xl">
                       <Button 
                         variant={task.status === 'pending' ? 'default' : 'ghost'} 
-                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'pending' ? STATUS_STYLES.pending.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-orange-50'}`}
+                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'pending' ? 'bg-orange-500 hover:bg-orange-600 shadow-sm text-white' : 'text-slate-500 hover:bg-orange-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'pending')}
                       >
-                        <Clock className="h-3 w-3" /> To Do
+                        <Clock className="h-2.5 w-2.5" /> <span className="hidden xs:inline">To Do</span>
                       </Button>
                       <Button 
                         variant={task.status === 'in_progress' ? 'default' : 'ghost'} 
-                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'in_progress' ? STATUS_STYLES.in_progress.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-blue-50'}`}
+                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'in_progress' ? 'bg-blue-600 hover:bg-blue-700 shadow-sm text-white' : 'text-slate-500 hover:bg-blue-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
                       >
-                        <Play className="h-3 w-3" /> Progress
+                        <Play className="h-2.5 w-2.5" /> <span className="hidden xs:inline">Progress</span>
                       </Button>
                       <Button 
                         variant={task.status === 'completed' ? 'default' : 'ghost'} 
-                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'completed' ? STATUS_STYLES.completed.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-emerald-50'}`}
+                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'completed' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-sm text-white' : 'text-slate-500 hover:bg-emerald-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'completed')}
                       >
-                        <CheckCircle className="h-3 w-3" /> Done
+                        <CheckCircle className="h-2.5 w-2.5" /> <span className="hidden xs:inline">Done</span>
                       </Button>
                     </div>
 
-                    {/* Metadata & Actions Row */}
                     <div className="flex justify-between items-center px-1">
-                       <Badge variant="outline" className="text-[9px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-6">
+                       <Badge variant="outline" className="text-[8px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-5">
                          {task.category || 'ROC'}
                        </Badge>
-                       <div className="flex gap-1">
-                         <Button
-                           variant="ghost"
-                           size="icon"
-                           className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                           onClick={() => handleEdit(task)}
-                           data-testid={`edit-task-${task.id}`}
-                         >
+                       <div className="flex gap-0.5">
+                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={() => handleEdit(task)}>
                            <Edit className="h-3.5 w-3.5" />
                          </Button>
-                         <Button
-                           variant="ghost"
-                           size="icon"
-                           className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                           onClick={() => handleDelete(task.id)}
-                           data-testid={`delete-task-${task.id}`}
-                         >
+                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDelete(task.id)}>
                            <Trash2 className="h-3.5 w-3.5" />
                          </Button>
                        </div>
@@ -850,9 +842,3 @@ export default function Tasks() {
                 </Card>
               </motion.div>
             );
-          })
-        )}
-      </motion.div>
-    </motion.div>
-  );
-}
