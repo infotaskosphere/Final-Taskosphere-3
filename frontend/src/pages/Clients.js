@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,10 +8,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Mail, Cake, X, UserPlus, FileText, Calendar } from 'lucide-react';
-import { format } from 'date-fns';
+import { 
+  Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
+  FileText, Calendar, Search, Filter, Users, 
+  Briefcase, BarChart3, Archive, MessageCircle, Trash 
+} from 'lucide-react';
+import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
 
 const CLIENT_TYPES = [
@@ -41,6 +46,11 @@ export default function Clients() {
   const [importLoading, setImportLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
+  // Filter States
+  const [searchTerm, setSearchTerm] = useState('');
+  const [serviceFilter, setServiceFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('active');
+
   const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -49,11 +59,12 @@ export default function Clients() {
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
     email: '',
     phone: '',
-    birthday: '', // now used for Date of Incorporation
+    birthday: '',
     services: [],
     dsc_details: [],
     assigned_to: 'unassigned',
     notes: '',
+    status: 'active',
   });
 
   useEffect(() => {
@@ -63,7 +74,7 @@ export default function Clients() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [clients.length]);
+  }, [searchTerm, serviceFilter, statusFilter, clients.length]);
 
   const fetchClients = async () => {
     try {
@@ -83,23 +94,68 @@ export default function Clients() {
     }
   };
 
-  // ──────────────────────────────────────────────
-  // CSV IMPORT (unchanged)
-  // ──────────────────────────────────────────────
+  // ==================== UTILS ====================
+
+  const openWhatsApp = (phone, name = "") => {
+    const cleanPhone = phone.replace(/\D/g, '');
+    const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
+    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
+  };
+
+  // ==================== MEMOIZED DATA ====================
+
+  const stats = useMemo(() => {
+    const totalClients = clients.length;
+    const activeClients = clients.filter(c => (c.status || 'active') === 'active').length;
+    const serviceCounts = {};
+    clients.forEach(c => {
+      if ((c.status || 'active') === 'active' && c.services) {
+        c.services.forEach(s => {
+          const name = s.startsWith('Other:') ? 'Other' : s;
+          serviceCounts[name] = (serviceCounts[name] || 0) + 1;
+        });
+      }
+    });
+    return { totalClients, activeClients, serviceCounts };
+  }, [clients]);
+
+  const todayReminders = useMemo(() => {
+    const today = startOfDay(new Date());
+    return clients.filter(c => {
+      if (c.birthday) {
+        const anniv = new Date(c.birthday);
+        if (anniv.getMonth() === today.getMonth() && anniv.getDate() === today.getDate()) return true;
+      }
+      return c.contact_persons?.some(cp => {
+        if (!cp.birthday) return false;
+        const bday = new Date(cp.birthday);
+        return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
+      });
+    });
+  }, [clients]);
+
+  const filteredClients = useMemo(() => {
+    return clients.filter(c => {
+      const matchesSearch = c.company_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           c.email.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           c.phone.includes(searchTerm);
+      const matchesService = serviceFilter === 'all' || 
+                            (c.services && c.services.some(s => s.toLowerCase().includes(serviceFilter.toLowerCase())));
+      const matchesStatus = statusFilter === 'all' || (c.status || 'active') === statusFilter;
+      return matchesSearch && matchesService && matchesStatus;
+    });
+  }, [clients, searchTerm, serviceFilter, statusFilter]);
+
+  const currentClients = filteredClients.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredClients.length / ITEMS_PER_PAGE);
+
+  const getClientNumber = (index) => `#${String(((currentPage - 1) * ITEMS_PER_PAGE) + index + 1).padStart(3, '0')}`;
+
+  // ==================== HANDLERS ====================
+
   const downloadTemplate = () => {
-    const headers = [
-      'company_name', 'client_type', 'email', 'phone', 'birthday',
-      'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1',
-      'contact_name_2', 'contact_designation_2', 'contact_email_2', 'contact_phone_2',
-      'services', 'notes'
-    ];
-
-    const csvContent = headers.join(',') + '\n' +
-      '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15",' +
-      '"Rahul Sharma","Director","rahul@abc.com","+919812345678",' +
-      '"Priya Patel","Manager","priya@abc.com","+918923456789",' +
-      '"GST,Income Tax,Other: Consulting","Prefers WhatsApp"';
-
+    const headers = ['company_name', 'client_type', 'email', 'phone', 'birthday', 'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1', 'services', 'notes'];
+    const csvContent = headers.join(',') + '\n' + '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15","Rahul Sharma","Director","rahul@abc.com","GST,Income Tax","Notes"';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -113,178 +169,107 @@ export default function Clients() {
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     setImportLoading(true);
-
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
-        const rows = results.data;
-        let successCount = 0;
-        const errors = [];
-
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-
+        let count = 0;
+        for (let row of results.data) {
+          if (!row.company_name) continue;
           try {
-            if (!row.company_name?.trim()) throw new Error('Missing company_name');
-            if (!row.email?.trim()) throw new Error('Missing email');
-            if (!row.phone?.trim()) throw new Error('Missing phone');
-
-            const contact_persons = [];
-            if (row.contact_name_1?.trim()) {
-              contact_persons.push({
-                name: row.contact_name_1.trim(),
-                designation: row.contact_designation_1?.trim() || '',
-                email: row.contact_email_1?.trim() || '',
-                phone: row.contact_phone_1?.trim() || '',
-                birthday: '' // CSV doesn't provide contact birthdays yet
-              });
-            }
-            if (row.contact_name_2?.trim()) {
-              contact_persons.push({
-                name: row.contact_name_2.trim(),
-                designation: row.contact_designation_2?.trim() || '',
-                email: row.contact_email_2?.trim() || '',
-                phone: row.contact_phone_2?.trim() || '',
-                birthday: ''
-              });
-            }
-
-            const services = row.services
-              ? row.services.split(',').map(s => s.trim()).filter(Boolean)
-              : [];
-
-            const clientData = {
-              company_name: row.company_name.trim(),
-              client_type: CLIENT_TYPES.some(t => t.value === (row.client_type || '').trim())
-                ? (row.client_type || '').trim()
-                : 'proprietor',
-              email: row.email.trim(),
-              phone: row.phone.trim(),
-              birthday: row.birthday?.trim() || '',
-              contact_persons: contact_persons.length > 0 ? contact_persons : [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
-              services,
-              notes: row.notes?.trim() || '',
-              assigned_to: 'unassigned',
-              dsc_details: []
-            };
-
-            await api.post('/clients', clientData);
-            successCount++;
-          } catch (err) {
-            errors.push(`Row ${i + 2}: ${err.response?.data?.detail || err.message}`);
-          }
+            await api.post('/clients', {
+              company_name: row.company_name,
+              client_type: row.client_type || 'proprietor',
+              email: row.email,
+              phone: row.phone,
+              birthday: row.birthday || '',
+              services: row.services ? row.services.split(',').map(s => s.trim()) : [],
+              contact_persons: [{ name: row.contact_name_1 || '', designation: row.contact_designation_1 || '', email: row.contact_email_1 || '', phone: row.contact_phone_1 || '', birthday: '' }],
+              status: 'active'
+            });
+            count++;
+          } catch (e) { console.error(e); }
         }
-
         setImportLoading(false);
-
-        if (successCount > 0) {
-          toast.success(`${successCount} client(s) imported successfully!`);
-          fetchClients();
-        }
-        if (errors.length > 0) {
-          toast.error(`Import completed with ${errors.length} error(s)`);
-        }
-
+        if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
         if (fileInputRef.current) fileInputRef.current.value = '';
-      },
-      error: () => {
-        setImportLoading(false);
-        toast.error('Failed to read CSV file');
       }
     });
   };
 
-  // ──────────────────────────────────────────────
-  // FORM HANDLERS (mostly unchanged)
-  // ──────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      const clientData = {
-        ...formData,
-        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-      };
-
-      if (editingClient) {
-        await api.put(`/clients/${editingClient.id}`, clientData);
-        toast.success('Client updated successfully!');
-      } else {
-        await api.post('/clients', clientData);
-        toast.success('Client created successfully!');
-      }
-
+      const data = { ...formData, assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to };
+      if (editingClient) await api.put(`/clients/${editingClient.id}`, data);
+      else await api.post('/clients', data);
       setDialogOpen(false);
       resetForm();
       fetchClients();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save client');
-    } finally {
-      setLoading(false);
-    }
+      toast.success('Saved successfully!');
+    } catch (error) { toast.error('Error saving client'); }
+    finally { setLoading(false); }
   };
 
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
-      company_name: client.company_name,
-      client_type: client.client_type,
-      contact_persons: client.contact_persons?.length > 0
-        ? client.contact_persons.map(cp => ({
-            ...cp,
-            birthday: cp.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : ''
-          }))
-        : [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
-      email: client.email,
-      phone: client.phone,
+      ...client,
+      contact_persons: client.contact_persons?.map(cp => ({ 
+        ...cp, 
+        birthday: cp.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '' 
+      })) || [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
       birthday: client.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
-      services: client.services || [],
-      dsc_details: client.dsc_details || [],
+      status: client.status || 'active',
       assigned_to: client.assigned_to || 'unassigned',
-      notes: client.notes || '',
+      dsc_details: client.dsc_details || []
     });
     setDialogOpen(true);
   };
 
   const resetForm = () => {
-    setFormData({
-      company_name: '',
-      client_type: 'proprietor',
-      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
-      email: '',
-      phone: '',
-      birthday: '',
-      services: [],
-      dsc_details: [],
-      assigned_to: 'unassigned',
-      notes: '',
-    });
+    setFormData({ company_name: '', client_type: 'proprietor', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }], email: '', phone: '', birthday: '', services: [], dsc_details: [], assigned_to: 'unassigned', notes: '', status: 'active' });
     setEditingClient(null);
-    setOtherService('');
   };
 
-  const toggleService = (service) => {
-    if (service === 'Other' && !formData.services.includes('Other')) {
-      setFormData(prev => ({ ...prev, services: [...prev.services, 'Other'] }));
-    } else if (service === 'Other') {
-      setFormData(prev => ({
-        ...prev,
-        services: prev.services.filter(s => s !== 'Other' && !s.startsWith('Other:'))
-      }));
-      setOtherService('');
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        services: prev.services.includes(service)
-          ? prev.services.filter(s => s !== service)
-          : [...prev.services, service]
-      }));
-    }
-  };
+  // ==================== DYNAMIC FIELDS ====================
+
+  const updateContact = (idx, field, val) => setFormData(p => ({ 
+    ...p, 
+    contact_persons: p.contact_persons.map((c, i) => i === index ? { ...c, [field]: val } : c) 
+  }));
+
+  const addContact = () => setFormData(p => ({ 
+    ...p, 
+    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }] 
+  }));
+
+  const removeContact = (idx) => setFormData(p => ({ 
+    ...p, 
+    contact_persons: p.contact_persons.filter((_, i) => i !== idx) 
+  }));
+
+  const updateDSC = (idx, field, val) => setFormData(p => ({
+    ...p,
+    dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
+  }));
+
+  const addDSC = () => setFormData(p => ({
+    ...p,
+    dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
+  }));
+
+  const removeDSC = (idx) => setFormData(p => ({
+    ...p,
+    dsc_details: p.dsc_details.filter((_, i) => i !== idx)
+  }));
+
+  const toggleService = (s) => setFormData(p => {
+    const services = p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s];
+    return { ...p, services };
+  });
 
   const addOtherService = () => {
     if (otherService.trim()) {
@@ -296,385 +281,196 @@ export default function Clients() {
     }
   };
 
-  const addContactPerson = () => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: [...prev.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }]
-    }));
-  };
-
-  const removeContactPerson = (index) => {
-    if (formData.contact_persons.length > 1) {
-      setFormData(prev => ({
-        ...prev,
-        contact_persons: prev.contact_persons.filter((_, i) => i !== index)
-      }));
-    }
-  };
-
-  const updateContactPerson = (index, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: prev.contact_persons.map((c, i) =>
-        i === index ? { ...c, [field]: value } : c
-      )
-    }));
-  };
-
-  // ──────────────────────────────────────────────
-  // PAGINATION + AUTO NUMBERING
-  // ──────────────────────────────────────────────
-  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentClients = clients.slice(indexOfFirstItem, indexOfLastItem);
-
-  const totalPages = Math.ceil(clients.length / ITEMS_PER_PAGE);
-
-  const paginate = (pageNumber) => setCurrentPage(pageNumber);
-
-  const getClientNumber = (index) => {
-    const globalIndex = indexOfFirstItem + index;
-    return `#${String(globalIndex + 1).padStart(3, '0')}`;
-  };
-
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Client Management</h1>
-          <p className="text-slate-600 mt-1">Manage your clients and track their details</p>
+          <h1 className="text-3xl font-bold text-slate-900 font-outfit">Client Management</h1>
+          <p className="text-slate-600 mt-1">Manage firm clients and track details</p>
         </div>
-
         <div className="flex flex-wrap gap-3">
-          <Button variant="outline" onClick={downloadTemplate}>
-            <FileText className="mr-2 h-4 w-4" />
-            CSV Format
-          </Button>
-
-          <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={importLoading}>
-            {importLoading ? 'Importing...' : 'Add CSV'}
-          </Button>
-
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700">
-                <Plus className="mr-2 h-4 w-4" /> Add Client
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader className="pb-6 border-b">
-                <DialogTitle className="text-2xl font-bold">Add New Client</DialogTitle>
-                <DialogDescription>
-                  Create and manage client details, contacts and services.
-                </DialogDescription>
-              </DialogHeader>
-
-              <form onSubmit={handleSubmit} className="space-y-8 pt-6">
-                {/* Basic Information */}
-                <div className="space-y-6 border rounded-lg p-6 bg-slate-50/40">
-                  <div>
-                    <h3 className="text-lg font-semibold">Basic Information</h3>
-                    <p className="text-sm text-muted-foreground">Core company details</p>
+          <Button variant="outline" onClick={downloadTemplate} className="border-indigo-600 text-indigo-600"><FileText className="mr-2 h-4 w-4" />CSV Format</Button>
+          <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={importLoading}>{importLoading ? 'Importing...' : 'Add CSV'}</Button>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if(!open) resetForm(); }}>
+            <DialogTrigger asChild><Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg transition-all"><Plus className="mr-2 h-5 w-5" /> Add Client</Button></DialogTrigger>
+            <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto bg-white rounded-3xl border-none shadow-2xl">
+              <div className="p-8 space-y-8">
+                <DialogHeader className="flex flex-row justify-between items-center">
+                  <div><DialogTitle className="text-2xl font-bold font-outfit">Client Entry</DialogTitle><DialogDescription>Enter core client information below.</DialogDescription></div>
+                  <div className="flex items-center gap-3 bg-slate-50 px-3 py-1.5 rounded-xl border">
+                    <Label className="text-[10px] font-bold uppercase text-slate-400">Status: {formData.status}</Label>
+                    <Switch checked={formData.status === 'active'} onCheckedChange={(c) => setFormData({...formData, status: c ? 'active' : 'inactive'})} />
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label className="required">Company Name</Label>
-                      <Input
-                        value={formData.company_name}
-                        onChange={e => setFormData({ ...formData, company_name: e.target.value })}
-                        placeholder="ABC Enterprises"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="required">Client Type</Label>
-                      <Select
-                        value={formData.client_type}
-                        onValueChange={v => setFormData({ ...formData, client_type: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CLIENT_TYPES.map(t => (
-                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="required">Company Email</Label>
-                      <Input
-                        type="email"
-                        value={formData.email}
-                        onChange={e => setFormData({ ...formData, email: e.target.value })}
-                        placeholder="company@example.com"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="required">Company Phone</Label>
-                      <Input
-                        value={formData.phone}
-                        onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder="+1234567890"
-                        required
-                      />
-                    </div>
-
-                    <div className="md:col-span-2 space-y-2">
-                      <Label>Date of Incorporation</Label>
-                      <Input
-                        type="date"
-                        value={formData.birthday}
-                        onChange={e => setFormData({ ...formData, birthday: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Contact Persons */}
-                <div className="space-y-6 border rounded-lg p-6 bg-slate-50/40">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="text-lg font-semibold">Contact Persons</h3>
-                      <p className="text-sm text-muted-foreground">Manage associated contacts</p>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={addContactPerson}>
-                      + Add Contact
-                    </Button>
-                  </div>
-
-                  {formData.contact_persons.map((contact, idx) => (
-                    <div key={idx} className="border rounded-md p-5 bg-white relative">
-                      <div className="flex justify-between items-center mb-4">
-                        <h4 className="font-medium">Contact Person #{idx + 1}</h4>
-                        {formData.contact_persons.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="text-red-600 hover:text-red-700"
-                            onClick={() => removeContactPerson(idx)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-8">
+                  {/* Basic Info */}
+                  <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
+                    <h3 className="text-base font-bold text-slate-800">Basic Information</h3>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-2"><Label className="text-xs font-semibold uppercase text-slate-500">Company Name *</Label><Input className="bg-white border-slate-200 h-11" value={formData.company_name} onChange={e => setFormData({...formData, company_name: e.target.value})} required /></div>
+                      <div className="space-y-2"><Label className="text-xs font-semibold uppercase text-slate-500">Client Type *</Label>
+                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                          <SelectTrigger className="bg-white border-slate-200 h-11"><SelectValue /></SelectTrigger>
+                          <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                        </Select>
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        <div className="space-y-2">
-                          <Label>Full Name</Label>
-                          <Input
-                            value={contact.name}
-                            onChange={e => updateContactPerson(idx, 'name', e.target.value)}
-                            placeholder="Full Name"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Designation</Label>
-                          <Input
-                            value={contact.designation}
-                            onChange={e => updateContactPerson(idx, 'designation', e.target.value)}
-                            placeholder="Designation"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Email</Label>
-                          <Input
-                            type="email"
-                            value={contact.email}
-                            onChange={e => updateContactPerson(idx, 'email', e.target.value)}
-                            placeholder="Email"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Phone</Label>
-                          <Input
-                            value={contact.phone}
-                            onChange={e => updateContactPerson(idx, 'phone', e.target.value)}
-                            placeholder="Phone"
-                          />
-                        </div>
-
-                        <div className="md:col-span-2 space-y-2">
-                          <Label>Birthday mm/dd/yyyy</Label>
-                          <Input
-                            type="date"
-                            value={contact.birthday}
-                            onChange={e => updateContactPerson(idx, 'birthday', e.target.value)}
-                          />
-                          <p className="text-xs text-muted-foreground italic mt-1">
-                            This will link to dashboard notification bell for upcoming birthdays.
-                          </p>
-                        </div>
-                      </div>
+                      <div className="space-y-2"><Label className="text-xs font-semibold uppercase text-slate-500">Email *</Label><Input className="bg-white border-slate-200 h-11" type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required /></div>
+                      <div className="space-y-2"><Label className="text-xs font-semibold uppercase text-slate-500">Phone *</Label><Input className="bg-white border-slate-200 h-11" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required /></div>
+                      <div className="col-span-2 space-y-2"><Label className="text-xs font-semibold uppercase text-slate-500">Date of Incorporation</Label><Input className="bg-white border-slate-200 h-11" type="date" value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} /></div>
                     </div>
-                  ))}
-                </div>
-
-                {/* Services */}
-                <div className="space-y-4">
-                  <Label className="text-base font-semibold">Services *</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {SERVICES.map(s => (
-                      <Badge
-                        key={s}
-                        variant={formData.services.includes(s) || formData.services.some(x => x.startsWith('Other:')) ? "default" : "outline"}
-                        className="cursor-pointer px-4 py-1.5 text-sm"
-                        onClick={() => toggleService(s)}
-                      >
-                        {s}
-                      </Badge>
-                    ))}
                   </div>
 
-                  {formData.services.some(s => s.startsWith('Other:')) && (
-                    <div className="flex gap-2 mt-3">
-                      <Input
-                        placeholder="Specify other service"
-                        value={otherService}
-                        onChange={e => setOtherService(e.target.value)}
-                      />
-                      <Button type="button" size="sm" onClick={addOtherService}>Add</Button>
+                  {/* Contact Persons */}
+                  <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
+                    <div className="flex justify-between items-end"><div><h3 className="text-base font-bold text-slate-800">Contact Persons</h3><p className="text-xs text-slate-400">Manage associated contacts</p></div><Button type="button" size="sm" onClick={addContact} variant="outline" className="h-9 bg-white border-slate-200 rounded-lg"><Plus className="h-4 w-4 mr-1.5" /> Add Contact</Button></div>
+                    <div className="space-y-4">
+                      {formData.contact_persons.map((c, i) => (
+                        <div key={i} className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm relative space-y-4">
+                          <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-700">Contact Person #{i + 1}</span>{formData.contact_persons.length > 1 && <Button type="button" size="icon" variant="ghost" onClick={() => removeContact(i)} className="h-8 w-8 text-slate-300 hover:text-red-500"><Trash className="h-4 w-4" /></Button>}</div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <Input className="h-10 border-slate-100" placeholder="Name" value={c.name} onChange={e => updateContact(i, 'name', e.target.value)} />
+                            <Input className="h-10 border-slate-100" placeholder="Designation" value={c.designation} onChange={e => updateContact(i, 'designation', e.target.value)} />
+                            <Input className="h-10 border-slate-100" placeholder="Email" value={c.email} onChange={e => updateContact(i, 'email', e.target.value)} />
+                            <Input className="h-10 border-slate-100" placeholder="Phone" value={c.phone} onChange={e => updateContact(i, 'phone', e.target.value)} />
+                            <div className="col-span-2 space-y-2 mt-1"><Label className="text-[11px] font-bold text-slate-500">Birthday</Label><Input type="date" className="h-10 border-slate-100" value={c.birthday} onChange={e => updateContact(i, 'birthday', e.target.value)} /></div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {formData.services.filter(s => s.startsWith('Other:')).map((s, i) => (
-                      <Badge key={i} variant="secondary" className="flex items-center gap-1">
-                        {s.replace('Other: ', '')}
-                        <X
-                          className="h-3 w-3 cursor-pointer"
-                          onClick={() => setFormData(p => ({
-                            ...p,
-                            services: p.services.filter(x => x !== s)
-                          }))}
-                        />
-                      </Badge>
-                    ))}
                   </div>
-                </div>
 
-                {/* Assign To + Notes */}
-                {user?.role !== 'staff' && (
+                  {/* DSC Details Section restored */}
+                  <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
+                    <div className="flex justify-between items-end"><div><h3 className="text-base font-bold text-slate-800">DSC Details</h3><p className="text-xs text-slate-400">Manage digital signature certificates</p></div><Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-9 bg-white border-slate-200 rounded-lg"><FileText className="h-4 w-4 mr-1.5" /> Add DSC</Button></div>
+                    <div className="space-y-4">
+                      {formData.dsc_details.map((d, i) => (
+                        <div key={i} className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm relative space-y-4">
+                          <Button type="button" size="icon" variant="ghost" onClick={() => removeDSC(i)} className="absolute right-1 top-1 h-8 w-8"><X className="h-4 w-4 text-slate-300" /></Button>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1"><Label className="text-[10px] uppercase font-bold text-slate-400">Cert No</Label><Input className="h-9" value={d.certificate_number} onChange={e => updateDSC(i, 'certificate_number', e.target.value)} /></div>
+                            <div className="space-y-1"><Label className="text-[10px] uppercase font-bold text-slate-400">Holder Name</Label><Input className="h-9" value={d.holder_name} onChange={e => updateDSC(i, 'holder_name', e.target.value)} /></div>
+                            <div className="space-y-1"><Label className="text-[10px] uppercase font-bold text-slate-400">Issue Date</Label><Input type="date" className="h-9" value={d.issue_date} onChange={e => updateDSC(i, 'issue_date', e.target.value)} /></div>
+                            <div className="space-y-1"><Label className="text-[10px] uppercase font-bold text-slate-400">Expiry Date</Label><Input type="date" className="h-9" value={d.expiry_date} onChange={e => updateDSC(i, 'expiry_date', e.target.value)} /></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Services *</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {SERVICES.map(s => <Badge key={s} variant={formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))) ? "default" : "outline"} className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]" onClick={() => toggleService(s)}>{s}</Badge>)}
+                    </div>
+                    {formData.services.includes('Other') && <div className="flex gap-2"><Input placeholder="Specify service" value={otherService} onChange={e => setOtherService(e.target.value)} /><Button type="button" onClick={addOtherService} className="bg-slate-800">Add</Button></div>}
+                  </div>
+
                   <div className="space-y-2">
-                    <Label>Assign To</Label>
-                    <Select
-                      value={formData.assigned_to}
-                      onValueChange={v => setFormData({ ...formData, assigned_to: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">Unassigned</SelectItem>
-                        {users.map(u => (
-                          <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Notes</Label>
+                    <Textarea className="bg-slate-50 border-slate-100 min-h-[100px] rounded-xl" placeholder="Additional notes..." value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                   </div>
-                )}
 
-                <div className="space-y-2">
-                  <Label>Notes</Label>
-                  <Textarea
-                    value={formData.notes}
-                    onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Additional notes about the client"
-                    rows={4}
-                  />
-                </div>
-
-                <DialogFooter className="pt-6 border-t">
-                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={loading}>
-                    {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
-                  </Button>
-                </DialogFooter>
-              </form>
+                  <DialogFooter className="sticky bottom-0 bg-white pt-6 pb-4 border-t flex flex-col sm:flex-row gap-3">
+                    <div className="flex gap-2 w-full sm:w-auto"><Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button><Button type="button" variant="outline" onClick={downloadTemplate}>CSV Format</Button></div>
+                    <div className="flex gap-2 w-full sm:w-auto"><Button type="button" className="bg-indigo-600 text-white" onClick={() => fileInputRef.current?.click()}>Add CSV</Button><Button type="submit" disabled={loading} className="bg-indigo-900 text-white px-8">{loading ? 'Saving...' : editingClient ? 'Update' : 'Save'}</Button></div>
+                  </DialogFooter>
+                </form>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
       </div>
 
-      {/* Hidden file input for CSV */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept=".csv"
-        onChange={handleImportCSV}
-        style={{ display: 'none' }}
-      />
+      {/* Same-Day Birthday Reminders (Admin/Manager Only) */}
+      {(user?.role === 'admin' || user?.role === 'manager') && todayReminders.length > 0 && (
+        <Card className="bg-pink-50 border-pink-100 animate-pulse">
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-2 bg-white rounded-full text-pink-500 shadow-sm"><Cake className="h-5 w-5" /></div>
+            <div>
+              <h4 className="text-sm font-bold text-pink-900">Today's Celebrations</h4>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {todayReminders.map(c => <Badge key={c.id} className="bg-white text-pink-700 border-pink-200 shadow-sm">{c.company_name}</Badge>)}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Clients Grid with Pagination & Auto-numbering */}
+      {/* Admin Stats Dashboard Row */}
+      {user?.role === 'admin' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600"><Users className="h-5 w-5" /></div>
+            <div><p className="text-[10px] uppercase text-slate-400 font-bold">Total Clients</p><h2 className="text-xl font-bold">{stats.totalClients}</h2></div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><Briefcase className="h-5 w-5" /></div>
+            <div><p className="text-[10px] uppercase text-slate-400 font-bold">Active</p><h2 className="text-xl font-bold">{stats.activeClients}</h2></div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-amber-50 rounded-lg text-amber-600"><Archive className="h-5 w-5" /></div>
+            <div><p className="text-[10px] uppercase text-slate-400 font-bold">Archived</p><h2 className="text-xl font-bold">{stats.totalClients - stats.activeClients}</h2></div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><BarChart3 className="h-5 w-5" /></div>
+            <div className="overflow-hidden"><p className="text-[10px] uppercase text-slate-400 font-bold">Top Service</p><h2 className="text-sm font-bold truncate">{Object.entries(stats.serviceCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || 'N/A'}</h2></div>
+          </Card>
+        </div>
+      )}
+
+      {/* Search & Global Filter Bar */}
+      <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+        <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" /><Input placeholder="Search company, email or phone..." className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+        <div className="flex gap-2">
+          <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className="h-10 bg-slate-50 border-none w-[110px] text-xs"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All</SelectItem></SelectContent></Select>
+          <Select value={serviceFilter} onValueChange={setServiceFilter}><SelectTrigger className="h-10 bg-slate-50 border-none w-[150px] text-xs"><SelectValue placeholder="Service" /></SelectTrigger><SelectContent><SelectItem value="all">All Services</SelectItem>{SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select>
+        </div>
+      </div>
+
+      {/* Client Grid Display */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {currentClients.length === 0 ? (
-          <Card className="col-span-full">
-            <CardContent className="py-12 text-center text-muted-foreground">
-              No clients found. Add your first client!
+        {currentClients.map((c, i) => (
+          <Card key={c.id} className={`overflow-hidden transition-all border-slate-200 ${c.status === 'inactive' ? 'opacity-60 grayscale-[0.2]' : 'hover:shadow-md'}`}>
+            <CardHeader className="pb-3 border-b bg-slate-50/50">
+              <div className="flex justify-between items-start">
+                <div><CardTitle className="text-base font-bold">{getClientNumber(i)} {c.company_name}</CardTitle><p className="text-[10px] text-slate-500">{CLIENT_TYPES.find(t => t.value === c.client_type)?.label || c.client_type}</p></div>
+                <div className="flex gap-1">
+                  {c.status === 'inactive' && <Badge variant="outline" className="text-[8px] uppercase text-slate-300 border-slate-200">Archived</Badge>}
+                  {c.birthday && <Calendar className="h-4 w-4 text-blue-400" />}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-4 space-y-4">
+              <div className="text-xs space-y-1 text-slate-600 font-medium">
+                <p className="flex items-center gap-2"><Mail className="h-3 w-3 text-slate-400" /> {c.email}</p>
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2"><Briefcase className="h-3 w-3 text-slate-400" /> {c.phone}</p>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-full" onClick={() => openWhatsApp(c.phone, c.company_name)}><MessageCircle className="h-4 w-4" /></Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {c.services?.slice(0, 3).map(s => <Badge key={s} variant="secondary" className="text-[9px] bg-slate-100 text-slate-500 border-none px-2 rounded-full">{s.replace('Other: ', '')}</Badge>)}
+                {c.services?.length > 3 && <span className="text-[9px] text-slate-400 ml-1">+{c.services.length - 3}</span>}
+              </div>
+              <div className="flex gap-2 pt-3 border-t justify-end">
+                <Button variant="ghost" size="sm" className="h-8 text-indigo-600 hover:bg-indigo-50 px-3" onClick={() => handleEdit(c)}><Edit className="h-3.5 w-3.5 mr-1" /> Edit</Button>
+                {user?.role === 'admin' && <Button variant="ghost" size="sm" className="h-8 text-red-500 hover:bg-red-50 px-3" onClick={() => { if(confirm("Delete client record?")) api.delete(`/clients/${c.id}`).then(()=>fetchClients()) }}><Trash2 className="h-3.5 w-3.5" /></Button>}
+              </div>
             </CardContent>
           </Card>
-        ) : (
-          currentClients.map((client, idx) => (
-            <Card key={client.id} className="overflow-hidden">
-              <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="text-lg">
-                      {getClientNumber(idx)} {client.company_name}
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
-                    </p>
-                  </div>
-                  {client.birthday && <Calendar className="h-5 w-5 text-blue-500" />}
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-4 text-sm">
-                {/* contact info, services, assigned_to, actions – same as your original */}
-                {/* ... keep your existing card content logic here ... */}
-              </CardContent>
-            </Card>
-          ))
-        )}
+        ))}
       </div>
 
       {/* Pagination Controls */}
-      {clients.length > ITEMS_PER_PAGE && (
-        <div className="flex justify-center items-center gap-2 mt-8">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={currentPage === 1}
-            onClick={() => paginate(currentPage - 1)}
-          >
-            Previous
-          </Button>
-
-          <span className="text-sm text-muted-foreground px-4">
-            Page {currentPage} of {totalPages}
-          </span>
-
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={currentPage === totalPages}
-            onClick={() => paginate(currentPage + 1)}
-          >
-            Next
-          </Button>
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-3 pt-4">
+          <Button variant="outline" size="sm" className="rounded-xl h-9 border-slate-200 text-slate-600" disabled={currentPage === 1} onClick={() => setCurrentPage(v => v - 1)}>Prev</Button>
+          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">Page {currentPage} of {totalPages}</span>
+          <Button variant="outline" size="sm" className="rounded-xl h-9 border-slate-200 text-slate-600" disabled={currentPage === totalPages} onClick={() => setCurrentPage(v => v + 1)}>Next</Button>
         </div>
       )}
+      <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
     </div>
   );
 }
