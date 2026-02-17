@@ -978,25 +978,25 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
       <table className="min-w-full">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-           <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+           <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               S.No
             </th> 
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Holder Name
             </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Type
             </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Associated With
             </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Expiry Date
             </th>
-            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Status
             </th>
-            <th className="text-right text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
+            <th className="w-40 px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
               Actions
             </th>
           </tr>
