@@ -847,9 +847,14 @@ export default function DocumentRegister() {
         {movementData?.movement_type === 'IN'
           ? 'Record when Document is delivered/returned'
           : 'Record when Document is taken out'}
-      </DialogDescription>
-    </DialogHeader>
+        </DialogDescription>
+       </DialogHeader>
+      </DialogContent>
+     </Dialog>
 
+   </div>
+   );
+}
     function DocumentTable({
   DocumentList,
   onEdit,
