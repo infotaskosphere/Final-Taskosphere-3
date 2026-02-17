@@ -55,7 +55,7 @@ export default function DocumentRegister() {
       const response = await api.get('/documents');
       setDocumentList(response.data);
     } catch (error) {
-      toast.error('Failed to fetch documents');
+      toast.error(getErrorMessage(error) || 'Failed to fetch documents');
     }
   };
 
@@ -81,7 +81,7 @@ export default function DocumentRegister() {
       resetForm();
       fetchDocuments();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save document');
+      toast.error(getErrorMessage(error) || 'Failed to save document');
     } finally {
       setLoading(false);
     }
@@ -98,7 +98,7 @@ export default function DocumentRegister() {
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
       fetchDocuments();
     } catch (error) {
-      toast.error('Failed to record movement');
+      toast.error(getErrorMessage(error) || 'Failed to record movement');
     } finally {
       setLoading(false);
     }
@@ -140,7 +140,7 @@ export default function DocumentRegister() {
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) setEditingDocument(updatedDocument);
     } catch (error) {
-      toast.error('Failed to record movement');
+      toast.error(getErrorMessage(error) || 'Failed to record movement');
     } finally {
       setLoading(false);
     }
@@ -165,7 +165,7 @@ export default function DocumentRegister() {
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) setEditingDocument(updatedDocument);
     } catch (error) {
-      toast.error('Failed to update movement');
+      toast.error(getErrorMessage(error) || 'Failed to update movement');
     } finally {
       setLoading(false);
     }
@@ -204,7 +204,7 @@ export default function DocumentRegister() {
       toast.success('Document deleted successfully!');
       fetchDocuments();
     } catch (error) {
-      toast.error('Failed to delete document');
+      toast.error(getErrorMessage(error) || 'Failed to delete document');
     }
   };
 
@@ -233,6 +233,14 @@ export default function DocumentRegister() {
 
   const inDocuments = documentList.filter(doc => getDocumentInOutStatus(doc) === 'IN' && filterBySearch(doc));
   const outDocuments = documentList.filter(doc => getDocumentInOutStatus(doc) === 'OUT' && filterBySearch(doc));
+
+  const getErrorMessage = (error) => {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map((err) => err.msg || err.message || JSON.stringify(err)).join(', ');
+    if (detail && typeof detail === 'object') return detail.msg || detail.message || JSON.stringify(detail);
+    return null;
+  };
 
   return (
     <div className="space-y-6" data-testid="document-page">
@@ -355,7 +363,7 @@ export default function DocumentRegister() {
                           value={formData.entity_type}
                           onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
                         >
-                          <SelectTrigger data-testid="document-entity-type-select">
+                          <SelectTrigger id="entity_type" data-testid="document-entity-type-select">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -514,8 +522,9 @@ export default function DocumentRegister() {
                                   </div>
                                 </div>
                                 <div className="space-y-2">
-                                  <Label className="text-xs">Person Name</Label>
+                                  <Label htmlFor="edit-person-name" className="text-xs">Person Name</Label>
                                   <Input
+                                    id="edit-person-name"
                                     size="sm"
                                     value={editMovementData.person_name}
                                     onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
@@ -523,8 +532,9 @@ export default function DocumentRegister() {
                                   />
                                 </div>
                                 <div className="space-y-2">
-                                  <Label className="text-xs">Notes</Label>
+                                  <Label htmlFor="edit-notes" className="text-xs">Notes</Label>
                                   <Input
+                                    id="edit-notes"
                                     size="sm"
                                     value={editMovementData.notes}
                                     onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })}
@@ -674,7 +684,7 @@ export default function DocumentRegister() {
                       value={formData.entity_type}
                       onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
                     >
-                      <SelectTrigger data-testid="document-entity-type-select">
+                      <SelectTrigger id="entity_type" data-testid="document-entity-type-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
