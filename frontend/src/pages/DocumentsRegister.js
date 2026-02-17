@@ -717,9 +717,114 @@ export default function DocumentRegister() {
                 </TabsContent>
               </Tabs>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* same as original simple form */}
-              </form>
+              <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+
+  <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <Label>Name of Document Holder *</Label>
+      <Input
+        value={formData.holder_name}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            holder_name: e.target.value,
+          })
+        }
+        required
+      />
+    </div>
+
+    <div className="space-y-2">
+      <Label>Type</Label>
+      <Input
+        value={formData.Document_type}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            Document_type: e.target.value,
+          })
+        }
+      />
+    </div>
+  </div>
+
+  <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <Label>Issue Date *</Label>
+      <Input
+        type="date"
+        value={formData.issue_date}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            issue_date: e.target.value,
+          })
+        }
+        required
+      />
+    </div>
+
+    <div className="space-y-2">
+      <Label>Password</Label>
+      <Input
+        value={formData.Document_password}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            Document_password: e.target.value,
+          })
+        }
+      />
+    </div>
+  </div>
+
+  <div className="space-y-2">
+    <Label>Associated With</Label>
+    <Input
+      value={formData.associated_with}
+      onChange={(e) =>
+        setFormData({
+          ...formData,
+          associated_with: e.target.value,
+        })
+      }
+    />
+  </div>
+
+  <div className="space-y-2">
+    <Label>Notes</Label>
+    <Textarea
+      placeholder="Additional notes"
+      value={formData.notes}
+      onChange={(e) =>
+        setFormData({
+          ...formData,
+          notes: e.target.value,
+        })
+      }
+    />
+  </div>
+
+  <DialogFooter>
+    <Button
+      type="button"
+      variant="outline"
+      onClick={() => setDialogOpen(false)}
+    >
+      Cancel
+    </Button>
+
+    <Button
+      type="submit"
+      disabled={loading}
+      className="bg-indigo-600 hover:bg-indigo-700"
+    >
+      {loading ? 'Saving...' : 'Add Document'}
+    </Button>
+  </DialogFooter>
+
+</form>
+
             )}
           </DialogContent>
         </Dialog>
