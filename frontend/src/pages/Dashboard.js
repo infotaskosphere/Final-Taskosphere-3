@@ -74,13 +74,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      api.get('/chat/notifications').then(res => {
-        if (res.data.length > chatMessages.length) {
-          notificationAudio.current.play();
-        }
-        setChatMessages(res.data);
-      });
-    }, 10000); // every 10 seconds
+      api.get('/chat/notifications')
+        .then(res => {
+          if (res.data.length > chatMessages.length) {
+            notificationAudio.current.play().catch(() => {}); // silent fail if audio missing
+          }
+          setChatMessages(res.data);
+        })
+        .catch(err => console.warn('Chat notifications failed:', err));
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [chatMessages]);
@@ -88,16 +90,17 @@ export default function Dashboard() {
   const fetchMyTodos = async () => {
     try {
       const res = await api.get('/todos/my');
-      setTodos(res.data);
+      setTodos(res.data || []);
     } catch (error) {
       console.error('Failed to fetch todos:', error);
+      setTodos([]); // fallback to prevent undefined crash
     }
   };
 
   const addTodo = async () => {
-    if (!newTodo) return;
+    if (!newTodo.trim()) return;
     try {
-      const res = await api.post('/todos', { title: newTodo, completed: false });
+      const res = await api.post('/todos', { title: newTodo.trim(), completed: false });
       setTodos([...todos, res.data]);
       setNewTodo('');
       toast.success('Todo added successfully!');
@@ -108,6 +111,7 @@ export default function Dashboard() {
 
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
+    if (!todo) return;
     try {
       const res = await api.patch(`/todos/${id}`, { completed: !todo.completed });
       setTodos(todos.map(t => t.id === id ? res.data : t));
@@ -135,25 +139,21 @@ export default function Dashboard() {
       ]);
 
       setStats(statsRes.data);
-      setRecentTasks(tasksRes.data.slice(0, 5));
-      setUpcomingDueDates(dueDatesRes.data.slice(0, 5));
+      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
+      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
 
-    // Fetch Rankings
-  const rankingRes = await api.get(
-    `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
-  );
-  setRankings(rankingRes.data.rankings);
+      // Fetch Rankings
+      const rankingRes = await api.get(
+        `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+      );
+      setRankings(rankingRes.data?.rankings || []);
 
       // Fetch Chat Notifications
-  const chatRes = await api.get('/chat/notifications');
-
-  if (chatRes.data.length > chatMessages.length) {
-    notificationAudio.play();
-  }
-
-  setChatMessages(chatRes.data);
-
-
+      const chatRes = await api.get('/chat/notifications');
+      if (chatRes.data?.length > chatMessages.length) {
+        notificationAudio.current.play().catch(() => {});
+      }
+      setChatMessages(chatRes.data || []);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
     }
@@ -168,39 +168,39 @@ export default function Dashboard() {
     }
   };
 
-    const handlePunchAction = async (action) => {
-      setLoading(true);
-      try {
-        await api.post('/attendance', { action });
-        toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-        const res = await api.get('/attendance/today');
-        setTodayAttendance(res.data);
-      } catch (error) {
-        toast.error(error.response?.data?.detail || 'Failed to record attendance');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const handlePunchAction = async (action) => {
+    setLoading(true);
+    try {
+      await api.post('/attendance', { action });
+      toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
+      const res = await api.get('/attendance/today');
+      setTodayAttendance(res.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to record attendance');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const getStatusStyle = (status) => {
-      const styles = {
-        completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-        in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' },
-        pending: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-400' },
-      };
-      return styles[status] || styles.pending;
+  const getStatusStyle = (status) => {
+    const styles = {
+      completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+      in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' },
+      pending: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-400' },
     };
+    return styles[status] || styles.pending;
+  };
 
-    const getPriorityStyle = (priority) => {
-      const styles = {
-        high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
-        medium: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
-        low: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
-      };
-      return styles[priority] || styles.medium;
+  const getPriorityStyle = (priority) => {
+    const styles = {
+      high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
+      medium: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
+      low: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
     };
-    const getDeadlineColor = (daysLeft) => {
-    // Overdue or Due Today
+    return styles[priority] || styles.medium;
+  };
+
+  const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
         bg: 'bg-red-50 border-red-200 hover:bg-red-100',
@@ -208,8 +208,6 @@ export default function Dashboard() {
         text: 'text-red-600'
       };
     }
-
-    // 1–7 days → Orange
     if (daysLeft <= 7) {
       return {
         bg: 'bg-orange-50 border-orange-200 hover:bg-orange-100',
@@ -217,8 +215,6 @@ export default function Dashboard() {
         text: 'text-orange-600'
       };
     }
-
-    // 8–15 days → Yellow
     if (daysLeft <= 15) {
       return {
         bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100',
@@ -226,8 +222,6 @@ export default function Dashboard() {
         text: 'text-yellow-600'
       };
     }
-
-    // 31+ days → Green
     if (daysLeft >= 31) {
       return {
         bg: 'bg-green-100 border-green-300 hover:bg-green-200',
@@ -235,741 +229,749 @@ export default function Dashboard() {
         text: 'text-green-700'
       };
     }
-
-    // Everything else (16–30 days)
     return {
       bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100',
       badge: 'bg-yellow-500 text-white',
       text: 'text-yellow-600'
     };
   };
-    const completionRate = stats?.total_tasks > 0 
-      ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100) 
-      : 0;
 
-    // Find next deadline
-    const nextDeadline = upcomingDueDates.length > 0 
-      ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
-      : null;
+  const completionRate = stats?.total_tasks > 0
+    ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
+    : 0;
 
-    return (
-      <motion.div 
-        className="space-y-6" 
-        data-testid="dashboard-page"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Welcome Banner */}
-        <motion.div variants={itemVariants}>
-          <Card 
-            className="border-0 shadow-lg overflow-hidden relative"
-            style={{ 
-              background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
-            }}
-          >
-            <div 
-              className="absolute top-0 right-0 w-72 h-72 rounded-full opacity-20 -mr-16 -mt-16"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
-            />
-            <CardContent className="p-8 relative">
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-                <div>
-                  <h1 className="text-3xl lg:text-4xl font-bold font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    Welcome back, {user?.full_name?.split(' ')[0]}
-                  </h1>
-                  <p className="text-slate-600 mt-2 text-lg">
-                    Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
-                  </p>
-                </div>
-                
-                {nextDeadline && (
-                  <div 
-                    className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
-                    style={{ borderColor: COLORS.mediumBlue, backgroundColor: 'white' }}
-                    onClick={() => navigate('/duedates')}
-                    data-testid="next-deadline-card"
-                  >
-                    <Calendar className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Next Filing Deadline</p>
-                      <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
-                        {format(new Date(nextDeadline.due_date), 'MMM d')}: {nextDeadline.title.slice(0, 15)}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+  const nextDeadline = upcomingDueDates.length > 0
+    ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
+    : null;
 
-        {/* Key Metrics Row - Responsive with equal sizing */}
-        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
-          {/* Total Tasks */}
-          <Card 
-            className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-            onClick={() => navigate('/tasks')}
-            data-testid="stat-total-tasks"
-          >
-            <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-              <div className="flex items-start justify-between flex-1">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
-                  <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_tasks || 0}</p>
-                </div>
-                <div 
-                  className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.deepBlue}15` }}
-                >
-                  <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.deepBlue }} />
-                </div>
-              </div>
-              <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-                <span>View all</span>
-                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Overdue/Pending */}
-          <Card 
-            className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
-              stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
-            }`}
-            onClick={() => navigate('/tasks')}
-            data-testid="stat-overdue-tasks"
-          >
-            <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-              <div className="flex items-start justify-between flex-1">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue Tasks</p>
-                  <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.coral }}>{stats?.overdue_tasks || 0}</p>
-                </div>
-                <div 
-                  className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.coral}15` }}
-                >
-                  <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.coral }} />
-                </div>
-              </div>
-              <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-                <span>View all</span>
-                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Completion Rate */}
-          <Card 
-            className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-            onClick={() => navigate('/tasks')}
-            data-testid="stat-completion-rate"
-          >
-            <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-              <div className="flex items-start justify-between flex-1">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Completion Rate</p>
-                  <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>{completionRate}%</p>
-                </div>
-                <div 
-                  className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
-                >
-                  <Target className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.emeraldGreen }} />
-                </div>
-              </div>
-              <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-                <span>View all</span>
-                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Attendance */}
-          <Card 
-            className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-            onClick={() => navigate('/attendance')}
-            data-testid="stat-attendance"
-          >
-            <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-              <div className="flex items-start justify-between flex-1">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Today's Attendance</p>
-                  <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>
-                    {todayAttendance ? (todayAttendance.punch_in ? 'In' : 'Out') : 'N/A'}
-                  </p>
-                </div>
-                <div 
-                  className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
-                >
-                  <Clock className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.mediumBlue }} />
-                </div>
-              </div>
-              <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-                <span>View report</span>
-                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Punch In/Out + Recent Tasks + Upcoming Due Dates + Team Workload */}
-        <motion.div className="grid grid-cols-1 lg:grid-cols-4 gap-6" variants={itemVariants}>
-          {/* Punch In/Out */}
-          <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-            <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Clock className="h-5 w-5 text-indigo-600" />
-                Attendance
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                Track your daily work hours
-              </p>
-            </CardHeader>
-            <CardContent className="p-6">
-              {todayAttendance ? (
-                <div className="space-y-4">
-                  {todayAttendance.punch_in && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-600">Punch In:</span>
-                      <Badge variant="secondary">
-                        {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
-                      </Badge>
-                    </div>
-                  )}
-                  {todayAttendance.punch_out && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-600">Punch Out:</span>
-                      <Badge variant="secondary">
-                        {format(new Date(todayAttendance.punch_out), 'hh:mm a')}
-                      </Badge>
-                    </div>
-                  )}
-                  <div className="flex gap-3 mt-4">
-                    {!todayAttendance.punch_in ? (
-                      <Button 
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                        onClick={() => handlePunchAction('punch_in')}
-                        disabled={loading}
-                      >
-                        <LogIn className="h-4 w-4 mr-2" />
-                        Punch In
-                      </Button>
-                    ) : !todayAttendance.punch_out ? (
-                      <Button 
-                        className="flex-1 bg-red-600 hover:bg-red-700"
-                        onClick={() => handlePunchAction('punch_out')}
-                        disabled={loading}
-                      >
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Punch Out
-                      </Button>
-                    ) : (
-                      <p className="text-sm text-slate-500">Day completed</p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <Button 
-                  className="w-full bg-emerald-600 hover:bg-emerald-700"
-                  onClick={() => handlePunchAction('punch_in')}
-                  disabled={loading}
-                >
-                  <LogIn className="h-4 w-4 mr-2" />
-                  Start Your Day
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Recent Tasks */}
-          <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-            <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <FileText className="h-5 w-5 text-blue-600" />
-                Recent Tasks
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                Your latest assignments
-              </p>
-            </CardHeader>
-            <CardContent className="p-4">
-              {recentTasks.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 text-sm">
-                  No recent tasks
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {recentTasks.map((task) => {
-                    const statusStyle = getStatusStyle(task.status);
-                    const priorityStyle = getPriorityStyle(task.priority);
-                    return (
-                      <div
-                        key={task.id}
-                        className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${priorityStyle.bg} ${priorityStyle.border}`}
-                        onClick={() => navigate(`/tasks/${task.id}`)}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium text-sm truncate">{task.title}</p>
-                          <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>
-                            {task.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <Calendar className="h-3 w-3" />
-                          Due {format(new Date(task.due_date), 'MMM d')}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="text-right mt-4">
-                <button
-                  onClick={() => navigate('/tasks')}
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  View All Tasks →
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Upcoming Due Dates */}
-          <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-            <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-amber-600" />
-                Upcoming Filings
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                Next 30 days deadlines
-              </p>
-            </CardHeader>
-            <CardContent className="p-4">
-              {upcomingDueDates.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 text-sm">
-                  No upcoming deadlines
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {upcomingDueDates.map((due) => {
-                    const color = getDeadlineColor(due.days_remaining);
-                    return (
-                      <div
-                        key={due.id}
-                        className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${color.bg}`}
-                        onClick={() => navigate(`/duedates/${due.id}`)}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium text-sm truncate">{due.title}</p>
-                          <Badge className={color.badge}>
-                            {due.days_remaining <= 0 ? 'Overdue' : `${due.days_remaining}d left`}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          {due.client_name}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="text-right mt-4">
-                <button
-                  onClick={() => navigate('/duedates')}
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  View Calendar →
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Team Workload */}
-          {user.role === 'admin' && (
-            <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-              <CardHeader className="pb-2 border-b border-slate-100">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <Users className="h-5 w-5 text-purple-600" />
-                  Team Workload
-                </CardTitle>
-                <p className="text-xs text-slate-500 mt-1">
-                  Current task distribution
+  return (
+    <motion.div
+      className="space-y-6"
+      data-testid="dashboard-page"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      {/* Welcome Banner */}
+      <motion.div variants={itemVariants}>
+        <Card
+          className="border-0 shadow-lg overflow-hidden relative"
+          style={{
+            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+          }}
+        >
+          <div
+            className="absolute top-0 right-0 w-72 h-72 rounded-full opacity-20 -mr-16 -mt-16"
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
+          />
+          <CardContent className="p-8 relative">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div>
+                <h1 className="text-3xl lg:text-4xl font-bold font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
+                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'}
+                </h1>
+                <p className="text-slate-600 mt-2 text-lg">
+                  Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
                 </p>
-              </CardHeader>
-              <CardContent className="p-4">
-                {stats?.team_workload?.length === 0 ? (
-                  <div className="text-center py-6 text-slate-400 text-sm">
-                    No team data
+              </div>
+
+              {nextDeadline && (
+                <div
+                  className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
+                  style={{ borderColor: COLORS.mediumBlue, backgroundColor: 'white' }}
+                  onClick={() => navigate('/duedates')}
+                  data-testid="next-deadline-card"
+                >
+                  <Calendar className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Next Filing Deadline</p>
+                    <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
+                      {format(new Date(nextDeadline.due_date), 'MMM d')}: {nextDeadline.title?.slice(0, 15) || 'Deadline'}
+                    </p>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {stats?.team_workload?.slice(0, 5).map((member) => (
-                      <div
-                        key={member.user_id}
-                        className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 text-xs font-semibold">
-                            {member.name ? member.name.charAt(0) : '?'}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-slate-900">{member.name || 'Unknown'}</p>
-                            <p className="text-xs text-slate-500">{member.role}</p>
-                          </div>
-                        </div>
-                        <Badge className="bg-purple-100 text-purple-700">
-                          {member.tasks} tasks
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="text-right mt-4">
-                  <button
-                    onClick={() => navigate('/reports')}
-                    className="text-sm text-blue-600 hover:underline"
-                  >
-                    View Full Report →
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </motion.div>
-
-        {/* Chat Notifications */}
-        <motion.div variants={itemVariants}>
-          <Card 
-            className="border border-slate-200 shadow-sm rounded-2xl hover:shadow-md hover:border-slate-300 transition-all duration-200"
-            data-testid="chat-notifications-widget"
-            onClick={() => navigate('/chat')}
-          >
-            <CardHeader className="pb-2 border-b border-slate-100">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-emerald-600" />
-                  New Messages
-                </CardTitle>
-                <Badge className="bg-emerald-500 text-white">
-                  {chatMessages.length}
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Recent unread conversations
-              </p>
-            </CardHeader>
-
-            <CardContent className="p-4">
-              {chatMessages.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 text-sm">
-                  No new messages
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {chatMessages.slice(0,4).map((msg) => (
-                    <div
-                      key={msg.id}
-                      className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 animate-pulse cursor-pointer hover:bg-emerald-100 transition"
-                      onClick={() => navigate('/chat')}
-                    >
-                      <p className="text-sm font-semibold text-slate-900">
-                        {msg.sender_name}
-                      </p>
-                      <p className="text-xs text-slate-600 truncate">
-                        {msg.message}
-                      </p>
-                    </div>
-                  ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </motion.div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
 
-        {/* Star Performers + To-Do List */}
-        <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card 
-            className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
-            data-testid="staff-ranking-card"
-          >
-            {/* Header */}
-            <CardHeader className="pb-3 border-b border-slate-100">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-yellow-500" />
-                  Star Performers
-                </CardTitle>
-
-                {user.role === "admin" && (
-                  <div className="flex gap-2">
-                    {["all", "monthly", "weekly"].map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setRankingPeriod(p)}
-                        className={`px-3 py-1 text-xs rounded-full border transition ${
-                          rankingPeriod === p
-                            ? "bg-blue-600 text-white border-blue-600"
-                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        {p.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                )}
+      {/* Key Metrics Row */}
+      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
+        <Card
+          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
+          onClick={() => navigate('/tasks')}
+          data-testid="stat-total-tasks"
+        >
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
+                  {stats?.total_tasks || 0}
+                </p>
               </div>
-
-              <p className="text-xs text-slate-500 mt-1">
-                Recognizing top contributors based on performance metrics
-              </p>
-            </CardHeader>
-
-            {/* Body */}
-            <CardContent className="p-4">
-              {rankings.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-sm">
-                  No ranking data available
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-                  {rankings.slice(0, 5).map((member, index) => {
-
-                    const isTop = index === 0;
-                    const isSecond = index === 1;
-                    const isThird = index === 2;
-
-                    return (
-                      <div
-                        key={member.user_id}
-                        className={`flex items-center justify-between p-3 rounded-xl transition border
-                          ${
-                            isTop
-                              ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md"
-                              : isSecond
-                              ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300"
-                              : isThird
-                              ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300"
-                              : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                          }`}
-
-                      >
-                        <div className="flex items-center gap-3">
-
-                          {/* Rank Badge */}
-                          <div className="w-7 text-sm font-semibold">
-                            {isTop && "🥇"}
-                            {isSecond && "🥈"}
-                            {isThird && "🥉"}
-                            {!isTop && !isSecond && !isThird && `#${member.rank}`}
-                          </div>
-
-                          {/* Avatar */}
-                          <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
-                            ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
-                          `}>
-                            {member.profile_picture ? (
-                              <img
-                                src={member.profile_picture}
-                                alt={member.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div
-                                className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white
-                                  ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
-                                `}
-                              >
-                                {member.name ? member.name.charAt(0) : '?'}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Name + Role */}
-                          <div>
-                            <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
-                              {member.name || 'Unknown'}
-                            </p>
-                            <p className="text-xs text-slate-500 capitalize">
-                              {member.role}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Score */}
-                        <div className="text-right">
-                          <p className={`text-sm font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
-                            {member.score}%
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {member.hours_worked}h worked
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* View All */}
-              {rankings.length > 5 && (
-                <div className="text-right mt-4">
-                  <button
-                    onClick={() => navigate('/reports')}
-                    className="text-sm text-blue-600 hover:underline"
-                  >
-                    View All Rankings →
-                  </button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          <Card 
-            className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
-            data-testid="todo-list-card"
-          >
-            {/* Header */}
-            <CardHeader className="pb-3 border-b border-slate-100">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <CheckSquare className="h-5 w-5 text-blue-500" />
-                  My To-Do List
-                </CardTitle>
+              <div
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
+                style={{ backgroundColor: `${COLORS.deepBlue}15` }}
+              >
+                <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.deepBlue }} />
               </div>
+            </div>
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View all</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </CardContent>
+        </Card>
 
-              <p className="text-xs text-slate-500 mt-1">
-                Manage your personal tasks
-              </p>
-            </CardHeader>
-
-            {/* Body */}
-            <CardContent className="p-4">
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  value={newTodo}
-                  onChange={(e) => setNewTodo(e.target.value)}
-                  placeholder="Add new task..."
-                  className="flex-1 p-2 border border-slate-300 rounded-md"
-                />
-                <Button onClick={addTodo} disabled={!newTodo}>Add</Button>
+        <Card
+          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
+            stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
+          }`}
+          onClick={() => navigate('/tasks')}
+          data-testid="stat-overdue-tasks"
+        >
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue Tasks</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.coral }}>
+                  {stats?.overdue_tasks || 0}
+                </p>
               </div>
-              {todos.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-sm">
-                  No tasks added yet
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-                  {todos.map((todo) => (
-                    <div
-                      key={todo.id}
-                      className={`flex items-center justify-between p-3 rounded-xl border ${todo.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={todo.completed}
-                          onChange={() => handleToggleTodo(todo.id)}
-                          className="h-5 w-5"
-                        />
-                        <span className={`text-sm ${todo.completed ? 'line-through text-slate-500' : 'text-slate-900'}`}>
-                          {todo.title}
-                        </span>
-                      </div>
-                      <Button variant="destructive" size="sm" onClick={() => handleDeleteTodo(todo.id)}>Delete</Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
+              <div
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
+                style={{ backgroundColor: `${COLORS.coral}15` }}
+              >
+                <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.coral }} />
+              </div>
+            </div>
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View all</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Quick Access Row */}
-        <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
-          <Card 
-            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-            onClick={() => navigate('/clients')}
-            data-testid="quick-clients"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div 
-                className="p-3 rounded-xl group-hover:scale-110 transition-transform"
+        <Card
+          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
+          onClick={() => navigate('/tasks')}
+          data-testid="stat-completion-rate"
+        >
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Completion Rate</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>
+                  {completionRate}%
+                </p>
+              </div>
+              <div
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
               >
-                <Building2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
+                <Target className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.emeraldGreen }} />
               </div>
-              <div>
-                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_clients || 0}</p>
-                <p className="text-sm text-slate-500">Clients</p>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View all</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </CardContent>
+        </Card>
 
-          <Card 
-            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-            onClick={() => navigate('/dsc')}
-            data-testid="quick-dsc"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div 
-                className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                  stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
-                }`}
+        <Card
+          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
+          onClick={() => navigate('/attendance')}
+          data-testid="stat-attendance"
+        >
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Today's Attendance</p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>
+                  {todayAttendance ? (todayAttendance.punch_in ? 'In' : 'Out') : 'N/A'}
+                </p>
+              </div>
+              <div
+                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
+                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
               >
-                <Key className={`h-5 w-5 ${stats?.expiring_dsc_count > 0 ? 'text-red-600' : 'text-slate-500'}`} />
+                <Clock className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.mediumBlue }} />
               </div>
-              <div>
-                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.total_dsc || 0}</p>
-                <p className="text-sm text-slate-500">DSC Certificates</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card 
-            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-            onClick={() => navigate('/duedates')}
-            data-testid="quick-duedates"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div 
-                className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                  stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
-                }`}
-              >
-                <Calendar className={`h-5 w-5 ${stats?.upcoming_due_dates > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
-              </div>
-              <div>
-                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.upcoming_due_dates || 0}</p>
-                <p className="text-sm text-slate-500">Compliance Calendar</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {user?.role === 'admin' && (
-            <Card 
-              className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-              onClick={() => navigate('/users')}
-              data-testid="quick-users"
-            >
-              <CardContent className="p-5 flex items-center gap-4">
-                <div 
-                  className="p-3 rounded-xl group-hover:scale-110 transition-transform"
-                  style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
-                >
-                  <Users className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>{stats?.team_workload?.length || 0}</p>
-                  <p className="text-sm text-slate-500">Team Members</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </motion.div>
+            </div>
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View report</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </CardContent>
+        </Card>
       </motion.div>
-    );
+
+      {/* Punch In/Out + Recent Tasks + Upcoming Due Dates + Team Workload */}
+      <motion.div className="grid grid-cols-1 lg:grid-cols-4 gap-6" variants={itemVariants}>
+        {/* Punch In/Out */}
+        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
+          <CardHeader className="pb-2 border-b border-slate-100">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <Clock className="h-5 w-5 text-indigo-600" />
+              Attendance
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              Track your daily work hours
+            </p>
+          </CardHeader>
+          <CardContent className="p-6">
+            {todayAttendance ? (
+              <div className="space-y-4">
+                {todayAttendance.punch_in && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Punch In:</span>
+                    <Badge variant="secondary">
+                      {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
+                    </Badge>
+                  </div>
+                )}
+                {todayAttendance.punch_out && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Punch Out:</span>
+                    <Badge variant="secondary">
+                      {format(new Date(todayAttendance.punch_out), 'hh:mm a')}
+                    </Badge>
+                  </div>
+                )}
+                <div className="flex gap-3 mt-4">
+                  {!todayAttendance.punch_in ? (
+                    <Button
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+                      onClick={() => handlePunchAction('punch_in')}
+                      disabled={loading}
+                    >
+                      <LogIn className="h-4 w-4 mr-2" />
+                      Punch In
+                    </Button>
+                  ) : !todayAttendance.punch_out ? (
+                    <Button
+                      className="flex-1 bg-red-600 hover:bg-red-700"
+                      onClick={() => handlePunchAction('punch_out')}
+                      disabled={loading}
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Punch Out
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-slate-500">Day completed</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <Button
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+                onClick={() => handlePunchAction('punch_in')}
+                disabled={loading}
+              >
+                <LogIn className="h-4 w-4 mr-2" />
+                Start Your Day
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent Tasks */}
+        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
+          <CardHeader className="pb-2 border-b border-slate-100">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Recent Tasks
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              Your latest assignments
+            </p>
+          </CardHeader>
+          <CardContent className="p-4">
+            {recentTasks.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-sm">
+                No recent tasks
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentTasks.map((task) => {
+                  const statusStyle = getStatusStyle(task.status);
+                  const priorityStyle = getPriorityStyle(task.priority);
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${priorityStyle.bg} ${priorityStyle.border}`}
+                      onClick={() => navigate(`/tasks/${task.id}`)}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium text-sm truncate">{task.title}</p>
+                        <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>
+                          {task.status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Calendar className="h-3 w-3" />
+                        Due {format(new Date(task.due_date), 'MMM d')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="text-right mt-4">
+              <button
+                onClick={() => navigate('/tasks')}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                View All Tasks →
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Due Dates */}
+        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
+          <CardHeader className="pb-2 border-b border-slate-100">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-amber-600" />
+              Upcoming Filings
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              Next 30 days deadlines
+            </p>
+          </CardHeader>
+          <CardContent className="p-4">
+            {upcomingDueDates.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-sm">
+                No upcoming deadlines
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {upcomingDueDates.map((due) => {
+                  const color = getDeadlineColor(due.days_remaining);
+                  return (
+                    <div
+                      key={due.id}
+                      className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${color.bg}`}
+                      onClick={() => navigate(`/duedates/${due.id}`)}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium text-sm truncate">{due.title}</p>
+                        <Badge className={color.badge}>
+                          {due.days_remaining <= 0 ? 'Overdue' : `${due.days_remaining}d left`}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {due.client_name || 'Client'}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="text-right mt-4">
+              <button
+                onClick={() => navigate('/duedates')}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                View Calendar →
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Team Workload - Admin Only */}
+        {user.role === 'admin' && (
+          <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
+            <CardHeader className="pb-2 border-b border-slate-100">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Users className="h-5 w-5 text-purple-600" />
+                Team Workload
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">
+                Current task distribution
+              </p>
+            </CardHeader>
+            <CardContent className="p-4">
+              {stats?.team_workload?.length === 0 ? (
+                <div className="text-center py-6 text-slate-400 text-sm">
+                  No team data
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {stats?.team_workload?.slice(0, 5).map((member) => (
+                    <div
+                      key={member.user_id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 text-xs font-semibold">
+                          {member.name ? member.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{member.name || 'Unknown'}</p>
+                          <p className="text-xs text-slate-500">{member.role || 'Staff'}</p>
+                        </div>
+                      </div>
+                      <Badge className="bg-purple-100 text-purple-700">
+                        {member.tasks || 0} tasks
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="text-right mt-4">
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  View Full Report →
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </motion.div>
+
+      {/* Chat Notifications */}
+      <motion.div variants={itemVariants}>
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl hover:shadow-md hover:border-slate-300 transition-all duration-200"
+          data-testid="chat-notifications-widget"
+          onClick={() => navigate('/chat')}
+        >
+          <CardHeader className="pb-2 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Activity className="h-5 w-5 text-emerald-600" />
+                New Messages
+              </CardTitle>
+              <Badge className="bg-emerald-500 text-white">
+                {chatMessages.length}
+              </Badge>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Recent unread conversations
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-4">
+            {chatMessages.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-sm">
+                No new messages
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {chatMessages.slice(0, 4).map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 animate-pulse cursor-pointer hover:bg-emerald-100 transition"
+                    onClick={() => navigate('/chat')}
+                  >
+                    <p className="text-sm font-semibold text-slate-900">
+                      {msg.sender_name || 'Someone'}
+                    </p>
+                    <p className="text-xs text-slate-600 truncate">
+                      {msg.message || 'New message'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Star Performers + My To-Do List */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="staff-ranking-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-yellow-500" />
+                Star Performers
+              </CardTitle>
+
+              {user.role === "admin" && (
+                <div className="flex gap-2">
+                  {["all", "monthly", "weekly"].map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setRankingPeriod(p)}
+                      className={`px-3 py-1 text-xs rounded-full border transition ${
+                        rankingPeriod === p
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {p.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500 mt-1">
+              Recognizing top contributors based on performance metrics
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-4">
+            {rankings.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No ranking data available
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+                {rankings.slice(0, 5).map((member, index) => {
+                  const isTop = index === 0;
+                  const isSecond = index === 1;
+                  const isThird = index === 2;
+
+                  return (
+                    <div
+                      key={member.user_id || index}
+                      className={`flex items-center justify-between p-3 rounded-xl transition border
+                        ${
+                          isTop
+                            ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md"
+                            : isSecond
+                            ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300"
+                            : isThird
+                            ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300"
+                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                        }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 text-sm font-semibold">
+                          {isTop && "🥇"}
+                          {isSecond && "🥈"}
+                          {isThird && "🥉"}
+                          {!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
+                        </div>
+
+                        <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
+                          ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
+                        `}>
+                          {member.profile_picture ? (
+                            <img
+                              src={member.profile_picture}
+                              alt={member.name || 'User'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div
+                              className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white
+                                ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
+                              `}
+                            >
+                              {member.name ? member.name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                            {member.name || 'Unknown User'}
+                          </p>
+                          <p className="text-xs text-slate-500 capitalize">
+                            {member.role || 'Staff'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <p className={`text-sm font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                          {member.score ? `${member.score}%` : 'N/A'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {member.hours_worked ? `${member.hours_worked}h` : '0h'} worked
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {rankings.length > 5 && (
+              <div className="text-right mt-4">
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  View All Rankings →
+                </button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="todo-list-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <CheckSquare className="h-5 w-5 text-blue-500" />
+                My To-Do List
+              </CardTitle>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Manage your personal tasks
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-4">
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                value={newTodo}
+                onChange={(e) => setNewTodo(e.target.value)}
+                placeholder="Add new task..."
+                className="flex-1 p-2 border border-slate-300 rounded-md"
+              />
+              <Button onClick={addTodo} disabled={!newTodo.trim()}>Add</Button>
+            </div>
+            {todos.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No tasks added yet
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+                {todos.map((todo) => (
+                  <div
+                    key={todo.id}
+                    className={`flex items-center justify-between p-3 rounded-xl border ${
+                      todo.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={todo.completed}
+                        onChange={() => handleToggleTodo(todo.id)}
+                        className="h-5 w-5 flex-shrink-0"
+                      />
+                      <span
+                        className={`text-sm flex-1 ${
+                          todo.completed ? 'line-through text-slate-500' : 'text-slate-900'
+                        }`}
+                      >
+                        {todo.title}
+                      </span>
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Quick Access Row */}
+      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
+        <Card
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/clients')}
+          data-testid="quick-clients"
+        >
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className="p-3 rounded-xl group-hover:scale-110 transition-transform"
+              style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
+            >
+              <Building2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.total_clients || 0}
+              </p>
+              <p className="text-sm text-slate-500">Clients</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/dsc')}
+          data-testid="quick-dsc"
+        >
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
+                stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
+              }`}
+            >
+              <Key className={`h-5 w-5 ${stats?.expiring_dsc_count > 0 ? 'text-red-600' : 'text-slate-500'}`} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.total_dsc || 0}
+              </p>
+              <p className="text-sm text-slate-500">DSC Certificates</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/duedates')}
+          data-testid="quick-duedates"
+        >
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
+                stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
+              }`}
+            >
+              <Calendar className={`h-5 w-5 ${stats?.upcoming_due_dates > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.upcoming_due_dates || 0}
+              </p>
+              <p className="text-sm text-slate-500">Compliance Calendar</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {user?.role === 'admin' && (
+          <Card
+            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+            onClick={() => navigate('/users')}
+            data-testid="quick-users"
+          >
+            <CardContent className="p-5 flex items-center gap-4">
+              <div
+                className="p-3 rounded-xl group-hover:scale-110 transition-transform"
+                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
+              >
+                <Users className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                  {stats?.team_workload?.length || 0}
+                </p>
+                <p className="text-sm text-slate-500">Team Members</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </motion.div>
+    </motion.div>
+  );
 }
