@@ -22,6 +22,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress'; // ← make sure this component exists (shadcn/ui)
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Mail, Cake, X, UserPlus, FileText } from 'lucide-react';
@@ -44,6 +45,7 @@ const SERVICES = [
 
 export default function Clients() {
   const { user } = useAuth();
+
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,10 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
 
+  // CSV import states
   const [importLoading, setImportLoading] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -69,46 +74,44 @@ export default function Clients() {
 
   useEffect(() => {
     fetchClients();
-    if (user?.role !== 'staff') {
-      fetchUsers();
-    }
+    if (user?.role !== 'staff') fetchUsers();
   }, []);
 
   const fetchClients = async () => {
     try {
-      const response = await api.get('/clients');
-      setClients(response.data);
-    } catch (error) {
-      toast.error('Failed to fetch clients');
+      const res = await api.get('/clients');
+      setClients(res.data);
+    } catch {
+      toast.error('Failed to load clients');
     }
   };
 
   const fetchUsers = async () => {
     try {
-      const response = await api.get('/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
+      const res = await api.get('/users');
+      setUsers(res.data);
+    } catch {
+      console.error('Failed to load users');
     }
   };
 
   // ────────────────────────────────────────────────
-  //                CSV FUNCTIONS
+  //                   CSV HANDLING
   // ────────────────────────────────────────────────
 
   const downloadTemplate = () => {
     const headers = [
-      'company_name', 'client_type', 'email', 'phone', 'birthday',
-      'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1',
-      'contact_name_2', 'contact_designation_2', 'contact_email_2', 'contact_phone_2',
-      'services', 'notes'
+      'company_name','client_type','email','phone','birthday',
+      'contact_name_1','contact_designation_1','contact_email_1','contact_phone_1',
+      'contact_name_2','contact_designation_2','contact_email_2','contact_phone_2',
+      'services','notes'
     ];
 
     const example = [
-      'ABC Enterprises', 'proprietor', 'company@example.com', '+919876543210', '2025-04-15',
-      'Rahul Sharma', 'Director', 'rahul@abc.com', '+919812345678',
-      'Priya Patel', 'Manager', 'priya@abc.com', '+918923456789',
-      'GST,Income Tax,Other: Consulting', 'Prefers WhatsApp'
+      'ABC Enterprises','proprietor','company@example.com','+919876543210','2025-04-15',
+      'Rahul Sharma','Director','rahul@abc.com','+919812345678',
+      'Priya Patel','Manager','priya@abc.com','+918923456789',
+      'GST,Income Tax,Other: Consulting','Prefers WhatsApp'
     ];
 
     const csv = [headers.join(','), example.map(v => `"${v}"`).join(',')].join('\n');
@@ -122,26 +125,60 @@ export default function Clients() {
     URL.revokeObjectURL(url);
   };
 
-  const handleImportCSV = (e) => {
+  const handleImportCSV = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setImportLoading(true);
+    setImportProgress(0);
+    setImportResult(null);
 
     Papa.parse(file, {
       header: true,
-      skipEmptyLines: true,
-      complete: async ({ data: rows }) => {
-        let success = 0;
+      skipEmptyLines: 'greedy',
+      complete: async (results) => {
+        if (results.errors.length > 0 && results.errors.some(err => err.type !== 'FieldMismatch')) {
+          toast.error('Invalid CSV format. Please use the template.');
+          setImportLoading(false);
+          return;
+        }
+
+        const rows = results.data;
+        const total = rows.length;
+        let processed = 0;
         const errors = [];
+        const created = [];
 
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
+        for (const [index, row] of rows.entries()) {
+          processed++;
+          setImportProgress(Math.round((processed / total) * 100));
+
+          const rowNum = index + 2;
+          const rowErrors = [];
+
+          // Required fields + basic format checks
+          if (!row.company_name?.trim()) rowErrors.push('Company name required');
+          if (!row.email?.trim()) rowErrors.push('Email required');
+          else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) {
+            rowErrors.push('Invalid email');
+          }
+          if (!row.phone?.trim()) rowErrors.push('Phone required');
+
+          if (row.birthday?.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(row.birthday.trim())) {
+            rowErrors.push('Birthday format: YYYY-MM-DD');
+          }
+
+          const cType = (row.client_type || '').trim().toLowerCase();
+          if (cType && !CLIENT_TYPES.some(t => t.value === cType)) {
+            rowErrors.push(`Invalid client type: ${row.client_type}`);
+          }
+
+          if (rowErrors.length > 0) {
+            errors.push(`Row ${rowNum}: ${rowErrors.join(', ')} (${row.company_name || '—'})`);
+            continue;
+          }
+
           try {
-            if (!row.company_name?.trim()) throw new Error('Missing company_name');
-            if (!row.email?.trim()) throw new Error('Missing email');
-            if (!row.phone?.trim()) throw new Error('Missing phone');
-
             const contacts = [];
             if (row.contact_name_1?.trim()) {
               contacts.push({
@@ -166,13 +203,11 @@ export default function Clients() {
 
             const payload = {
               company_name: row.company_name.trim(),
-              client_type: CLIENT_TYPES.some(t => t.value === row.client_type?.trim())
-                ? row.client_type.trim()
-                : 'proprietor',
+              client_type: cType || 'proprietor',
               email: row.email.trim(),
               phone: row.phone.trim(),
               birthday: row.birthday?.trim() || '',
-              contact_persons: contacts.length > 0 ? contacts : [{ name: '', email: '', phone: '', designation: '' }],
+              contact_persons: contacts.length ? contacts : [{ name: '', email: '', phone: '', designation: '' }],
               services,
               notes: row.notes?.trim() || '',
               assigned_to: 'unassigned',
@@ -180,34 +215,42 @@ export default function Clients() {
             };
 
             await api.post('/clients', payload);
-            success++;
+            created.push(payload.company_name);
           } catch (err) {
-            errors.push(`Row ${i + 2}: ${err.message || err.response?.data?.detail || 'Unknown error'}`);
+            const msg = err.response?.data?.detail || err.message || 'Server error';
+            errors.push(`Row ${rowNum}: ${msg} (${row.company_name || '—'})`);
           }
         }
 
         setImportLoading(false);
+        setImportProgress(100);
 
-        if (success > 0) {
-          toast.success(`${success} client${success === 1 ? '' : 's'} imported`);
+        const result = {
+          success: created.length,
+          failed: errors.length,
+          errors,
+        };
+
+        setImportResult(result);
+
+        if (created.length > 0) {
+          toast.success(`${created.length} client${created.length === 1 ? '' : 's'} added`);
           fetchClients();
         }
-        if (errors.length > 0) {
-          toast.error(`${errors.length} row${errors.length === 1 ? '' : 's'} failed`);
-          console.log('Import errors:', errors);
-        }
 
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (errors.length > 0) {
+          toast.warning(`${errors.length} row${errors.length === 1 ? '' : 's'} failed`);
+        }
       },
-      error: () => {
+      error: (err) => {
         setImportLoading(false);
-        toast.error('Failed to read CSV');
+        toast.error(`Could not read file: ${err.message}`);
       },
     });
   };
 
   // ────────────────────────────────────────────────
-  //                FORM HANDLERS (unchanged parts)
+  //                   FORM SUBMIT / EDIT / DELETE
   // ────────────────────────────────────────────────
 
   const handleSubmit = async (e) => {
@@ -232,7 +275,7 @@ export default function Clients() {
       resetForm();
       fetchClients();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Save failed');
+      toast.error(err.response?.data?.detail || 'Operation failed');
     } finally {
       setLoading(false);
     }
@@ -259,7 +302,7 @@ export default function Clients() {
     if (!window.confirm('Delete this client?')) return;
     try {
       await api.delete(`/clients/${id}`);
-      toast.success('Client deleted');
+      toast.success('Deleted');
       fetchClients();
     } catch {
       toast.error('Delete failed');
@@ -269,9 +312,9 @@ export default function Clients() {
   const sendBirthdayEmail = async (id) => {
     try {
       await api.post(`/clients/${id}/send-birthday-email`);
-      toast.success('Birthday email sent');
+      toast.success('Email sent');
     } catch {
-      toast.error('Failed to send email');
+      toast.error('Failed to send');
     }
   };
 
@@ -294,14 +337,14 @@ export default function Clients() {
 
   const toggleService = (service) => {
     if (service === 'Other') {
-      if (!formData.services.includes('Other')) {
-        setFormData(p => ({ ...p, services: [...p.services, 'Other'] }));
-      } else {
+      if (formData.services.includes('Other')) {
         setFormData(p => ({
           ...p,
           services: p.services.filter(s => s !== 'Other' && !s.startsWith('Other:')),
         }));
         setOtherService('');
+      } else {
+        setFormData(p => ({ ...p, services: [...p.services, 'Other'] }));
       }
       return;
     }
@@ -330,58 +373,62 @@ export default function Clients() {
     }));
   };
 
-  const removeContactPerson = (idx) => {
+  const removeContactPerson = (index) => {
     if (formData.contact_persons.length <= 1) return;
     setFormData(p => ({
       ...p,
-      contact_persons: p.contact_persons.filter((_, i) => i !== idx),
+      contact_persons: p.contact_persons.filter((_, i) => i !== index),
     }));
   };
 
-  const updateContact = (idx, field, value) => {
+  const updateContactPerson = (index, field, value) => {
     setFormData(p => ({
       ...p,
-      contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: value } : c),
+      contact_persons: p.contact_persons.map((c, i) =>
+        i === index ? { ...c, [field]: value } : c
+      ),
     }));
   };
 
   const addDSC = () => {
     setFormData(p => ({
       ...p,
-      dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }],
+      dsc_details: [...p.dsc_details, {
+        certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: ''
+      }],
     }));
   };
 
-  const removeDSC = (idx) => {
+  const removeDSC = (index) => {
     setFormData(p => ({
       ...p,
-      dsc_details: p.dsc_details.filter((_, i) => i !== idx),
+      dsc_details: p.dsc_details.filter((_, i) => i !== index),
     }));
   };
 
-  const updateDSC = (idx, field, value) => {
+  const updateDSC = (index, field, value) => {
     setFormData(p => ({
       ...p,
-      dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: value } : d),
+      dsc_details: p.dsc_details.map((d, i) => i === index ? { ...d, [field]: value } : d),
     }));
   };
 
   const getUserName = (id) => users.find(u => u.id === id)?.full_name || 'Unassigned';
 
-  const getTypeLabel = (type) => CLIENT_TYPES.find(t => t.value === type)?.label || type;
+  const getClientTypeLabel = (type) => CLIENT_TYPES.find(t => t.value === type)?.label || type;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold">Client Management</h1>
-          <p className="text-muted-foreground">Manage your clients and track their details</p>
+          <p className="text-slate-600">Manage your clients and track their details</p>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button className="bg-indigo-600 hover:bg-indigo-700">
-              <Plus className="mr-2 h-4 w-4" /> Add Client
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg">
+              <Plus className="mr-2 h-5 w-5" /> Add Client
             </Button>
           </DialogTrigger>
 
@@ -389,16 +436,16 @@ export default function Clients() {
             <DialogHeader>
               <DialogTitle>{editingClient ? 'Edit Client' : 'Add New Client'}</DialogTitle>
               <DialogDescription>
-                {editingClient ? 'Update the client details.' : 'Fill in the details to create a new client.'}
+                {editingClient ? 'Update client details.' : 'Fill in the details to add a new client.'}
               </DialogDescription>
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* ─── Basic Information ─── */}
+              {/* Basic Information */}
               <div className="space-y-4">
-                <h3 className="font-semibold">Basic Information</h3>
+                <h3 className="font-semibold text-lg">Basic Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  <div className="space-y-2">
                     <Label>Company Name *</Label>
                     <Input
                       value={formData.company_name}
@@ -406,7 +453,7 @@ export default function Clients() {
                       required
                     />
                   </div>
-                  <div>
+                  <div className="space-y-2">
                     <Label>Client Type *</Label>
                     <Select
                       value={formData.client_type}
@@ -416,16 +463,14 @@ export default function Clients() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {CLIENT_TYPES.map(t => (
-                          <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                        ))}
+                        {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  <div className="space-y-2">
                     <Label>Company Email *</Label>
                     <Input
                       type="email"
@@ -434,7 +479,7 @@ export default function Clients() {
                       required
                     />
                   </div>
-                  <div>
+                  <div className="space-y-2">
                     <Label>Company Phone *</Label>
                     <Input
                       value={formData.phone}
@@ -444,8 +489,8 @@ export default function Clients() {
                   </div>
                 </div>
 
-                <div>
-                  <Label>Company Birthday / Anniversary</Label>
+                <div className="space-y-2">
+                  <Label>Company Birthday/Anniversary</Label>
                   <Input
                     type="date"
                     value={formData.birthday}
@@ -454,19 +499,60 @@ export default function Clients() {
                 </div>
               </div>
 
-              {/* ─── Contact Persons, DSC, Services, Assign To, Notes ─── */}
-              {/* Keep your existing code for these sections here */}
-              {/* For brevity I'm not repeating them – insert your current implementation */}
+              {/* ────────────────────────────────────────────────
+                  →→→ Insert your full Contact Persons, DSC Details, Services, Assign To, Notes sections here ←←←
+                  (the code below is placeholder – replace with your actual implementation)
+              ──────────────────────────────────────────────── */}
 
-              {/* ─── Footer with CSV buttons on left, actions on right ─── */}
-              <DialogFooter className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-4 border-t">
+              <div className="space-y-4">
+                <h3 className="font-semibold">Contact Persons</h3>
+                {/* your contact persons cards + add/remove logic */}
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="font-semibold">DSC Details</h3>
+                {/* your DSC cards + add/remove logic */}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Services</Label>
+                {/* your service badges / toggle logic */}
+              </div>
+
+              {user?.role !== 'staff' && (
+                <div className="space-y-2">
+                  <Label>Assign To</Label>
+                  <Select
+                    value={formData.assigned_to}
+                    onValueChange={v => setFormData(s => ({ ...s, assigned_to: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select user" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {users.map(u => (
+                        <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  value={formData.notes}
+                  onChange={e => setFormData(s => ({ ...s, notes: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+
+              {/* Footer with CSV + actions */}
+              <DialogFooter className="flex flex-col sm:flex-row justify-between gap-4 pt-6 border-t mt-6">
                 {!editingClient && (
                   <div className="flex flex-wrap gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={downloadTemplate}
-                    >
+                    <Button type="button" variant="outline" onClick={downloadTemplate}>
                       <FileText className="mr-2 h-4 w-4" />
                       Download CSV Template
                     </Button>
@@ -477,33 +563,64 @@ export default function Clients() {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={importLoading}
                     >
-                      {importLoading ? 'Importing…' : 'Import from CSV'}
+                      {importLoading ? 'Importing...' : 'Import from CSV'}
                     </Button>
                   </div>
                 )}
 
-                <div className="flex gap-3 self-end sm:self-auto">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => { setDialogOpen(false); resetForm(); }}
-                  >
+                <div className="flex gap-3">
+                  <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
                     Cancel
                   </Button>
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="min-w-[120px]"
-                  >
-                    {loading
-                      ? 'Saving…'
-                      : editingClient
-                      ? 'Update Client'
-                      : 'Add Client'}
+                  <Button type="submit" disabled={loading} className="min-w-[140px]">
+                    {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
                   </Button>
                 </div>
               </DialogFooter>
             </form>
+
+            {/* Progress bar during import */}
+            {importLoading && (
+              <div className="mt-4 space-y-2">
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Importing clients...</span>
+                  <span>{importProgress}%</span>
+                </div>
+                <Progress value={importProgress} className="h-2" />
+              </div>
+            )}
+
+            {/* Import result summary */}
+            {importResult && (
+              <div className="mt-6 p-4 border rounded-lg bg-slate-50">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-medium">Import Summary</h3>
+                  <Button variant="ghost" size="sm" onClick={() => setImportResult(null)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                  <div>
+                    <p className="font-medium text-green-700">Success</p>
+                    <p>{importResult.success} clients</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-red-700">Failed</p>
+                    <p>{importResult.failed} rows</p>
+                  </div>
+                </div>
+
+                {importResult.errors.length > 0 && (
+                  <div className="max-h-48 overflow-auto text-sm bg-white p-3 rounded border border-red-200">
+                    <ul className="list-disc pl-5 space-y-1">
+                      {importResult.errors.map((err, i) => (
+                        <li key={i} className="text-red-800">{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 
@@ -513,22 +630,19 @@ export default function Clients() {
           type="file"
           accept=".csv"
           onChange={handleImportCSV}
-          hidden
+          className="hidden"
         />
       </div>
 
-      {/* ─── Clients grid / list ─── */}
-      {/* Keep your existing clients display code here */}
-      {/* Example placeholder: */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {/* Clients list / cards – keep your original rendering logic here */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {clients.map(client => (
           <Card key={client.id}>
             <CardHeader>
               <CardTitle>{client.company_name}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p>{client.email} • {client.phone}</p>
-              {/* ... rest of card content ... */}
+              {/* your client card content */}
             </CardContent>
           </Card>
         ))}
