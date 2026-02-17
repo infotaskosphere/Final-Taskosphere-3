@@ -83,11 +83,9 @@ const CATEGORY_STYLES = {
 // Card gradient styles based on status/priority
 const getCardGradient = (task, isOverdue) => {
   if (isOverdue) {
-    // Red gradient for overdue tasks
     return 'linear-gradient(135deg, rgba(254, 202, 202, 0.6) 0%, rgba(252, 165, 165, 0.4) 50%, rgba(248, 113, 113, 0.2) 100%)';
   }
   if (task.priority === 'high' || task.priority === 'critical') {
-    // Orange gradient for high priority/urgent tasks
     return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
   }
   return 'none';
@@ -98,7 +96,6 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
@@ -113,7 +110,7 @@ export default function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
-  
+
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -172,7 +169,6 @@ export default function Tasks() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const taskData = {
         ...formData,
@@ -181,7 +177,6 @@ export default function Tasks() {
         client_id: formData.client_id || null,
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       };
-
       if (editingTask) {
         await api.put(`/tasks/${editingTask.id}`, taskData);
         toast.success('Task updated successfully!');
@@ -189,7 +184,6 @@ export default function Tasks() {
         await api.post('/tasks', taskData);
         toast.success('Task created successfully!');
       }
-
       setDialogOpen(false);
       resetForm();
       fetchTasks();
@@ -221,7 +215,6 @@ export default function Tasks() {
 
   const handleDelete = async (taskId) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
-
     try {
       await api.delete(`/tasks/${taskId}`);
       toast.success('Task deleted successfully!');
@@ -248,7 +241,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-      
+
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'Progress' : 'Done'}!`);
       fetchTasks();
@@ -335,7 +328,7 @@ export default function Tasks() {
   };
 
   return (
-    <motion.div 
+    <motion.div
       className="space-y-6"
       variants={containerVariants}
       initial="hidden"
@@ -347,7 +340,7 @@ export default function Tasks() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
           <p className="text-slate-600 mt-1">Manage and track all your compliance tasks</p>
         </div>
-        
+
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) resetForm();
@@ -385,7 +378,6 @@ export default function Tasks() {
                   data-testid="task-title-input"
                 />
               </div>
-
               {/* Description */}
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
@@ -399,7 +391,6 @@ export default function Tasks() {
                   data-testid="task-description-input"
                 />
               </div>
-
               {/* Client and Due Date Row */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -421,7 +412,6 @@ export default function Tasks() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="due_date">Due Date</Label>
                   <Input
@@ -434,7 +424,6 @@ export default function Tasks() {
                   />
                 </div>
               </div>
-
               {/* Assignee and Co-assignee Row */}
               {user?.role !== 'staff' && (
                 <div className="grid grid-cols-2 gap-4">
@@ -457,7 +446,6 @@ export default function Tasks() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="co_assignee">Co-assignee</Label>
                     <Select
@@ -487,7 +475,6 @@ export default function Tasks() {
                   </div>
                 </div>
               )}
-
               {/* Department Selection with Toggle Buttons */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">Department</Label>
@@ -500,8 +487,8 @@ export default function Tasks() {
                         type="button"
                         onClick={() => setFormData({ ...formData, category: dept.value })}
                         className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                          isSelected 
-                            ? 'bg-blue-600 text-white shadow-md' 
+                          isSelected
+                            ? 'bg-blue-600 text-white shadow-md'
                             : 'bg-slate-100 text-slate-700 hover:bg-blue-100 hover:text-blue-700'
                         }`}
                       >
@@ -511,7 +498,6 @@ export default function Tasks() {
                   })}
                 </div>
               </div>
-
               {/* Priority */}
               <div className="space-y-2">
                 <Label>Priority</Label>
@@ -530,7 +516,6 @@ export default function Tasks() {
                   </SelectContent>
                 </Select>
               </div>
-
               {/* Recurring Task */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -545,7 +530,7 @@ export default function Tasks() {
                     data-testid="task-recurring-switch"
                   />
                 </div>
-                
+
                 {formData.is_recurring && (
                   <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                     <div className="space-y-2">
@@ -588,11 +573,10 @@ export default function Tasks() {
                   </div>
                 )}
               </div>
-
               <DialogFooter className="pt-4 border-t border-slate-200">
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => { setDialogOpen(false); resetForm(); }}
                   className="px-6"
                 >
@@ -658,7 +642,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
-        
+
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -673,7 +657,6 @@ export default function Tasks() {
               <SelectItem value="overdue">Overdue</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={filterPriority} onValueChange={setFilterPriority}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Priority" />
@@ -686,7 +669,6 @@ export default function Tasks() {
               <SelectItem value="critical">Critical</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Category" />
@@ -698,7 +680,6 @@ export default function Tasks() {
               ))}
             </SelectContent>
           </Select>
-
           {(user?.role === 'admin' || user?.role === 'manager') && (
             <Select value={filterAssignee} onValueChange={setFilterAssignee}>
               <SelectTrigger className="w-36 bg-white">
@@ -712,7 +693,6 @@ export default function Tasks() {
               </SelectContent>
             </Select>
           )}
-
           <div className="flex border rounded-lg overflow-hidden">
             <Button
               variant="ghost"
@@ -734,10 +714,10 @@ export default function Tasks() {
         </div>
       </motion.div>
 
-      {/* Task Cards Grid - Responsive with consistent card sizing and 1:1 layout */}
-      <motion.div 
-        className={viewMode === 'grid' 
-          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
+      {/* Task Cards Grid / List */}
+      <motion.div
+        className={viewMode === 'grid'
+          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr'
           : 'space-y-3'}
         variants={containerVariants}
       >
@@ -752,10 +732,10 @@ export default function Tasks() {
             const displayStatus = getDisplayStatus(task);
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
             const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-            
-           return (
+
+            return (
               <motion.div key={task.id} variants={itemVariants} className="h-full">
-                <Card 
+                <Card
                   className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1] min-h-[280px]
                     ${taskIsOverdue ? 'bg-red-50/40 border-red-100' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/40 border-orange-100' : 'bg-white'}`}
                 >
@@ -772,7 +752,7 @@ export default function Tasks() {
                     </Badge>
                   </div>
 
-                  {/* 2. CONTENT AREA - flex-1 ensures this area takes space and pushes footer down */}
+                  {/* 2. CONTENT AREA */}
                   <div className="px-4 py-2 space-y-1.5 flex-1 overflow-hidden flex flex-col justify-center">
                     <div>
                       <h3 className="text-sm sm:text-base font-bold text-slate-800 leading-tight line-clamp-2">
@@ -782,7 +762,6 @@ export default function Tasks() {
                         {getClientName(task.client_id)}
                       </p>
                     </div>
-
                     <div className="space-y-1 mt-1">
                       <div className="flex items-center gap-2 text-slate-500">
                         <User className="h-3 w-3 flex-shrink-0" />
@@ -799,26 +778,26 @@ export default function Tasks() {
                     </div>
                   </div>
 
-                  {/* 3. SEPARATED ACTION FOOTER - Integrated within card bounds */}
+                  {/* 3. ACTION FOOTER */}
                   <div className="bg-white/90 px-3 py-3 border-t border-slate-100/50 flex flex-col gap-3 mt-auto">
                     {/* Status Capsules Row */}
                     <div className="flex justify-between items-center gap-1 bg-slate-50 p-1 rounded-2xl">
-                      <Button 
-                        variant={task.status === 'pending' ? 'default' : 'ghost'} 
+                      <Button
+                        variant={task.status === 'pending' ? 'default' : 'ghost'}
                         className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'pending' ? 'bg-orange-500 hover:bg-orange-600 shadow-sm text-white' : 'text-slate-500 hover:bg-orange-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'pending')}
                       >
                         <Clock className="h-2.5 w-2.5" /> <span className="hidden xs:inline">To Do</span>
                       </Button>
-                      <Button 
-                        variant={task.status === 'in_progress' ? 'default' : 'ghost'} 
+                      <Button
+                        variant={task.status === 'in_progress' ? 'default' : 'ghost'}
                         className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'in_progress' ? 'bg-blue-600 hover:bg-blue-700 shadow-sm text-white' : 'text-slate-500 hover:bg-blue-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
                       >
                         <Play className="h-2.5 w-2.5" /> <span className="hidden xs:inline">Progress</span>
                       </Button>
-                      <Button 
-                        variant={task.status === 'completed' ? 'default' : 'ghost'} 
+                      <Button
+                        variant={task.status === 'completed' ? 'default' : 'ghost'}
                         className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'completed' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-sm text-white' : 'text-slate-500 hover:bg-emerald-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'completed')}
                       >
@@ -828,19 +807,25 @@ export default function Tasks() {
 
                     {/* Meta and Utility Actions */}
                     <div className="flex justify-between items-center px-1">
-                       <Badge variant="outline" className="text-[8px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-5">
-                         {task.category || 'ROC'}
-                       </Badge>
-                       <div className="flex gap-0.5">
-                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={() => handleEdit(task)}>
-                           <Edit className="h-3.5 w-3.5" />
-                         </Button>
-                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDelete(task.id)}>
-                           <Trash2 className="h-3.5 w-3.5" />
-                         </Button>
-                       </div>
+                      <Badge variant="outline" className="text-[8px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-5">
+                        {task.category || 'OTHER'}
+                      </Badge>
+                      <div className="flex gap-0.5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={() => handleEdit(task)}>
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDelete(task.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </Card>
               </motion.div>
             );
+          })
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
