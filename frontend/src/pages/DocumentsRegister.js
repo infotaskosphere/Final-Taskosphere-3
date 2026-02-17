@@ -850,82 +850,12 @@ export default function DocumentRegister() {
       </DialogDescription>
     </DialogHeader>
 
-    <form onSubmit={handleMovement} className="space-y-4">
-      <div className="space-y-2">
-        <Label>Document Certificate</Label>
-        <p className="text-sm font-medium">
-          {selectedDocument?.holder_name}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label>
-          {movementData?.movement_type === 'IN'
-            ? 'Delivered By *'
-            : 'Taken By *'}
-        </Label>
-        <Input
-          value={movementData.person_name}
-          onChange={(e) =>
-            setMovementData({
-              ...movementData,
-              person_name: e.target.value,
-            })
-          }
-          required
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Notes</Label>
-        <Textarea
-          value={movementData.notes}
-          onChange={(e) =>
-            setMovementData({
-              ...movementData,
-              notes: e.target.value,
-            })
-          }
-        />
-      </div>
-
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setMovementDialogOpen(false)}
-        >
-          Cancel
-        </Button>
-
-        <Button
-          type="submit"
-          disabled={loading}
-          className={
-            movementData?.movement_type === 'IN'
-              ? 'bg-emerald-600 hover:bg-emerald-700'
-              : 'bg-red-600 hover:bg-red-700'
-          }
-        >
-          {loading
-            ? 'Recording...'
-            : `Mark as ${movementData.movement_type}`}
-        </Button>
-      </DialogFooter>
-    </form>
-  </DialogContent>
-</Dialog>
-
-</div>
-);
-}
-      function DocumentTable({
+    function DocumentTable({
   DocumentList,
   onEdit,
   onDelete,
   onMovement,
   onViewLog,
-  getDocumentStatus,
   type
 }) {
   return (
@@ -934,22 +864,40 @@ export default function DocumentRegister() {
 
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">S.No</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Document Name</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Associated With</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Expiry Date</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+              S.No
+            </th>
+
+            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+              Document Name
+            </th>
+
+            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+              Type
+            </th>
+
+            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+              Associated With
+            </th>
+
+            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+              Current Status
+            </th>
+
+            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">
+              Actions
+            </th>
           </tr>
         </thead>
 
         <tbody className="divide-y divide-slate-100 bg-white">
           {DocumentList.map((doc, index) => {
-            const status = getDocumentStatus(doc.valid_upto);
+
+            const isIn = type === "IN";
 
             return (
               <tr key={doc.id}>
+
                 <td className="px-6 py-4 text-sm text-slate-500">
                   {index + 1}
                 </td>
@@ -966,24 +914,26 @@ export default function DocumentRegister() {
                   {doc.associated_with || '-'}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {doc.valid_upto
-                    ? format(new Date(doc.valid_upto), 'MMM dd, yyyy')
-                    : '-'}
-                </td>
-
+                {/* IN / OUT STATUS BADGE */}
                 <td className="px-6 py-4">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${status.color}`} />
-                    <span className={`text-sm font-medium ${status.textColor}`}>
-                      {status.text}
+                  {isIn ? (
+                    <span className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full bg-emerald-100 text-emerald-700">
+                      <ArrowDownCircle className="h-3 w-3" />
+                      IN
                     </span>
-                  </div>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">
+                      <ArrowUpCircle className="h-3 w-3" />
+                      OUT
+                    </span>
+                  )}
                 </td>
 
+                {/* ACTIONS */}
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
 
+                    {/* VIEW HISTORY */}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -992,18 +942,20 @@ export default function DocumentRegister() {
                       <History className="h-4 w-4" />
                     </Button>
 
+                    {/* TOGGLE IN/OUT */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() =>
-                        onMovement(doc, type === 'IN' ? 'OUT' : 'IN')
+                        onMovement(doc, isIn ? 'OUT' : 'IN')
                       }
                     >
-                      {type === 'IN'
-                        ? <ArrowUpCircle className="h-4 w-4" />
-                        : <ArrowDownCircle className="h-4 w-4" />}
+                      {isIn
+                        ? <ArrowUpCircle className="h-4 w-4 text-red-600" />
+                        : <ArrowDownCircle className="h-4 w-4 text-emerald-600" />}
                     </Button>
 
+                    {/* EDIT */}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1012,6 +964,7 @@ export default function DocumentRegister() {
                       <Edit className="h-4 w-4" />
                     </Button>
 
+                    {/* DELETE */}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1022,6 +975,7 @@ export default function DocumentRegister() {
 
                   </div>
                 </td>
+
               </tr>
             );
           })}
