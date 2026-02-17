@@ -16,12 +16,17 @@ import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 
-// Brand Colors
+// Brand Colors (darker variants used where needed)
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
+  darkGreen: '#0f9d58',     // darker green for DONE
+  darkBlue: '#0d47a1',      // darker blue for PROGRESS
+  darkOrange: '#e65100',    // darker orange for HIGH
+  darkRed: '#c62828',       // darker red for CRITICAL/OVERDUE
+  darkAmber: '#f57c00',     // darker amber for MEDIUM
 };
 
 // Department categories for CA/CS firms
@@ -38,7 +43,7 @@ const DEPARTMENTS = [
   { value: 'other', label: 'OTHER' },
 ];
 
-// Predefined task categories for CA/CS firms (alias for backward compatibility)
+// Predefined task categories (alias)
 const TASK_CATEGORIES = DEPARTMENTS;
 
 // Recurrence pattern options
@@ -49,44 +54,44 @@ const RECURRENCE_PATTERNS = [
   { value: 'yearly', label: 'Yearly' },
 ];
 
-// Status colors with gradients for cards
+// Darker & improved status styles
 const STATUS_STYLES = {
-  pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do', btn: 'bg-orange-500 hover:bg-orange-600' },
-  in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Progress', btn: 'bg-blue-600 hover:bg-blue-700' },
-  completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Done', btn: 'bg-emerald-500 hover:bg-emerald-600' },
-  review: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Review', btn: 'bg-purple-600 hover:bg-purple-700' },
-  overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue', btn: 'bg-red-500 hover:bg-red-600' },
+  pending: { bg: 'bg-amber-200', text: 'text-amber-900', label: 'To Do', btn: 'bg-amber-600 hover:bg-amber-700' },
+  in_progress: { bg: 'bg-blue-200', text: 'text-blue-900', label: 'Progress', btn: 'bg-blue-700 hover:bg-blue-800' },
+  completed: { bg: 'bg-emerald-200', text: 'text-emerald-900', label: 'Done', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+  review: { bg: 'bg-purple-200', text: 'text-purple-900', label: 'Review', btn: 'bg-purple-700 hover:bg-purple-800' },
+  overdue: { bg: 'bg-red-200', text: 'text-red-900', label: 'Overdue', btn: 'bg-red-700 hover:bg-red-800' },
 };
 
-// Priority colors
+// Darker priority styles
 const PRIORITY_STYLES = {
-  low: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'LOW' },
-  medium: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'MEDIUM' },
-  high: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'HIGH' },
-  critical: { bg: 'bg-red-100', text: 'text-red-700', label: 'CRITICAL' },
+  low: { bg: 'bg-slate-200', text: 'text-slate-900', label: 'LOW' },
+  medium: { bg: 'bg-amber-200', text: 'text-amber-900', label: 'MEDIUM' },
+  high: { bg: 'bg-orange-200', text: 'text-orange-900', label: 'HIGH' },
+  critical: { bg: 'bg-red-200', text: 'text-red-900', label: 'CRITICAL' },
 };
 
-// Category colors
+// Category colors (slightly darker)
 const CATEGORY_STYLES = {
-  gst: { bg: 'bg-green-100', text: 'text-green-700' },
-  income_tax: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
-  accounts: { bg: 'bg-purple-100', text: 'text-purple-700' },
-  tds: { bg: 'bg-teal-100', text: 'text-teal-700' },
-  roc: { bg: 'bg-orange-100', text: 'text-orange-700' },
-  trademark: { bg: 'bg-pink-100', text: 'text-pink-700' },
-  msme_smadhan: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
-  fema: { bg: 'bg-lime-100', text: 'text-lime-700' },
-  dsc: { bg: 'bg-amber-100', text: 'text-amber-700' },
-  other: { bg: 'bg-gray-100', text: 'text-gray-700' },
+  gst: { bg: 'bg-green-200', text: 'text-green-900' },
+  income_tax: { bg: 'bg-indigo-200', text: 'text-indigo-900' },
+  accounts: { bg: 'bg-purple-200', text: 'text-purple-900' },
+  tds: { bg: 'bg-teal-200', text: 'text-teal-900' },
+  roc: { bg: 'bg-orange-200', text: 'text-orange-900' },
+  trademark: { bg: 'bg-pink-200', text: 'text-pink-900' },
+  msme_smadhan: { bg: 'bg-cyan-200', text: 'text-cyan-900' },
+  fema: { bg: 'bg-lime-200', text: 'text-lime-900' },
+  dsc: { bg: 'bg-amber-200', text: 'text-amber-900' },
+  other: { bg: 'bg-gray-200', text: 'text-gray-900' },
 };
 
-// Card gradient styles based on status/priority
+// Card gradient (darker versions)
 const getCardGradient = (task, isOverdue) => {
   if (isOverdue) {
-    return 'linear-gradient(135deg, rgba(254, 202, 202, 0.6) 0%, rgba(252, 165, 165, 0.4) 50%, rgba(248, 113, 113, 0.2) 100%)';
+    return 'linear-gradient(135deg, rgba(239, 83, 80, 0.25) 0%, rgba(211, 47, 47, 0.15) 100%)';
   }
   if (task.priority === 'high' || task.priority === 'critical') {
-    return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
+    return 'linear-gradient(135deg, rgba(245, 124, 0, 0.25) 0%, rgba(230, 81, 0, 0.15) 100%)';
   }
   return 'none';
 };
@@ -96,6 +101,7 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
@@ -224,7 +230,6 @@ export default function Tasks() {
     }
   };
 
-  // Quick status update from task card
   const handleQuickStatusChange = async (task, newStatus) => {
     try {
       const taskData = {
@@ -241,7 +246,6 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'Progress' : 'Done'}!`);
       fetchTasks();
@@ -294,20 +298,17 @@ export default function Tasks() {
     return cat ? cat.label : value || 'Other';
   };
 
-  // Check if task is overdue
   const isOverdue = (task) => {
     if (task.status === 'completed') return false;
     if (!task.due_date) return false;
     return new Date(task.due_date) < new Date();
   };
 
-  // Get task status for display
   const getDisplayStatus = (task) => {
     if (isOverdue(task)) return 'overdue';
     return task.status;
   };
 
-  // Filter tasks
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -318,7 +319,6 @@ export default function Tasks() {
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
 
-  // Stats
   const stats = {
     total: tasks.length,
     todo: tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
@@ -329,7 +329,7 @@ export default function Tasks() {
 
   return (
     <motion.div
-      className="space-y-6"
+      className="space-y-6 pb-10"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -374,7 +374,7 @@ export default function Tasks() {
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
-                  className="border-slate-300"
+                  className="border-slate-300 focus:border-blue-500 focus:ring-blue-500"
                   data-testid="task-title-input"
                 />
               </div>
@@ -387,19 +387,19 @@ export default function Tasks() {
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
-                  className="border-slate-300"
+                  className="border-slate-300 focus:border-blue-500 focus:ring-blue-500"
                   data-testid="task-description-input"
                 />
               </div>
               {/* Client and Due Date Row */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Client</Label>
                   <Select
                     value={formData.client_id || 'no_client'}
                     onValueChange={(value) => setFormData({ ...formData, client_id: value === 'no_client' ? '' : value })}
                   >
-                    <SelectTrigger className="border-slate-300">
+                    <SelectTrigger className="border-slate-300 focus:border-blue-500 focus:ring-blue-500">
                       <SelectValue placeholder="No Client" />
                     </SelectTrigger>
                     <SelectContent className="max-h-60 overflow-y-auto">
@@ -419,21 +419,22 @@ export default function Tasks() {
                     type="date"
                     value={formData.due_date}
                     onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                    className="border-slate-300"
+                    className="border-slate-300 focus:border-blue-500 focus:ring-blue-500"
                     data-testid="task-due-date-input"
                   />
                 </div>
               </div>
+
               {/* Assignee and Co-assignee Row */}
               {user?.role !== 'staff' && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="assigned_to">Assignee</Label>
                     <Select
                       value={formData.assigned_to}
                       onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
                     >
-                      <SelectTrigger className="border-slate-300" data-testid="task-assign-select">
+                      <SelectTrigger className="border-slate-300 focus:border-blue-500 focus:ring-blue-500" data-testid="task-assign-select">
                         <SelectValue placeholder="Select assignee..." />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
@@ -458,7 +459,7 @@ export default function Tasks() {
                         }
                       }}
                     >
-                      <SelectTrigger className="border-slate-300" data-testid="task-co-assign-select">
+                      <SelectTrigger className="border-slate-300 focus:border-blue-500 focus:ring-blue-500" data-testid="task-co-assign-select">
                         <SelectValue placeholder="Select co-assignee..." />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
@@ -475,6 +476,7 @@ export default function Tasks() {
                   </div>
                 </div>
               )}
+
               {/* Department Selection with Toggle Buttons */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">Department</Label>
@@ -486,10 +488,10 @@ export default function Tasks() {
                         key={dept.value}
                         type="button"
                         onClick={() => setFormData({ ...formData, category: dept.value })}
-                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all border ${
                           isSelected
-                            ? 'bg-blue-600 text-white shadow-md'
-                            : 'bg-slate-100 text-slate-700 hover:bg-blue-100 hover:text-blue-700'
+                            ? 'bg-blue-700 text-white shadow-md border-blue-800'
+                            : 'bg-slate-100 text-slate-700 hover:bg-blue-100 hover:text-blue-800 border-slate-300'
                         }`}
                       >
                         {dept.label}
@@ -498,6 +500,7 @@ export default function Tasks() {
                   })}
                 </div>
               </div>
+
               {/* Priority */}
               <div className="space-y-2">
                 <Label>Priority</Label>
@@ -505,7 +508,7 @@ export default function Tasks() {
                   value={formData.priority}
                   onValueChange={(value) => setFormData({ ...formData, priority: value })}
                 >
-                  <SelectTrigger className="border-slate-300">
+                  <SelectTrigger className="border-slate-300 focus:border-blue-500 focus:ring-blue-500">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -516,6 +519,7 @@ export default function Tasks() {
                   </SelectContent>
                 </Select>
               </div>
+
               {/* Recurring Task */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -532,14 +536,14 @@ export default function Tasks() {
                 </div>
 
                 {formData.is_recurring && (
-                  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                     <div className="space-y-2">
                       <Label htmlFor="recurrence_pattern">Repeat</Label>
                       <Select
                         value={formData.recurrence_pattern}
                         onValueChange={(value) => setFormData({ ...formData, recurrence_pattern: value })}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="border-slate-300 focus:border-blue-500 focus:ring-blue-500">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -560,7 +564,7 @@ export default function Tasks() {
                           max="365"
                           value={formData.recurrence_interval}
                           onChange={(e) => setFormData({ ...formData, recurrence_interval: parseInt(e.target.value) || 1 })}
-                          className="w-20"
+                          className="w-20 border-slate-300 focus:border-blue-500 focus:ring-blue-500"
                         />
                         <span className="text-sm text-slate-600">
                           {formData.recurrence_pattern === 'daily' && 'day(s)'}
@@ -573,19 +577,20 @@ export default function Tasks() {
                   </div>
                 )}
               </div>
+
               <DialogFooter className="pt-4 border-t border-slate-200">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => { setDialogOpen(false); resetForm(); }}
-                  className="px-6"
+                  className="px-6 border-slate-300 hover:bg-slate-100"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="text-white px-6"
+                  className="text-white px-6 shadow-md"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
                 >
                   {loading ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}
@@ -604,28 +609,28 @@ export default function Tasks() {
             <p className="text-3xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
           </CardContent>
         </Card>
-        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'pending' ? 'ring-2 ring-amber-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')}>
+        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'pending' ? 'ring-2 ring-amber-500' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')}>
           <CardContent className="p-4 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">To Do</p>
-            <p className="text-3xl font-bold mt-1 text-amber-600">{stats.todo}</p>
+            <p className="text-3xl font-bold mt-1 text-amber-700">{stats.todo}</p>
           </CardContent>
         </Card>
-        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'in_progress' ? 'ring-2 ring-blue-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')}>
+        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'in_progress' ? 'ring-2 ring-blue-500' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')}>
           <CardContent className="p-4 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">In Progress</p>
-            <p className="text-3xl font-bold mt-1 text-blue-600">{stats.inProgress}</p>
+            <p className="text-3xl font-bold mt-1 text-blue-700">{stats.inProgress}</p>
           </CardContent>
         </Card>
-        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'completed' ? 'ring-2 ring-emerald-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')}>
+        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'completed' ? 'ring-2 ring-emerald-500' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')}>
           <CardContent className="p-4 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completed</p>
-            <p className="text-3xl font-bold mt-1 text-emerald-600">{stats.completed}</p>
+            <p className="text-3xl font-bold mt-1 text-emerald-700">{stats.completed}</p>
           </CardContent>
         </Card>
-        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'overdue' ? 'ring-2 ring-red-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}>
+        <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'overdue' ? 'ring-2 ring-red-500' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}>
           <CardContent className="p-4 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-            <p className="text-3xl font-bold mt-1 text-red-600">{stats.overdue}</p>
+            <p className="text-3xl font-bold mt-1 text-red-700">{stats.overdue}</p>
           </CardContent>
         </Card>
       </motion.div>
@@ -638,14 +643,14 @@ export default function Tasks() {
             placeholder="Search tasks..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-white"
+            className="pl-10 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
             data-testid="task-search-input"
           />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-36 bg-white">
+            <SelectTrigger className="w-36 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500">
               <Filter className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -657,8 +662,9 @@ export default function Tasks() {
               <SelectItem value="overdue">Overdue</SelectItem>
             </SelectContent>
           </Select>
+
           <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className="w-36 bg-white">
+            <SelectTrigger className="w-36 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -669,8 +675,9 @@ export default function Tasks() {
               <SelectItem value="critical">Critical</SelectItem>
             </SelectContent>
           </Select>
+
           <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className="w-36 bg-white">
+            <SelectTrigger className="w-36 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
@@ -680,9 +687,10 @@ export default function Tasks() {
               ))}
             </SelectContent>
           </Select>
+
           {(user?.role === 'admin' || user?.role === 'manager') && (
             <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-              <SelectTrigger className="w-36 bg-white">
+              <SelectTrigger className="w-36 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500">
                 <SelectValue placeholder="All Users" />
               </SelectTrigger>
               <SelectContent>
@@ -693,11 +701,12 @@ export default function Tasks() {
               </SelectContent>
             </Select>
           )}
-          <div className="flex border rounded-lg overflow-hidden">
+
+          <div className="flex border border-slate-300 rounded-lg overflow-hidden bg-white">
             <Button
               variant="ghost"
               size="icon"
-              className={viewMode === 'grid' ? 'bg-slate-100' : ''}
+              className={`h-9 w-9 ${viewMode === 'grid' ? 'bg-slate-100' : ''}`}
               onClick={() => setViewMode('grid')}
             >
               <LayoutGrid className="h-4 w-4" />
@@ -705,7 +714,7 @@ export default function Tasks() {
             <Button
               variant="ghost"
               size="icon"
-              className={viewMode === 'list' ? 'bg-slate-100' : ''}
+              className={`h-9 w-9 ${viewMode === 'list' ? 'bg-slate-100' : ''}`}
               onClick={() => setViewMode('list')}
             >
               <List className="h-4 w-4" />
@@ -717,14 +726,14 @@ export default function Tasks() {
       {/* Task Cards Grid / List */}
       <motion.div
         className={viewMode === 'grid'
-          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr'
-          : 'space-y-3'}
+          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5 auto-rows-fr'
+          : 'space-y-4'}
         variants={containerVariants}
       >
         {filteredTasks.length === 0 ? (
-          <motion.div variants={itemVariants} className="col-span-full text-center py-12">
-            <p className="text-slate-500 text-lg">No tasks found</p>
-            <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
+          <motion.div variants={itemVariants} className="col-span-full text-center py-16">
+            <p className="text-slate-500 text-xl font-medium">No tasks found</p>
+            <p className="text-slate-400 text-sm mt-2">Try adjusting your filters or create a new task</p>
           </motion.div>
         ) : (
           filteredTasks.map((task) => {
@@ -736,86 +745,95 @@ export default function Tasks() {
             return (
               <motion.div key={task.id} variants={itemVariants} className="h-full">
                 <Card
-                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1] min-h-[280px]
-                    ${taskIsOverdue ? 'bg-red-50/40 border-red-100' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/40 border-orange-100' : 'bg-white'}`}
+                  className={`rounded-3xl border border-slate-200 p-0 overflow-hidden shadow-md transition-all hover:shadow-xl flex flex-col h-full min-h-[300px]
+                    ${taskIsOverdue ? 'bg-red-50/60 border-red-200' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/60 border-orange-200' : 'bg-white'}`}
                 >
-                  {/* 1. TOP BADGE ROW */}
-                  <div className="px-4 pt-4 pb-2 flex gap-1.5 flex-wrap">
-                    <Badge variant="secondary" className={`${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap`}>
+                  {/* TOP BADGE ROW */}
+                  <div className="px-5 pt-4 pb-2 flex flex-wrap gap-2">
+                    <Badge variant="secondary" className={`${statusStyle.bg} ${statusStyle.text} rounded-full text-xs px-3 py-1 border-none uppercase font-bold tracking-wide`}>
                       {statusStyle.label}
                     </Badge>
-                    <Badge variant="secondary" className={`${priorityStyle.bg} ${priorityStyle.text} rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap`}>
+                    <Badge variant="secondary" className={`${priorityStyle.bg} ${priorityStyle.text} rounded-full text-xs px-3 py-1 border-none uppercase font-bold tracking-wide`}>
                       {priorityStyle.label}
                     </Badge>
-                    <Badge variant="secondary" className="bg-slate-100 text-slate-600 rounded-full text-[10px] px-2.5 py-0.5 border-none uppercase font-bold whitespace-nowrap">
+                    <Badge variant="secondary" className="bg-slate-200 text-slate-800 rounded-full text-xs px-3 py-1 border-none uppercase font-bold tracking-wide">
                       {task.category?.toUpperCase() || 'OTHER'}
                     </Badge>
                   </div>
 
-                  {/* 2. CONTENT AREA */}
-                  <div className="px-4 py-2 space-y-1.5 flex-1 overflow-hidden flex flex-col justify-center">
+                  {/* CONTENT AREA */}
+                  <div className="px-5 py-3 space-y-2 flex-1 flex flex-col">
                     <div>
-                      <h3 className="text-sm sm:text-base font-bold text-slate-800 leading-tight line-clamp-2">
+                      <h3 className="text-base font-bold text-slate-900 leading-tight line-clamp-2">
                         {task.title}
                       </h3>
-                      <p className="text-[10px] text-slate-500 mt-1 uppercase font-semibold truncate">
+                      <p className="text-xs text-slate-600 mt-1 uppercase font-semibold truncate">
                         {getClientName(task.client_id)}
                       </p>
                     </div>
-                    <div className="space-y-1 mt-1">
-                      <div className="flex items-center gap-2 text-slate-500">
-                        <User className="h-3 w-3 flex-shrink-0" />
-                        <span className="text-[10px] font-medium truncate max-w-full">
-                          {getUserName(task.assigned_to)}
-                        </span>
+
+                    <div className="space-y-2 mt-2 text-sm text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                        <span className="truncate">{getUserName(task.assigned_to)}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-slate-500">
-                        <Calendar className="h-3 w-3 flex-shrink-0" />
-                        <span className="text-[10px] font-medium whitespace-nowrap">
-                          {task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}
-                        </span>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                        <span>{task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 3. ACTION FOOTER */}
-                  <div className="bg-white/90 px-3 py-3 border-t border-slate-100/50 flex flex-col gap-3 mt-auto">
-                    {/* Status Capsules Row */}
-                    <div className="flex justify-between items-center gap-1 bg-slate-50 p-1 rounded-2xl">
+                  {/* ACTION FOOTER */}
+                  <div className="bg-slate-50/80 px-4 py-4 border-t border-slate-200 flex flex-col gap-3 mt-auto">
+                    {/* Status Buttons Row */}
+                    <div className="flex justify-between items-center gap-2 bg-white p-2 rounded-xl shadow-sm">
                       <Button
                         variant={task.status === 'pending' ? 'default' : 'ghost'}
-                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'pending' ? 'bg-orange-500 hover:bg-orange-600 shadow-sm text-white' : 'text-slate-500 hover:bg-orange-50'}`}
+                        className={`flex-1 rounded-lg h-9 text-xs gap-1.5 transition-all font-medium ${
+                          task.status === 'pending'
+                            ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-sm'
+                            : 'text-slate-600 hover:bg-amber-50'
+                        }`}
                         onClick={() => handleQuickStatusChange(task, 'pending')}
                       >
-                        <Clock className="h-2.5 w-2.5" /> <span className="hidden xs:inline">To Do</span>
+                        <Clock className="h-3.5 w-3.5" /> To Do
                       </Button>
                       <Button
                         variant={task.status === 'in_progress' ? 'default' : 'ghost'}
-                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'in_progress' ? 'bg-blue-600 hover:bg-blue-700 shadow-sm text-white' : 'text-slate-500 hover:bg-blue-50'}`}
+                        className={`flex-1 rounded-lg h-9 text-xs gap-1.5 transition-all font-medium ${
+                          task.status === 'in_progress'
+                            ? 'bg-blue-700 hover:bg-blue-800 text-white shadow-sm'
+                            : 'text-slate-600 hover:bg-blue-50'
+                        }`}
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
                       >
-                        <Play className="h-2.5 w-2.5" /> <span className="hidden xs:inline">Progress</span>
+                        <Play className="h-3.5 w-3.5" /> Progress
                       </Button>
                       <Button
                         variant={task.status === 'completed' ? 'default' : 'ghost'}
-                        className={`flex-1 rounded-xl h-7 text-[9px] px-1 gap-1 transition-all ${task.status === 'completed' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-sm text-white' : 'text-slate-500 hover:bg-emerald-50'}`}
+                        className={`flex-1 rounded-lg h-9 text-xs gap-1.5 transition-all font-medium ${
+                          task.status === 'completed'
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
+                            : 'text-slate-600 hover:bg-emerald-50'
+                        }`}
                         onClick={() => handleQuickStatusChange(task, 'completed')}
                       >
-                        <CheckCircle className="h-2.5 w-2.5" /> <span className="hidden xs:inline">Done</span>
+                        <CheckCircle className="h-3.5 w-3.5" /> Done
                       </Button>
                     </div>
 
-                    {/* Meta and Utility Actions */}
-                    <div className="flex justify-between items-center px-1">
-                      <Badge variant="outline" className="text-[8px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-5">
+                    {/* Meta & Actions */}
+                    <div className="flex justify-between items-center px-2">
+                      <Badge variant="outline" className="text-xs border-slate-300 text-slate-700 font-medium px-3 py-1">
                         {task.category || 'OTHER'}
                       </Badge>
-                      <div className="flex gap-0.5">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50" onClick={() => handleEdit(task)}>
-                          <Edit className="h-3.5 w-3.5" />
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleEdit(task)}>
+                          <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDelete(task.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(task.id)}>
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
