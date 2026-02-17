@@ -758,7 +758,7 @@ class DocumentMovement(BaseModel):
 
 
 class DocumentBase(BaseModel):
-    document_name: str
+    document_name: Optional[str] = None
     document_type: Optional[str] = None
     holder_name: Optional[str] = None
     associated_with: Optional[str] = None
