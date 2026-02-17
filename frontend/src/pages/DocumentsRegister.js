@@ -788,10 +788,6 @@ export default function DocumentRegister() {
             </div>
           </CardContent>
         </Card>
-      )}
-
-    </div>
-  );
             {/* MOVEMENT DIALOG */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
