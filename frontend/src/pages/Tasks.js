@@ -753,10 +753,10 @@ export default function Tasks() {
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
             const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
             
-            return (
+           return (
               <motion.div key={task.id} variants={itemVariants} className="h-full">
                 <Card 
-                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1] min-h-[300px]
+                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1] min-h-[280px]
                     ${taskIsOverdue ? 'bg-red-50/40 border-red-100' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/40 border-orange-100' : 'bg-white'}`}
                 >
                   {/* 1. TOP BADGE ROW */}
@@ -772,8 +772,8 @@ export default function Tasks() {
                     </Badge>
                   </div>
 
-                  {/* 2. CONTENT AREA */}
-                  <div className="px-4 py-2 space-y-2 flex-1 overflow-hidden flex flex-col justify-center">
+                  {/* 2. CONTENT AREA - flex-1 ensures this area takes space and pushes footer down */}
+                  <div className="px-4 py-2 space-y-1.5 flex-1 overflow-hidden flex flex-col justify-center">
                     <div>
                       <h3 className="text-sm sm:text-base font-bold text-slate-800 leading-tight line-clamp-2">
                         {task.title}
@@ -783,24 +783,25 @@ export default function Tasks() {
                       </p>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="space-y-1 mt-1">
                       <div className="flex items-center gap-2 text-slate-500">
                         <User className="h-3 w-3 flex-shrink-0" />
-                        <span className="text-[10px] font-medium truncate max-w-[150px]">
+                        <span className="text-[10px] font-medium truncate max-w-full">
                           {getUserName(task.assigned_to)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-slate-500">
                         <Calendar className="h-3 w-3 flex-shrink-0" />
-                        <span className="text-[10px] font-medium">
+                        <span className="text-[10px] font-medium whitespace-nowrap">
                           {task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 3. SEPARATED ACTION FOOTER */}
-                  <div className="bg-white/95 px-3 py-3 border-t border-slate-100 flex flex-col gap-3 mt-auto">
+                  {/* 3. SEPARATED ACTION FOOTER - Integrated within card bounds */}
+                  <div className="bg-white/90 px-3 py-3 border-t border-slate-100/50 flex flex-col gap-3 mt-auto">
+                    {/* Status Capsules Row */}
                     <div className="flex justify-between items-center gap-1 bg-slate-50 p-1 rounded-2xl">
                       <Button 
                         variant={task.status === 'pending' ? 'default' : 'ghost'} 
@@ -825,6 +826,7 @@ export default function Tasks() {
                       </Button>
                     </div>
 
+                    {/* Meta and Utility Actions */}
                     <div className="flex justify-between items-center px-1">
                        <Badge variant="outline" className="text-[8px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-5">
                          {task.category || 'ROC'}
