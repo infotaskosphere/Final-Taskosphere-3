@@ -243,11 +243,11 @@ export default function DSCRegister() {
     if (daysLeft < 0) {
       return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
     } else if (daysLeft <= 7) {
-      return { color: 'bg-red-500', text: `${daysLeft}d left`, textColor: 'text-red-700' };
+      return { color: 'bg-red-500', text: `${daysLeft} Days left`, textColor: 'text-red-700' };
     } else if (daysLeft <= 30) {
-      return { color: 'bg-yellow-500', text: `${daysLeft}d left`, textColor: 'text-yellow-700' };
+      return { color: 'bg-yellow-500', text: `${daysLeft} Days left`, textColor: 'text-yellow-700' };
     }
-    return { color: 'bg-emerald-500', text: `${daysLeft}d left`, textColor: 'text-emerald-700' };
+    return { color: 'bg-emerald-500', text: `${daysLeft} Days left`, textColor: 'text-emerald-700' };
   };
 
   // Filter by search query
@@ -975,7 +975,7 @@ export default function DSCRegister() {
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className="w-full table-fixed">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
            <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">
@@ -1010,23 +1010,23 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`dsc-row-${dsc.id}`}
               >
-                <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                <td className="px-6 py-4 text-sm font-medium text-slate-500 whitespace-nowrap">
                   {index + 1}
                 </td>
                 
-                <td className="px-6 py-4 font-medium text-slate-900">
+                <td className="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">
                   {dsc.holder_name}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
                   {dsc.dsc_type || '-'}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
                   {dsc.associated_with || '-'}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
                 </td>
                 <td className="px-6 py-4">
