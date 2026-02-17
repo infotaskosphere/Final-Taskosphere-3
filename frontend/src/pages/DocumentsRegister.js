@@ -52,7 +52,7 @@ export default function DocumentRegister() {
 
   const fetchDocuments = async () => {
     try {
-      const response = await api.get('/api/documents');
+      const response = await api.get('/documents');
       setDocumentList(response.data);
     } catch (error) {
       toast.error('Failed to fetch documents');
@@ -135,7 +135,7 @@ export default function DocumentRegister() {
       toast.success(`Document marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
 
-      const response = await api.get('/api/documents');
+      const response = await api.get('/documents');
       setDocumentList(response.data);
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) setEditingDocument(updatedDocument);
