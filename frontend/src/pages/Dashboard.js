@@ -395,7 +395,7 @@ const fetchTodayAttendance = async () => {
                   </p>
                   {todayAttendance?.punch_out && (
                     <p className="text-sm text-blue-100/80">
-                      Out: {format(new Date(todayAttendance.punch_out), 'hh:mm a')} ��� {todayAttendance.duration_minutes}min
+                      Out: {format(new Date(todayAttendance.punch_out), 'hh:mm a')} | {todayAttendance.duration_minutes} min
                     </p>
                   )}
                 </div>
