@@ -51,11 +51,11 @@ const RECURRENCE_PATTERNS = [
 
 // Status colors with gradients for cards
 const STATUS_STYLES = {
-  pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do' },
-  in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Progress' },
-  completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Completed' },
-  review: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Review' },
-  overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
+  pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do', btn: 'bg-orange-500 hover:bg-orange-600' },
+  in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Progress', btn: 'bg-blue-600 hover:bg-blue-700' },
+  completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Done', btn: 'bg-emerald-500 hover:bg-emerald-600' },
+  review: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Review', btn: 'bg-purple-600 hover:bg-purple-700' },
+  overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue', btn: 'bg-red-500 hover:bg-red-600' },
 };
 
 // Priority colors
@@ -250,7 +250,7 @@ export default function Tasks() {
       };
       
       await api.put(`/tasks/${task.id}`, taskData);
-      toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
+      toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'Progress' : 'Done'}!`);
       fetchTasks();
     } catch (error) {
       toast.error('Failed to update task status');
@@ -734,7 +734,7 @@ export default function Tasks() {
         </div>
       </motion.div>
 
-      {/* Task Cards Grid - Responsive with consistent card sizing */}
+      {/* Task Cards Grid - Responsive with consistent card sizing and 1:1 layout */}
       <motion.div 
         className={viewMode === 'grid' 
           ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
@@ -752,159 +752,101 @@ export default function Tasks() {
             const displayStatus = getDisplayStatus(task);
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
             const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-            const categoryStyle = CATEGORY_STYLES[task.category] || CATEGORY_STYLES.other;
-            const cardGradient = getCardGradient(task, taskIsOverdue);
             
             return (
               <motion.div key={task.id} variants={itemVariants} className="h-full">
                 <Card 
-                  className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full rounded-2xl
-                    ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
-                  style={{ background: cardGradient !== 'none' ? cardGradient : 'white', minHeight: '320px' }}
-                  data-testid={`task-card-${task.id}`}
+                  className={`rounded-3xl border border-slate-100 p-0 overflow-hidden shadow-sm transition-all hover:shadow-md flex flex-col h-full [aspect-ratio:1/1]
+                    ${taskIsOverdue ? 'bg-red-50/40 border-red-100' : (task.priority === 'high' || task.priority === 'critical') ? 'bg-orange-50/40 border-orange-100' : 'bg-white'}`}
                 >
-                  <CardContent className="p-4 sm:p-5 flex flex-col h-full">
-                    {/* Status & Priority Tags */}
-                    <div className="flex items-center gap-2 mb-3 flex-wrap">
-                      <span 
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
-                        style={{ 
-                          background: taskIsOverdue 
-                            ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
-                            : statusStyle.bg.replace('bg-', '').includes('amber') ? '#fef3c7' : '#dbeafe'
-                        }}
-                      >
-                        {statusStyle.label}
-                      </span>
-                      <span 
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
-                        style={{ 
-                          background: (task.priority === 'high' || task.priority === 'critical')
-                            ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
-                            : priorityStyle.bg.replace('bg-', '').includes('blue') ? '#dbeafe' : '#f1f5f9'
-                        }}
-                      >
-                        {priorityStyle.label}
-                      </span>
-                      <span 
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${categoryStyle.text}`}
-                        style={{ background: categoryStyle.bg.replace('bg-', '#') + ' linear-gradient(135deg, transparent 0%, transparent 100%)' }}
-                      >
-                        {getCategoryLabel(task.category)}
-                      </span>
-                      {task.is_recurring && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                          <Repeat className="h-3 w-3 inline mr-1" />
-                          Recurring
-                        </span>
-                      )}
+                  {/* 1. TOP BADGE ROW */}
+                  <div className="px-5 pt-5 pb-2 flex gap-2 flex-wrap">
+                    <Badge variant="secondary" className={`${statusStyle.bg} ${statusStyle.text} rounded-full text-[10px] px-3 border-none uppercase font-bold`}>
+                      {statusStyle.label}
+                    </Badge>
+                    <Badge variant="secondary" className={`${priorityStyle.bg} ${priorityStyle.text} rounded-full text-[10px] px-3 border-none uppercase font-bold`}>
+                      {priorityStyle.label}
+                    </Badge>
+                    <Badge variant="secondary" className="bg-slate-100 text-slate-600 rounded-full text-[10px] px-3 border-none uppercase font-bold">
+                      {task.category?.toUpperCase() || 'OTHER'}
+                    </Badge>
+                  </div>
+
+                  {/* 2. CONTENT AREA (Clean Middle) */}
+                  <div className="px-5 py-3 space-y-3 flex-1 overflow-hidden flex flex-col justify-center">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-800 leading-tight line-clamp-2">{task.title}</h3>
+                      <p className="text-[11px] text-slate-500 mt-1 uppercase font-medium leading-relaxed truncate">
+                        {getClientName(task.client_id)}
+                      </p>
                     </div>
 
-                    {/* Task Title - Fixed height */}
-                    <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[48px] text-sm sm:text-base" style={{ color: COLORS.deepBlue }}>
-                      {task.title}
-                    </h3>
-
-                    {/* Description - Fixed height for equal cards */}
-                    <div className="h-[44px] mb-3">
-                      {task.description ? (
-                        <p className="text-xs sm:text-sm text-slate-600 line-clamp-2">{task.description}</p>
-                      ) : (
-                        <p className="text-xs sm:text-sm text-slate-400 italic">No description</p>
-                      )}
-                    </div>
-
-                    {/* Meta Info - flex-1 to push footer down */}
-                    <div className="space-y-1.5 text-xs sm:text-sm text-slate-500 flex-1 min-h-[60px]">
-                      {task.client_id && (
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="truncate">{getClientName(task.client_id)}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1.5 pt-2">
+                      <div className="flex items-center gap-2 text-slate-500">
                         <User className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="truncate">{getUserName(task.assigned_to)}</span>
+                        <span className="text-[11px] font-medium truncate">{getUserName(task.assigned_to)}</span>
                       </div>
-                      {task.due_date && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="text-[11px] font-medium">{task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}</span>
+                      </div>
                     </div>
+                  </div>
 
-                    {/* Quick Status Change Buttons - Consistent pill shape */}
-                    <div className="flex items-center gap-2 mt-auto pt-3 border-t border-slate-200/50">
-                      <button
+                  {/* 3. SEPARATED ACTION FOOTER (Bottom Block) */}
+                  <div className="bg-white/95 px-4 py-4 border-t border-slate-100/50 flex flex-col gap-4 mt-auto">
+                    {/* Status Pills Row */}
+                    <div className="flex justify-between items-center gap-1 bg-slate-50 p-1 rounded-2xl">
+                      <Button 
+                        variant={task.status === 'pending' ? 'default' : 'ghost'} 
+                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'pending' ? STATUS_STYLES.pending.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-orange-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'pending')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'pending' 
-                            ? 'bg-amber-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
-                        title="Mark as To Do"
-                        data-testid={`status-todo-${task.id}`}
                       >
-                        <Clock className="h-3.5 w-3.5" />
-                        <span>To Do</span>
-                      </button>
-                      <button
+                        <Clock className="h-3 w-3" /> To Do
+                      </Button>
+                      <Button 
+                        variant={task.status === 'in_progress' ? 'default' : 'ghost'} 
+                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'in_progress' ? STATUS_STYLES.in_progress.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-blue-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'in_progress' 
-                            ? 'bg-blue-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
-                        title="Mark as In Progress"
-                        data-testid={`status-progress-${task.id}`}
                       >
-                        <Play className="h-3.5 w-3.5" />
-                        <span>Progress</span>
-                      </button>
-                      <button
+                        <Play className="h-3 w-3" /> Progress
+                      </Button>
+                      <Button 
+                        variant={task.status === 'completed' ? 'default' : 'ghost'} 
+                        className={`flex-1 rounded-xl h-8 text-[10px] gap-1 transition-all ${task.status === 'completed' ? STATUS_STYLES.completed.btn + ' shadow-sm text-white' : 'text-slate-500 hover:bg-emerald-50'}`}
                         onClick={() => handleQuickStatusChange(task, 'completed')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'completed' 
-                            ? 'bg-emerald-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
-                        title="Mark as Completed"
-                        data-testid={`status-done-${task.id}`}
                       >
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        <span>Done</span>
-                      </button>
+                        <CheckCircle className="h-3 w-3" /> Done
+                      </Button>
                     </div>
 
-                    {/* Category & Actions */}
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
-                      <Badge 
-                        variant="outline" 
-                        className="text-xs rounded-lg px-2.5 py-1"
-                        style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
-                      >
-                        {getCategoryLabel(task.category)}
-                      </Badge>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg hover:bg-blue-50"
-                          onClick={() => handleEdit(task)}
-                          data-testid={`edit-task-${task.id}`}
-                        >
-                          <Edit className="h-4 w-4 text-blue-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg hover:bg-red-50"
-                          onClick={() => handleDelete(task.id)}
-                          data-testid={`delete-task-${task.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </div>
+                    {/* Metadata & Actions Row */}
+                    <div className="flex justify-between items-center px-1">
+                       <Badge variant="outline" className="text-[9px] border-slate-200 text-slate-400 font-bold uppercase tracking-wider px-2 h-6">
+                         {task.category || 'ROC'}
+                       </Badge>
+                       <div className="flex gap-1">
+                         <Button
+                           variant="ghost"
+                           size="icon"
+                           className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                           onClick={() => handleEdit(task)}
+                           data-testid={`edit-task-${task.id}`}
+                         >
+                           <Edit className="h-3.5 w-3.5" />
+                         </Button>
+                         <Button
+                           variant="ghost"
+                           size="icon"
+                           className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                           onClick={() => handleDelete(task.id)}
+                           data-testid={`delete-task-${task.id}`}
+                         >
+                           <Trash2 className="h-3.5 w-3.5" />
+                         </Button>
+                       </div>
                     </div>
-                  </CardContent>
+                  </div>
                 </Card>
               </motion.div>
             );
