@@ -263,7 +263,7 @@ export default function DocumentRegister() {
               Add Document
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl">
                 {editingDocument ? 'Edit Document' : 'Add New Document'}
@@ -285,7 +285,7 @@ export default function DocumentRegister() {
 
                 <TabsContent value="details" className="mt-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
                         <Input
@@ -332,7 +332,7 @@ export default function DocumentRegister() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="document_password">Password</Label>
                         <Input
@@ -356,7 +356,7 @@ export default function DocumentRegister() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="entity_type">Entity Type</Label>
                         <Select
@@ -469,112 +469,86 @@ export default function DocumentRegister() {
                       <Button
                         type="submit"
                         disabled={loading}
-                        className={getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
+                        className={getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
                       >
-                        {getDocumentInOutStatus(editingDocument) === 'IN' ? (
-                          <>
-                            <ArrowUpCircle className="h-4 w-4 mr-2" />
-                            Mark as OUT
-                          </>
-                        ) : (
-                          <>
-                            <ArrowDownCircle className="h-4 w-4 mr-2" />
-                            Mark as IN
-                          </>
-                        )}
+                        {loading ? 'Recording...' : `Mark as ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'OUT' : 'IN'}`}
                       </Button>
                     </form>
                   </Card>
                 </TabsContent>
 
                 <TabsContent value="history" className="mt-4">
-                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                  <div className="space-y-3">
                     {editingDocument?.movement_log?.length > 0 ? (
-                      editingDocument.movement_log.slice().reverse().map((movement, index) => {
-                        const movementKey = movement.id || movement.timestamp;
-                        const isEditing = editingMovement === movementKey;
-
+                      editingDocument.movement_log.map((movement, index) => {
+                        const isEditing = editingMovement === (movement.id || movement.timestamp);
                         return (
-                          <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                          <Card key={index} className={`p-4 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                             {isEditing ? (
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-3">
-                                  <Label className="text-sm font-medium">Status:</Label>
-                                  <div className="flex gap-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}
+                              <form onSubmit={(e) => { e.preventDefault(); handleUpdateMovement(movement.id || movement.timestamp); }} className="space-y-3">
+                                <div className="flex gap-4">
+                                  <div className="space-y-2 flex-1">
+                                    <Label htmlFor="edit_type">Type</Label>
+                                    <Select
+                                      value={editMovementData.movement_type}
+                                      onValueChange={(value) => setEditMovementData({ ...editMovementData, movement_type: value })}
                                     >
-                                      <ArrowDownCircle className="h-4 w-4 mr-1" /> IN
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
-                                      className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}
-                                    >
-                                      <ArrowUpCircle className="h-4 w-4 mr-1" /> OUT
-                                    </Button>
+                                      <SelectTrigger id="edit_type">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="IN">IN</SelectItem>
+                                        <SelectItem value="OUT">OUT</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-2 flex-1">
+                                    <Label htmlFor="edit_person">Person Name *</Label>
+                                    <Input
+                                      id="edit_person"
+                                      placeholder="Enter person name"
+                                      value={editMovementData.person_name}
+                                      onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
+                                      required
+                                    />
                                   </div>
                                 </div>
                                 <div className="space-y-2">
-                                  <Label htmlFor="edit-person-name" className="text-xs">Person Name</Label>
-                                  <Input
-                                    id="edit-person-name"
-                                    size="sm"
-                                    value={editMovementData.person_name}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
-                                    placeholder="Person name"
-                                  />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label htmlFor="edit-notes" className="text-xs">Notes</Label>
-                                  <Input
-                                    id="edit-notes"
-                                    size="sm"
+                                  <Label htmlFor="edit_notes">Notes</Label>
+                                  <Textarea
+                                    id="edit_notes"
+                                    placeholder="Additional notes"
                                     value={editMovementData.notes}
                                     onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })}
-                                    placeholder="Notes (optional)"
+                                    rows={2}
                                   />
                                 </div>
-                                <div className="flex gap-2 justify-end">
+                                <div className="flex gap-2">
+                                  <Button type="submit" size="sm" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700">
+                                    {loading ? 'Updating...' : 'Update'}
+                                  </Button>
                                   <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>
                                     Cancel
                                   </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-indigo-600 hover:bg-indigo-700"
-                                    onClick={() => handleUpdateMovement(movement.id)}
-                                    disabled={loading || !editMovementData.person_name}
-                                  >
-                                    {loading ? 'Saving...' : 'Save'}
-                                  </Button>
                                 </div>
-                              </div>
+                              </form>
                             ) : (
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    {movement.movement_type === 'IN' ? (
-                                      <Badge className="bg-emerald-600 text-xs">IN</Badge>
-                                    ) : (
-                                      <Badge className="bg-red-600 text-xs">OUT</Badge>
-                                    )}
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600' : 'bg-red-600'}>
+                                      {movement.movement_type}
+                                    </Badge>
                                     <span className="text-sm font-medium">{movement.person_name}</span>
                                   </div>
-                                  {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
-                                  {movement.edited_at && (
-                                    <p className="text-xs text-slate-400 mt-1">
-                                      Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}
-                                    </p>
+                                  <p className="text-xs text-slate-500">
+                                    Recorded by: {movement.recorded_by || '—'}
+                                  </p>
+                                  {movement.notes && (
+                                    <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>
                                   )}
                                 </div>
-                                <div className="flex flex-col items-end gap-2">
+                                <div className="text-right flex items-start gap-2">
                                   <div className="text-xs text-slate-500">
                                     {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
                                   </div>
@@ -606,7 +580,7 @@ export default function DocumentRegister() {
               </Tabs>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
                     <Input
@@ -653,7 +627,7 @@ export default function DocumentRegister() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="document_password">Password</Label>
                     <Input
@@ -677,7 +651,7 @@ export default function DocumentRegister() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="entity_type">Entity Type</Label>
                     <Select
@@ -939,23 +913,23 @@ export default function DocumentRegister() {
 
 function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, type }) {
   return (
-    <div className="w-full overflow-hidden">
-      <table className="w-full table-auto border-collapse">
+    <div className="w-full overflow-x-auto">
+      <table className="w-full table-fixed border-collapse">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[5%]">
               S.No
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[30%]">
               Holder Name
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[20%]">
               Type
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[30%]">
               Associated With
             </th>
-            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[15%]">
               Actions
             </th>
           </tr>
