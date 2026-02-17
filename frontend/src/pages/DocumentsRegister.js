@@ -52,10 +52,10 @@ export default function DocumentRegister() {
 
   const fetchDocuments = async () => {
     try {
-      const response = await api.get('/document');
+      const response = await api.get('/api/documents');
       setDocumentList(response.data);
     } catch (error) {
-      toast.error('Failed to fetch Documents');
+      toast.error('Failed to fetch documents');
     }
   };
 
@@ -70,10 +70,10 @@ export default function DocumentRegister() {
       };
 
       if (editingDocument) {
-        await api.put(`/document/${editingDocument.id}`, documentData);
+        await api.put(`/api/documents/${editingDocument.id}`, documentData);
         toast.success('Document updated successfully!');
       } else {
-        await api.post('/document', documentData);
+        await api.post('/api/documents', documentData);
         toast.success('Document added successfully!');
       }
 
@@ -81,7 +81,7 @@ export default function DocumentRegister() {
       resetForm();
       fetchDocuments();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save Document');
+      toast.error(error.response?.data?.detail || 'Failed to save document');
     } finally {
       setLoading(false);
     }
@@ -92,7 +92,7 @@ export default function DocumentRegister() {
     setLoading(true);
 
     try {
-      await api.post(`/document/${selectedDocument.id}/movement`, movementData);
+      await api.post(`/api/documents/${selectedDocument.id}/movement`, movementData);
       toast.success(`Document marked as ${movementData.movement_type}!`);
       setMovementDialogOpen(false);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
@@ -128,14 +128,14 @@ export default function DocumentRegister() {
     try {
       const currentStatus = getDocumentInOutStatus(editingDocument);
       const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
-      await api.post(`/document/${editingDocument.id}/movement`, {
+      await api.post(`/api/documents/${editingDocument.id}/movement`, {
         ...movementData,
         movement_type: newType,
       });
       toast.success(`Document marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-      
-      const response = await api.get('/document');
+
+      const response = await api.get('/api/documents');
       setDocumentList(response.data);
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) setEditingDocument(updatedDocument);
@@ -151,7 +151,7 @@ export default function DocumentRegister() {
     setLoading(true);
 
     try {
-      await api.put(`/document/${editingDocument.id}/movement/${movementId}`, {
+      await api.put(`/api/documents/${editingDocument.id}/movement/${movementId}`, {
         movement_id: movementId,
         movement_type: editMovementData.movement_type,
         person_name: editMovementData.person_name,
@@ -159,8 +159,8 @@ export default function DocumentRegister() {
       });
       toast.success('Movement log updated successfully!');
       setEditingMovement(null);
-      
-      const response = await api.get('/document');
+
+      const response = await api.get('/api/documents');
       setDocumentList(response.data);
       const updatedDocument = response.data.find(d => d.id === editingDocument.id);
       if (updatedDocument) setEditingDocument(updatedDocument);
@@ -197,14 +197,14 @@ export default function DocumentRegister() {
   };
 
   const handleDelete = async (documentId) => {
-    if (!window.confirm('Are you sure you want to delete this Document?')) return;
+    if (!window.confirm('Are you sure you want to delete this document?')) return;
 
     try {
-      await api.delete(`/document/${documentId}`);
+      await api.delete(`/api/documents/${documentId}`);
       toast.success('Document deleted successfully!');
       fetchDocuments();
     } catch (error) {
-      toast.error('Failed to delete Document');
+      toast.error('Failed to delete document');
     }
   };
 
@@ -261,8 +261,8 @@ export default function DocumentRegister() {
                 {editingDocument ? 'Edit Document' : 'Add New Document'}
               </DialogTitle>
               <DialogDescription>
-                {editingDocument 
-                  ? 'Update document details and track IN/OUT status.' 
+                {editingDocument
+                  ? 'Update document details and track IN/OUT status.'
                   : 'Fill in the details to add a new document.'}
               </DialogDescription>
             </DialogHeader>
@@ -410,7 +410,6 @@ export default function DocumentRegister() {
                   </form>
                 </TabsContent>
 
-                {/* IN/OUT Status tab and History tab remain unchanged */}
                 <TabsContent value="status" className="mt-4 space-y-4">
                   <Card className={`p-4 ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                     <div className="flex items-center justify-between">
@@ -596,7 +595,6 @@ export default function DocumentRegister() {
                 </TabsContent>
               </Tabs>
             ) : (
-              /* ── New Document Form ── */
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -813,7 +811,6 @@ export default function DocumentRegister() {
         </TabsContent>
       </Tabs>
 
-      {/* Movement Dialog - unchanged */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -871,7 +868,6 @@ export default function DocumentRegister() {
         </DialogContent>
       </Dialog>
 
-      {/* Movement Log Dialog - unchanged */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -931,7 +927,6 @@ export default function DocumentRegister() {
   );
 }
 
-// Document Table Component (unchanged except minor text adjustment)
 function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, type }) {
   return (
     <div className="w-full overflow-hidden">
