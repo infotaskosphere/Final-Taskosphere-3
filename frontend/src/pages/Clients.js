@@ -63,27 +63,29 @@ export default function Clients() {
     phone: '',
     birthday: '',
     services: [],
-    dsc_details: [],
     assigned_to: 'unassigned',
     notes: '',
     status: 'active',
   });
 
-  // ────────────────────────────────────────────────
-  // ADDED: DSC states
-  // ────────────────────────────────────────────────
+  // DSC-specific states
   const [clientDSCs, setClientDSCs] = useState([]);
-  const [dscFormOpen, setDscFormOpen] = useState(false);
+  const [dscDialogOpen, setDscDialogOpen] = useState(false);
   const [editingDSC, setEditingDSC] = useState(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [logDialogOpen, setLogDialogOpen] = useState(false);
   const [selectedDSC, setSelectedDSC] = useState(null);
-
   const [movementData, setMovementData] = useState({
     movement_type: 'IN',
     person_name: '',
     notes: '',
   });
+  const [editMovementData, setEditMovementData] = useState({
+    movement_type: 'IN',
+    person_name: '',
+    notes: '',
+  });
+  const [editingMovement, setEditingMovement] = useState(null);
 
   useEffect(() => {
     fetchClients();
@@ -94,11 +96,8 @@ export default function Clients() {
     setCurrentPage(1);
   }, [searchTerm, serviceFilter, statusFilter, clients.length]);
 
-  // ────────────────────────────────────────────────
-  // ADDED: Fetch DSCs when editing client changes
-  // ────────────────────────────────────────────────
   useEffect(() => {
-    if (editingClient?.id) {
+    if (editingClient) {
       fetchClientDSCs(editingClient.id);
     }
   }, [editingClient]);
@@ -121,16 +120,12 @@ export default function Clients() {
     }
   };
 
-  // ────────────────────────────────────────────────
-  // ADDED: Fetch client-specific DSCs
-  // ────────────────────────────────────────────────
   const fetchClientDSCs = async (clientId) => {
     try {
-      const response = await api.get(`/clients/${clientId}/dscs`); // or /dsc?client_id=${clientId}
-      setClientDSCs(response.data || []);
+      const response = await api.get(`/clients/${clientId}/dscs`);
+      setClientDSCs(response.data);
     } catch (error) {
-      toast.error('Failed to load DSCs for this client');
-      console.error(error);
+      toast.error('Failed to fetch DSCs');
     }
   };
 
@@ -142,9 +137,7 @@ export default function Clients() {
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
 
-  // ────────────────────────────────────────────────
-  // ADDED: DSC helpers (copied/adapted from DSCRegister)
-  // ────────────────────────────────────────────────
+  // DSC helpers
   const getDSCStatus = (expiryDate) => {
     const now = new Date();
     const expiry = new Date(expiryDate);
@@ -345,7 +338,7 @@ export default function Clients() {
       services: prev.services.includes(service)
         ? prev.services.filter(s => s !== service)
         : [...prev.services, service]
-    }));
+    });
   };
 
   const handleToggleStatus = async (clientId, currentStatus) => {
@@ -359,71 +352,85 @@ export default function Clients() {
     }
   };
 
-  // ────────────────────────────────────────────────
-  // ADDED: DSC handlers
-  // ────────────────────────────────────────────────
-  const handleDSCSubmit = async (dscFormData) => {
+  // DSC Handlers
+  const handleDSCSubmit = async (e) => {
+    e.preventDefault();
     setLoading(true);
+
     try {
-      const payload = {
-        ...dscFormData,
-        client_id: editingClient.id,
-        associated_with: editingClient.company_name,
-        issue_date: new Date(dscFormData.issue_date).toISOString(),
-        expiry_date: new Date(dscFormData.expiry_date).toISOString(),
+      const dscData = {
+        ...formData,
+        issue_date: new Date(formData.issue_date).toISOString(),
+        expiry_date: new Date(formData.expiry_date).toISOString(),
       };
 
       if (editingDSC) {
-        await api.put(`/dsc/${editingDSC.id}`, payload);
-        toast.success('DSC updated');
+        await api.put(`/dsc/${editingDSC.id}`, dscData);
+        toast.success('DSC updated successfully!');
       } else {
-        await api.post('/dsc', payload);
-        toast.success('DSC added');
+        dscData.associated_with = editingClient.company_name;
+        dscData.client_id = editingClient.id;
+        await api.post('/dsc', dscData);
+        toast.success('DSC added successfully!');
       }
 
-      setDscFormOpen(false);
-      setEditingDSC(null);
+      setDscDialogOpen(false);
+      resetDSCForm();
       fetchClientDSCs(editingClient.id);
-    } catch (err) {
-      toast.error('Could not save DSC');
-      console.error(err);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to save DSC');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteDSC = async (dscId) => {
-    if (!window.confirm('Delete this DSC?')) return;
-    try {
-      await api.delete(`/dsc/${dscId}`);
-      toast.success('DSC deleted');
-      fetchClientDSCs(editingClient.id);
-    } catch (err) {
-      toast.error('Delete failed');
-    }
+  const resetDSCForm = () => {
+    setFormData({
+      holder_name: '',
+      dsc_type: '',
+      dsc_password: '',
+      associated_with: '',
+      entity_type: 'firm',
+      issue_date: '',
+      expiry_date: '',
+      notes: '',
+    });
+    setEditingDSC(null);
   };
 
-  const openMovementDialog = (dsc, suggestedType) => {
-    setSelectedDSC(dsc);
-    setMovementData(prev => ({ ...prev, movement_type: suggestedType }));
-    setMovementDialogOpen(true);
+  const handleDeleteDSC = async (dscId) => {
+    if (!window.confirm('Are you sure you want to delete this DSC?')) return;
+
+    try {
+      await api.delete(`/dsc/${dscId}`);
+      toast.success('DSC deleted successfully!');
+      fetchClientDSCs(editingClient.id);
+    } catch (error) {
+      toast.error('Failed to delete DSC');
+    }
   };
 
   const handleMovement = async (e) => {
     e.preventDefault();
-    if (!selectedDSC) return;
     setLoading(true);
+
     try {
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
-      toast.success(`Marked as ${movementData.movement_type}`);
+      toast.success(`DSC marked as ${movementData.movement_type}!`);
       setMovementDialogOpen(false);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
       fetchClientDSCs(editingClient.id);
-    } catch (err) {
-      toast.error('Movement record failed');
+    } catch (error) {
+      toast.error('Failed to record movement');
     } finally {
       setLoading(false);
     }
+  };
+
+  const openMovementDialog = (dsc, type) => {
+    setSelectedDSC(dsc);
+    setMovementData({ ...movementData, movement_type: type });
+    setMovementDialogOpen(true);
   };
 
   const openLogDialog = (dsc) => {
@@ -431,11 +438,250 @@ export default function Clients() {
     setLogDialogOpen(true);
   };
 
+  const handleUpdateMovement = async (movementId) => {
+    if (!editingDSC || !editMovementData.person_name) return;
+    setLoading(true);
+
+    try {
+      await api.put(`/dsc/${editingDSC.id}/movement/${movementId}`, {
+        movement_id: movementId,
+        movement_type: editMovementData.movement_type,
+        person_name: editMovementData.person_name,
+        notes: editMovementData.notes,
+      });
+      toast.success('Movement log updated successfully!');
+      setEditingMovement(null);
+      
+      // Refresh
+      fetchClientDSCs(editingClient.id);
+      const updatedDSC = clientDSCs.find(d => d.id === editingDSC.id);
+      if (updatedDSC) {
+        setEditingDSC(updatedDSC);
+      }
+    } catch (error) {
+      toast.error('Failed to update movement');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditingMovement = (movement) => {
+    setEditingMovement(movement.id || movement.timestamp);
+    setEditMovementData({
+      movement_type: movement.movement_type,
+      person_name: movement.person_name,
+      notes: movement.notes || '',
+    });
+  };
+
   return (
-    <div className="space-y-6">
-      {/* ────────────────────────────────────────────────
-          Everything above this line is 100% unchanged
-      ──────────────────────────────────────────────── */}
+    <div className="container mx-auto p-4 max-w-7xl">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h1 className="text-3xl font-bold font-outfit text-slate-900">Clients</h1>
+          <p className="text-slate-600 mt-1">Manage your clients efficiently</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" className="gap-2" onClick={downloadTemplate}><FileText className="h-4 w-4" /> Template</Button>
+          <Button variant="outline" className="gap-2" disabled={importLoading} onClick={() => fileInputRef.current?.click()}>{importLoading ? 'Importing...' : <><FileText className="h-4 w-4" /> Import CSV</>}</Button>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+            <DialogTrigger asChild>
+              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"><Plus className="h-5 w-5" /> Add Client</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0">
+              <div className="sticky top-0 bg-white z-10 border-b p-6">
+                <DialogHeader>
+                  <DialogTitle className="font-outfit text-2xl">{editingClient ? 'Edit Client' : 'Add New Client'}</DialogTitle>
+                  <DialogDescription>Fill in the client details below.</DialogDescription>
+                </DialogHeader>
+              </div>
+              <form onSubmit={handleSubmit} className="p-6 space-y-8">
+                {/* Company Details */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold uppercase text-slate-500">Company Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <Label htmlFor="company_name">Company Name</Label>
+                      <Input id="company_name" value={formData.company_name} onChange={e => setFormData({...formData, company_name: e.target.value})} required />
+                    </div>
+                    <div>
+                      <Label htmlFor="client_type">Client Type</Label>
+                      <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CLIENT_TYPES.map(type => <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="email">Email</Label>
+                      <Input id="email" type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                    </div>
+                    <div>
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input id="phone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                    </div>
+                    <div>
+                      <Label htmlFor="birthday">Anniversary Date</Label>
+                      <Input id="birthday" type="date" value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contact Persons */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-sm font-bold uppercase text-slate-500">Contact Persons</h3>
+                    <Button type="button" variant="outline" className="gap-2" onClick={addContactPerson}><UserPlus className="h-4 w-4" /> Add Contact</Button>
+                  </div>
+                  {formData.contact_persons.map((cp, index) => (
+                    <Card key={index} className="p-4 relative">
+                      {index > 0 && <Button variant="ghost" size="icon" className="absolute top-2 right-2 text-red-500" onClick={() => removeContactPerson(index)}><X className="h-4 w-4" /></Button>}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor={`cp_name_${index}`}>Name</Label>
+                          <Input id={`cp_name_${index}`} value={cp.name} onChange={e => updateContactPerson(index, 'name', e.target.value)} />
+                        </div>
+                        <div>
+                          <Label htmlFor={`cp_designation_${index}`}>Designation</Label>
+                          <Input id={`cp_designation_${index}`} value={cp.designation} onChange={e => updateContactPerson(index, 'designation', e.target.value)} />
+                        </div>
+                        <div>
+                          <Label htmlFor={`cp_email_${index}`}>Email</Label>
+                          <Input id={`cp_email_${index}`} type="email" value={cp.email} onChange={e => updateContactPerson(index, 'email', e.target.value)} />
+                        </div>
+                        <div>
+                          <Label htmlFor={`cp_phone_${index}`}>Phone</Label>
+                          <Input id={`cp_phone_${index}`} value={cp.phone} onChange={e => updateContactPerson(index, 'phone', e.target.value)} />
+                        </div>
+                        <div>
+                          <Label htmlFor={`cp_birthday_${index}`}>Birthday</Label>
+                          <Input id={`cp_birthday_${index}`} type="date" value={cp.birthday} onChange={e => updateContactPerson(index, 'birthday', e.target.value)} />
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Services */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold uppercase text-slate-500">Services</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {SERVICES.map(service => (
+                      <Button 
+                        key={service} 
+                        variant={formData.services.includes(service) ? "default" : "outline"} 
+                        className={`justify-start ${formData.services.includes(service) ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
+                        onClick={() => toggleService(service)}
+                      >
+                        {service}
+                      </Button>
+                    ))}
+                  </div>
+                  {formData.services.includes('Other') && (
+                    <div className="mt-4">
+                      <Label htmlFor="other_service">Other Service Details</Label>
+                      <Input id="other_service" value={otherService} onChange={e => setOtherService(e.target.value)} placeholder="Specify other service" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold uppercase text-slate-500">Notes</h3>
+                  <Textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} rows={4} />
+                </div>
+
+                {/* Assigned To (Admin/Manager only) */}
+                {(user?.role === 'admin' || user?.role === 'manager') && (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-bold uppercase text-slate-500">Assignment</h3>
+                    <Select value={formData.assigned_to} onValueChange={v => setFormData({...formData, assigned_to: v})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Assign to" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Status Toggle (Admin only) */}
+                {user?.role === 'admin' && editingClient && (
+                  <div className="flex items-center gap-3">
+                    <Switch 
+                      checked={formData.status === 'active'} 
+                      onCheckedChange={checked => setFormData({...formData, status: checked ? 'active' : 'inactive'})}
+                    />
+                    <Label>Active Client</Label>
+                  </div>
+                )}
+
+                {/* DSC Details Section */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold uppercase text-slate-500">DSC Details</h3>
+                  {/* DSC Expiry Alert */}
+                  {clientDSCs.filter(dsc => getDSCStatus(dsc.expiry_date).color !== 'bg-emerald-500').length > 0 && (
+                    <Card className="border-2 border-orange-200 bg-orange-50">
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
+                          <div>
+                            <h3 className="font-semibold text-orange-900">Attention Required</h3>
+                            <p className="text-sm text-orange-700 mt-1">
+                              {clientDSCs.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
+                              {clientDSCs.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                  <Tabs defaultValue="IN">
+                    <TabsList>
+                      <TabsTrigger value="IN">IN</TabsTrigger>
+                      <TabsTrigger value="OUT">OUT</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="IN">
+                      <DSCTable 
+                        dscList={clientDSCs.filter(dsc => getDSCInOutStatus(dsc) === 'IN')}
+                        onEdit={openEditDSC}
+                        onDelete={handleDeleteDSC}
+                        onMovement={openMovementDialog}
+                        onViewLog={openLogDialog}
+                        getDSCStatus={getDSCStatus}
+                        type="IN"
+                      />
+                    </TabsContent>
+                    <TabsContent value="OUT">
+                      <DSCTable 
+                        dscList={clientDSCs.filter(dsc => getDSCInOutStatus(dsc) === 'OUT')}
+                        onEdit={openEditDSC}
+                        onDelete={handleDeleteDSC}
+                        onMovement={openMovementDialog}
+                        onViewLog={openLogDialog}
+                        getDSCStatus={getDSCStatus}
+                        type="OUT"
+                      />
+                    </TabsContent>
+                  </Tabs>
+                </div>
+
+                <DialogFooter className="sticky bottom-0 bg-white border-t p-6 z-10 flex justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                  <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700">
+                    {loading ? 'Saving...' : editingClient ? 'Update' : 'Save'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
 
       {/* Same-Day Birthday Reminders (Admin/Manager Only) */}
       {(user?.role === 'admin' || user?.role === 'manager') && todayReminders.length > 0 && (
@@ -526,341 +772,259 @@ export default function Clients() {
         </div>
       )}
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
+    </div>
+  );
+}
 
-      {/* ────────────────────────────────────────────────
-          Client Edit Dialog – with added DSC section
-      ──────────────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => {
-        setDialogOpen(open);
-        if (!open) resetForm();
-      }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingClient ? 'Edit Client' : 'Add New Client'}</DialogTitle>
-          </DialogHeader>
+// DSC Table Component
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
+  return (
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-auto border-collapse">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
+              S.No
+            </th> 
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+              Holder Name
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
+              Type
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+              Associated With
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
+              Expiry Date
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-32">
+              Status
+            </th>
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">
+              Actions
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 bg-white">
+          {dscList.map((dsc, index) => {
+            const status = getDSCStatus(dsc.expiry_date);
+            return (
+              <tr
+                key={dsc.id}
+                className="hover:bg-slate-50 transition-colors"
+                data-testid={`dsc-row-${dsc.id}`}
+              >
+                <td className="px-4 py-3 text-sm text-slate-500">
+                  {index + 1}
+                </td>
+                
+                <td className="px-4 py-3 text-sm font-medium text-slate-900 break-words leading-tight">
+                  {dsc.holder_name}
+                </td>
 
-          <form onSubmit={handleSubmit} className="space-y-8 py-4">
+                <td className="px-4 py-3 text-sm text-slate-600 truncate">
+                  {dsc.dsc_type || '-'}
+                </td>
 
-            {/* ────── Original fields (unchanged) ────── */}
+                <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">
+                  {dsc.associated_with || '-'}
+                </td>
 
-            {/* Company Details */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Company Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Company Name *</Label>
-                  <Input value={formData.company_name} onChange={e => setFormData({...formData, company_name: e.target.value})} required />
-                </div>
-                <div>
-                  <Label>Client Type</Label>
-                  <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
-                </div>
-                <div>
-                  <Label>Phone</Label>
-                  <Input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-                </div>
-                <div>
-                  <Label>Anniversary / Birthday</Label>
-                  <Input type="date" value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
-                </div>
-              </div>
-            </div>
+                <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                  {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
+                </td>
+                
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-1.5 h-1.5 rounded-full ${status.color}`}></div>
+                    <span className={`text-[12px] font-medium leading-none ${status.textColor}`}>
+                      {status.text}
+                    </span>
+                  </div>
+                </td>
 
-            {/* Contact Persons – original code unchanged */}
-            {/* Services – original code unchanged */}
-            {/* Notes – original code unchanged */}
-            {/* Assigned To – original code unchanged */}
-            {/* Status Toggle – original code unchanged */}
-
-            {/* ────────────────────────────────────────────────
-                ADDED: DSC Management Section
-            ──────────────────────────────────────────────── */}
-            <div className="space-y-6 border-t pt-6">
-              <h3 className="text-lg font-semibold">DSC Management</h3>
-
-              <Tabs defaultValue="details">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="details">Details</TabsTrigger>
-                  <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="details" className="pt-6 space-y-6">
-                  {/* Expiry warning */}
-                  {clientDSCs.some(d => getDSCStatus(d.expiry_date).color !== 'bg-emerald-500') && (
-                    <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg flex gap-3 text-sm">
-                      <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-orange-900">Attention required</p>
-                        <p className="text-orange-800">
-                          {clientDSCs.filter(d => getDSCStatus(d.expiry_date).color === 'bg-red-500').length} expired or ≤7 days •
-                          {clientDSCs.filter(d => getDSCStatus(d.expiry_date).color === 'bg-yellow-500').length} ≤30 days
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between items-center">
-                    <h4 className="font-medium">Certificates</h4>
-                    <Button type="button" onClick={() => { setEditingDSC(null); setDscFormOpen(true); }}>
-                      <Plus className="mr-2 h-4 w-4" /> Add DSC
+                <td className="px-4 py-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onViewLog(dsc)}
+                      className="h-8 w-8 p-0 hover:bg-slate-100"
+                      title="View Log"
+                    >
+                      <History className="h-4 w-4 text-slate-500" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
+                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
+                      title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                    >
+                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onEdit(dsc)}
+                      className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onDelete(dsc.id)}
+                      className="h-8 w-8 p-0 hover:bg-red-50 text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-                  {clientDSCs.length === 0 ? (
-                    <div className="text-center py-10 text-slate-500 border border-dashed rounded-lg">
-                      No DSC records yet for this client
-                    </div>
-                  ) : (
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left">Holder</th>
-                            <th className="px-4 py-3 text-left">Type</th>
-                            <th className="px-4 py-3 text-left">Expiry</th>
-                            <th className="px-4 py-3 text-left">Status</th>
-                            <th className="px-4 py-3 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {clientDSCs.map(dsc => {
-                            const st = getDSCStatus(dsc.expiry_date);
-                            const inout = getDSCInOutStatus(dsc);
-                            return (
-                              <tr key={dsc.id} className="hover:bg-slate-50">
-                                <td className="px-4 py-3 font-medium">{dsc.holder_name}</td>
-                                <td className="px-4 py-3">{dsc.dsc_type || '—'}</td>
-                                <td className="px-4 py-3">{format(new Date(dsc.expiry_date), 'dd MMM yyyy')}</td>
-                                <td className="px-4 py-3">
-                                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${st.color.replace('bg-', 'bg-')} ${st.textColor}`}>
-                                    {st.text}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-right space-x-1">
-                                  <Button variant="ghost" size="icon" onClick={() => openLogDialog(dsc)}><History className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="icon" onClick={() => openMovementDialog(dsc, inout === 'IN' ? 'OUT' : 'IN')}>
-                                    {inout === 'IN' ? <ArrowUpCircle className="h-4 w-4 text-red-600" /> : <ArrowDownCircle className="h-4 w-4 text-emerald-600" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" onClick={() => { setEditingDSC(dsc); setDscFormOpen(true); }}><Edit className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="icon" onClick={() => handleDeleteDSC(dsc.id)}><Trash2 className="h-4 w-4 text-red-600" /></Button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </TabsContent>
+  // ─── DSC Dialog ──────────────────────────────────────────────────────────────
 
-                <TabsContent value="status" className="pt-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <Card className="bg-emerald-50/50">
-                      <CardContent className="p-6">
-                        <div className="flex items-center gap-4">
-                          <ArrowDownCircle className="h-8 w-8 text-emerald-600" />
-                          <div>
-                            <p className="text-sm text-emerald-700">Currently IN (with us)</p>
-                            <p className="text-3xl font-bold">{clientDSCs.filter(d => getDSCInOutStatus(d) === 'IN').length}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="bg-red-50/50">
-                      <CardContent className="p-6">
-                        <div className="flex items-center gap-4">
-                          <ArrowUpCircle className="h-8 w-8 text-red-600" />
-                          <div>
-                            <p className="text-sm text-red-700">Currently OUT</p>
-                            <p className="text-3xl font-bold">{clientDSCs.filter(d => getDSCInOutStatus(d) === 'OUT').length}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="history" className="pt-6">
-                  <div className="space-y-4">
-                    {clientDSCs.flatMap(d => (d.movement_log || []).map(log => ({...log, dsc: d})))
-                      .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
-                      .map((entry, i) => (
-                        <div key={i} className="flex gap-4 p-4 border rounded-lg">
-                          <div className={`rounded-full p-3 ${entry.movement_type === 'IN' ? 'bg-emerald-100' : 'bg-red-100'}`}>
-                            {entry.movement_type === 'IN' ? <ArrowDownCircle className="h-6 w-6 text-emerald-600" /> : <ArrowUpCircle className="h-6 w-6 text-red-600" />}
-                          </div>
-                          <div className="flex-1">
-                            <p className="font-medium">{entry.movement_type} • {entry.person_name}</p>
-                            <p className="text-sm text-slate-500 mt-1">
-                              {format(new Date(entry.timestamp), 'dd MMM yyyy • hh:mm a')}
-                            </p>
-                            {entry.notes && <p className="text-sm mt-2">{entry.notes}</p>}
-                            <p className="text-xs text-slate-400 mt-2">DSC: {entry.dsc.holder_name}</p>
-                          </div>
-                        </div>
-                      ))}
-
-                    {clientDSCs.every(d => !d.movement_log?.length) && (
-                      <div className="text-center py-10 text-slate-500">
-                        No movement history recorded yet
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
-
-            {/* Form footer – original */}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Create Client'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ────────────────────────────────────────────────
-          ADDED: DSC Add/Edit Dialog (placeholder – fill fields)
-      ──────────────────────────────────────────────── */}
-      <Dialog open={dscFormOpen} onOpenChange={setDscFormOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingDSC ? 'Edit DSC' : 'Add DSC'}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const data = Object.fromEntries(fd);
-            handleDSCSubmit(data);
-          }}>
-            <div className="space-y-4 py-4">
-              <div>
-                <Label>Holder Name *</Label>
-                <Input name="holder_name" defaultValue={editingDSC?.holder_name || ''} required />
-              </div>
-              <div>
-                <Label>Type (Class / Purpose)</Label>
-                <Input name="dsc_type" defaultValue={editingDSC?.dsc_type || ''} placeholder="Class 3, Signature, Encryption..." />
-              </div>
-              <div>
-                <Label>Password</Label>
-                <Input name="dsc_password" type="password" defaultValue={editingDSC?.dsc_password || ''} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Issue Date *</Label>
-                  <Input name="issue_date" type="date" defaultValue={editingDSC ? format(new Date(editingDSC.issue_date), 'yyyy-MM-dd') : ''} required />
-                </div>
-                <div>
-                  <Label>Expiry Date *</Label>
-                  <Input name="expiry_date" type="date" defaultValue={editingDSC ? format(new Date(editingDSC.expiry_date), 'yyyy-MM-dd') : ''} required />
-                </div>
-              </div>
-              <div>
-                <Label>Entity Type</Label>
-                <Select name="entity_type" defaultValue={editingDSC?.entity_type || 'firm'}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="firm">Firm</SelectItem>
-                    <SelectItem value="individual">Individual</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Notes</Label>
-                <Textarea name="notes" defaultValue={editingDSC?.notes || ''} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDscFormOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : editingDSC ? 'Update' : 'Add'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ────────────────────────────────────────────────
-          ADDED: Movement Dialog
-      ──────────────────────────────────────────────── */}
-      <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record DSC Movement</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleMovement}>
-            <div className="space-y-4 py-4">
-              <div>
-                <Label>Person Name *</Label>
-                <Input value={movementData.person_name} onChange={e => setMovementData({...movementData, person_name: e.target.value})} required />
-              </div>
-              <div>
-                <Label>Notes</Label>
-                <Textarea value={movementData.notes} onChange={e => setMovementData({...movementData, notes: e.target.value})} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" className={movementData.movement_type === 'IN' ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"}>
-                Mark as {movementData.movement_type}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ────────────────────────────────────────────────
-          ADDED: Movement Log Dialog
-      ──────────────────────────────────────────────── */}
-      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <History className="h-5 w-5" /> Movement History
-            </DialogTitle>
-            <DialogDescription>{selectedDSC?.holder_name || 'DSC'}</DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto space-y-4 py-4">
-            {selectedDSC?.movement_log?.length > 0 ? (
-              selectedDSC.movement_log.map((m, idx) => (
-                <div key={idx} className={`p-4 rounded-lg border ${m.movement_type === 'IN' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                  <div className="flex justify-between">
-                    <div>
-                      <Badge variant={m.movement_type === 'IN' ? 'success' : 'destructive'}>
-                        {m.movement_type}
-                      </Badge>
-                      <span className="ml-2 font-medium">{m.person_name}</span>
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      {format(new Date(m.timestamp), 'dd MMM yyyy • HH:mm')}
-                    </div>
-                  </div>
-                  {m.notes && <p className="mt-2 text-sm">{m.notes}</p>}
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-12 text-slate-500">
-                No movement records yet
-              </div>
-            )}
+  <Dialog open={dscDialogOpen} onOpenChange={setDscDialogOpen}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>{editingDSC ? 'Edit DSC' : 'Add New DSC'}</DialogTitle>
+      </DialogHeader>
+      <form onSubmit={handleDSCSubmit}>
+        <div className="space-y-4">
+          <div>
+            <Label>Holder Name *</Label>
+            <Input value={formData.holder_name} onChange={e => setFormData({...formData, holder_name: e.target.value})} required />
           </div>
-        </DialogContent>
-      </Dialog>
+          <div>
+            <Label>Type</Label>
+            <Input value={formData.dsc_type} onChange={e => setFormData({...formData, dsc_type: e.target.value})} placeholder="e.g., Class 3, Signature, Encryption" />
+          </div>
+          <div>
+            <Label>Password</Label>
+            <Input value={formData.dsc_password} onChange={e => setFormData({...formData, dsc_password: e.target.value})} />
+          </div>
+          <div>
+            <Label>Entity Type</Label>
+            <Select value={formData.entity_type} onValueChange={v => setFormData({...formData, entity_type: v})}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="firm">Firm</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Issue Date *</Label>
+              <Input type="date" value={formData.issue_date} onChange={e => setFormData({...formData, issue_date: e.target.value})} required />
+            </div>
+            <div>
+              <Label>Expiry Date *</Label>
+              <Input type="date" value={formData.expiry_date} onChange={e => setFormData({...formData, expiry_date: e.target.value})} required />
+            </div>
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+          </div>
+        </div>
+        <DialogFooter className="mt-6">
+          <Button type="button" variant="outline" onClick={() => setDscDialogOpen(false)}>Cancel</Button>
+          <Button type="submit" disabled={loading}>
+            {loading ? 'Saving...' : editingDSC ? 'Update DSC' : 'Add DSC'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
 
+  // ─── Movement Dialog ─────────────────────────────────────────────────────────
+
+  <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Record DSC Movement</DialogTitle>
+      </DialogHeader>
+      <form onSubmit={handleMovement}>
+        <div className="space-y-4">
+          <div>
+            <Label>Person Name</Label>
+            <Input value={movementData.person_name} onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })} required />
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Textarea value={movementData.notes} onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>Cancel</Button>
+          <Button type="submit" disabled={loading}>
+            {loading ? 'Recording...' : `Mark as ${movementData.movement_type}`}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+
+  // ─── Log Dialog ──────────────────────────────────────────────────────────────
+
+  <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Movement Log</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
+        {selectedDSC?.movement_log?.map((movement, index) => (
+          <Card key={index} className="p-4">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  {movement.movement_type === 'IN' ? (
+                    <Badge className="bg-emerald-600">IN</Badge>
+                  ) : (
+                    <Badge className="bg-red-600">OUT</Badge>
+                  )}
+                  <span className="text-sm font-medium">{movement.person_name}</span>
+                </div>
+                <p className="text-sm text-slate-600">
+                  {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Recorded by: {movement.recorded_by}
+                </p>
+                {movement.notes && (
+                  <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-slate-500">
+                  {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {format(new Date(movement.timestamp), 'hh:mm a')}
+                </p>
+              </div>
+            </div>
+          </Card>
+        )) || (
+          <div className="text-center py-8 text-slate-500">
+            <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+            <p>No movement history yet</p>
+          </div>
+        )}
+      </div>
+    </DialogContent>
+  </Dialog>
     </div>
   );
 }
