@@ -69,11 +69,12 @@ export default function DocumentRegister() {
     try {
       const response = await api.get('/documents');
 
-      const normalized = response.data.map(doc => ({
-        ...doc,
-        id: doc.id || doc._id,
-        holder_name: doc.holder_name || doc.document_name,
-      }));
+const normalized = response.data.map(doc => ({
+  ...doc,
+  id: doc.id || doc._id,
+  holder_name: doc.holder_name || doc.document_name,
+  Document_type: doc.Document_type || doc.document_type || '',
+}));
 
       setDocumentList(normalized);
     } catch {
