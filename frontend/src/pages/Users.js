@@ -145,46 +145,49 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
               className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
               style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
             >
-              {userData.full_name?.charAt(0).toUpperCase()}
+              {userData.full_name?.charAt(0)}
             </div>
           )}
         </div>
-
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-slate-900 truncate text-sm sm:text-base">{userData.full_name}</h3>
-          <p className="text-xs sm:text-sm text-slate-500 truncate">{userData.email}</p>
+          <h3 className="text-base sm:text-lg font-outfit font-semibold text-slate-900 truncate">
+            {userData.full_name}
+          </h3>
+          <div className="flex items-center gap-1.5 mt-1">
+            <Badge className={`${roleStyle.bg} ${roleStyle.text} font-medium text-[10px] sm:text-xs capitalize flex items-center gap-1`}>
+              {getRoleIcon(userData.role)}
+              {userData.role}
+            </Badge>
+            <Badge className="bg-slate-100 text-slate-700 font-medium text-[10px] sm:text-xs">
+              {userData.status || 'Active'}
+            </Badge>
+          </div>
         </div>
       </div>
 
-      {/* Role Badge – only visible to admins */}
-      {isAdmin && (
-        <div className="mb-4">
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${roleStyle.bg} ${roleStyle.text}`}>
-            {getRoleIcon(userData.role)}
-            {userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}
-          </span>
+      {/* Departments */}
+      {userDepts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {userDepts.map(dept => (
+            <DeptPill key={dept} dept={dept} size="sm" />
+          ))}
         </div>
       )}
 
-      {/* Departments */}
-      <div className="space-y-2">
-        <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">Departments</p>
-        <div className="flex flex-wrap gap-1.5">
-          {userDepts.length > 0 ? (
-            <>
-              {userDepts.slice(0, 4).map((dept) => (
-                <DeptPill key={dept} dept={dept} size="sm" />
-              ))}
-              {userDepts.length > 4 && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">
-                  +{userDepts.length - 4}
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="text-xs text-slate-400 italic">No departments assigned</span>
-          )}
-        </div>
+      {/* Details */}
+      <div className="space-y-2 text-xs sm:text-sm text-slate-600">
+        <p className="flex items-center gap-2 truncate">
+          <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="truncate">{userData.email}</span>
+        </p>
+        <p className="flex items-center gap-2">
+          <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+          {userData.phone || 'No phone'}
+        </p>
+        <p className="flex items-center gap-2">
+          <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+          Joined {format(new Date(userData.created_at), 'MMM dd, yyyy')}
+        </p>
       </div>
     </motion.div>
   );
@@ -193,28 +196,23 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 export default function Users() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
-
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
   const [formData, setFormData] = useState({
+    full_name: '',
     email: '',
     password: '',
-    full_name: '',
     role: 'staff',
-    profile_picture: '',
-    phone: '',
-    birthdate: '',
     departments: [],
+    phone: '',
+    profile_picture: '',
   });
-
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
     can_view_all_clients: false,
@@ -224,39 +222,19 @@ export default function Users() {
     can_manage_users: false,
     can_assign_tasks: false,
     assigned_clients: [],
+    // NEW: Added default values for new permissions
+    can_view_staff_activity: false,
+    can_view_attendance_reports: false,
+    can_send_reminders: false,
   });
-
-  const handlePhotoUpload = async (file) => {
-    const formDataCloud = new FormData();
-    formDataCloud.append("file", file);
-    formDataCloud.append("upload_preset", "taskosphere_unsigned");
-
-    try {
-      const res = await fetch(
-        "https://api.cloudinary.com/v1_1/dbb4263pa/image/upload",
-        {
-          method: "POST",
-          body: formDataCloud,
-        }
-      );
-
-      const data = await res.json();
-
-      if (data.secure_url) {
-        setFormData(prev => ({
-          ...prev,
-          profile_picture: data.secure_url
-        }));
-      }
-    } catch (error) {
-      console.error("Image upload failed:", error);
-    }
-  };
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchUsers();
-    fetchClients();
-  }, []);
+    if (isAdmin) {
+      fetchUsers();
+      fetchClients();
+    }
+  }, [isAdmin]);
 
   const fetchUsers = async () => {
     try {
@@ -276,29 +254,56 @@ export default function Users() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+  const fetchPermissions = async (userId) => {
+    try {
+      const response = await api.get(`/users/${userId}/permissions`);
+      setPermissions(response.data);
+    } catch (error) {
+      console.error('Failed to fetch permissions');
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+  };
+
+  const handleDepartmentChange = (dept) => {
+    setFormData(prev => ({
+      ...prev,
+      departments: prev.departments.includes(dept)
+        ? prev.departments.filter(d => d !== dept)
+        : [...prev.departments, dept]
+    }));
+  };
+
+  const handleProfilePictureChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
     try {
-      if (editingUser) {
-        const updateData = {
-          full_name: formData.full_name,
-          role: formData.role,
-          departments: formData.departments,
-        };
-        await api.put(`/users/${editingUser.id}`, updateData);
-        toast.success('User updated successfully!');
-      } else {
-        const token = localStorage.getItem('token');
-        await axios.post(`${API}/auth/register`, formData, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        toast.success('User created successfully!');
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData({ ...formData, profile_picture: reader.result });
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      toast.error('Failed to upload profile picture');
+    }
+  };
 
+  const handleSubmit = async () => {
+    setLoading(true);
+    try {
+      let response;
+      if (selectedUser) {
+        response = await api.put(`/users/${selectedUser.id}`, formData);
+        toast.success('User updated successfully');
+      } else {
+        response = await api.post('/auth/register', formData);
+        toast.success('User created successfully');
+      }
       setDialogOpen(false);
-      resetForm();
       fetchUsers();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to save user');
@@ -307,80 +312,52 @@ export default function Users() {
     }
   };
 
-  const handleEdit = (userToEdit) => {
-    setEditingUser(userToEdit);
+  const handleEdit = (userData) => {
+    setSelectedUser(userData);
     setFormData({
-      email: userToEdit.email,
+      full_name: userData.full_name,
+      email: userData.email,
       password: '',
-      full_name: userToEdit.full_name,
-      role: userToEdit.role,
-      profile_picture: userToEdit.profile_picture || '',
-      phone: userToEdit.phone || '',
-      birthdate: userToEdit.birthdate || '',
-      departments: userToEdit.departments || [],
+      role: userData.role,
+      departments: userData.departments || [],
+      phone: userData.phone || '',
+      profile_picture: userData.profile_picture || '',
     });
     setDialogOpen(true);
   };
 
-  const handleDelete = async (userId) => {
+  const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
-
     try {
-      await api.delete(`/users/${userId}`);
-      toast.success('User deleted successfully!');
+      await api.delete(`/users/${id}`);
+      toast.success('User deleted successfully');
       fetchUsers();
     } catch (error) {
       toast.error('Failed to delete user');
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      email: '',
-      password: '',
-      full_name: '',
-      role: 'staff',
-      profile_picture: '',
-      departments: [],
-    });
-    setEditingUser(null);
-  };
-
-  const toggleDepartment = (deptValue) => {
-    setFormData(prev => {
-      const currentDepts = prev.departments || [];
-      if (currentDepts.includes(deptValue)) {
-        return { ...prev, departments: currentDepts.filter(d => d !== deptValue) };
-      } else {
-        return { ...prev, departments: [...currentDepts, deptValue] };
-      }
-    });
-  };
-
-  const openPermissionsDialog = (userData) => {
+  const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
-    setPermissions(userData.permissions || {
-      can_view_all_tasks: false,
-      can_view_all_clients: false,
-      can_view_all_dsc: false,
-      can_view_all_duedates: false,
-      can_view_reports: false,
-      can_manage_users: false,
-      can_assign_tasks: false,
-      assigned_clients: [],
-    });
+    await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
 
+  const toggleClientAssignment = (clientId) => {
+    setPermissions(prev => ({
+      ...prev,
+      assigned_clients: prev.assigned_clients.includes(clientId)
+        ? prev.assigned_clients.filter(id => id !== clientId)
+        : [...prev.assigned_clients, clientId]
+    }));
+  };
+
   const handleSavePermissions = async () => {
-    if (!selectedUserForPermissions) return;
-    
     setLoading(true);
     try {
       await api.put(`/users/${selectedUserForPermissions.id}/permissions`, permissions);
-      toast.success('Permissions updated successfully!');
+      toast.success('Permissions updated successfully');
       setPermissionsDialogOpen(false);
-      fetchUsers();
     } catch (error) {
       toast.error('Failed to update permissions');
     } finally {
@@ -388,355 +365,188 @@ export default function Users() {
     }
   };
 
-  const toggleClientAssignment = (clientId) => {
-    const currentAssigned = permissions.assigned_clients || [];
-    if (currentAssigned.includes(clientId)) {
-      setPermissions({
-        ...permissions,
-        assigned_clients: currentAssigned.filter(id => id !== clientId)
-      });
-    } else {
-      setPermissions({
-        ...permissions,
-        assigned_clients: [...currentAssigned, clientId]
-      });
-    }
-  };
-
-  // Filter users
   const filteredUsers = users.filter(u => {
-    const matchesSearch = !searchQuery || 
-      u.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email?.toLowerCase().includes(searchQuery.toLowerCase());
-    
+    const matchesSearch = u.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          u.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role === activeTab;
-    
     return matchesSearch && matchesTab;
   });
 
-  // Stats – only calculate if admin
-  const stats = isAdmin ? {
-    total: users.length,
-    admins: users.filter(u => u.role === 'admin').length,
-    managers: users.filter(u => u.role === 'manager').length,
-    staff: users.filter(u => u.role === 'staff').length,
-  } : {
-    total: users.length
-  };
-
-  if (user?.role !== 'admin') {
+  if (!isAdmin) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
-        <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mb-6">
-          <Shield className="h-10 w-10 text-red-500" />
-        </div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Access Denied</h2>
-        <p className="text-slate-600 max-w-md">Only administrators can manage users. Contact your admin for access.</p>
+      <div className="flex items-center justify-center h-64">
+        <Card className="p-8 text-center max-w-md">
+          <UsersIcon className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-slate-700">Access Restricted</h2>
+          <p className="text-slate-500 mt-2">Only administrators can manage users.</p>
+        </Card>
       </div>
     );
   }
 
   return (
     <motion.div 
-      className="space-y-4 sm:space-y-6" 
-      data-testid="users-page"
+      className="space-y-6" 
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Header */}
-      <motion.div variants={itemVariants} className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
-            Team Members
-          </h1>
-          <p className="text-slate-600 mt-1 text-sm sm:text-base">Manage your team and their access permissions</p>
+          <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Team Members</h1>
+          <p className="text-slate-600 mt-1">Manage your team and their permissions</p>
         </div>
-
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button
-              className="text-white rounded-xl px-4 sm:px-6 shadow-lg transition-all hover:scale-105 hover:shadow-xl w-full sm:w-auto"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
-              data-testid="add-user-btn"
+            <Button 
+              className="rounded-xl font-medium text-white w-full md:w-auto"
+              style={{ background: COLORS.deepBlue }}
             >
-              <Plus className="mr-2 h-5 w-5" />
-              Add Member
+              <Plus className="h-4 w-4 mr-2" />
+              Add Team Member
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4 sm:mx-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-xl sm:text-2xl" style={{ color: COLORS.deepBlue }}>
-                {editingUser ? 'Edit Member' : 'Add New Member'}
+                {selectedUser ? 'Edit Team Member' : 'Add New Team Member'}
               </DialogTitle>
               <DialogDescription>
-                {editingUser ? 'Update member details and departments.' : 'Create a new team member account.'}
+                {selectedUser ? 'Update team member details' : 'Create a new team member account'}
               </DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="full_name">Full Name <span className="text-red-500">*</span></Label>
-                <Input
-                  id="full_name"
-                  placeholder="John Doe"
-                  value={formData.full_name}
-                  onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                  required
-                  className="h-11 rounded-xl"
-                  data-testid="user-name-input"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Profile Photo</Label>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handlePhotoUpload(e.target.files?.[0])}
-                  className="h-11 rounded-xl"
-                />
-                {formData.profile_picture && (
-                  <img
-                    src={formData.profile_picture}
-                    alt="Preview"
-                    className="w-20 h-20 rounded-xl object-cover border mt-2"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email">Email <span className="text-red-500">*</span></Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="user@example.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                  disabled={editingUser}
-                  className="h-11 rounded-xl"
-                  data-testid="user-email-input"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input
-                  id="phone"
-                  type="text"
-                  placeholder="Enter phone number"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="h-11 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="birthdate">Birthdate</Label>
-                <Input
-                  id="birthdate"
-                  type="date"
-                  value={formData.birthdate}
-                  onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
-                  className="h-11 rounded-xl"
-                />
-              </div>
-
-              {!editingUser && (
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password <span className="text-red-500">*</span></Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Create strong password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required
-                    className="h-11 rounded-xl"
-                    data-testid="user-password-input"
-                  />
+            <div className="space-y-4 py-4">
+              {/* Profile Picture */}
+              <div className="flex justify-center">
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-200 flex items-center justify-center">
+                    {formData.profile_picture ? (
+                      <img src={formData.profile_picture} alt="Profile" className="w-full h-full object-cover" />
+                    ) : (
+                      <UserIcon className="h-12 w-12 text-slate-400" />
+                    )}
+                  </div>
+                  <label 
+                    htmlFor="profile-upload"
+                    className="absolute bottom-0 right-0 bg-white rounded-full p-2 shadow cursor-pointer"
+                  >
+                    <Camera className="h-4 w-4 text-slate-600" />
+                    <input
+                      id="profile-upload"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleProfilePictureChange}
+                    />
+                  </label>
                 </div>
-              )}
+              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="role">Role <span className="text-red-500">*</span></Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value) => setFormData({ ...formData, role: value })}
-                >
-                  <SelectTrigger className="h-11 rounded-xl" data-testid="user-role-select">
+              {/* Basic Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="full_name">Full Name</Label>
+                  <Input id="full_name" name="full_name" value={formData.full_name} onChange={handleInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" name="email" type="email" value={formData.email} onChange={handleInputChange} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="password">{selectedUser ? 'New Password (optional)' : 'Password'}</Label>
+                  <Input id="password" name="password" type="password" value={formData.password} onChange={handleInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="phone">Phone</Label>
+                  <Input id="phone" name="phone" value={formData.phone} onChange={handleInputChange} />
+                </div>
+              </div>
+
+              <div>
+                <Label>Role</Label>
+                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">
-                      <div className="flex items-center gap-2">
-                        <Crown className="h-4 w-4 text-purple-500" />
-                        Admin
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="manager">
-                      <div className="flex items-center gap-2">
-                        <Briefcase className="h-4 w-4 text-blue-500" />
-                        Manager
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="staff">
-                      <div className="flex items-center gap-2">
-                        <UserIcon className="h-4 w-4 text-slate-500" />
-                        Staff
-                      </div>
-                    </SelectItem>
+                    <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Department Selection */}
-              <div className="space-y-3">
+              {/* Departments */}
+              <div>
                 <Label>Departments</Label>
-                <div className="grid grid-cols-5 gap-2">
-                  {DEPARTMENTS.map((dept) => {
-                    const isSelected = (formData.departments || []).includes(dept.value);
-                    return (
-                      <button
-                        key={dept.value}
-                        type="button"
-                        onClick={() => toggleDepartment(dept.value)}
-                        className={`p-2 rounded-xl text-xs font-semibold transition-all border-2 ${
-                          isSelected 
-                            ? 'shadow-md scale-105' 
-                            : 'border-transparent bg-slate-50 hover:bg-slate-100 text-slate-600'
-                        }`}
-                        style={isSelected ? { 
-                          background: `${dept.color}15`,
-                          borderColor: dept.color,
-                          color: dept.color
-                        } : {}}
-                        data-testid={`user-dept-${dept.value}`}
-                      >
-                        {dept.label}
-                      </button>
-                    );
-                  })}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-2">
+                  {DEPARTMENTS.map(dept => (
+                    <div
+                      key={dept.value}
+                      onClick={() => handleDepartmentChange(dept.value)}
+                      className={`flex items-center justify-center p-2 rounded-xl cursor-pointer transition-all ${
+                        formData.departments.includes(dept.value)
+                          ? 'text-white font-semibold' 
+                          : 'bg-white border border-slate-200 hover:border-slate-300'
+                      }`}
+                      style={{
+                        background: formData.departments.includes(dept.value) 
+                          ? `linear-gradient(135deg, ${dept.color} 0%, ${dept.color}CC 100%)`
+                          : undefined
+                      }}
+                    >
+                      {dept.label}
+                    </div>
+                  ))}
                 </div>
-                {(formData.departments || []).length > 0 && (
-                  <p className="text-xs text-emerald-600 font-medium">
-                    {(formData.departments || []).length} selected
-                  </p>
-                )}
               </div>
-
-              <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => { setDialogOpen(false); resetForm(); }}
-                  className="rounded-xl w-full sm:w-auto"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={loading}
-                  className="text-white rounded-xl w-full sm:w-auto"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
-                  data-testid="user-submit-btn"
-                >
-                  {loading ? 'Saving...' : editingUser ? 'Update' : 'Create'}
-                </Button>
-              </DialogFooter>
-            </form>
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="text-white rounded-xl w-full sm:w-auto"
+                style={{ background: COLORS.emeraldGreen }}
+              >
+                {loading ? 'Saving...' : selectedUser ? 'Update' : 'Create'}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </motion.div>
 
-      {/* Stats Cards – only show role breakdown to admins */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
-              <UsersIcon className="h-5 w-5 text-slate-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
-              <p className="text-xs text-slate-500">Total</p>
-            </div>
-          </div>
-        </div>
-
-        {isAdmin && (
-          <>
-            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-                  <Crown className="h-5 w-5 text-purple-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{stats.admins}</p>
-                  <p className="text-xs text-slate-500">Admins</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <Briefcase className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{stats.managers}</p>
-                  <p className="text-xs text-slate-500">Managers</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-                  <UserIcon className="h-5 w-5 text-emerald-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{stats.staff}</p>
-                  <p className="text-xs text-slate-500">Staff</p>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </motion.div>
-
-      {/* Search & Filter Tabs – role tabs only for admins */}
-      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder="Search by name or email..."
-            value={searchQuery}
+      {/* Search & Filters */}
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input 
+            placeholder="Search by name or email..." 
+            value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 h-11 rounded-xl bg-white border-slate-200"
+            className="pl-9 rounded-xl"
           />
         </div>
-        
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
-          <TabsList className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-1'} h-11 p-1 bg-slate-100 rounded-xl w-full sm:w-auto`}>
-            <TabsTrigger value="all" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              All
+        <Tabs defaultValue="all" className="w-full md:w-auto">
+          <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
+            <TabsTrigger value="all" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
+              All ({users.length})
             </TabsTrigger>
-            {isAdmin && (
-              <>
-                <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                  Admins
-                </TabsTrigger>
-                <TabsTrigger value="manager" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                  Managers
-                </TabsTrigger>
-                <TabsTrigger value="staff" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                  Staff
-                </TabsTrigger>
-              </>
-            )}
+            <TabsTrigger value="admin" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
+              Admins ({users.filter(u => u.role === 'admin').length})
+            </TabsTrigger>
+            <TabsTrigger value="manager" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
+              Managers ({users.filter(u => u.role === 'manager').length})
+            </TabsTrigger>
+            <TabsTrigger value="staff" className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none">
+              Staff ({users.filter(u => u.role === 'staff').length})
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </motion.div>
@@ -796,6 +606,29 @@ export default function Users() {
                   { key: 'can_view_reports', label: 'View Reports' },
                   { key: 'can_manage_users', label: 'Manage Users' },
                   { key: 'can_assign_tasks', label: 'Assign Tasks' },
+                ].map((perm) => (
+                  <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
+                    <span className="text-sm text-slate-700">{perm.label}</span>
+                    <Switch
+                      checked={permissions[perm.key]}
+                      onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* NEW: Staff Management Section (for admin-exclusive tabs in StaffActivity.js) */}
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                <UsersIcon className="h-4 w-4" />
+                Staff Management
+              </h4>
+              <div className="space-y-2">
+                {[
+                  { key: 'can_view_staff_activity', label: 'View Staff Activity' },
+                  { key: 'can_view_attendance_reports', label: 'View Attendance Reports' },
+                  { key: 'can_send_reminders', label: 'Send Task Reminders' },
                 ].map((perm) => (
                   <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
                     <span className="text-sm text-slate-700">{perm.label}</span>
