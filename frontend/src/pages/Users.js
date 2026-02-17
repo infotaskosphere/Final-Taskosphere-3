@@ -51,7 +51,7 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
-// Department Pill Component - Sleek and Trendy
+// Department Pill Component
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -72,8 +72,8 @@ const DeptPill = ({ dept, size = 'sm' }) => {
   );
 };
 
-// User Card Component - Modern Grid Card
-const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS }) => {
+// User Card Component
+const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS, isAdmin }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
   
@@ -133,22 +133,22 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 
       {/* Avatar & Name */}
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
-      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
-        {userData.profile_picture ? (
-          <img
-            src={userData.profile_picture}
-            alt={userData.full_name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
-            style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
-          >
-            {userData.full_name?.charAt(0).toUpperCase()}
-          </div>
-        )}
-      </div>
+        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
+          {userData.profile_picture ? (
+            <img
+              src={userData.profile_picture}
+              alt={userData.full_name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
+              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+            >
+              {userData.full_name?.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </div>
 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-slate-900 truncate text-sm sm:text-base">{userData.full_name}</h3>
@@ -156,15 +156,17 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
         </div>
       </div>
 
-      {/* Role Badge */}
-      <div className="mb-4">
-        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${roleStyle.bg} ${roleStyle.text}`}>
-          {getRoleIcon(userData.role)}
-          {userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}
-        </span>
-      </div>
+      {/* Role Badge – only visible to admins */}
+      {isAdmin && (
+        <div className="mb-4">
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${roleStyle.bg} ${roleStyle.text}`}>
+            {getRoleIcon(userData.role)}
+            {userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}
+          </span>
+        </div>
+      )}
 
-      {/* Departments - Sleek Pills */}
+      {/* Departments */}
       <div className="space-y-2">
         <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">Departments</p>
         <div className="flex flex-wrap gap-1.5">
@@ -190,6 +192,8 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 
 export default function Users() {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -199,52 +203,55 @@ export default function Users() {
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
+
   const [formData, setFormData] = useState({
-  email: '',
-  password: '',
-  full_name: '',
-  role: 'staff',
-  profile_picture: '',
-  phone: '',
-  birthdate: '',
-  departments: [],
-});
+    email: '',
+    password: '',
+    full_name: '',
+    role: 'staff',
+    profile_picture: '',
+    phone: '',
+    birthdate: '',
+    departments: [],
+  });
+
   const [permissions, setPermissions] = useState({
-  can_view_all_tasks: false,
-  can_view_all_clients: false,
-  can_view_all_dsc: false,
-  can_view_all_duedates: false,
-  can_view_reports: false,
-  can_manage_users: false,
-  can_assign_tasks: false,
-  assigned_clients: [],
-});
+    can_view_all_tasks: false,
+    can_view_all_clients: false,
+    can_view_all_dsc: false,
+    can_view_all_duedates: false,
+    can_view_reports: false,
+    can_manage_users: false,
+    can_assign_tasks: false,
+    assigned_clients: [],
+  });
+
   const handlePhotoUpload = async (file) => {
-  const formDataCloud = new FormData();
-  formDataCloud.append("file", file);
-  formDataCloud.append("upload_preset", "taskosphere_unsigned");
+    const formDataCloud = new FormData();
+    formDataCloud.append("file", file);
+    formDataCloud.append("upload_preset", "taskosphere_unsigned");
 
-  try {
-    const res = await fetch(
-      "https://api.cloudinary.com/v1_1/dbb4263pa/image/upload",
-      {
-        method: "POST",
-        body: formDataCloud,
+    try {
+      const res = await fetch(
+        "https://api.cloudinary.com/v1_1/dbb4263pa/image/upload",
+        {
+          method: "POST",
+          body: formDataCloud,
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.secure_url) {
+        setFormData(prev => ({
+          ...prev,
+          profile_picture: data.secure_url
+        }));
       }
-    );
-
-    const data = await res.json();
-
-    if (data.secure_url) {
-      setFormData(prev => ({
-        ...prev,
-        profile_picture: data.secure_url
-      }));
+    } catch (error) {
+      console.error("Image upload failed:", error);
     }
-  } catch (error) {
-    console.error("Image upload failed:", error);
-  }
-};
+  };
 
   useEffect(() => {
     fetchUsers();
@@ -407,12 +414,14 @@ export default function Users() {
     return matchesSearch && matchesTab;
   });
 
-  // Stats
-  const stats = {
+  // Stats – only calculate if admin
+  const stats = isAdmin ? {
     total: users.length,
     admins: users.filter(u => u.role === 'admin').length,
     managers: users.filter(u => u.role === 'manager').length,
     staff: users.filter(u => u.role === 'staff').length,
+  } : {
+    total: users.length
   };
 
   if (user?.role !== 'admin') {
@@ -480,23 +489,23 @@ export default function Users() {
                   data-testid="user-name-input"
                 />
               </div>
-              <div className="space-y-2">
-              <Label>Profile Photo</Label>
-              <Input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handlePhotoUpload(e.target.files[0])}
-                className="h-11 rounded-xl"
-              />
 
-              {formData.profile_picture && (
-              <img
-               src={formData.profile_picture}
-               alt="Preview"
-               className="w-20 h-20 rounded-xl object-cover border mt-2"
-             />
-           )}
-         </div>
+              <div className="space-y-2">
+                <Label>Profile Photo</Label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handlePhotoUpload(e.target.files?.[0])}
+                  className="h-11 rounded-xl"
+                />
+                {formData.profile_picture && (
+                  <img
+                    src={formData.profile_picture}
+                    alt="Preview"
+                    className="w-20 h-20 rounded-xl object-cover border mt-2"
+                  />
+                )}
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="email">Email <span className="text-red-500">*</span></Label>
@@ -512,28 +521,29 @@ export default function Users() {
                   data-testid="user-email-input"
                 />
               </div>
-              <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                type="text"
-                placeholder="Enter phone number"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="h-11 rounded-xl"
-              />
-            </div>
 
-            <div className="space-y-2">
-            <Label htmlFor="birthdate">Birthdate</Label>
-            <Input
-              id="birthdate"
-              type="date"
-              value={formData.birthdate}
-              onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
-              className="h-11 rounded-xl"
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="text"
+                  placeholder="Enter phone number"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="h-11 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="birthdate">Birthdate</Label>
+                <Input
+                  id="birthdate"
+                  type="date"
+                  value={formData.birthdate}
+                  onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
+                  className="h-11 rounded-xl"
+                />
+              </div>
 
               {!editingUser && (
                 <div className="space-y-2">
@@ -544,7 +554,7 @@ export default function Users() {
                     placeholder="Create strong password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required={!editingUser}
+                    required
                     className="h-11 rounded-xl"
                     data-testid="user-password-input"
                   />
@@ -583,7 +593,7 @@ export default function Users() {
                 </Select>
               </div>
 
-              {/* Department Selection - Trendy Grid */}
+              {/* Department Selection */}
               <div className="space-y-3">
                 <Label>Departments</Label>
                 <div className="grid grid-cols-5 gap-2">
@@ -642,8 +652,8 @@ export default function Users() {
         </Dialog>
       </motion.div>
 
-      {/* Stats Cards */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      {/* Stats Cards – only show role breakdown to admins */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -655,42 +665,49 @@ export default function Users() {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-              <Crown className="h-5 w-5 text-purple-600" />
+
+        {isAdmin && (
+          <>
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
+                  <Crown className="h-5 w-5 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-slate-900">{stats.admins}</p>
+                  <p className="text-xs text-slate-500">Admins</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900">{stats.admins}</p>
-              <p className="text-xs text-slate-500">Admins</p>
+
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                  <Briefcase className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-slate-900">{stats.managers}</p>
+                  <p className="text-xs text-slate-500">Managers</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-              <Briefcase className="h-5 w-5 text-blue-600" />
+
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                  <UserIcon className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-slate-900">{stats.staff}</p>
+                  <p className="text-xs text-slate-500">Staff</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900">{stats.managers}</p>
-              <p className="text-xs text-slate-500">Managers</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-              <UserIcon className="h-5 w-5 text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900">{stats.staff}</p>
-              <p className="text-xs text-slate-500">Staff</p>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </motion.div>
 
-      {/* Search & Filter Tabs */}
+      {/* Search & Filter Tabs – role tabs only for admins */}
       <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -703,19 +720,23 @@ export default function Users() {
         </div>
         
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
-          <TabsList className="grid grid-cols-4 h-11 p-1 bg-slate-100 rounded-xl w-full sm:w-auto">
+          <TabsList className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-1'} h-11 p-1 bg-slate-100 rounded-xl w-full sm:w-auto`}>
             <TabsTrigger value="all" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
               All
             </TabsTrigger>
-            <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              Admins
-            </TabsTrigger>
-            <TabsTrigger value="manager" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              Managers
-            </TabsTrigger>
-            <TabsTrigger value="staff" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-              Staff
-            </TabsTrigger>
+            {isAdmin && (
+              <>
+                <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                  Admins
+                </TabsTrigger>
+                <TabsTrigger value="manager" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                  Managers
+                </TabsTrigger>
+                <TabsTrigger value="staff" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                  Staff
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
         </Tabs>
       </motion.div>
@@ -740,6 +761,7 @@ export default function Users() {
               onPermissions={openPermissionsDialog}
               currentUserId={user.id}
               COLORS={COLORS}
+              isAdmin={isAdmin}
             />
           ))
         )}
