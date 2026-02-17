@@ -38,6 +38,7 @@ export default function DocumentRegister() {
   const [editingMovement, setEditingMovement] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState("IN");
 
   const [formData, setFormData] = useState({
     holder_name: '',
@@ -734,42 +735,88 @@ export default function DocumentRegister() {
           placeholder="Search by Document Name..."
         />
       </div>
+      {/* IN / OUT TOGGLE */}
+<div className="mt-4">
+  <div className="flex gap-4 bg-slate-100 p-1 rounded-full w-fit">
 
-      {/* IN / OUT TABS */}
-      <Tabs defaultValue="in" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="in">
-            IN ({inDocument.length})
-          </TabsTrigger>
-          <TabsTrigger value="out">
-            OUT ({outDocument.length})
-          </TabsTrigger>
-        </TabsList>
+    <button
+      onClick={() => setActiveTab("IN")}
+      className={`flex items-center gap-2 px-6 py-2 rounded-full font-medium transition-all ${
+        activeTab === "IN"
+          ? "bg-emerald-600 text-white shadow"
+          : "text-slate-600"
+      }`}
+    >
+      <ArrowDownCircle className="h-4 w-4" />
+      IN ({inDocument.length})
+    </button>
 
-        <TabsContent value="in">
-          <DocumentTable
-            DocumentList={inDocument}
-            onEdit={setEditingDocument}
-            onDelete={handleDelete}
-            onMovement={openMovementDialog}
-            onViewLog={openLogDialog}
-            getDocumentStatus={getDocumentStatus}
-            type="IN"
-          />
-        </TabsContent>
+    <button
+      onClick={() => setActiveTab("OUT")}
+      className={`flex items-center gap-2 px-6 py-2 rounded-full font-medium transition-all ${
+        activeTab === "OUT"
+          ? "bg-red-600 text-white shadow"
+          : "text-slate-600"
+      }`}
+    >
+      <ArrowUpCircle className="h-4 w-4" />
+      OUT ({outDocument.length})
+    </button>
 
-        <TabsContent value="out">
-          <DocumentTable
-            DocumentList={outDocument}
-            onEdit={setEditingDocument}
-            onDelete={handleDelete}
-            onMovement={openMovementDialog}
-            onViewLog={openLogDialog}
-            getDocumentStatus={getDocumentStatus}
-            type="OUT"
-          />
-        </TabsContent>
-      </Tabs>
+  </div>
+</div>
+
+<div className="mt-6">
+  {activeTab === "IN" && (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 overflow-hidden">
+      <div className="px-6 py-3 bg-emerald-100 border-b border-emerald-200">
+        <h3 className="font-semibold text-emerald-800">
+          DOCUMENT IN - AVAILABLE ({inDocument.length})
+        </h3>
+      </div>
+
+      <div className="p-4">
+        <DocumentTable
+          DocumentList={inDocument}
+          onEdit={(doc) => {
+            setEditingDocument(doc);
+            setDialogOpen(true);
+          }}
+          onDelete={handleDelete}
+          onMovement={openMovementDialog}
+          onViewLog={openLogDialog}
+          getDocumentStatus={getDocumentStatus}
+          type="IN"
+        />
+      </div>
+    </div>
+  )}
+
+  {activeTab === "OUT" && (
+    <div className="rounded-2xl border border-red-200 bg-red-50 overflow-hidden">
+      <div className="px-6 py-3 bg-red-100 border-b border-red-200">
+        <h3 className="font-semibold text-red-800">
+          DOCUMENT OUT - TAKEN ({outDocument.length})
+        </h3>
+      </div>
+
+      <div className="p-4">
+        <DocumentTable
+          DocumentList={outDocument}
+          onEdit={(doc) => {
+            setEditingDocument(doc);
+            setDialogOpen(true);
+          }}
+          onDelete={handleDelete}
+          onMovement={openMovementDialog}
+          onViewLog={openLogDialog}
+          getDocumentStatus={getDocumentStatus}
+          type="OUT"
+        />
+      </div>
+    </div>
+  )}
+</div>
 
       {/* EXPIRY ALERT */}
       {(expiredCount > 0 || warningCount > 0) && (
