@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { 
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, 
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, 
-  MoreVertical, Mail, Phone, Calendar, Camera 
+  MoreVertical, Mail, Phone, Calendar, Camera, Cake 
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
@@ -179,6 +179,12 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
           <Phone className="h-3.5 w-3.5 flex-shrink-0" />
           {userData.phone || 'No phone'}
         </p>
+        {userData.birthday && (
+          <p className="flex items-center gap-2 text-pink-500 font-medium">
+            <Cake className="h-3.5 w-3.5 flex-shrink-0" />
+            {format(new Date(userData.birthday), 'MMM dd')}
+          </p>
+        )}
         <p className="flex items-center gap-2">
           <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
           Joined {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
@@ -206,6 +212,7 @@ export default function Users() {
     role: 'staff',
     departments: [],
     phone: '',
+    birthday: '',
     profile_picture: '',
   });
   const [permissions, setPermissions] = useState({
@@ -219,6 +226,7 @@ export default function Users() {
     assigned_clients: [],
     can_view_staff_activity: false,
     can_view_attendance_reports: false,
+    can_view_staff_activity: false,
     can_send_reminders: false,
   });
   const [loading, setLoading] = useState(false);
@@ -314,6 +322,7 @@ export default function Users() {
       role: userData.role,
       departments: userData.departments || [],
       phone: userData.phone || '',
+      birthday: userData.birthday || '',
       profile_picture: userData.profile_picture || '',
     });
     setDialogOpen(true);
@@ -394,7 +403,7 @@ export default function Users() {
             <Button 
               className="rounded-xl font-medium text-white w-full md:w-auto"
               style={{ background: COLORS.deepBlue }}
-              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', profile_picture: '' }); }}
+              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '' }); }}
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Team Member
@@ -448,16 +457,22 @@ export default function Users() {
                 </div>
               </div>
 
-              <div>
-                <Label>Role</Label>
-                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="staff">Staff</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="birthday">Birthdate</Label>
+                  <Input id="birthday" name="birthday" type="date" value={formData.birthday} onChange={handleInputChange} />
+                </div>
+                <div>
+                  <Label>Role</Label>
+                  <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div>
