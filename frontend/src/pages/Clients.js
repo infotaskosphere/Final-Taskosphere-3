@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Mail, Cake, X, UserPlus, FileText } from 'lucide-react';
 import { format } from 'date-fns';
+import Papa from 'papaparse';   // ← NEW
 
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
@@ -35,6 +36,11 @@ export default function Clients() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
+
+  // NEW: CSV Import states
+  const [importLoading, setImportLoading] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     company_name: '',
@@ -74,6 +80,123 @@ export default function Clients() {
     }
   };
 
+  // ==================== CSV IMPORT FUNCTIONS ====================
+
+  const downloadTemplate = () => {
+    const headers = [
+      'company_name', 'client_type', 'email', 'phone', 'birthday',
+      'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1',
+      'contact_name_2', 'contact_designation_2', 'contact_email_2', 'contact_phone_2',
+      'services', 'notes'
+    ];
+
+    const csvContent = headers.join(',') + '\n' +
+      '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15",' +
+      '"Rahul Sharma","Director","rahul@abc.com","+919812345678",' +
+      '"Priya Patel","Manager","priya@abc.com","+918923456789",' +
+      '"GST,Income Tax,Other: Consulting","Prefers WhatsApp"';
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'clients-import-template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSV = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setImportLoading(true);
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const rows = results.data;
+        let successCount = 0;
+        const errors = [];
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+
+          try {
+            if (!row.company_name?.trim()) throw new Error('Missing company_name');
+            if (!row.email?.trim()) throw new Error('Missing email');
+            if (!row.phone?.trim()) throw new Error('Missing phone');
+
+            const contact_persons = [];
+            if (row.contact_name_1?.trim()) {
+              contact_persons.push({
+                name: row.contact_name_1.trim(),
+                designation: row.contact_designation_1?.trim() || '',
+                email: row.contact_email_1?.trim() || '',
+                phone: row.contact_phone_1?.trim() || ''
+              });
+            }
+            if (row.contact_name_2?.trim()) {
+              contact_persons.push({
+                name: row.contact_name_2.trim(),
+                designation: row.contact_designation_2?.trim() || '',
+                email: row.contact_email_2?.trim() || '',
+                phone: row.contact_phone_2?.trim() || ''
+              });
+            }
+
+            const services = row.services
+              ? row.services.split(',').map(s => s.trim()).filter(Boolean)
+              : [];
+
+            const clientData = {
+              company_name: row.company_name.trim(),
+              client_type: CLIENT_TYPES.some(t => t.value === (row.client_type || '').trim())
+                ? (row.client_type || '').trim()
+                : 'proprietor',
+              email: row.email.trim(),
+              phone: row.phone.trim(),
+              birthday: row.birthday?.trim() || '',
+              contact_persons: contact_persons.length > 0
+                ? contact_persons
+                : [{ name: '', email: '', phone: '', designation: '' }],
+              services,
+              notes: row.notes?.trim() || '',
+              assigned_to: 'unassigned',
+              dsc_details: []
+            };
+
+            await api.post('/clients', clientData);
+            successCount++;
+          } catch (err) {
+            errors.push(`Row ${i + 2}: ${err.response?.data?.detail || err.message}`);
+          }
+        }
+
+        setImportLoading(false);
+
+        if (successCount > 0) {
+          toast.success(`${successCount} client(s) imported successfully!`);
+          fetchClients();
+        }
+        if (errors.length > 0) {
+          toast.error(`Import completed with ${errors.length} error(s)`);
+          console.error('CSV Import Errors:', errors);
+        }
+
+        // Reset file input
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      },
+      error: () => {
+        setImportLoading(false);
+        toast.error('Failed to read CSV file');
+      }
+    });
+  };
+
+  // ==================== EXISTING FUNCTIONS (unchanged) ====================
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -82,7 +205,6 @@ export default function Clients() {
       const clientData = {
         ...formData,
         assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-        services: formData.services,
       };
 
       if (editingClient) {
@@ -206,7 +328,7 @@ export default function Clients() {
   const updateContactPerson = (index, field, value) => {
     setFormData(prev => ({
       ...prev,
-      contact_persons: prev.contact_persons.map((contact, i) => 
+      contact_persons: prev.contact_persons.map((contact, i) =>
         i === index ? { ...contact, [field]: value } : contact
       )
     }));
@@ -235,7 +357,7 @@ export default function Clients() {
   const updateDSC = (index, field, value) => {
     setFormData(prev => ({
       ...prev,
-      dsc_details: prev.dsc_details.map((dsc, i) => 
+      dsc_details: prev.dsc_details.map((dsc, i) =>
         i === index ? { ...dsc, [field]: value } : dsc
       )
     }));
@@ -258,314 +380,343 @@ export default function Clients() {
           <p className="text-slate-600 mt-1">Manage your clients and track their details</p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
-          <DialogTrigger asChild>
-            <Button
-              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
-              data-testid="add-client-btn"
-            >
-              <Plus className="mr-2 h-5 w-5" />
-              Add Client
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="font-outfit text-2xl">
-                {editingClient ? 'Edit Client' : 'Add New Client'}
-              </DialogTitle>
-              <DialogDescription>
-                {editingClient ? 'Update client details below.' : 'Fill in the details to add a new client.'}
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Basic Information */}
-              <div className="space-y-4">
-                <h3 className="font-semibold text-lg">Basic Information</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="company_name">Company Name *</Label>
-                    <Input
-                      id="company_name"
-                      placeholder="ABC Enterprises"
-                      value={formData.company_name}
-                      onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                      required
-                      data-testid="client-company-input"
-                    />
+        <div className="flex flex-wrap gap-3">
+          {/* NEW: CSV Buttons */}
+          <Button
+            variant="outline"
+            onClick={downloadTemplate}
+            className="border-indigo-600 text-indigo-600 hover:bg-indigo-50"
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Download CSV Template
+          </Button>
+
+          <Button
+            variant="secondary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importLoading}
+          >
+            {importLoading ? 'Importing...' : 'Import from CSV'}
+          </Button>
+
+          {/* Existing Add Client Button */}
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}>
+            <DialogTrigger asChild>
+              <Button
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
+                data-testid="add-client-btn"
+              >
+                <Plus className="mr-2 h-5 w-5" />
+                Add Client
+              </Button>
+            </DialogTrigger>
+
+            {/* ... (Your existing full DialogContent remains 100% unchanged) ... */}
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="font-outfit text-2xl">
+                  {editingClient ? 'Edit Client' : 'Add New Client'}
+                </DialogTitle>
+                <DialogDescription>
+                  {editingClient ? 'Update client details below.' : 'Fill in the details to add a new client.'}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Basic Information */}
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-lg">Basic Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="company_name">Company Name *</Label>
+                      <Input
+                        id="company_name"
+                        placeholder="ABC Enterprises"
+                        value={formData.company_name}
+                        onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                        required
+                        data-testid="client-company-input"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="client_type">Client Type *</Label>
+                      <Select
+                        value={formData.client_type}
+                        onValueChange={(value) => setFormData({ ...formData, client_type: value })}
+                      >
+                        <SelectTrigger data-testid="client-type-select">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CLIENT_TYPES.map(type => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Company Email *</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="company@example.com"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        required
+                        data-testid="client-email-input"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Company Phone *</Label>
+                      <Input
+                        id="phone"
+                        placeholder="+1234567890"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        required
+                        data-testid="client-phone-input"
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="client_type">Client Type *</Label>
+                    <Label htmlFor="birthday">Company Birthday/Anniversary</Label>
+                    <Input
+                      id="birthday"
+                      type="date"
+                      value={formData.birthday}
+                      onChange={(e) => setFormData({ ...formData, birthday: e.target.value })}
+                      data-testid="client-birthday-input"
+                    />
+                  </div>
+                </div>
+
+                {/* Contact Persons - unchanged */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-lg">Contact Persons</h3>
+                    <Button type="button" size="sm" onClick={addContactPerson} variant="outline">
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Add Contact
+                    </Button>
+                  </div>
+                  {formData.contact_persons.map((contact, index) => (
+                    <Card key={index} className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <p className="text-sm font-medium text-slate-700">Contact Person #{index + 1}</p>
+                        {formData.contact_persons.length > 1 && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => removeContactPerson(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input
+                          placeholder="Full Name"
+                          value={contact.name}
+                          onChange={(e) => updateContactPerson(index, 'name', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Designation"
+                          value={contact.designation}
+                          onChange={(e) => updateContactPerson(index, 'designation', e.target.value)}
+                        />
+                        <Input
+                          type="email"
+                          placeholder="Email"
+                          value={contact.email}
+                          onChange={(e) => updateContactPerson(index, 'email', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Phone"
+                          value={contact.phone}
+                          onChange={(e) => updateContactPerson(index, 'phone', e.target.value)}
+                        />
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* DSC Details - unchanged */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-lg">DSC Details</h3>
+                    <Button type="button" size="sm" onClick={addDSC} variant="outline">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Add DSC
+                    </Button>
+                  </div>
+                  {formData.dsc_details.map((dsc, index) => (
+                    <Card key={index} className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <p className="text-sm font-medium text-slate-700">DSC #{index + 1}</p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeDSC(index)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input
+                          placeholder="Certificate Number"
+                          value={dsc.certificate_number}
+                          onChange={(e) => updateDSC(index, 'certificate_number', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Holder Name"
+                          value={dsc.holder_name}
+                          onChange={(e) => updateDSC(index, 'holder_name', e.target.value)}
+                        />
+                        <Input
+                          type="date"
+                          placeholder="Issue Date"
+                          value={dsc.issue_date}
+                          onChange={(e) => updateDSC(index, 'issue_date', e.target.value)}
+                        />
+                        <Input
+                          type="date"
+                          placeholder="Expiry Date"
+                          value={dsc.expiry_date}
+                          onChange={(e) => updateDSC(index, 'expiry_date', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Notes"
+                          className="col-span-2"
+                          value={dsc.notes}
+                          onChange={(e) => updateDSC(index, 'notes', e.target.value)}
+                        />
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Services - unchanged */}
+                <div className="space-y-2">
+                  <Label>Services *</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {SERVICES.map(service => (
+                      <Badge
+                        key={service}
+                        variant={formData.services.includes(service) || (service === 'Other' && formData.services.some(s => s.startsWith('Other:'))) ? "default" : "outline"}
+                        className="cursor-pointer hover:scale-105 transition-transform"
+                        onClick={() => toggleService(service)}
+                      >
+                        {service}
+                      </Badge>
+                    ))}
+                  </div>
+                  {formData.services.includes('Other') && (
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        placeholder="Enter other service"
+                        value={otherService}
+                        onChange={(e) => setOtherService(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addOtherService())}
+                      />
+                      <Button type="button" onClick={addOtherService} size="sm">Add</Button>
+                    </div>
+                  )}
+                  {formData.services.filter(s => s.startsWith('Other:')).map(service => (
+                    <Badge key={service} className="mr-2">
+                      {service.replace('Other: ', '')}
+                      <X
+                        className="ml-1 h-3 w-3 cursor-pointer"
+                        onClick={() => setFormData(prev => ({
+                          ...prev,
+                          services: prev.services.filter(s => s !== service)
+                        }))}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+
+                {user?.role !== 'staff' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="assigned_to">Assign To</Label>
                     <Select
-                      value={formData.client_type}
-                      onValueChange={(value) => setFormData({ ...formData, client_type: value })}
+                      value={formData.assigned_to}
+                      onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
                     >
-                      <SelectTrigger data-testid="client-type-select">
-                        <SelectValue />
+                      <SelectTrigger data-testid="client-assign-select">
+                        <SelectValue placeholder="Select user" />
                       </SelectTrigger>
                       <SelectContent>
-                        {CLIENT_TYPES.map(type => (
-                          <SelectItem key={type.value} value={type.value}>
-                            {type.label}
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {users.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Company Email *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="company@example.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      required
-                      data-testid="client-email-input"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Company Phone *</Label>
-                    <Input
-                      id="phone"
-                      placeholder="+1234567890"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      required
-                      data-testid="client-phone-input"
-                    />
-                  </div>
-                </div>
+                )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="birthday">Company Birthday/Anniversary</Label>
-                  <Input
-                    id="birthday"
-                    type="date"
-                    value={formData.birthday}
-                    onChange={(e) => setFormData({ ...formData, birthday: e.target.value })}
-                    data-testid="client-birthday-input"
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    placeholder="Additional notes about the client"
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    rows={3}
+                    data-testid="client-notes-input"
                   />
                 </div>
-              </div>
 
-              {/* Contact Persons */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-lg">Contact Persons</h3>
-                  <Button type="button" size="sm" onClick={addContactPerson} variant="outline">
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Add Contact
-                  </Button>
-                </div>
-                {formData.contact_persons.map((contact, index) => (
-                  <Card key={index} className="p-4">
-                    <div className="flex justify-between items-start mb-3">
-                      <p className="text-sm font-medium text-slate-700">Contact Person #{index + 1}</p>
-                      {formData.contact_persons.length > 1 && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removeContactPerson(index)}
-                          className="h-6 w-6 p-0"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Full Name"
-                        value={contact.name}
-                        onChange={(e) => updateContactPerson(index, 'name', e.target.value)}
-                      />
-                      <Input
-                        placeholder="Designation"
-                        value={contact.designation}
-                        onChange={(e) => updateContactPerson(index, 'designation', e.target.value)}
-                      />
-                      <Input
-                        type="email"
-                        placeholder="Email"
-                        value={contact.email}
-                        onChange={(e) => updateContactPerson(index, 'email', e.target.value)}
-                      />
-                      <Input
-                        placeholder="Phone"
-                        value={contact.phone}
-                        onChange={(e) => updateContactPerson(index, 'phone', e.target.value)}
-                      />
-                    </div>
-                  </Card>
-                ))}
-              </div>
-
-              {/* DSC Details */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-lg">DSC Details</h3>
-                  <Button type="button" size="sm" onClick={addDSC} variant="outline">
-                    <FileText className="h-4 w-4 mr-2" />
-                    Add DSC
-                  </Button>
-                </div>
-                {formData.dsc_details.map((dsc, index) => (
-                  <Card key={index} className="p-4">
-                    <div className="flex justify-between items-start mb-3">
-                      <p className="text-sm font-medium text-slate-700">DSC #{index + 1}</p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => removeDSC(index)}
-                        className="h-6 w-6 p-0"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Certificate Number"
-                        value={dsc.certificate_number}
-                        onChange={(e) => updateDSC(index, 'certificate_number', e.target.value)}
-                      />
-                      <Input
-                        placeholder="Holder Name"
-                        value={dsc.holder_name}
-                        onChange={(e) => updateDSC(index, 'holder_name', e.target.value)}
-                      />
-                      <Input
-                        type="date"
-                        placeholder="Issue Date"
-                        value={dsc.issue_date}
-                        onChange={(e) => updateDSC(index, 'issue_date', e.target.value)}
-                      />
-                      <Input
-                        type="date"
-                        placeholder="Expiry Date"
-                        value={dsc.expiry_date}
-                        onChange={(e) => updateDSC(index, 'expiry_date', e.target.value)}
-                      />
-                      <Input
-                        placeholder="Notes"
-                        className="col-span-2"
-                        value={dsc.notes}
-                        onChange={(e) => updateDSC(index, 'notes', e.target.value)}
-                      />
-                    </div>
-                  </Card>
-                ))}
-              </div>
-
-              {/* Services */}
-              <div className="space-y-2">
-                <Label>Services *</Label>
-                <div className="flex flex-wrap gap-2">
-                  {SERVICES.map(service => (
-                    <Badge
-                      key={service}
-                      variant={formData.services.includes(service) || formData.services.some(s => s.startsWith('Other:')) && service === 'Other' ? "default" : "outline"}
-                      className="cursor-pointer hover:scale-105 transition-transform"
-                      onClick={() => toggleService(service)}
-                    >
-                      {service}
-                    </Badge>
-                  ))}
-                </div>
-                {formData.services.includes('Other') && (
-                  <div className="flex gap-2 mt-2">
-                    <Input
-                      placeholder="Enter other service"
-                      value={otherService}
-                      onChange={(e) => setOtherService(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addOtherService())}
-                    />
-                    <Button type="button" onClick={addOtherService} size="sm">Add</Button>
-                  </div>
-                )}
-                {formData.services.filter(s => s.startsWith('Other:')).map(service => (
-                  <Badge key={service} className="mr-2">
-                    {service.replace('Other: ', '')}
-                    <X
-                      className="ml-1 h-3 w-3 cursor-pointer"
-                      onClick={() => setFormData(prev => ({
-                        ...prev,
-                        services: prev.services.filter(s => s !== service)
-                      }))}
-                    />
-                  </Badge>
-                ))}
-              </div>
-
-              {user?.role !== 'staff' && (
-                <div className="space-y-2">
-                  <Label htmlFor="assigned_to">Assign To</Label>
-                  <Select
-                    value={formData.assigned_to}
-                    onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setDialogOpen(false); resetForm(); }}
+                    data-testid="client-cancel-btn"
                   >
-                    <SelectTrigger data-testid="client-assign-select">
-                      <SelectValue placeholder="Select user" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.full_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Additional notes about the client"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows={3}
-                  data-testid="client-notes-input"
-                />
-              </div>
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setDialogOpen(false);
-                    resetForm();
-                  }}
-                  data-testid="client-cancel-btn"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={loading}
-                  className="bg-indigo-600 hover:bg-indigo-700"
-                  data-testid="client-submit-btn"
-                >
-                  {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                    data-testid="client-submit-btn"
+                  >
+                    {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
-      {/* Clients Grid - showing continues in next file due to size */}
+      {/* Hidden CSV File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        onChange={handleImportCSV}
+        style={{ display: 'none' }}
+      />
+
+      {/* Clients Grid - unchanged */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {clients.length === 0 ? (
           <Card className="col-span-full border border-slate-200">
