@@ -19,9 +19,12 @@ export default function DocumentRegister() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [fullNotesOpen, setFullNotesOpen] = useState(false);
+  const [selectedFullNotes, setSelectedFullNotes] = useState({ holder_name: '', notes: '' });
+
   const [editingDocument, setEditingDocument] = useState(null);
   const [selectedDocument, setSelectedDocument] = useState(null);
-  const [editingMovement, setEditingMovement] = useState(null);
+  const [editingMovement, setEditingMovement] = useState(null);           // ← kept even if unused
   const [searchQuery, setSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
@@ -40,7 +43,7 @@ export default function DocumentRegister() {
     notes: '',
   });
 
-  const [editMovementData, setEditMovementData] = useState({
+  const [editMovementData, setEditMovementData] = useState({           // ← kept even if unused
     movement_type: 'IN',
     person_name: '',
     notes: '',
@@ -115,12 +118,22 @@ export default function DocumentRegister() {
     setLogDialogOpen(true);
   };
 
+  const openFullNotes = (doc) => {
+    if (!doc.notes) return;
+    setSelectedFullNotes({
+      holder_name: doc.holder_name || '—',
+      notes: doc.notes,
+    });
+    setFullNotesOpen(true);
+  };
+
   const getDocumentInOutStatus = (document) => {
     if (!document) return 'OUT';
     if (document.current_status) return document.current_status;
     return document.current_location === 'with_company' ? 'IN' : 'OUT';
   };
 
+  // Kept even if currently unused in render flow
   const handleMovementInModal = async () => {
     if (!editingDocument || !movementData.person_name) return;
     setLoading(true);
@@ -146,6 +159,7 @@ export default function DocumentRegister() {
     }
   };
 
+  // Kept even if currently unused
   const handleUpdateMovement = async (movementId) => {
     if (!editingDocument || !editMovementData.person_name) return;
     setLoading(true);
@@ -171,6 +185,7 @@ export default function DocumentRegister() {
     }
   };
 
+  // Kept even if currently unused
   const startEditingMovement = (movement) => {
     setEditingMovement(movement.id || movement.timestamp);
     setEditMovementData({
@@ -227,7 +242,8 @@ export default function DocumentRegister() {
     return (
       document.holder_name?.toLowerCase().includes(query) ||
       document.document_type?.toLowerCase().includes(query) ||
-      document.associated_with?.toLowerCase().includes(query)
+      document.associated_with?.toLowerCase().includes(query) ||
+      document.notes?.toLowerCase().includes(query)
     );
   };
 
@@ -263,455 +279,145 @@ export default function DocumentRegister() {
               Add Document
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-2xl">
                 {editingDocument ? 'Edit Document' : 'Add New Document'}
               </DialogTitle>
-              <DialogDescription>
-                {editingDocument
-                  ? 'Update document details and track IN/OUT status.'
-                  : 'Fill in the details to add a new document.'}
-              </DialogDescription>
             </DialogHeader>
 
-            {editingDocument ? (
-              <Tabs defaultValue="details" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="details">Details</TabsTrigger>
-                  <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="details" className="mt-4">
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="holder_name"
-                          placeholder="Name of document holder"
-                          value={formData.holder_name}
-                          onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })}
-                          required
-                          data-testid="document-holder-name-input"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Document Type</Label>
-                        <Select
-                          value={formData.document_type}
-                          onValueChange={(value) => setFormData({ ...formData, document_type: value })}
-                        >
-                          <SelectTrigger id="document_type" data-testid="document-type-select">
-                            <SelectValue placeholder="Select document type" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            <SelectItem value="Agreement">Agreement / Contract</SelectItem>
-                            <SelectItem value="NDA">NDA</SelectItem>
-                            <SelectItem value="Purchase Order">Purchase Order</SelectItem>
-                            <SelectItem value="Invoice">Invoice / Bill</SelectItem>
-                            <SelectItem value="Cheque">Cheque / Payment Receipt</SelectItem>
-                            <SelectItem value="PanCard">PAN Card / Copy</SelectItem>
-                            <SelectItem value="Aadhar">Aadhaar Card / Copy</SelectItem>
-                            <SelectItem value="GST Certificate">GST Registration Certificate</SelectItem>
-                            <SelectItem value="Incorporation">Certificate of Incorporation</SelectItem>
-                            <SelectItem value="MOA">Memorandum of Association (MOA)</SelectItem>
-                            <SelectItem value="AOA">Articles of Association (AOA)</SelectItem>
-                            <SelectItem value="Bank Statement">Bank Statement</SelectItem>
-                            <SelectItem value="Balance Sheet">Financial Statement / Balance Sheet</SelectItem>
-                            <SelectItem value="ITR">Income Tax Return (ITR)</SelectItem>
-                            <SelectItem value="Power of Attorney">Power of Attorney</SelectItem>
-                            <SelectItem value="Lease Agreement">Lease / Rent Agreement</SelectItem>
-                            <SelectItem value="License">License / Permit</SelectItem>
-                            <SelectItem value="Trademark">Trademark / IP Document</SelectItem>
-                            <SelectItem value="Correspondence">Important Correspondence / Letter</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="document_password">Password</Label>
-                        <Input
-                          id="document_password"
-                          type="text"
-                          placeholder="Document Password (if any)"
-                          value={formData.document_password}
-                          onChange={(e) => setFormData({ ...formData, document_password: e.target.value })}
-                          data-testid="document-password-input"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                        <Input
-                          id="associated_with"
-                          placeholder="Firm or client name"
-                          value={formData.associated_with}
-                          onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                          data-testid="document-associated-input"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="entity_type">Entity Type</Label>
-                        <Select
-                          value={formData.entity_type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                        >
-                          <SelectTrigger id="entity_type" data-testid="document-entity-type-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="firm">Firm</SelectItem>
-                            <SelectItem value="client">Client</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="issue_date"
-                          type="date"
-                          value={formData.issue_date}
-                          onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                          required
-                          data-testid="document-issue-date-input"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="notes">Notes</Label>
-                      <Textarea
-                        id="notes"
-                        placeholder="Additional notes"
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        rows={2}
-                        data-testid="document-notes-input"
-                      />
-                    </div>
-
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => { setDialogOpen(false); resetForm(); }}
-                        data-testid="document-cancel-btn"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700"
-                        data-testid="document-submit-btn"
-                      >
-                        {loading ? 'Saving...' : 'Update Document'}
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </TabsContent>
-
-                <TabsContent value="status" className="mt-4 space-y-4">
-                  <Card className={`p-4 ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-slate-600">Current Status</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {getDocumentInOutStatus(editingDocument) === 'IN' ? (
-                            <>
-                              <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
-                              <Badge className="bg-emerald-600 text-white">IN - Available</Badge>
-                            </>
-                          ) : (
-                            <>
-                              <ArrowUpCircle className="h-5 w-5 text-red-600" />
-                              <Badge className="bg-red-600 text-white">OUT - Taken</Badge>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card className="p-4">
-                    <h4 className="font-medium text-slate-900 mb-3">
-                      {getDocumentInOutStatus(editingDocument) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
-                    </h4>
-                    <form onSubmit={(e) => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_person">
-                          {getDocumentInOutStatus(editingDocument) === 'IN' ? 'Taken By *' : 'Delivered By *'}
-                        </Label>
-                        <Input
-                          id="inline_person"
-                          placeholder="Enter person name"
-                          value={movementData.person_name}
-                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="inline_notes">Notes</Label>
-                        <Input
-                          id="inline_notes"
-                          placeholder="Optional notes"
-                          value={movementData.notes}
-                          onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className={getDocumentInOutStatus(editingDocument) === 'IN' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
-                      >
-                        {loading ? 'Recording...' : `Mark as ${getDocumentInOutStatus(editingDocument) === 'IN' ? 'OUT' : 'IN'}`}
-                      </Button>
-                    </form>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="history" className="mt-4">
-                  <div className="space-y-3">
-                    {editingDocument?.movement_log?.length > 0 ? (
-                      editingDocument.movement_log.map((movement, index) => {
-                        const isEditing = editingMovement === (movement.id || movement.timestamp);
-                        return (
-                          <Card key={index} className={`p-4 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                            {isEditing ? (
-                              <form onSubmit={(e) => { e.preventDefault(); handleUpdateMovement(movement.id || movement.timestamp); }} className="space-y-3">
-                                <div className="flex gap-4">
-                                  <div className="space-y-2 flex-1">
-                                    <Label htmlFor="edit_type">Type</Label>
-                                    <Select
-                                      value={editMovementData.movement_type}
-                                      onValueChange={(value) => setEditMovementData({ ...editMovementData, movement_type: value })}
-                                    >
-                                      <SelectTrigger id="edit_type">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="IN">IN</SelectItem>
-                                        <SelectItem value="OUT">OUT</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div className="space-y-2 flex-1">
-                                    <Label htmlFor="edit_person">Person Name *</Label>
-                                    <Input
-                                      id="edit_person"
-                                      placeholder="Enter person name"
-                                      value={editMovementData.person_name}
-                                      onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
-                                      required
-                                    />
-                                  </div>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label htmlFor="edit_notes">Notes</Label>
-                                  <Textarea
-                                    id="edit_notes"
-                                    placeholder="Additional notes"
-                                    value={editMovementData.notes}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })}
-                                    rows={2}
-                                  />
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button type="submit" size="sm" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700">
-                                    {loading ? 'Updating...' : 'Update'}
-                                  </Button>
-                                  <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>
-                                    Cancel
-                                  </Button>
-                                </div>
-                              </form>
-                            ) : (
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge className={movement.movement_type === 'IN' ? 'bg-emerald-600' : 'bg-red-600'}>
-                                      {movement.movement_type}
-                                    </Badge>
-                                    <span className="text-sm font-medium">{movement.person_name}</span>
-                                  </div>
-                                  <p className="text-xs text-slate-500">
-                                    Recorded by: {movement.recorded_by || '—'}
-                                  </p>
-                                  {movement.notes && (
-                                    <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>
-                                  )}
-                                </div>
-                                <div className="text-right flex items-start gap-2">
-                                  <div className="text-xs text-slate-500">
-                                    {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
-                                  </div>
-                                  {movement.id && (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
-                                      onClick={() => startEditingMovement(movement)}
-                                    >
-                                      <Edit className="h-3 w-3 mr-1" /> Edit
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </Card>
-                        );
-                      })
-                    ) : (
-                      <div className="text-center py-8 text-slate-500">
-                        <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                        <p>No movement history yet</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="holder_name"
-                      placeholder="Name of document holder"
-                      value={formData.holder_name}
-                      onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })}
-                      required
-                      data-testid="document-holder-name-input"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Document Type</Label>
-                    <Select
-                      value={formData.document_type}
-                      onValueChange={(value) => setFormData({ ...formData, document_type: value })}
-                    >
-                      <SelectTrigger id="document_type" data-testid="document-type-select">
-                        <SelectValue placeholder="Select document type" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64">
-                        <SelectItem value="Agreement">Agreement / Contract</SelectItem>
-                        <SelectItem value="NDA">NDA</SelectItem>
-                        <SelectItem value="Purchase Order">Purchase Order</SelectItem>
-                        <SelectItem value="Invoice">Invoice / Bill</SelectItem>
-                        <SelectItem value="Cheque">Cheque / Payment Receipt</SelectItem>
-                        <SelectItem value="PanCard">PAN Card / Copy</SelectItem>
-                        <SelectItem value="Aadhar">Aadhaar Card / Copy</SelectItem>
-                        <SelectItem value="GST Certificate">GST Registration Certificate</SelectItem>
-                        <SelectItem value="Incorporation">Certificate of Incorporation</SelectItem>
-                        <SelectItem value="MOA">Memorandum of Association (MOA)</SelectItem>
-                        <SelectItem value="AOA">Articles of Association (AOA)</SelectItem>
-                        <SelectItem value="Bank Statement">Bank Statement</SelectItem>
-                        <SelectItem value="Balance Sheet">Financial Statement / Balance Sheet</SelectItem>
-                        <SelectItem value="ITR">Income Tax Return (ITR)</SelectItem>
-                        <SelectItem value="Power of Attorney">Power of Attorney</SelectItem>
-                        <SelectItem value="Lease Agreement">Lease / Rent Agreement</SelectItem>
-                        <SelectItem value="License">License / Permit</SelectItem>
-                        <SelectItem value="Trademark">Trademark / IP Document</SelectItem>
-                        <SelectItem value="Correspondence">Important Correspondence / Letter</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="document_password">Password</Label>
-                    <Input
-                      id="document_password"
-                      type="text"
-                      placeholder="Document Password (if any)"
-                      value={formData.document_password}
-                      onChange={(e) => setFormData({ ...formData, document_password: e.target.value })}
-                      data-testid="document-password-input"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                    <Input
-                      id="associated_with"
-                      placeholder="Firm or client name"
-                      value={formData.associated_with}
-                      onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                      data-testid="document-associated-input"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="entity_type">Entity Type</Label>
-                    <Select
-                      value={formData.entity_type}
-                      onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                    >
-                      <SelectTrigger id="entity_type" data-testid="document-entity-type-select">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="firm">Firm</SelectItem>
-                        <SelectItem value="client">Client</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="issue_date"
-                      type="date"
-                      value={formData.issue_date}
-                      onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                      required
-                      data-testid="document-issue-date-input"
-                    />
-                  </div>
-                </div>
-
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    placeholder="Additional notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    rows={2}
-                    data-testid="document-notes-input"
+                  <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="holder_name"
+                    placeholder="Name of document holder"
+                    value={formData.holder_name}
+                    onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })}
+                    required
+                    data-testid="document-holder-name-input"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Document Type</Label>
+                  <Select
+                    value={formData.document_type}
+                    onValueChange={(value) => setFormData({ ...formData, document_type: value })}
+                  >
+                    <SelectTrigger id="document_type" data-testid="document-type-select">
+                      <SelectValue placeholder="Select document type" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64">
+                      <SelectItem value="Agreement">Agreement / Contract</SelectItem>
+                      <SelectItem value="NDA">NDA</SelectItem>
+                      <SelectItem value="Purchase Order">Purchase Order</SelectItem>
+                      <SelectItem value="Invoice">Invoice / Bill</SelectItem>
+                      <SelectItem value="Cheque">Cheque / Payment Receipt</SelectItem>
+                      <SelectItem value="PanCard">PAN Card / Copy</SelectItem>
+                      <SelectItem value="Aadhar">Aadhaar Card / Copy</SelectItem>
+                      <SelectItem value="GST Certificate">GST Registration Certificate</SelectItem>
+                      <SelectItem value="Incorporation">Certificate of Incorporation</SelectItem>
+                      <SelectItem value="MOA">Memorandum of Association (MOA)</SelectItem>
+                      <SelectItem value="AOA">Articles of Association (AOA)</SelectItem>
+                      <SelectItem value="Bank Statement">Bank Statement</SelectItem>
+                      <SelectItem value="Balance Sheet">Financial Statement / Balance Sheet</SelectItem>
+                      <SelectItem value="ITR">Income Tax Return (ITR)</SelectItem>
+                      <SelectItem value="Power of Attorney">Power of Attorney</SelectItem>
+                      <SelectItem value="Lease Agreement">Lease / Rent Agreement</SelectItem>
+                      <SelectItem value="License">License / Permit</SelectItem>
+                      <SelectItem value="Trademark">Trademark / IP Document</SelectItem>
+                      <SelectItem value="Correspondence">Important Correspondence / Letter</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => { setDialogOpen(false); resetForm(); }}
-                    data-testid="document-cancel-btn"
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="document_password">Password</Label>
+                  <Input
+                    id="document_password"
+                    type="text"
+                    placeholder="Document Password (if any)"
+                    value={formData.document_password}
+                    onChange={(e) => setFormData({ ...formData, document_password: e.target.value })}
+                    data-testid="document-password-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
+                  <Input
+                    id="associated_with"
+                    placeholder="Firm or client name"
+                    value={formData.associated_with}
+                    onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
+                    data-testid="document-associated-input"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="entity_type">Entity Type</Label>
+                  <Select
+                    value={formData.entity_type}
+                    onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
                   >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-700"
-                    data-testid="document-submit-btn"
-                  >
-                    {loading ? 'Saving...' : 'Add Document'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            )}
+                    <SelectTrigger id="entity_type" data-testid="document-entity-type-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="firm">Firm</SelectItem>
+                      <SelectItem value="client">Client</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="issue_date"
+                    type="date"
+                    value={formData.issue_date}
+                    onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
+                    required
+                    data-testid="document-issue-date-input"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Additional notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  rows={2}
+                  data-testid="document-notes-input"
+                />
+              </div>
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => { setDialogOpen(false); resetForm(); }}
+                  data-testid="document-cancel-btn"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                  data-testid="document-submit-btn"
+                >
+                  {loading ? 'Saving...' : editingDocument ? 'Update Document' : 'Add Document'}
+                </Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -720,7 +426,7 @@ export default function DocumentRegister() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
           type="text"
-          placeholder="Search by holder name, type, company..."
+          placeholder="Search by holder name, type, company, notes..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
@@ -760,6 +466,7 @@ export default function DocumentRegister() {
                   onDelete={handleDelete}
                   onMovement={openMovementDialog}
                   onViewLog={openLogDialog}
+                  onShowFullNotes={openFullNotes}
                   type="IN"
                 />
               )}
@@ -787,6 +494,7 @@ export default function DocumentRegister() {
                   onDelete={handleDelete}
                   onMovement={openMovementDialog}
                   onViewLog={openLogDialog}
+                  onShowFullNotes={openFullNotes}
                   type="OUT"
                 />
               )}
@@ -795,17 +503,13 @@ export default function DocumentRegister() {
         </TabsContent>
       </Tabs>
 
+      {/* Movement Dialog */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl">
               Mark Document as {movementData.movement_type}
             </DialogTitle>
-            <DialogDescription>
-              {movementData.movement_type === 'IN'
-                ? 'Record when document is delivered/returned'
-                : 'Record when document is taken out'}
-            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleMovement} className="space-y-4">
             <div className="space-y-2">
@@ -852,6 +556,7 @@ export default function DocumentRegister() {
         </DialogContent>
       </Dialog>
 
+      {/* Log Dialog */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -907,29 +612,51 @@ export default function DocumentRegister() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Full Notes Modal */}
+      <Dialog open={fullNotesOpen} onOpenChange={setFullNotesOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle>Notes — {selectedFullNotes.holder_name}</DialogTitle>
+          </DialogHeader>
+          <div className="mt-4 p-5 bg-slate-50 rounded-lg border max-h-[65vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+            {selectedFullNotes.notes || (
+              <p className="text-slate-400 italic text-center py-10">No notes available</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFullNotesOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, type }) {
+function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, onShowFullNotes, type }) {
   return (
-    <div className="w-full overflow-x-auto">
-      <table className="w-full table-fixed border-collapse">
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-auto border-collapse">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[5%]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
               S.No
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[30%]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
               Holder Name
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[20%]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
               Type
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[30%]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
               Associated With
             </th>
-            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-[15%]">
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[260px]">
+              Notes
+            </th>
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-44">
               Actions
             </th>
           </tr>
@@ -951,6 +678,25 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
               <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">
                 {doc.associated_with || '—'}
               </td>
+
+              <td
+                className={`px-4 py-3 text-sm text-slate-600 break-words leading-tight cursor-pointer hover:bg-slate-50/80 transition-colors group relative ${doc.notes ? '' : 'cursor-default'}`}
+                onClick={() => doc.notes && onShowFullNotes(doc)}
+              >
+                {doc.notes ? (
+                  <>
+                    <div className="line-clamp-3 pr-10" title="Click to view full notes">
+                      {doc.notes}
+                    </div>
+                    <div className="absolute right-3 top-3 opacity-50 group-hover:opacity-80 transition-opacity text-xs text-slate-400 pointer-events-none">
+                      …
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-slate-400 italic">—</span>
+                )}
+              </td>
+
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-1">
                   <Button
