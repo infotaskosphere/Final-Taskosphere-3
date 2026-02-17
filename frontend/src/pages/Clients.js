@@ -1,564 +1,423 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import api from '@/lib/api';
-import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Mail, Cake, X, UserPlus, FileText } from 'lucide-react';
-import { format } from 'date-fns';
-import Papa from 'papaparse';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Add New Client - Modal</title>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --gray: #6b7280;
+      --light: #f3f4f6;
+      --border: #d1d5db;
+    }
 
-const CLIENT_TYPES = [
-  { value: 'proprietor', label: 'Proprietor' },
-  { value: 'pvt_ltd', label: 'Private Limited' },
-  { value: 'llp', label: 'LLP' },
-  { value: 'partnership', label: 'Partnership' },
-  { value: 'huf', label: 'HUF' },
-  { value: 'trust', label: 'Trust' },
-];
+    * { box-sizing: border-box; margin:0; padding:0; }
+    body {
+      font-family: -apple-system, BlinkMacOSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f1f5f9;
+      padding: 40px;
+    }
 
-const SERVICES = [
-  'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
-  'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
-];
+    /* Modal Overlay */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
 
-export default function Clients() {
-  const { user } = useAuth();
-  const [clients, setClients] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingClient, setEditingClient] = useState(null);
-  const [otherService, setOtherService] = useState('');
+    .modal {
+      background: white;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 780px;
+      max-height: 92vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+    }
 
-  const [importLoading, setImportLoading] = useState(false);
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-  const fileInputRef = useRef(null);
+    .modal-title {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #111827;
+    }
 
-  const [formData, setFormData] = useState({
-    company_name: '',
-    client_type: 'proprietor',
-    contact_persons: [{ name: '', email: '', phone: '', designation: '' }],
-    email: '',
-    phone: '',
-    birthday: '',
-    services: [],
-    dsc_details: [],
-    assigned_to: 'unassigned',
-    notes: '',
+    .close-btn {
+      font-size: 1.6rem;
+      color: var(--gray);
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      padding: 14px 24px;
+      font-weight: 500;
+      color: var(--gray);
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .tab.active {
+      color: var(--primary-dark);
+      border-bottom-color: var(--primary);
+      background: rgba(99,102,241,0.04);
+    }
+
+    .tab-content {
+      padding: 24px;
+    }
+
+    .hidden { display: none; }
+
+    /* Form styling */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px 24px;
+    }
+
+    .form-group.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    .required::after {
+      content: " *";
+      color: #ef4444;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.95rem;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+    }
+
+    .services-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .service-chip {
+      padding: 8px 14px;
+      background: var(--light);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+
+    .service-chip.selected {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .csv-area {
+      border: 2px dashed #d1d5db;
+      border-radius: 8px;
+      padding: 60px 20px;
+      text-align: center;
+      margin: 20px 0;
+      background: #f9fafb;
+    }
+
+    .csv-area:hover {
+      border-color: var(--primary);
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      font-size: 0.95rem;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #d1d5db;
+    }
+
+    .btn-outline {
+      background: white;
+      border: 1px solid #4b5563;
+      color: #4b5563;
+    }
+
+    .btn-outline:hover {
+      background: #f3f4f6;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .add-contact-btn, .add-dsc-btn {
+      color: var(--primary);
+      background: none;
+      border: 1px solid var(--primary);
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Trigger button (for demo) -->
+<button class="btn btn-primary" onclick="openModal()">Open Add Client Modal</button>
+
+<!-- Modal -->
+<div id="clientModal" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Add New Client</h2>
+      <span class="close-btn" onclick="closeModal()">×</span>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="single">Add Client</div>
+      <div class="tab" data-tab="csv">Add via CSV</div>
+    </div>
+
+    <!-- Single Client Form -->
+    <div id="single-tab" class="tab-content">
+
+      <h3 style="margin:0 0 16px; font-size:1.15rem;">Basic Information</h3>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="required">Company Name</label>
+          <input type="text" placeholder="ABC Enterprises" value="ABC Enterprises" />
+        </div>
+        <div class="form-group">
+          <label class="required">Client Type</label>
+          <select>
+            <option>Proprietor</option>
+            <option>Partnership</option>
+            <option>Pvt Ltd</option>
+            <option>LLP</option>
+            <option>Others</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="required">Company Email</label>
+          <input type="email" placeholder="company@example.com" />
+        </div>
+        <div class="form-group">
+          <label class="required">Company Phone</label>
+          <input type="tel" placeholder="+1234567890" />
+        </div>
+        <div class="form-group full">
+          <label>Company Birthday / Anniversary</label>
+          <input type="date" />
+        </div>
+      </div>
+
+      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+
+      <h3 style="margin:0 0 16px; font-size:1.15rem;">Contact Persons</h3>
+      <div style="margin-bottom:16px;">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" placeholder="Full Name" />
+          </div>
+          <div class="form-group">
+            <label>Designation</label>
+            <input type="text" placeholder="Designation" />
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" placeholder="Email" />
+          </div>
+          <div class="form-group">
+            <label>Phone</label>
+            <input type="tel" placeholder="Phone" />
+          </div>
+        </div>
+        <button class="btn add-contact-btn">+ Add Another Contact</button>
+      </div>
+
+      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+
+      <h3 style="margin:0 0 16px; font-size:1.15rem;">DSC Details</h3>
+      <button class="btn add-dsc-btn">+ Add DSC</button>
+
+      <hr style="margin:28px 0; border-color:#e5e7eb;" />
+
+      <h3 style="margin:0 0 12px; font-size:1.15rem;">Services *</h3>
+      <div class="services-grid">
+        <div class="service-chip selected">GST</div>
+        <div class="service-chip">Trademark</div>
+        <div class="service-chip">Income Tax</div>
+        <div class="service-chip">ROC</div>
+        <div class="service-chip">Audit</div>
+        <div class="service-chip">Compliance</div>
+        <div class="service-chip">Company Registration</div>
+        <div class="service-chip">Tax Planning</div>
+        <div class="service-chip">Accounting</div>
+        <div class="service-chip">Payroll</div>
+        <div class="service-chip">Other</div>
+      </div>
+
+      <div style="margin:24px 0;">
+        <label>Assign To</label>
+        <select>
+          <option>Unassigned</option>
+          <option>John Doe</option>
+          <option>Jane Smith</option>
+        </select>
+      </div>
+
+      <div class="form-group full">
+        <label>Notes</label>
+        <textarea rows="4" placeholder="Any additional notes..."></textarea>
+      </div>
+
+    </div>
+
+    <!-- CSV Tab -->
+    <div id="csv-tab" class="tab-content hidden">
+
+      <h3 style="margin-bottom:16px;">Bulk Add Clients via CSV</h3>
+      
+      <div class="csv-area">
+        <p style="font-size:1.1rem; margin-bottom:8px; color:#4b5563;">
+          Drag & drop your CSV file here
+        </p>
+        <p style="color:var(--gray); margin:8px 0 16px;">
+          or
+        </p>
+        <button class="btn btn-primary">Choose CSV File</button>
+      </div>
+
+      <p style="color:var(--gray); font-size:0.9rem; margin:16px 0;">
+        Download <a href="#" style="color:var(--primary);">sample CSV format</a> to see the required columns.
+      </p>
+
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline csv-only">CSV Format</button>
+      <button class="btn btn-secondary csv-only">Add CSV</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary single-only">Add Client</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const modal = document.getElementById('clientModal');
+  const tabs = document.querySelectorAll('.tab');
+  const contents = {
+    single: document.getElementById('single-tab'),
+    csv: document.getElementById('csv-tab')
+  };
+  const singleOnly = document.querySelectorAll('.single-only');
+  const csvOnly = document.querySelectorAll('.csv-only');
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+
+  function updateFooter(tab) {
+    if (tab === 'single') {
+      singleOnly.forEach(el => el.style.display = 'inline-block');
+      csvOnly.forEach(el => el.style.display = 'none');
+    } else {
+      singleOnly.forEach(el => el.style.display = 'none');
+      csvOnly.forEach(el => el.style.display = 'inline-block');
+    }
+  }
+
+  // Tab switching
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      Object.values(contents).forEach(c => c.classList.add('hidden'));
+      contents[tab.dataset.tab].classList.remove('hidden');
+
+      updateFooter(tab.dataset.tab);
+    });
   });
 
-  useEffect(() => {
-    fetchClients();
-    if (user?.role !== 'staff') {
-      fetchUsers();
-    }
-  }, []);
+  // Initial footer state
+  updateFooter('single');
 
-  const fetchClients = async () => {
-    try {
-      const response = await api.get('/clients');
-      setClients(response.data);
-    } catch (error) {
-      toast.error('Failed to fetch clients');
-    }
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const response = await api.get('/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    }
-  };
-
-  // ────────────────────────────────────────────────
-  //                   CSV FUNCTIONS
-  // ────────────────────────────────────────────────
-
-  const downloadTemplate = () => {
-    const headers = [
-      'company_name',
-      'client_type',
-      'email',
-      'phone',
-      'birthday',
-      'contact_name_1',
-      'contact_designation_1',
-      'contact_email_1',
-      'contact_phone_1',
-      'contact_name_2',
-      'contact_designation_2',
-      'contact_email_2',
-      'contact_phone_2',
-      'services',
-      'notes'
-    ];
-
-    const exampleRow = [
-      'ABC Enterprises',
-      'proprietor',
-      'company@example.com',
-      '+919876543210',
-      '2025-04-15',
-      'Rahul Sharma',
-      'Director',
-      'rahul@abc.com',
-      '+919812345678',
-      'Priya Patel',
-      'Manager',
-      'priya@abc.com',
-      '+918923456789',
-      'GST,Income Tax,Other: Consulting',
-      'Prefers WhatsApp communication'
-    ];
-
-    const csvContent = [headers.join(','), exampleRow.map(v => `"${v}"`).join(',')].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'clients-import-template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleImportCSV = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    setImportLoading(true);
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const rows = results.data;
-        let successCount = 0;
-        const errors = [];
-
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-
-          try {
-            if (!row.company_name?.trim()) throw new Error('Missing company_name');
-            if (!row.email?.trim()) throw new Error('Missing email');
-            if (!row.phone?.trim()) throw new Error('Missing phone');
-
-            const contact_persons = [];
-            if (row.contact_name_1?.trim()) {
-              contact_persons.push({
-                name: row.contact_name_1.trim(),
-                designation: row.contact_designation_1?.trim() || '',
-                email: row.contact_email_1?.trim() || '',
-                phone: row.contact_phone_1?.trim() || ''
-              });
-            }
-            if (row.contact_name_2?.trim()) {
-              contact_persons.push({
-                name: row.contact_name_2.trim(),
-                designation: row.contact_designation_2?.trim() || '',
-                email: row.contact_email_2?.trim() || '',
-                phone: row.contact_phone_2?.trim() || ''
-              });
-            }
-
-            const services = row.services
-              ? row.services.split(',').map(s => s.trim()).filter(Boolean)
-              : [];
-
-            const clientData = {
-              company_name: row.company_name.trim(),
-              client_type: CLIENT_TYPES.some(t => t.value === (row.client_type || '').trim())
-                ? (row.client_type || '').trim()
-                : 'proprietor',
-              email: row.email.trim(),
-              phone: row.phone.trim(),
-              birthday: row.birthday?.trim() || '',
-              contact_persons: contact_persons.length > 0 ? contact_persons : [{ name: '', email: '', phone: '', designation: '' }],
-              services,
-              notes: row.notes?.trim() || '',
-              assigned_to: 'unassigned',
-              dsc_details: [],
-            };
-
-            await api.post('/clients', clientData);
-            successCount++;
-          } catch (err) {
-            errors.push(`Row ${i + 2}: ${err.message || err.response?.data?.detail || 'Unknown error'}`);
-          }
-        }
-
-        setImportLoading(false);
-
-        if (successCount > 0) {
-          toast.success(`${successCount} client(s) imported successfully!`);
-          fetchClients();
-        }
-        if (errors.length > 0) {
-          toast.error(`Some rows failed:\n${errors.join('\n')}`);
-        }
-
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      },
-      error: (error) => {
-        setImportLoading(false);
-        toast.error('Failed to parse CSV file');
-        console.error(error);
-      }
+  // Service chip toggle (demo)
+  document.querySelectorAll('.service-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('selected');
     });
-  };
+  });
 
-  // ────────────────────────────────────────────────
-  //                ORIGINAL FUNCTIONS
-  // ────────────────────────────────────────────────
+  // Close when clicking overlay
+  modal.addEventListener('click', e => {
+    if (e.target === modal) closeModal();
+  });
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const clientData = {
-        ...formData,
-        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
-      };
-
-      if (editingClient) {
-        await api.put(`/clients/${editingClient.id}`, clientData);
-        toast.success('Client updated successfully!');
-      } else {
-        await api.post('/clients', clientData);
-        toast.success('Client created successfully!');
-      }
-
-      setDialogOpen(false);
-      resetForm();
-      fetchClients();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save client');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEdit = (client) => {
-    setEditingClient(client);
-    setFormData({
-      company_name: client.company_name,
-      client_type: client.client_type,
-      contact_persons: client.contact_persons?.length > 0 ? client.contact_persons : [{ name: '', email: '', phone: '', designation: '' }],
-      email: client.email,
-      phone: client.phone,
-      birthday: client.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
-      services: client.services || [],
-      dsc_details: client.dsc_details || [],
-      assigned_to: client.assigned_to || 'unassigned',
-      notes: client.notes || '',
-    });
-    setDialogOpen(true);
-  };
-
-  const handleDelete = async (clientId) => {
-    if (!window.confirm('Are you sure you want to delete this client?')) return;
-
-    try {
-      await api.delete(`/clients/${clientId}`);
-      toast.success('Client deleted successfully!');
-      fetchClients();
-    } catch (error) {
-      toast.error('Failed to delete client');
-    }
-  };
-
-  const sendBirthdayEmail = async (clientId) => {
-    try {
-      await api.post(`/clients/${clientId}/send-birthday-email`);
-      toast.success('Birthday email sent successfully!');
-    } catch (error) {
-      toast.error('Failed to send birthday email');
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      company_name: '',
-      client_type: 'proprietor',
-      contact_persons: [{ name: '', email: '', phone: '', designation: '' }],
-      email: '',
-      phone: '',
-      birthday: '',
-      services: [],
-      dsc_details: [],
-      assigned_to: 'unassigned',
-      notes: '',
-    });
-    setEditingClient(null);
-    setOtherService('');
-  };
-
-  const toggleService = (service) => {
-    if (service === 'Other' && !formData.services.includes('Other')) {
-      setFormData(prev => ({ ...prev, services: [...prev.services, 'Other'] }));
-    } else if (service === 'Other') {
-      setFormData(prev => ({
-        ...prev,
-        services: prev.services.filter(s => s !== 'Other' && !s.startsWith('Other:'))
-      }));
-      setOtherService('');
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        services: prev.services.includes(service)
-          ? prev.services.filter(s => s !== service)
-          : [...prev.services, service]
-      }));
-    }
-  };
-
-  const addOtherService = () => {
-    if (otherService.trim()) {
-      setFormData(prev => ({
-        ...prev,
-        services: [...prev.services.filter(s => s !== 'Other'), `Other: ${otherService}`]
-      }));
-      setOtherService('');
-    }
-  };
-
-  const addContactPerson = () => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: [...prev.contact_persons, { name: '', email: '', phone: '', designation: '' }]
-    }));
-  };
-
-  const removeContactPerson = (index) => {
-    if (formData.contact_persons.length > 1) {
-      setFormData(prev => ({
-        ...prev,
-        contact_persons: prev.contact_persons.filter((_, i) => i !== index)
-      }));
-    }
-  };
-
-  const updateContactPerson = (index, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: prev.contact_persons.map((contact, i) => 
-        i === index ? { ...contact, [field]: value } : contact
-      )
-    }));
-  };
-
-  const addDSC = () => {
-    setFormData(prev => ({
-      ...prev,
-      dsc_details: [...prev.dsc_details, {
-        certificate_number: '',
-        holder_name: '',
-        issue_date: '',
-        expiry_date: '',
-        notes: ''
-      }]
-    }));
-  };
-
-  const removeDSC = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      dsc_details: prev.dsc_details.filter((_, i) => i !== index)
-    }));
-  };
-
-  const updateDSC = (index, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      dsc_details: prev.dsc_details.map((dsc, i) => 
-        i === index ? { ...dsc, [field]: value } : dsc
-      )
-    }));
-  };
-
-  const getUserName = (userId) => {
-    const foundUser = users.find(u => u.id === userId);
-    return foundUser?.full_name || 'Unassigned';
-  };
-
-  const getClientTypeLabel = (type) => {
-    return CLIENT_TYPES.find(ct => ct.value === type)?.label || type;
-  };
-
-  return (
-    <div className="space-y-6" data-testid="clients-page">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-900">Client Management</h1>
-          <p className="text-slate-600 mt-1">Manage your clients and track their details</p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="outline"
-            onClick={downloadTemplate}
-            className="border-indigo-600 text-indigo-600 hover:bg-indigo-50"
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Download CSV Template
-          </Button>
-
-          <Button
-            variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importLoading}
-          >
-            {importLoading ? 'Importing...' : 'Import from CSV'}
-          </Button>
-
-          <Dialog open={dialogOpen} onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) resetForm();
-          }}>
-            <DialogTrigger asChild>
-              <Button
-                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
-                data-testid="add-client-btn"
-              >
-                <Plus className="mr-2 h-5 w-5" />
-                Add Client
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="font-outfit text-2xl">
-                  {editingClient ? 'Edit Client' : 'Add New Client'}
-                </DialogTitle>
-                <DialogDescription>
-                  {editingClient ? 'Update client details below.' : 'Fill in the details to add a new client.'}
-                </DialogDescription>
-              </DialogHeader>
-
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* ────────────────────────────────────────────────
-                    YOUR ORIGINAL FORM CONTENT (unchanged)
-                ──────────────────────────────────────────────── */}
-                {/* Basic Information, Contact Persons, DSC Details, Services, Assign To, Notes */}
-                {/* ... insert your existing form fields here ... */}
-
-                {/* Dialog Footer – now with 4 buttons as requested */}
-                <DialogFooter className="flex flex-wrap gap-3 justify-end sm:justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={downloadTemplate}
-                  >
-                    CSV Format
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="default"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={importLoading}
-                  >
-                    {importLoading ? 'Uploading...' : 'Add CSV'}
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setDialogOpen(false);
-                      resetForm();
-                    }}
-                  >
-                    Cancel
-                  </Button>
-
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-700 min-w-[120px]"
-                  >
-                    {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Add Client'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleImportCSV}
-            className="hidden"
-          />
-        </div>
-      </div>
-
-      {/* Clients Grid – your original layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {clients.length === 0 ? (
-          <Card className="col-span-full border border-slate-200">
-            <CardContent className="p-12 text-center text-slate-500">
-              <p>No clients found. Add your first client!</p>
-            </CardContent>
-          </Card>
-        ) : (
-          clients.map((client) => (
-            <Card
-              key={client.id}
-              className="border border-slate-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
-              data-testid={`client-card-${client.id}`}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg font-semibold text-slate-900">
-                      {client.company_name}
-                    </CardTitle>
-                    <p className="text-sm text-slate-500 mt-1">
-                      {getClientTypeLabel(client.client_type)}
-                    </p>
-                  </div>
-                  {client.birthday && (
-                    <Cake className="h-5 w-5 text-pink-500" />
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {/* YOUR ORIGINAL CARD CONTENT – keep as is */}
-                {/* ... */}
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
+  // Demo logs (console only, as per "same logs")
+  console.log('Modal initialized');
+</script>
+</body>
+</html>
