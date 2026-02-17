@@ -792,7 +792,7 @@ export default function DocumentRegister() {
 
     </div>
   );
-      {/* MOVEMENT DIALOG */}
+            {/* MOVEMENT DIALOG */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -853,6 +853,7 @@ export default function DocumentRegister() {
               >
                 Cancel
               </Button>
+
               <Button
                 type="submit"
                 disabled={loading}
