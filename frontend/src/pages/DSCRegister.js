@@ -974,29 +974,29 @@ export default function DSCRegister() {
 // DSC Table Component
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full">
+    <div>
+      <table className="w-full table-auto">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-           <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+           <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               S.No
             </th> 
-            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Holder Name
             </th>
-            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Type
             </th>
-            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Associated With
             </th>
-            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Expiry Date
             </th>
-            <th className="w-16 px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
               Status
             </th>
-            <th className="w-40 px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <th className="px-6 py-2 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
               Actions
             </th>
           </tr>
@@ -1010,32 +1010,32 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 className="hover:bg-slate-50 transition-colors"
                 data-testid={`dsc-row-${dsc.id}`}
               >
-                <td className="px-6 py-4 text-sm font-medium text-slate-500 whitespace-nowrap">
+                <td className="px-6 py-2 text-sm font-medium text-slate-500 whitespace-nowrap">
                   {index + 1}
                 </td>
                 
-                <td className="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">
+                <td className="px-6 py-2 font-medium text-slate-900 whitespace-nowrap">
                   {dsc.holder_name}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
                   {dsc.dsc_type || '-'}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
                   {dsc.associated_with || '-'}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
+                <td className="px-6 py-2 text-sm text-slate-600 whitespace-nowrap">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-6 py-2">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${status.color}`}></div>
                     <span className={`text-sm font-medium ${status.textColor}`}>{status.text}</span>
                   </div>
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="px-6 py-2 text-right">
                   <div className="flex justify-end gap-2">
                     <Button
                       variant="ghost"
