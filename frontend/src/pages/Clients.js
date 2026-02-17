@@ -48,7 +48,7 @@ export default function Clients() {
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const fileInputRef = useRef(null);
 
@@ -70,10 +70,6 @@ export default function Clients() {
     fetchClients();
     if (user?.role !== 'staff') fetchUsers();
   }, []);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, serviceFilter, statusFilter, clients.length]);
 
   const fetchClients = async () => {
     try {
@@ -417,13 +413,8 @@ export default function Clients() {
     );
   };
 
-  // ────────────────────────────────────────────────
-  // Render
-  // ────────────────────────────────────────────────
-
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 font-outfit">Client Management</h1>
@@ -466,7 +457,6 @@ export default function Clients() {
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-8">
-                  {/* Basic Info */}
                   <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
                     <h3 className="text-base font-bold text-slate-800">Basic Information</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -521,7 +511,6 @@ export default function Clients() {
                     </div>
                   </div>
 
-                  {/* Contact Persons */}
                   <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
                     <div className="flex justify-between items-end">
                       <div>
@@ -602,7 +591,6 @@ export default function Clients() {
                     </div>
                   </div>
 
-                  {/* Services */}
                   <div className="space-y-4">
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Services *</Label>
                     <div className="flex flex-wrap gap-2">
@@ -643,7 +631,6 @@ export default function Clients() {
                     )}
                   </div>
 
-                  {/* Notes */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Notes</Label>
                     <Textarea 
@@ -654,7 +641,6 @@ export default function Clients() {
                     />
                   </div>
 
-                  {/* Assigned To */}
                   {(user?.role === 'admin' || user?.role === 'manager') && (
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Assigned To</Label>
@@ -710,7 +696,6 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* Birthday Reminders */}
       {(user?.role === 'admin' || user?.role === 'manager') && todayReminders.length > 0 && (
         <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
@@ -731,7 +716,6 @@ export default function Clients() {
         </Card>
       )}
 
-      {/* Admin Stats */}
       {user?.role === 'admin' && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
@@ -775,7 +759,6 @@ export default function Clients() {
         </div>
       )}
 
-      {/* Search & Filters */}
       <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
@@ -809,44 +792,44 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* Virtualized Responsive Grid */}
       <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
-        <AutoSizer>
-          {({ height, width }) => {
-            // Responsive column count (Tailwind-like breakpoints)
-            const columnCount =
-              width < 640  ? 1 :      // mobile
-              width < 1024 ? 2 :      // tablet/small laptop
-              width < 1400 ? 3 :      // medium desktop
-              4;                      // large/ultra-wide
+        {filteredClients.length > 0 ? (
+          <AutoSizer>
+            {({ height, width }) => {
+              const columnCount = width < 640 ? 1 : width < 1024 ? 2 : width < 1400 ? 3 : 4;
+              const columnWidth = width / columnCount;
+              const rowHeight = 460; 
+              const rowCount = Math.ceil(filteredClients.length / columnCount);
 
-            const columnWidth = width / columnCount;
-            const rowHeight = 460; // tune this after testing (usually 440–480px)
-            const rowCount = Math.ceil(filteredClients.length / columnCount);
-
-            return (
-              <Grid
-                columnCount={columnCount}
-                columnWidth={columnWidth}
-                height={height}
-                rowCount={rowCount}
-                rowHeight={rowHeight}
-                width={width}
-                overscanColumnCount={2}
-                overscanRowCount={3}
-              >
-                {({ columnIndex, rowIndex, style }) => (
-                  <ClientCard 
-                    columnIndex={columnIndex} 
-                    rowIndex={rowIndex} 
-                    style={style} 
-                    columnCount={columnCount} 
-                  />
-                )}
-              </Grid>
-            );
-          }}
-        </AutoSizer>
+              return (
+                <Grid
+                  columnCount={columnCount}
+                  columnWidth={columnWidth}
+                  height={height}
+                  rowCount={rowCount}
+                  rowHeight={rowHeight}
+                  width={width}
+                  overscanColumnCount={2}
+                  overscanRowCount={3}
+                >
+                  {({ columnIndex, rowIndex, style }) => (
+                    <ClientCard 
+                      columnIndex={columnIndex} 
+                      rowIndex={rowIndex} 
+                      style={style} 
+                      columnCount={columnCount} 
+                    />
+                  )}
+                </Grid>
+              );
+            }}
+          </AutoSizer>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400">
+            <Users className="h-12 w-12 mb-2 opacity-20" />
+            <p>No clients found. Click "Add Client" to start.</p>
+          </div>
+        )}
       </div>
 
       <input 
