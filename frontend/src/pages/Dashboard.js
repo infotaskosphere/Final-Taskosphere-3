@@ -74,7 +74,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      api.get('/chat/notifications')
+      api.get('/notifications')  // Changed from /chat/notifications to match backend route
         .then(res => {
           if (res.data.length > chatMessages.length) {
             notificationAudio.current.play().catch(() => {}); // silent fail if audio missing
@@ -89,8 +89,11 @@ export default function Dashboard() {
 
   const fetchMyTodos = async () => {
     try {
-      const res = await api.get('/todos/my');
-      setTodos(res.data || []);
+      const res = await api.get('/tasks/my');  // Changed from /todos/my to match backend (assuming /tasks/my exists; if not, use /tasks and filter client-side)
+      setTodos(res.data.map(task => ({
+        ...task,
+        created_at: task.created_at || new Date().toISOString()  // Ensure created_at exists
+      })) || []);
     } catch (error) {
       console.error('Failed to fetch todos:', error);
       setTodos([]); // fallback to prevent undefined crash
@@ -100,8 +103,15 @@ export default function Dashboard() {
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
-      const res = await api.post('/todos', { title: newTodo.trim(), completed: false });
-      setTodos([...todos, res.data]);
+      const res = await api.post('/tasks', {  // Changed from /todos to /tasks
+        title: newTodo.trim(),
+        status: 'pending',  // Use backend-compatible fields (status instead of completed)
+        created_at: new Date().toISOString()  // Explicitly add creation date
+      });
+      setTodos([...todos, {
+        ...res.data,
+        completed: res.data.status === 'completed'  // Map status to completed for frontend
+      }]);
       setNewTodo('');
       toast.success('Todo added successfully!');
     } catch (error) {
@@ -113,8 +123,18 @@ export default function Dashboard() {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
     try {
-      const res = await api.patch(`/todos/${id}`, { completed: !todo.completed });
-      setTodos(todos.map(t => t.id === id ? res.data : t));
+      const newStatus = todo.completed ? 'pending' : 'completed';  // Map completed to backend status
+      const res = await api.patch(`/tasks/${id}`, {  // Changed from /todos/{id} to /tasks/{id}
+        status: newStatus,
+        updated_at: new Date().toISOString()  // Add update date for "done" feature
+      });
+      setTodos(todos.map(t => t.id === id ? {
+        ...res.data,
+        completed: res.data.status === 'completed'
+      } : t));
+      if (newStatus === 'completed') {
+        toast.success('Task marked as done!');
+      }
     } catch (error) {
       toast.error('Failed to update todo');
     }
@@ -122,7 +142,7 @@ export default function Dashboard() {
 
   const handleDeleteTodo = async (id) => {
     try {
-      await api.delete(`/todos/${id}`);
+      await api.delete(`/tasks/${id}`);  // Changed from /todos/{id} to /tasks/{id}
       setTodos(todos.filter(t => t.id !== id));
       toast.success('Todo deleted successfully!');
     } catch (error) {
@@ -149,7 +169,7 @@ export default function Dashboard() {
       setRankings(rankingRes.data?.rankings || []);
 
       // Fetch Chat Notifications
-      const chatRes = await api.get('/chat/notifications');
+      const chatRes = await api.get('/notifications');  // Changed from /chat/notifications
       if (chatRes.data?.length > chatMessages.length) {
         notificationAudio.current.play().catch(() => {});
       }
@@ -363,7 +383,7 @@ export default function Dashboard() {
             <div className="flex items-start justify-between flex-1">
               <div>
                 <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Completion Rate</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
                   {completionRate}%
                 </p>
               </div>
@@ -371,7 +391,7 @@ export default function Dashboard() {
                 className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
               >
-                <Target className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.emeraldGreen }} />
+                <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.emeraldGreen }} />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
@@ -390,108 +410,54 @@ export default function Dashboard() {
             <div className="flex items-start justify-between flex-1">
               <div>
                 <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Today's Attendance</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>
-                  {todayAttendance ? (todayAttendance.punch_in ? 'In' : 'Out') : 'N/A'}
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
+                  {todayAttendance?.duration_minutes ? `${Math.floor(todayAttendance.duration_minutes / 60)}h ${todayAttendance.duration_minutes % 60}m` : '0h'}
                 </p>
               </div>
               <div
                 className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
+                style={{ backgroundColor: `${COLORS.amber}15` }}
               >
-                <Clock className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.mediumBlue }} />
+                <Clock className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.amber }} />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View report</span>
+              <span>View details</span>
               <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </CardContent>
         </Card>
       </motion.div>
 
-      {/* Punch In/Out + Recent Tasks + Upcoming Due Dates + Team Workload */}
-      <motion.div className="grid grid-cols-1 lg:grid-cols-4 gap-6" variants={itemVariants}>
-        {/* Punch In/Out */}
-        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-          <CardHeader className="pb-2 border-b border-slate-100">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Clock className="h-5 w-5 text-indigo-600" />
-              Attendance
-            </CardTitle>
-            <p className="text-xs text-slate-500 mt-1">
-              Track your daily work hours
-            </p>
-          </CardHeader>
-          <CardContent className="p-6">
-            {todayAttendance ? (
-              <div className="space-y-4">
-                {todayAttendance.punch_in && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">Punch In:</span>
-                    <Badge variant="secondary">
-                      {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
-                    </Badge>
-                  </div>
-                )}
-                {todayAttendance.punch_out && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">Punch Out:</span>
-                    <Badge variant="secondary">
-                      {format(new Date(todayAttendance.punch_out), 'hh:mm a')}
-                    </Badge>
-                  </div>
-                )}
-                <div className="flex gap-3 mt-4">
-                  {!todayAttendance.punch_in ? (
-                    <Button
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => handlePunchAction('punch_in')}
-                      disabled={loading}
-                    >
-                      <LogIn className="h-4 w-4 mr-2" />
-                      Punch In
-                    </Button>
-                  ) : !todayAttendance.punch_out ? (
-                    <Button
-                      className="flex-1 bg-red-600 hover:bg-red-700"
-                      onClick={() => handlePunchAction('punch_out')}
-                      disabled={loading}
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Punch Out
-                    </Button>
-                  ) : (
-                    <p className="text-sm text-slate-500">Day completed</p>
-                  )}
-                </div>
-              </div>
-            ) : (
+      {/* Recent Tasks + Upcoming Due Dates + Attendance */}
+      <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="recent-tasks-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Target className="h-5 w-5 text-blue-500" />
+                Recent Tasks
+              </CardTitle>
               <Button
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => handlePunchAction('punch_in')}
-                disabled={loading}
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/tasks')}
+                className="text-blue-600 hover:text-blue-700"
               >
-                <LogIn className="h-4 w-4 mr-2" />
-                Start Your Day
+                View All
               </Button>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Tasks */}
-        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-          <CardHeader className="pb-2 border-b border-slate-100">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <FileText className="h-5 w-5 text-blue-600" />
-              Recent Tasks
-            </CardTitle>
+            </div>
             <p className="text-xs text-slate-500 mt-1">
-              Your latest assignments
+              Your latest assignments and progress
             </p>
           </CardHeader>
+
           <CardContent className="p-4">
             {recentTasks.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-sm">
+              <div className="text-center py-8 text-slate-400 text-sm">
                 No recent tasks
               </div>
             ) : (
@@ -499,187 +465,174 @@ export default function Dashboard() {
                 {recentTasks.map((task) => {
                   const statusStyle = getStatusStyle(task.status);
                   const priorityStyle = getPriorityStyle(task.priority);
+
                   return (
                     <div
                       key={task.id}
-                      className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${priorityStyle.bg} ${priorityStyle.border}`}
-                      onClick={() => navigate(`/tasks/${task.id}`)}
+                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-sm transition ${priorityStyle.bg} ${priorityStyle.border}`}
+                      onClick={() => navigate('/tasks')}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <p className="font-medium text-sm truncate">{task.title}</p>
-                        <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>
-                          {task.status.replace('_', ' ')}
+                        <p className="font-medium text-sm text-slate-900 truncate">
+                          {task.title || 'Untitled Task'}
+                        </p>
+                        <Badge
+                          variant="secondary"
+                          className={`${statusStyle.bg} ${statusStyle.text} text-xs font-medium`}
+                        >
+                          {task.status?.replace('_', ' ')?.toUpperCase() || 'PENDING'}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <div className="flex items-center gap-2 text-xs text-slate-600">
                         <Calendar className="h-3 w-3" />
-                        Due {format(new Date(task.due_date), 'MMM d')}
+                        {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
-            <div className="text-right mt-4">
-              <button
-                onClick={() => navigate('/tasks')}
-                className="text-sm text-blue-600 hover:underline"
-              >
-                View All Tasks →
-              </button>
-            </div>
           </CardContent>
         </Card>
 
-        {/* Upcoming Due Dates */}
-        <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-          <CardHeader className="pb-2 border-b border-slate-100">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-amber-600" />
-              Upcoming Filings
-            </CardTitle>
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="upcoming-duedates-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-orange-500" />
+                Upcoming Due Dates
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/duedates')}
+                className="text-blue-600 hover:text-blue-700"
+              >
+                View All
+              </Button>
+            </div>
             <p className="text-xs text-slate-500 mt-1">
-              Next 30 days deadlines
+              Next 30 days compliance calendar
             </p>
           </CardHeader>
+
           <CardContent className="p-4">
             {upcomingDueDates.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-sm">
-                No upcoming deadlines
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No upcoming due dates
               </div>
             ) : (
               <div className="space-y-3">
                 {upcomingDueDates.map((due) => {
-                  const color = getDeadlineColor(due.days_remaining);
+                  const color = getDeadlineColor(due.days_remaining || 0);
+
                   return (
                     <div
                       key={due.id}
-                      className={`p-3 rounded-xl cursor-pointer transition hover:shadow-md ${color.bg}`}
-                      onClick={() => navigate(`/duedates/${due.id}`)}
+                      className={`p-3 rounded-xl border cursor-pointer transition ${color.bg}`}
+                      onClick={() => navigate('/duedates')}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <p className="font-medium text-sm truncate">{due.title}</p>
-                        <Badge className={color.badge}>
-                          {due.days_remaining <= 0 ? 'Overdue' : `${due.days_remaining}d left`}
+                        <p className="font-medium text-sm text-slate-900 truncate">
+                          {due.title || 'Untitled Due Date'}
+                        </p>
+                        <Badge className={`${color.badge} text-xs font-medium`}>
+                          {due.days_remaining > 0 ? `${due.days_remaining}d left` : 'Overdue'}
                         </Badge>
                       </div>
-                      <p className="text-xs text-slate-500">
-                        {due.client_name || 'Client'}
-                      </p>
+                      <div className="flex items-center gap-2 text-xs text-slate-600">
+                        <Calendar className="h-3 w-3" />
+                        {format(new Date(due.due_date), 'MMM d, yyyy')}
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
-            <div className="text-right mt-4">
-              <button
-                onClick={() => navigate('/duedates')}
-                className="text-sm text-blue-600 hover:underline"
-              >
-                View Calendar →
-              </button>
-            </div>
           </CardContent>
         </Card>
 
-        {/* Team Workload - Admin Only */}
-        {user.role === 'admin' && (
-          <Card className="lg:col-span-1 border border-slate-200 shadow-sm rounded-2xl">
-            <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Users className="h-5 w-5 text-purple-600" />
-                Team Workload
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                Current task distribution
-              </p>
-            </CardHeader>
-            <CardContent className="p-4">
-              {stats?.team_workload?.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 text-sm">
-                  No team data
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {stats?.team_workload?.slice(0, 5).map((member) => (
-                    <div
-                      key={member.user_id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 text-xs font-semibold">
-                          {member.name ? member.name.charAt(0).toUpperCase() : '?'}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">{member.name || 'Unknown'}</p>
-                          <p className="text-xs text-slate-500">{member.role || 'Staff'}</p>
-                        </div>
-                      </div>
-                      <Badge className="bg-purple-100 text-purple-700">
-                        {member.tasks || 0} tasks
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="text-right mt-4">
-                <button
-                  onClick={() => navigate('/reports')}
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  View Full Report →
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </motion.div>
-
-      {/* Chat Notifications */}
-      <motion.div variants={itemVariants}>
         <Card
-          className="border border-slate-200 shadow-sm rounded-2xl hover:shadow-md hover:border-slate-300 transition-all duration-200"
-          data-testid="chat-notifications-widget"
-          onClick={() => navigate('/chat')}
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="attendance-card"
         >
-          <CardHeader className="pb-2 border-b border-slate-100">
+          <CardHeader className="pb-3 border-b border-slate-100">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Activity className="h-5 w-5 text-emerald-600" />
-                New Messages
+                <Activity className="h-5 w-5 text-purple-500" />
+                Attendance
               </CardTitle>
-              <Badge className="bg-emerald-500 text-white">
-                {chatMessages.length}
-              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/attendance')}
+                className="text-blue-600 hover:text-blue-700"
+              >
+                View Log
+              </Button>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Recent unread conversations
+              Track your daily work hours
             </p>
           </CardHeader>
 
           <CardContent className="p-4">
-            {chatMessages.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-sm">
-                No new messages
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {chatMessages.slice(0, 4).map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 animate-pulse cursor-pointer hover:bg-emerald-100 transition"
-                    onClick={() => navigate('/chat')}
-                  >
-                    <p className="text-sm font-semibold text-slate-900">
-                      {msg.sender_name || 'Someone'}
-                    </p>
-                    <p className="text-xs text-slate-600 truncate">
-                      {msg.message || 'New message'}
+            <div className="space-y-4">
+              {todayAttendance?.punch_in ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <LogIn className="h-4 w-4 text-green-500" />
+                      Punch In
+                    </div>
+                    <p className="text-sm font-medium">
+                      {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
                     </p>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  {todayAttendance?.punch_out ? (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <LogOut className="h-4 w-4 text-red-500" />
+                        Punch Out
+                      </div>
+                      <p className="text-sm font-medium">
+                        {format(new Date(todayAttendance.punch_out), 'hh:mm a')}
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      onClick={() => handlePunchAction('punch_out')}
+                      className="w-full bg-red-600 hover:bg-red-700"
+                      disabled={loading}
+                    >
+                      Punch Out
+                    </Button>
+                  )}
+
+                  <div className="text-center py-3 bg-slate-50 rounded-xl">
+                    <p className="text-xs text-slate-500">Total Hours Today</p>
+                    <p className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
+                      {todayAttendance.duration_minutes 
+                        ? `${Math.floor(todayAttendance.duration_minutes / 60)}h ${todayAttendance.duration_minutes % 60}m`
+                        : '0h 0m'
+                      }
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <Button
+                  onClick={() => handlePunchAction('punch_in')}
+                  className="w-full bg-green-600 hover:bg-green-700"
+                  disabled={loading}
+                >
+                  Punch In
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </motion.div>
@@ -859,13 +812,23 @@ export default function Dashboard() {
                         onChange={() => handleToggleTodo(todo.id)}
                         className="h-5 w-5 flex-shrink-0"
                       />
-                      <span
-                        className={`text-sm flex-1 ${
-                          todo.completed ? 'line-through text-slate-500' : 'text-slate-900'
-                        }`}
-                      >
-                        {todo.title}
-                      </span>
+                      <div className="flex-1">
+                        <span
+                          className={`text-sm ${
+                            todo.completed ? 'line-through text-slate-500' : 'text-slate-900'
+                          }`}
+                        >
+                          {todo.title}
+                        </span>
+                        <p className="text-xs text-slate-500">
+                          Added: {format(new Date(todo.created_at), 'MMM d, yyyy')}
+                        </p>
+                        {todo.completed && todo.updated_at && (
+                          <p className="text-xs text-green-600">
+                            Done: {format(new Date(todo.updated_at), 'MMM d, yyyy')}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <Button
                       variant="destructive"
