@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,19 +6,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import {
-  Plus, Edit, Trash2, Mail, Cake, MessageCircle, Users,
-  Briefcase, BarChart3, Archive, Search, Calendar, History,
-  ArrowDownCircle, ArrowUpCircle, AlertCircle
+import { 
+  Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
+  FileText, Calendar, Search, Users, 
+  Briefcase, BarChart3, Archive, MessageCircle, Trash 
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
+import AutoSizer from 'react-virtualized-auto-sizer';
+import { FixedSizeGrid as Grid } from 'react-window';
 
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
@@ -34,8 +35,6 @@ const SERVICES = [
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
 
-const ITEMS_PER_PAGE = 6;
-
 export default function Clients() {
   const { user } = useAuth();
   const [clients, setClients] = useState([]);
@@ -45,25 +44,13 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
 
-  // Filters
+  // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('active');
 
-  // DSC states
-  const [clientDSCs, setClientDSCs] = useState([]);
-  const [dscFormOpen, setDscFormOpen] = useState(false);
-  const [editingDSC, setEditingDSC] = useState(null);
-  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
-  const [logDialogOpen, setLogDialogOpen] = useState(false);
-  const [selectedDSC, setSelectedDSC] = useState(null);
-  const [movementData, setMovementData] = useState({
-    movement_type: 'IN',
-    person_name: '',
-    notes: '',
-  });
+  const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     company_name: '',
@@ -88,181 +75,157 @@ export default function Clients() {
     setCurrentPage(1);
   }, [searchTerm, serviceFilter, statusFilter, clients.length]);
 
-  useEffect(() => {
-    if (editingClient?.id) {
-      fetchClientDSCs(editingClient.id);
-      setOtherService(
-        editingClient.services?.find(s => s.startsWith('Other:'))?.replace('Other: ', '') || ''
-      );
-    }
-  }, [editingClient]);
-
   const fetchClients = async () => {
     try {
-      const res = await api.get('/clients');
-      setClients(res.data);
-    } catch (err) {
+      const response = await api.get('/clients');
+      setClients(response.data || []);
+    } catch (error) {
       toast.error('Failed to fetch clients');
     }
   };
 
   const fetchUsers = async () => {
     try {
-      const res = await api.get('/users');
-      setUsers(res.data);
-    } catch (err) {
-      console.error(err);
+      const response = await api.get('/users');
+      setUsers(response.data);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
     }
   };
 
-  const fetchClientDSCs = async (clientId) => {
-    try {
-      const res = await api.get(`/clients/${clientId}/dscs`);
-      setClientDSCs(res.data || []);
-    } catch (err) {
-      toast.error('Failed to load DSCs');
-    }
+  // ==================== UTILS ====================
+
+  const openWhatsApp = (phone, name = "") => {
+    const cleanPhone = phone?.replace(/\D/g, '') || '';
+    const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
+    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
 
-  // ─── Utils ────────────────────────────────────────────────
-
-  const openWhatsApp = (phone, name = '') => {
-    const clean = phone.replace(/\D/g, '');
-    const msg = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
-    window.open(`https://wa.me/${clean}?text=${msg}`, '_blank');
-  };
-
-  const getDSCStatus = (expiryDate) => {
-    const now = new Date();
-    const expiry = new Date(expiryDate);
-    const days = Math.ceil((expiry - now) / (86400000));
-    if (days < 0) return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
-    if (days <= 7) return { color: 'bg-red-500', text: `${days} Days left`, textColor: 'text-red-700' };
-    if (days <= 30) return { color: 'bg-yellow-500', text: `${days} Days left`, textColor: 'text-yellow-700' };
-    return { color: 'bg-emerald-500', text: `${days} Days left`, textColor: 'text-emerald-700' };
-  };
-
-  const getDSCInOutStatus = (dsc) => {
-    if (!dsc) return 'OUT';
-    if (dsc.current_status) return dsc.current_status;
-    return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
-  };
-
-  // ─── Memoized ─────────────────────────────────────────────
+  // ==================== MEMOIZED DATA ====================
 
   const stats = useMemo(() => {
-    const total = clients.length;
-    const active = clients.filter(c => (c.status || 'active') === 'active').length;
+    const totalClients = clients.length;
+    const activeClients = clients.filter(c => (c?.status || 'active') === 'active').length;
     const serviceCounts = {};
     clients.forEach(c => {
-      if ((c.status || 'active') === 'active' && c.services) {
+      if ((c?.status || 'active') === 'active' && c?.services) {
         c.services.forEach(s => {
-          const key = s.startsWith('Other:') ? 'Other' : s;
-          serviceCounts[key] = (serviceCounts[key] || 0) + 1;
+          const name = s?.startsWith('Other:') ? 'Other' : s;
+          serviceCounts[name] = (serviceCounts[name] || 0) + 1;
         });
       }
     });
-    return { totalClients: total, activeClients: active, serviceCounts };
+    return { totalClients, activeClients, serviceCounts };
   }, [clients]);
 
   const todayReminders = useMemo(() => {
     const today = startOfDay(new Date());
     return clients.filter(c => {
-      if (c.birthday) {
-        const d = new Date(c.birthday);
-        if (d.getMonth() === today.getMonth() && d.getDate() === today.getDate()) return true;
+      if (c?.birthday) {
+        const anniv = new Date(c.birthday);
+        if (anniv.getMonth() === today.getMonth() && anniv.getDate() === today.getDate()) return true;
       }
-      return c.contact_persons?.some(cp => {
-        if (!cp.birthday) return false;
-        const d = new Date(cp.birthday);
-        return d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
-      });
+      return c?.contact_persons?.some(cp => {
+        if (!cp?.birthday) return false;
+        const bday = new Date(cp.birthday);
+        return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
+      }) ?? false;
     });
   }, [clients]);
 
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
-      const searchMatch =
-        c.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.phone?.includes(searchTerm);
+      const matchesSearch = 
+        (c?.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c?.phone || '').includes(searchTerm);
 
-      const serviceMatch =
-        serviceFilter === 'all' ||
-        c.services?.some(s => s.toLowerCase().includes(serviceFilter.toLowerCase()));
+      const matchesService = serviceFilter === 'all' ||
+                            (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
 
-      const statusMatch = statusFilter === 'all' || (c.status || 'active') === statusFilter;
+      const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
 
-      return searchMatch && serviceMatch && statusMatch;
+      return matchesSearch && matchesService && matchesStatus;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
 
-  const currentClients = filteredClients.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
 
-  const totalPages = Math.ceil(filteredClients.length / ITEMS_PER_PAGE);
+  // ==================== HANDLERS ====================
 
-  // ─── Handlers ─────────────────────────────────────────────
-
-  const toggleService = (service) => {
-    setFormData(prev => ({
-      ...prev,
-      services: prev.services.includes(service)
-        ? prev.services.filter(s => s !== service)
-        : [...prev.services, service],
-    }));
+  const downloadTemplate = () => {
+    const headers = ['company_name', 'client_type', 'email', 'phone', 'birthday', 'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1', 'services', 'notes'];
+    const csvContent = headers.join(',') + '\n' + '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15","Rahul Sharma","Director","rahul@abc.com","GST,Income Tax","Notes"';
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'clients-import-template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const addContactPerson = () => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: [...prev.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }],
-    }));
-  };
-
-  const updateContactPerson = (index, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: prev.contact_persons.map((cp, i) =>
-        i === index ? { ...cp, [field]: value } : cp
-      ),
-    }));
-  };
-
-  const removeContactPerson = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      contact_persons: prev.contact_persons.filter((_, i) => i !== index),
-    }));
+  const handleImportCSV = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setImportLoading(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        let count = 0;
+        for (let row of results.data) {
+          if (!row.company_name) continue;
+          try {
+            await api.post('/clients', {
+              company_name: row.company_name,
+              client_type: row.client_type || 'proprietor',
+              email: row.email,
+              phone: row.phone,
+              birthday: row.birthday || '',
+              services: row.services ? row.services.split(',').map(s => s.trim()) : [],
+              contact_persons: [{ name: row.contact_name_1 || '', designation: row.contact_designation_1 || '', email: row.contact_email_1 || '', phone: row.contact_phone_1 || '', birthday: '' }],
+              status: 'active'
+            });
+            count++;
+          } catch (e) { console.error(e); }
+        }
+        setImportLoading(false);
+        if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      let finalServices = [...formData.services].filter(s => !s.startsWith('Other:'));
+      let finalServices = [...formData.services];
+      finalServices = finalServices.filter(s => !s.startsWith('Other:'));
       if (otherService.trim() && formData.services.includes('Other')) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
 
-      const payload = { ...formData, services: finalServices };
+      const data = { 
+        ...formData,
+        services: finalServices,
+        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to 
+      };
 
       if (editingClient) {
-        await api.put(`/clients/${editingClient.id}`, payload);
-        toast.success('Client updated');
+        await api.put(`/clients/${editingClient.id}`, data);
       } else {
-        await api.post('/clients', payload);
-        toast.success('Client created');
+        await api.post('/clients', data);
       }
 
       setDialogOpen(false);
       resetForm();
       fetchClients();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Save failed');
+      toast.success('Saved successfully!');
+    } catch (error) {
+      toast.error('Error saving client');
     } finally {
       setLoading(false);
     }
@@ -271,95 +234,494 @@ export default function Clients() {
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
-      company_name: client.company_name || '',
-      client_type: client.client_type || 'proprietor',
-      contact_persons: client.contact_persons?.length
-        ? client.contact_persons
-        : [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
-      email: client.email || '',
-      phone: client.phone || '',
-      birthday: client.birthday || '',
-      services: client.services || [],
-      assigned_to: client.assigned_to || 'unassigned',
-      notes: client.notes || '',
-      status: client.status || 'active',
+      ...client,
+      contact_persons: client?.contact_persons?.map(cp => ({ 
+        ...cp, 
+        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '' 
+      })) || [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
+      birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
+      status: client?.status || 'active',
+      assigned_to: client?.assigned_to || 'unassigned',
+      dsc_details: client?.dsc_details || []
     });
+    const other = client?.services?.find(s => s.startsWith('Other: '));
+    setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true);
   };
 
   const resetForm = () => {
-    setFormData({
-      company_name: '',
-      client_type: 'proprietor',
-      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
-      email: '',
-      phone: '',
-      birthday: '',
-      services: [],
-      assigned_to: 'unassigned',
-      notes: '',
-      status: 'active',
+    setFormData({ 
+      company_name: '', 
+      client_type: 'proprietor', 
+      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }], 
+      email: '', 
+      phone: '', 
+      birthday: '', 
+      services: [], 
+      dsc_details: [], 
+      assigned_to: 'unassigned', 
+      notes: '', 
+      status: 'active' 
     });
     setOtherService('');
     setEditingClient(null);
   };
 
-  const handleToggleStatus = async (id, current) => {
-    const next = current === 'active' ? 'inactive' : 'active';
-    try {
-      await api.put(`/clients/${id}`, { status: next });
-      toast.success(`Client ${next === 'active' ? 'activated' : 'archived'}`);
-      fetchClients();
-    } catch {
-      toast.error('Status update failed');
+  // ==================== DYNAMIC FIELDS ====================
+
+  const updateContact = (idx, field, val) => setFormData(p => ({ 
+    ...p, 
+    contact_persons: p.contact_persons.map((c, i) => 
+      i === idx ? { ...c, [field]: val } : c
+    ) 
+  }));
+
+  const addContact = () => setFormData(p => ({ 
+    ...p, 
+    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }] 
+  }));
+
+  const removeContact = (idx) => setFormData(p => ({ 
+    ...p, 
+    contact_persons: p.contact_persons.filter((_, i) => i !== idx) 
+  }));
+
+  const updateDSC = (idx, field, val) => setFormData(p => ({
+    ...p,
+    dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
+  }));
+
+  const addDSC = () => setFormData(p => ({
+    ...p,
+    dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
+  }));
+
+  const removeDSC = (idx) => setFormData(p => ({
+    ...p,
+    dsc_details: p.dsc_details.filter((_, i) => i !== idx)
+  }));
+
+  const toggleService = (s) => setFormData(p => {
+    const services = p.services.includes(s) 
+      ? p.services.filter(x => x !== s) 
+      : [...p.services, s];
+    return { ...p, services };
+  });
+
+  const addOtherService = () => {
+    if (otherService.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        services: [
+          ...prev.services.filter(s => !s.startsWith('Other:')),
+          `Other: ${otherService.trim()}`
+        ]
+      }));
+      setOtherService('');
     }
   };
 
-  // DSC handlers (kept minimal – expand as needed)
+  // ────────────────────────────────────────────────
+  // Virtualized Client Card Renderer
+  // ────────────────────────────────────────────────
 
-  const handleDSCSubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const data = Object.fromEntries(fd);
+  const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
+    const index = rowIndex * columnCount + columnIndex;
+    const client = filteredClients[index];
 
-    const payload = {
-      ...data,
-      client_id: editingClient.id,
-      associated_with: editingClient.company_name,
-      issue_date: new Date(data.issue_date).toISOString(),
-      expiry_date: new Date(data.expiry_date).toISOString(),
-    };
+    if (index >= filteredClients.length || !client) return null;
 
-    try {
-      if (editingDSC) {
-        await api.put(`/dsc/${editingDSC.id}`, payload);
-        toast.success('DSC updated');
-      } else {
-        await api.post('/dsc', payload);
-        toast.success('DSC added');
-      }
-      setDscFormOpen(false);
-      setEditingDSC(null);
-      fetchClientDSCs(editingClient.id);
-    } catch {
-      toast.error('DSC save failed');
-    }
+    return (
+      <div style={style} className="p-3 box-border">
+        <Card 
+          className={`h-full overflow-hidden transition-all border-slate-200 flex flex-col ${
+            client.status === 'inactive' ? 'opacity-60 grayscale-[0.2]' : 'hover:shadow-md'
+          }`}
+        >
+          <CardHeader className="pb-3 border-b bg-slate-50/50">
+            <div className="flex justify-between items-start">
+              <div>
+                <CardTitle className="text-base font-bold">
+                  {getClientNumber(index)} {client.company_name}
+                </CardTitle>
+                <p className="text-[10px] text-slate-500">
+                  {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {client.status === 'inactive' && (
+                  <Badge variant="outline" className="text-[8px] uppercase text-slate-300 border-slate-200">
+                    Archived
+                  </Badge>
+                )}
+                {client.birthday && <Calendar className="h-4 w-4 text-blue-400" />}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4 flex-1 flex flex-col">
+            <div className="text-xs space-y-1 text-slate-600 font-medium flex-1">
+              <p className="flex items-center gap-2">
+                <Mail className="h-3 w-3 text-slate-400" /> {client.email || '—'}
+              </p>
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-2">
+                  <Briefcase className="h-3 w-3 text-slate-400" /> {client.phone || '—'}
+                </p>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-full" 
+                  onClick={() => openWhatsApp(client.phone, client.company_name)}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {client.services?.slice(0, 3).map(s => (
+                <Badge key={s} variant="secondary" className="text-[9px] bg-slate-100 text-slate-500 border-none px-2 rounded-full">
+                  {s.replace('Other: ', '')}
+                </Badge>
+              ))}
+              {client.services?.length > 3 && (
+                <span className="text-[9px] text-slate-400 ml-1">+{client.services.length - 3}</span>
+              )}
+            </div>
+            <div className="flex gap-2 pt-3 border-t justify-end mt-auto">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-8 text-indigo-600 hover:bg-indigo-50 px-3" 
+                onClick={() => handleEdit(client)}
+              >
+                <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+              </Button>
+              {user?.role === 'admin' && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 text-red-500 hover:bg-red-50 px-3" 
+                  onClick={() => {
+                    if (confirm("Delete client record?")) {
+                      api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
   };
 
-  // ... (rest of DSC handlers like handleDeleteDSC, openMovementDialog, etc. remain the same)
+  // ────────────────────────────────────────────────
+  // Render
+  // ────────────────────────────────────────────────
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* Birthday reminders */}
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 font-outfit">Client Management</h1>
+          <p className="text-slate-600 mt-1">Manage firm clients and track details</p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="outline" onClick={downloadTemplate} className="border-indigo-600 text-indigo-600">
+            <FileText className="mr-2 h-4 w-4" />CSV Format
+          </Button>
+          <Button 
+            variant="secondary" 
+            onClick={() => fileInputRef.current?.click()} 
+            disabled={importLoading}
+          >
+            {importLoading ? 'Importing...' : 'Add CSV'}
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { 
+            setDialogOpen(open); 
+            if (!open) resetForm(); 
+          }}>
+            <DialogTrigger asChild>
+              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg transition-all">
+                <Plus className="mr-2 h-5 w-5" /> Add Client
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto bg-white rounded-3xl border-none shadow-2xl">
+              <div className="p-8 space-y-8">
+                <DialogHeader className="flex flex-row justify-between items-center">
+                  <div>
+                    <DialogTitle className="text-2xl font-bold font-outfit">Client Entry</DialogTitle>
+                    <DialogDescription>Enter core client information below.</DialogDescription>
+                  </div>
+                  <div className="flex items-center gap-3 bg-slate-50 px-3 py-1.5 rounded-xl border">
+                    <Label className="text-[10px] font-bold uppercase text-slate-400">Status: {formData.status}</Label>
+                    <Switch 
+                      checked={formData.status === 'active'} 
+                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})} 
+                    />
+                  </div>
+                </DialogHeader>
+
+                <form onSubmit={handleSubmit} className="space-y-8">
+                  {/* Basic Info */}
+                  <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
+                    <h3 className="text-base font-bold text-slate-800">Basic Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-slate-500">Company Name *</Label>
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          value={formData.company_name} 
+                          onChange={e => setFormData({...formData, company_name: e.target.value})} 
+                          required 
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-slate-500">Client Type *</Label>
+                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                          <SelectTrigger className="bg-white border-slate-200 h-11">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-slate-500">Email *</Label>
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          type="email" 
+                          value={formData.email} 
+                          onChange={e => setFormData({...formData, email: e.target.value})} 
+                          required 
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-slate-500">Phone *</Label>
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          value={formData.phone} 
+                          onChange={e => setFormData({...formData, phone: e.target.value})} 
+                          required 
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-slate-500">Date of Incorporation / Birthday</Label>
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          type="date" 
+                          value={formData.birthday} 
+                          onChange={e => setFormData({...formData, birthday: e.target.value})} 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contact Persons */}
+                  <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-800">Contact Persons</h3>
+                        <p className="text-xs text-slate-400">Manage associated contacts</p>
+                      </div>
+                      <Button 
+                        type="button" 
+                        size="sm" 
+                        onClick={addContact} 
+                        variant="outline" 
+                        className="h-9 bg-white border-slate-200 rounded-lg"
+                      >
+                        <Plus className="h-4 w-4 mr-1.5" /> Add Contact
+                      </Button>
+                    </div>
+                    <div className="space-y-4">
+                      {formData.contact_persons.map((cp, idx) => (
+                        <div 
+                          key={idx}
+                          className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm relative space-y-4"
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-bold text-slate-700">Contact Person #{idx + 1}</span>
+                            {formData.contact_persons.length > 1 && (
+                              <Button 
+                                type="button" 
+                                size="icon" 
+                                variant="ghost" 
+                                onClick={() => removeContact(idx)}
+                                className="h-8 w-8 text-slate-300 hover:text-red-500"
+                              >
+                                <Trash className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">Name</Label>
+                              <Input 
+                                value={cp.name} 
+                                onChange={e => updateContact(idx, 'name', e.target.value)} 
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">Designation</Label>
+                              <Input 
+                                value={cp.designation} 
+                                onChange={e => updateContact(idx, 'designation', e.target.value)} 
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">Email</Label>
+                              <Input 
+                                type="email"
+                                value={cp.email} 
+                                onChange={e => updateContact(idx, 'email', e.target.value)} 
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">Phone</Label>
+                              <Input 
+                                value={cp.phone} 
+                                onChange={e => updateContact(idx, 'phone', e.target.value)} 
+                              />
+                            </div>
+                            <div className="col-span-2 space-y-2">
+                              <Label className="text-xs text-slate-500">Birthday</Label>
+                              <Input 
+                                type="date" 
+                                value={cp.birthday || ''} 
+                                onChange={e => updateContact(idx, 'birthday', e.target.value)} 
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Services */}
+                  <div className="space-y-4">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Services *</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {SERVICES.map(s => (
+                        <Badge 
+                          key={s}
+                          variant={
+                            formData.services.includes(s) || 
+                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))) 
+                              ? "default" 
+                              : "outline"
+                          }
+                          className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]"
+                          onClick={() => toggleService(s)}
+                        >
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                    {formData.services.includes('Other') && (
+                      <div className="flex gap-2 items-end">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-xs text-slate-500">Specify other service</Label>
+                          <Input 
+                            placeholder="e.g. IEC Registration, FEMA Compliance..." 
+                            value={otherService} 
+                            onChange={e => setOtherService(e.target.value)} 
+                          />
+                        </div>
+                        <Button 
+                          type="button" 
+                          size="sm" 
+                          onClick={addOtherService}
+                        >
+                          Add
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Notes */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Notes</Label>
+                    <Textarea 
+                      className="bg-slate-50 border-slate-100 min-h-[120px] rounded-xl" 
+                      placeholder="Additional information, remarks, internal notes..." 
+                      value={formData.notes} 
+                      onChange={e => setFormData({...formData, notes: e.target.value})} 
+                    />
+                  </div>
+
+                  {/* Assigned To */}
+                  {(user?.role === 'admin' || user?.role === 'manager') && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Assigned To</Label>
+                      <Select 
+                        value={formData.assigned_to} 
+                        onValueChange={v => setFormData({...formData, assigned_to: v})}
+                      >
+                        <SelectTrigger className="bg-white border-slate-200 h-11">
+                          <SelectValue placeholder="Select staff member" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unassigned">Unassigned</SelectItem>
+                          {users.map(u => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.name || u.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <DialogFooter className="sticky bottom-0 bg-white pt-6 pb-4 border-t flex flex-col sm:flex-row gap-3">
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="button" variant="outline" onClick={downloadTemplate}>
+                        CSV Format
+                      </Button>
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <Button 
+                        type="button" 
+                        className="bg-indigo-600 text-white" 
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Add CSV
+                      </Button>
+                      <Button 
+                        type="submit" 
+                        disabled={loading} 
+                        className="bg-indigo-900 text-white px-10"
+                      >
+                        {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Create Client'}
+                      </Button>
+                    </div>
+                  </DialogFooter>
+                </form>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Birthday Reminders */}
       {(user?.role === 'admin' || user?.role === 'manager') && todayReminders.length > 0 && (
-        <Card className="bg-pink-50 border-pink-100">
+        <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
-            <Cake className="h-6 w-6 text-pink-600" />
+            <div className="p-2 bg-white rounded-full text-pink-500 shadow-sm">
+              <Cake className="h-5 w-5" />
+            </div>
             <div>
-              <h4 className="font-semibold text-pink-900">Today's Birthdays</h4>
+              <h4 className="text-sm font-bold text-pink-900">Today's Celebrations</h4>
               <div className="flex flex-wrap gap-2 mt-1">
                 {todayReminders.map(c => (
-                  <Badge key={c.id} variant="outline" className="bg-white">
+                  <Badge key={c.id} className="bg-white text-pink-700 border-pink-200 shadow-sm">
                     {c.company_name}
                   </Badge>
                 ))}
@@ -369,372 +731,131 @@ export default function Clients() {
         </Card>
       )}
 
-      {/* Stats - Admin only */}
+      {/* Admin Stats */}
       {user?.role === 'admin' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total Clients</p>
-              <p className="text-2xl font-bold">{stats.totalClients}</p>
-            </CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+              <Users className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase text-slate-400 font-bold">Total Clients</p>
+              <h2 className="text-xl font-bold">{stats.totalClients}</h2>
+            </div>
           </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Active</p>
-              <p className="text-2xl font-bold">{stats.activeClients}</p>
-            </CardContent>
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+              <Briefcase className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase text-slate-400 font-bold">Active</p>
+              <h2 className="text-xl font-bold">{stats.activeClients}</h2>
+            </div>
           </Card>
-          {/* ... add more stats */}
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+              <Archive className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase text-slate-400 font-bold">Archived</p>
+              <h2 className="text-xl font-bold">{stats.totalClients - stats.activeClients}</h2>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
+            <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
+              <BarChart3 className="h-5 w-5" />
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-[10px] uppercase text-slate-400 font-bold">Top Service</p>
+              <h2 className="text-sm font-bold truncate">
+                {Object.entries(stats.serviceCounts).sort((a,b) => b[1] - a[1])[0]?.[0] || 'N/A'}
+              </h2>
+            </div>
+          </Card>
         </div>
       )}
 
       {/* Search & Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search company, email, phone..."
-            className="pl-9"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
+          <Input 
+            placeholder="Search company, email or phone..." 
+            className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500" 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)} 
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Archived</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={serviceFilter} onValueChange={setServiceFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Service" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Services</SelectItem>
-            {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Client Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {currentClients.map((client, idx) => (
-          <Card key={client.id} className="overflow-hidden">
-            <CardHeader className="pb-3 bg-muted/40">
-              <div className="flex justify-between">
-                <div>
-                  <CardTitle className="text-base">
-                    #{String(idx + 1 + (currentPage - 1) * ITEMS_PER_PAGE).padStart(3, '0')} {client.company_name}
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
-                  </p>
-                </div>
-                {client.status === 'inactive' && (
-                  <Badge variant="secondary">Archived</Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-muted-foreground" />
-                  {client.email || '—'}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => openWhatsApp(client.phone, client.company_name)}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {client.services?.slice(0, 3).map(s => (
-                  <Badge key={s} variant="outline">
-                    {s.replace('Other: ', '')}
-                  </Badge>
-                ))}
-                {client.services?.length > 3 && (
-                  <span className="text-xs text-muted-foreground">+{client.services.length - 3}</span>
-                )}
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => handleEdit(client)}>
-                  <Edit className="h-3.5 w-3.5 mr-1" /> Edit
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center gap-4 mt-6">
-          <Button
-            variant="outline"
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(p => p - 1)}
-          >
-            Previous
-          </Button>
-          <span className="py-2 px-4 bg-muted rounded">
-            Page {currentPage} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(p => p + 1)}
-          >
-            Next
-          </Button>
+        <div className="flex gap-2">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-10 bg-slate-50 border-none w-[110px] text-xs">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Archived</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={serviceFilter} onValueChange={setServiceFilter}>
+            <SelectTrigger className="h-10 bg-slate-50 border-none w-[150px] text-xs">
+              <SelectValue placeholder="Service" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Services</SelectItem>
+              {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-      )}
+      </div>
 
-      {/* ─── Client Edit/Create Dialog ────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingClient ? 'Edit Client' : 'Add Client'}</DialogTitle>
-          </DialogHeader>
+      {/* Virtualized Responsive Grid */}
+      <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
+        <AutoSizer>
+          {({ height, width }) => {
+            // Responsive column count (Tailwind-like breakpoints)
+            const columnCount =
+              width < 640  ? 1 :      // mobile
+              width < 1024 ? 2 :      // tablet/small laptop
+              width < 1400 ? 3 :      // medium desktop
+              4;                      // large/ultra-wide
 
-          <form onSubmit={handleSubmit} className="space-y-8 py-4">
-            {/* Company Details */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Company Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Company Name *</Label>
-                  <Input
-                    required
-                    value={formData.company_name}
-                    onChange={e => setFormData({ ...formData, company_name: e.target.value })}
+            const columnWidth = width / columnCount;
+            const rowHeight = 460; // tune this after testing (usually 440–480px)
+            const rowCount = Math.ceil(filteredClients.length / columnCount);
+
+            return (
+              <Grid
+                columnCount={columnCount}
+                columnWidth={columnWidth}
+                height={height}
+                rowCount={rowCount}
+                rowHeight={rowHeight}
+                width={width}
+                overscanColumnCount={2}
+                overscanRowCount={3}
+              >
+                {({ columnIndex, rowIndex, style }) => (
+                  <ClientCard 
+                    columnIndex={columnIndex} 
+                    rowIndex={rowIndex} 
+                    style={style} 
+                    columnCount={columnCount} 
                   />
-                </div>
-                <div>
-                  <Label>Client Type</Label>
-                  <Select
-                    value={formData.client_type}
-                    onValueChange={v => setFormData({ ...formData, client_type: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CLIENT_TYPES.map(t => (
-                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.email}
-                    onChange={e => setFormData({ ...formData, email: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label>Phone</Label>
-                  <Input
-                    value={formData.phone}
-                    onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label>Anniversary / Birthday</Label>
-                  <Input
-                    type="date"
-                    value={formData.birthday}
-                    onChange={e => setFormData({ ...formData, birthday: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
+                )}
+              </Grid>
+            );
+          }}
+        </AutoSizer>
+      </div>
 
-            {/* Contact Persons */}
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Contact Persons</h3>
-                <Button type="button" variant="outline" size="sm" onClick={addContactPerson}>
-                  <Plus className="h-4 w-4 mr-2" /> Add Person
-                </Button>
-              </div>
-              {formData.contact_persons.map((cp, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-3 border p-4 rounded-lg relative">
-                  <div>
-                    <Label>Name</Label>
-                    <Input
-                      value={cp.name}
-                      onChange={e => updateContactPerson(idx, 'name', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Designation</Label>
-                    <Input
-                      value={cp.designation}
-                      onChange={e => updateContactPerson(idx, 'designation', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Email</Label>
-                    <Input
-                      type="email"
-                      value={cp.email}
-                      onChange={e => updateContactPerson(idx, 'email', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Phone</Label>
-                    <Input
-                      value={cp.phone}
-                      onChange={e => updateContactPerson(idx, 'phone', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Birthday</Label>
-                    <Input
-                      type="date"
-                      value={cp.birthday || ''}
-                      onChange={e => updateContactPerson(idx, 'birthday', e.target.value)}
-                    />
-                  </div>
-                  {formData.contact_persons.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute top-2 right-2 text-red-600"
-                      onClick={() => removeContactPerson(idx)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Services */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Services</h3>
-              <div className="flex flex-wrap gap-2">
-                {SERVICES.map(s => (
-                  <Button
-                    key={s}
-                    type="button"
-                    variant={formData.services.includes(s) ? 'default' : 'outline'}
-                    className="rounded-full"
-                    onClick={() => toggleService(s)}
-                  >
-                    {s}
-                  </Button>
-                ))}
-              </div>
-
-              {formData.services.includes('Other') && (
-                <div className="mt-4 p-4 bg-muted/40 rounded-lg border border-indigo-200">
-                  <Label className="text-indigo-800">Specify other service</Label>
-                  <Input
-                    className="mt-2"
-                    placeholder="e.g. IEC Registration, FEMA, MSME..."
-                    value={otherService}
-                    onChange={e => setOtherService(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Notes */}
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={formData.notes}
-                onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                placeholder="Additional information..."
-                rows={4}
-              />
-            </div>
-
-            {/* Assigned To & Status */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {user?.role === 'admin' && (
-                <div>
-                  <Label>Assigned To</Label>
-                  <Select
-                    value={formData.assigned_to}
-                    onValueChange={v => setFormData({ ...formData, assigned_to: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select staff" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users.map(u => (
-                        <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3">
-                <Label>Active</Label>
-                <Switch
-                  checked={formData.status === 'active'}
-                  onCheckedChange={checked =>
-                    setFormData({ ...formData, status: checked ? 'active' : 'inactive' })
-                  }
-                />
-              </div>
-            </div>
-
-            {/* DSC Section – placeholder (add your full DSC UI here if needed) */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-semibold">DSC Management</h3>
-              <p className="text-sm text-muted-foreground mt-2">
-                DSC features available when editing an existing client.
-              </p>
-              {/* → Insert your Tabs + DSC table + dialogs here */}
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : editingClient ? 'Update' : 'Create'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* DSC Add/Edit Dialog – minimal version */}
-      <Dialog open={dscFormOpen} onOpenChange={setDscFormOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingDSC ? 'Edit DSC' : 'Add DSC'}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleDSCSubmit}>
-            {/* Add your DSC fields here */}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDscFormOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit">Save</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Keep your other dialogs (movement, log) as they were */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        accept=".csv" 
+        onChange={handleImportCSV} 
+        className="hidden" 
+      />
     </div>
   );
 }
