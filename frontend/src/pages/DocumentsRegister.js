@@ -788,86 +788,90 @@ export default function DocumentRegister() {
             </div>
           </CardContent>
         </Card>
-            {/* MOVEMENT DIALOG */}
-      <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl">
-              Mark Document as {movementData?.movement_type}
-            </DialogTitle>
-            <DialogDescription>
-              {movementData?.movement_type === 'IN'
-                ? 'Record when Document is delivered/returned'
-                : 'Record when Document is taken out'}
-            </DialogDescription>
-          </DialogHeader>
+      )}
+      {/* MOVEMENT DIALOG */}
+<Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle className="font-outfit text-2xl">
+        Mark Document as {movementData?.movement_type}
+      </DialogTitle>
+      <DialogDescription>
+        {movementData?.movement_type === 'IN'
+          ? 'Record when Document is delivered/returned'
+          : 'Record when Document is taken out'}
+      </DialogDescription>
+    </DialogHeader>
 
-          <form onSubmit={handleMovement} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Document Certificate</Label>
-              <p className="text-sm font-medium">
-                {selectedDocument?.holder_name}
-              </p>
-            </div>
+    <form onSubmit={handleMovement} className="space-y-4">
+      <div className="space-y-2">
+        <Label>Document Certificate</Label>
+        <p className="text-sm font-medium">
+          {selectedDocument?.holder_name}
+        </p>
+      </div>
 
-            <div className="space-y-2">
-              <Label>
-                {movementData?.movement_type === 'IN'
-                  ? 'Delivered By *'
-                  : 'Taken By *'}
-              </Label>
-              <Input
-                value={movementData.person_name}
-                onChange={(e) =>
-                  setMovementData({
-                    ...movementData,
-                    person_name: e.target.value,
-                  })
-                }
-                required
-              />
-            </div>
+      <div className="space-y-2">
+        <Label>
+          {movementData?.movement_type === 'IN'
+            ? 'Delivered By *'
+            : 'Taken By *'}
+        </Label>
+        <Input
+          value={movementData.person_name}
+          onChange={(e) =>
+            setMovementData({
+              ...movementData,
+              person_name: e.target.value,
+            })
+          }
+          required
+        />
+      </div>
 
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={movementData.notes}
-                onChange={(e) =>
-                  setMovementData({
-                    ...movementData,
-                    notes: e.target.value,
-                  })
-                }
-              />
-            </div>
+      <div className="space-y-2">
+        <Label>Notes</Label>
+        <Textarea
+          value={movementData.notes}
+          onChange={(e) =>
+            setMovementData({
+              ...movementData,
+              notes: e.target.value,
+            })
+          }
+        />
+      </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMovementDialogOpen(false)}
-              >
-                Cancel
-              </Button>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setMovementDialogOpen(false)}
+        >
+          Cancel
+        </Button>
 
-              <Button
-                type="submit"
-                disabled={loading}
-                className={
-                  movementData?.movement_type === 'IN'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-red-600 hover:bg-red-700'
-                }
-              >
-                {loading
-                  ? 'Recording...'
-                  : `Mark as ${movementData.movement_type}`}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-     {/* MOVEMENT LOG DIALOG */}
+        <Button
+          type="submit"
+          disabled={loading}
+          className={
+            movementData?.movement_type === 'IN'
+              ? 'bg-emerald-600 hover:bg-emerald-700'
+              : 'bg-red-600 hover:bg-red-700'
+          }
+        >
+          {loading
+            ? 'Recording...'
+            : `Mark as ${movementData.movement_type}`}
+        </Button>
+      </DialogFooter>
+    </form>
+  </DialogContent>
+</Dialog>
+
+</div>
+);
+}
       function DocumentTable({
   DocumentList,
   onEdit,
