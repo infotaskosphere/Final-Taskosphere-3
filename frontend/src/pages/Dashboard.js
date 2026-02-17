@@ -614,10 +614,10 @@ export default function Dashboard() {
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 text-xs font-semibold">
-                            {member.name.charAt(0)}
+                            {member.name ? member.name.charAt(0) : '?'}
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-slate-900">{member.name}</p>
+                            <p className="text-sm font-medium text-slate-900">{member.name || 'Unknown'}</p>
                             <p className="text-xs text-slate-500">{member.role}</p>
                           </div>
                         </div>
@@ -783,7 +783,7 @@ export default function Dashboard() {
                                   ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
                                 `}
                               >
-                                {member.name?.charAt(0)}
+                                {member.name ? member.name.charAt(0) : '?'}
                               </div>
                             )}
                           </div>
@@ -791,7 +791,7 @@ export default function Dashboard() {
                           {/* Name + Role */}
                           <div>
                             <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
-                              {member.name}
+                              {member.name || 'Unknown'}
                             </p>
                             <p className="text-xs text-slate-500 capitalize">
                               {member.role}
