@@ -1013,9 +1013,6 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 <td className="px-6 py-4 text-sm font-medium text-slate-500">
                   {index + 1}
                 </td>
-                <td className="px-6 py-4 font-medium text-slate-900">
-                  {dsc.holder_name}
-                </td>
                 <td className="px-6 py-4 font-medium text-slate-900">{dsc.holder_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.dsc_type || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{dsc.associated_with || '-'}</td>
