@@ -192,17 +192,8 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       toast.error('Failed to delete todo');
     }
   };
-  // 1. Priority stripe class (matches your requested colors: Red-Critical, Orange-Urgent, Green-Medium, Blue-Low)
-const getPriorityStripeClass = (priority) => {
-  const p = (priority || '').toLowerCase().trim();
-  if (p === 'critical') return 'border-l-8 border-l-red-600';
-  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
-  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
-  if (p === 'low')      return 'border-l-8 border-l-blue-500';
-  return 'border-l-8 border-l-slate-300'; // neutral fallback
-};
 
-// 2. Status update handler for the "In Progress" / "Done" buttons
+// 1. Status update handler for the "In Progress" / "Done" buttons
 const updateAssignedTaskStatus = async (taskId, newStatus) => {
   try {
     await api.patch(`/tasks/${taskId}`, { 
