@@ -841,149 +841,82 @@ const finalProductivity =
                     <div>
                       <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completed</p>
                       <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>
-                        {taskAnalytics?.completed || 0}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1">Tasks done</p>
-                    </div>
-                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                      <CheckSquare className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border border-slate-200 shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.coral }}>
-                        {taskAnalytics?.overdue || 0}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1">Past due</p>
-                    </div>
-                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.coral}15` }}>
-                      <AlertCircle className="h-5 w-5" style={{ color: COLORS.coral }} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border border-slate-200 shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completion Rate</p>
-                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.lightGreen }}>
-                        {taskAnalytics?.total > 0 ? Math.round((taskAnalytics.completed / taskAnalytics.total) * 100) : 0}%
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1">Overall</p>
-                    </div>
-                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.lightGreen}15` }}>
-                      <Target className="h-5 w-5" style={{ color: COLORS.lightGreen }} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Status Pie Chart */}
-              <Card className="border border-slate-200 shadow-sm">
-                <CardHeader className="pb-2 border-b border-slate-100">
-                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                    <PieIcon className="h-5 w-5" />
-                    Task Status Distribution
-                  </CardTitle>
-                  <CardDescription>
-                    Breakdown by status
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-6">
-                  {taskAnalytics?.statusData?.length === 0 ? (
-                    <div className="text-center py-12 text-slate-500">
-                      No status data available
-                    </div>
-                  ) : (
-                    <div className="h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={taskAnalytics.statusData}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            outerRadius={80}
-                            fill="#8884d8"
-                            dataKey="value"
-                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          >
-                            {taskAnalytics.statusData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={TASK_STATUS_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                          <Legend />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Priority Bar Chart */}
-              <Card className="border border-slate-200 shadow-sm">
-                <CardHeader className="pb-2 border-b border-slate-100">
-                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                    <BarChart3 className="h-5 w-5" />
-                    Task Priority Distribution
-                  </CardTitle>
-                  <CardDescription>
-                    Breakdown by priority
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-6">
-                  {taskAnalytics?.priorityData?.length === 0 ? (
-                    <div className="text-center py-12 text-slate-500">
-                      No priority data available
-                    </div>
-                  ) : (
-                    <div className="h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={taskAnalytics.priorityData}>
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Bar dataKey="value" fill={COLORS.mediumBlue} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                       {/* Charts – wrapped properly */}
+{taskAnalytics ? (
+  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    {/* Status Pie Chart */}
+    <Card className="border border-slate-200 shadow-sm">
+      <CardHeader className="pb-2 border-b border-slate-100">
+        <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+          <PieIcon className="h-5 w-5" />
+          Task Status Distribution
+        </CardTitle>
+        <CardDescription>Breakdown by status</CardDescription>
+      </CardHeader>
+      <CardContent className="p-6">
+        {taskAnalytics.statusData?.length === 0 ? (
+          <div className="text-center py-12 text-slate-500">
+            No status data available
           </div>
-        </TabsContent>
-      </Tabs>
+        ) : (
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={taskAnalytics.statusData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                >
+                  {taskAnalytics.statusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={TASK_STATUS_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
 
-      {/* Info Note */}
-      <motion.div variants={itemVariants}>
-        <Card className="border border-emerald-200 bg-emerald-50">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <Monitor className="h-5 w-5 text-emerald-600 mt-0.5" />
-              <div>
-                <p className="font-medium text-emerald-800">Activity Tracking Active</p>
-                <p className="text-sm text-emerald-700 mt-1">
-                  Activity is tracked automatically based on keyboard and mouse activity while users work in Taskosphere. 
-                  Attendance data is based on daily punch-in/punch-out records.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-      );
-      }
+    {/* Priority Bar Chart */}
+    <Card className="border border-slate-200 shadow-sm">
+      <CardHeader className="pb-2 border-b border-slate-100">
+        <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+          <BarChart3 className="h-5 w-5" />
+          Task Priority Distribution
+        </CardTitle>
+        <CardDescription>Breakdown by priority</CardDescription>
+      </CardHeader>
+      <CardContent className="p-6">
+        {taskAnalytics.priorityData?.length === 0 ? (
+          <div className="text-center py-12 text-slate-500">
+            No priority data available
+          </div>
+        ) : (
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={taskAnalytics.priorityData}>
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" fill={COLORS.mediumBlue} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  </div>
+) : (
+  <div className="text-center py-12 text-slate-500">
+    No task analytics data available
+  </div>
+)}
