@@ -3,6 +3,7 @@ import logging
 import smtplib
 from datetime import datetime, timedelta
 from bson import ObjectId
+from dateutil import parser
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -2184,8 +2185,6 @@ async def get_staff_rankings(
 
         # ================= ATTENDANCE =================
     
-        from dateutil import parser   # ← add this import if you can
-
         total_minutes = 0
 
         for record in await db.attendance.find(
