@@ -15,6 +15,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from fastapi import WebSocket, WebSocketDisconnect
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta, date
