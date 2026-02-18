@@ -2166,7 +2166,7 @@ async def get_staff_rankings(
             record_date = datetime.strptime(record["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             if start_date and record_date < start_date:
                 continue
-            total_minutes += record.get("duration_minutes", 0)
+            total_minutes += record.get("duration_minutes") or 0
 
         work_score = min(total_minutes / (60 * 160), 1) * 100  # normalize
 
