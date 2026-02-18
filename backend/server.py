@@ -2118,7 +2118,6 @@ async def send_reminder_to_user(
         "task_count": len(tasks)
     }
 
-# ─── STAFF RANKINGS ─────────────────────────────────────────────────────────
 
     # ================= STAFF RANKING ROUTE =================
 
@@ -2181,22 +2180,34 @@ async def get_staff_rankings(
     # Sort, limit, return
     rankings.sort(key=lambda x: x["total_minutes"], reverse=True)
     return {"rankings": rankings[:50]}  # or whatever limit
+    
 
         # ================= ATTENDANCE =================
-        attendance_records = await db.attendance.find(
-            {"user_id": uid},
-            {"_id": 0}
-        ).to_list(1000)
+    
+        from dateutil import parser   # ← add this import if you can
 
         total_minutes = 0
 
-        for record in attendance_records:
-            record_date = datetime.strptime(record["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        for record in await db.attendance.find(
+            {"user_id": uid},
+            {"_id": 0, "date": 1, "duration_minutes": 1}
+        ).to_list(1000):
+            date_str = record.get("date")
+            if not date_str:
+                continue
+        
+            try:
+                record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
+                # or: record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+        
             if start_date and record_date < start_date:
                 continue
+        
             total_minutes += record.get("duration_minutes", 0)
 
-        work_score = min(total_minutes / (60 * 160), 1) * 100  # normalize
+        work_score = min(total_minutes / (60 * 160), 1.0) * 100
 
         # ================= TASKS =================
         tasks = await db.tasks.find(
