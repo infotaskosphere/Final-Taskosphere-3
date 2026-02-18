@@ -2120,7 +2120,7 @@ async def send_reminder_to_user(
     }
 
 
-    # ================= STAFF RANKING ROUTE =================
+# ================= STAFF RANKING ROUTE =================
 
 @api_router.get("/staff/rankings")
 async def get_staff_rankings(
@@ -2138,7 +2138,7 @@ async def get_staff_rankings(
     if period == "weekly":
         start_date = now - timedelta(days=7)
     elif period == "monthly":
-        start_date = now.replace(day=1)
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     users = await db.users.find(
         {"role": {"$in": ["manager", "staff"]}},
@@ -2148,62 +2148,35 @@ async def get_staff_rankings(
     rankings = []
     for user in users:
         uid = user["id"]
-        
-        # ... your query to get records for this user ...
-        # Example using aggregate (adjust match conditions)
-        pipeline = [
-            {"$match": {
-                "user_id": uid,           # adjust field name
-                # "date": {"$gte": start_date} if start_date else {}
-            }},
-            {"$group": {
-                "_id": None,
-                "total_minutes": {"$sum": {"$ifNull": ["$duration_minutes", 0]}},
-                # ... other metrics
-            }}
-        ]
-        
-        result = await db.attendance.aggregate(pipeline).to_list(1)  # or db.activity, etc.
-        
-        if result:
-            agg = result[0]
-            total_minutes = agg["total_minutes"]
-        else:
-            total_minutes = 0
-
-        # ... build user ranking entry ...
-        rankings.append({
-            "user": user,
-            "total_minutes": total_minutes,
-            # ... other fields
-        })
-
-    # Sort, limit, return
-    rankings.sort(key=lambda x: x["total_minutes"], reverse=True)
-    return {"rankings": rankings[:50]}  # or whatever limit
-    
+        total_minutes = 0
 
         # ================= ATTENDANCE =================
-    
-       for record in await db.attendance.find(
+        # Fixed: Correctly indented inside the user loop to avoid IndentationError
+        attendance_cursor = await db.attendance.find(
             {"user_id": uid},
             {"_id": 0, "date": 1, "duration_minutes": 1}
-        ).to_list(1000):
+        ).to_list(1000)
+
+        for record in attendance_cursor:
             date_str = record.get("date")
             if not date_str:
                 continue
         
             try:
+                # Retained: Support for isoparse with fallback to fromisoformat
                 record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
-                # or: record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-            except (ValueError, TypeError):
-                continue
+            except (ValueError, TypeError, NameError):
+                try:
+                    record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError):
+                    continue
         
             if start_date and record_date < start_date:
                 continue
         
             total_minutes += record.get("duration_minutes", 0)
 
+        # Retained: 160 hours baseline for score
         work_score = min(total_minutes / (60 * 160), 1.0) * 100
 
         # ================= TASKS =================
@@ -2213,12 +2186,16 @@ async def get_staff_rankings(
         ).to_list(1000)
 
         filtered_tasks = []
-
         for task in tasks:
             created = task.get("created_at")
+            if not created:
+                continue
 
             if isinstance(created, str):
-                created = datetime.fromisoformat(created)
+                try:
+                    created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
 
             if start_date and created < start_date:
                 continue
@@ -2226,25 +2203,30 @@ async def get_staff_rankings(
             filtered_tasks.append(task)
 
         total_tasks = len(filtered_tasks)
-        completed_tasks = len([t for t in filtered_tasks if t["status"] == "completed"])
-
+        completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
         completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
 
         # ================= SPEED =================
         completion_times = []
-
         for task in filtered_tasks:
-            if task["status"] == "completed":
+            if task.get("status") == "completed":
                 created = task.get("created_at")
                 updated = task.get("updated_at")
 
-                if isinstance(created, str):
-                    created = datetime.fromisoformat(created)
-                if isinstance(updated, str):
-                    updated = datetime.fromisoformat(updated)
+                if not created or not updated:
+                    continue
 
-                diff = (updated - created).total_seconds()
-                completion_times.append(diff)
+                try:
+                    if isinstance(created, str):
+                        created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
+                    if isinstance(updated, str):
+                        updated = datetime.fromisoformat(updated).replace(tzinfo=timezone.utc)
+
+                    diff = (updated - created).total_seconds()
+                    if diff > 0:
+                        completion_times.append(diff)
+                except (ValueError, TypeError):
+                    continue
 
         if completion_times:
             avg_seconds = sum(completion_times) / len(completion_times)
@@ -2253,6 +2235,7 @@ async def get_staff_rankings(
             speed_score = 0
 
         # ================= FINAL SCORE =================
+        # Retained original weights: 35% Work, 40% Completion, 25% Speed
         efficiency = (
             0.35 * work_score +
             0.40 * completion_percent +
@@ -2261,24 +2244,25 @@ async def get_staff_rankings(
 
         rankings.append({
             "user_id": uid,
-            "name": user["full_name"],
-            "role": user["role"],
+            "name": user.get("full_name", "Unknown"),
+            "role": user.get("role"),
             "profile_picture": user.get("profile_picture"),
             "score": round(efficiency, 2),
             "hours_worked": round(total_minutes / 60, 2),
             "completion_percent": round(completion_percent, 2),
         })
 
+    # Sort by descending score
     rankings.sort(key=lambda x: x["score"], reverse=True)
 
+    # Assign ranks
     for i, r in enumerate(rankings):
         r["rank"] = i + 1
 
     return {
         "period": period,
-        "rankings": rankings
+        "rankings": rankings[:50]
     }
-
 
 # ================= INCLUDE ROUTER =================
 app.include_router(api_router)
