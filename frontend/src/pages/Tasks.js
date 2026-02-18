@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { containerVariants, itemVariants } from '@/lib/animations';  // adjust path if needed
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
