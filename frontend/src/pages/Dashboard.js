@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -90,29 +91,10 @@ export default function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [assignedTasks, setAssignedTasks] = useState([]);
   const [newTodo, setNewTodo] = useState('');
+  
+  // ADDED MISSING STATES REQUIRED BY YOUR LOGIC
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
-  const fetchDashboardData = async () => {
-    try {
-      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-        api.get('/duedates/upcoming?days=30'),
-      ]);
-
-      setStats(statsRes.data);
-      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
-      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-
-      // Also fetching rankings if user is admin
-      if (user?.role === "admin") {
-        const rankingRes = await api.get(`/staff/rankings?period=${rankingPeriod}`);
-        setRankings(rankingRes.data?.rankings || []);
-      }
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-    }
-  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -120,27 +102,21 @@ export default function Dashboard() {
     fetchMyTodos();
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
-useEffect(() => {
-  const interval = setInterval(() => {
-    api.get('/notifications')
-      .then(res => {
-        // Correct comparison logic
-        if (res.data && res.data.length > chatMessages.length) {
-          notificationAudio.current.play().catch(() => {
-            // Browsers block audio until the user interacts with the page
-          });
-        }
-        setChatMessages(res.data || []);
-      })
-      .catch(err => console.warn('Chat notifications failed:', err));
-  }, 5000); // Changed to 5 seconds (5000ms) for better responsiveness
 
-  // CLEANUP: This stops the timer when you leave the page
-  return () => clearInterval(interval);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api.get('/notifications')
+        .then(res => {
+          if (res.data.length > chatMessages.length) {
+            notificationAudio.current.play().catch(() => {});
+          }
+          setChatMessages(res.data);
+        })
+        .catch(err => console.warn('Chat notifications failed:', err));
+    }, 50000);
+    return () => clearInterval(interval);
+  }, [chatMessages]);
 
-  // DEPENDENCY: Re-run only when chatMessages length changes
-}, [chatMessages.length]);
-  
   const fetchMyTodos = async () => {
     try {
       const res = await api.get('/tasks');
