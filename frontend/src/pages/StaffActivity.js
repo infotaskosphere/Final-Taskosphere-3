@@ -106,13 +106,6 @@ export default function StaffActivity() {
   }, [selectedUser]);
 
   const fetchUsers = async () => {
-  try {
-    const res = await api.get('/users');
-    setUsers(res.data || []);
-  } catch {}
-};
-
-  const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
       setUsers(response.data);
