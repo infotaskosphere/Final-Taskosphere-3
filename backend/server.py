@@ -15,7 +15,6 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from fastapi import WebSocket, WebSocketDisconnect
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -43,7 +42,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 # ... your existing code up to line 41 ...
 
-ALGORITM = "HS256"   # ← line 41 (or similar)
+ALGORITM = "HS256"
 
 # ────────────────────────────────────────────────
 # PASTE THE WEBSOCKET CODE STARTS HERE
@@ -582,6 +581,25 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
     return {"message": "User deleted successfully"}
 
 # Task routes
+@api_router.post("/tasks", response_model=Task)
+async def create_task(task_data: TaskCreate, current_user: User = Depends(get_current_user)):
+    # ... your existing code ...
+    await db.tasks.insert_one(doc)
+    
+    # NEW: Send real-time notification to assignee
+    if task_data.assigned_to:
+        notification_data = {
+            "title": "New Task Assigned",
+            "message": f"You have been assigned: {task_data.title}",
+            "type": "task",
+            "task_id": doc["id"],
+            "created_by": current_user.full_name
+        }
+        await send_new_notification(notification_data)
+    
+    return task
+
+
 @api_router.post("/tasks", response_model=Task)
 async def create_task(task_data: TaskCreate, current_user: User = Depends(get_current_user)):
     task = Task(**task_data.model_dump(), created_by=current_user.id)
