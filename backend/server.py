@@ -1,4 +1,5 @@
 import pytz
+import { Briefcase } from "lucide-react";
 import logging
 import smtplib
 from datetime import datetime, timedelta
@@ -435,9 +436,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user_id: str = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    except JWTError:
+    except JWTError as e:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    
+    except JWTError as e:
+        print("JWT Error:", e)
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+   
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -540,18 +544,30 @@ async def create_task(task_data: TaskCreate, current_user: User = Depends(get_cu
 
 @api_router.get("/tasks", response_model=List[Task])
 async def get_tasks(current_user: User = Depends(get_current_user)):
+
     query = {}
-    # Role-based filtering
-    if current_user.role == "staff":
-        # Staff sees only tasks assigned to them (as primary or sub-assignee)
+
+    # 🔐 ROLE-BASED FILTERING
+    if current_user.role != "admin":
+
         permissions = current_user.permissions
-        if permissions and permissions.can_view_all_tasks:
-            pass  # Can view all tasks
+
+        # If staff has special permission to view all tasks
+        if permissions and getattr(permissions, "can_view_all_tasks", False):
+            query = {}  # can view everything
+
         else:
+            # 3-person visibility rule
             query["$or"] = [
-                {"assigned_to": current_user.id},
-                {"sub_assignees": current_user.id}
+                {"assigned_to": current_user.id},      # Primary assignee
+                {"sub_assignees": current_user.id},    # Sub-assignee
+                {"created_by": current_user.id}        # Task creator
             ]
+
+    # Admin automatically sees all tasks
+    tasks = await db.tasks.find(query).to_list(1000)
+
+    return tasks
     
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     for task in tasks:
