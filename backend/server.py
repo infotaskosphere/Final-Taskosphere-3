@@ -49,10 +49,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+class DashboardStats(BaseModel):
+    total_tasks: int
+    completed_tasks: int
+    pending_tasks: int
+    overdue_tasks: int
+    total_dsc: int
+    expiring_dsc_count: int
+    expiring_dsc_list: List[dict]
+    total_clients: int
+    upcoming_birthdays: int
+    upcoming_due_dates: int
+    team_workload: List[dict]
+    compliance_status: dict
 
 api_router = APIRouter(prefix="/api")
 app.include_router(api_router)
-
 # ─── DASHBOARD STATS ────────────────────────────────────────────────────────
 
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
