@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User, LayoutGrid, List, Filter, CheckCircle, Clock, Play, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Brand Colors
 const COLORS = {
@@ -443,31 +444,30 @@ export default function Tasks() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="co_assignee">Co-assignee</Label>
-                    <Select
-                      value={formData.sub_assignees?.[0] || 'none'}
-                      onValueChange={(value) => {
-                        if (value === 'none') {
-                          setFormData({ ...formData, sub_assignees: [] });
-                        } else {
-                          setFormData({ ...formData, sub_assignees: [value] });
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="border-slate-300" data-testid="task-co-assign-select">
-                        <SelectValue placeholder="Select co-assignee..." />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60 overflow-y-auto">
-                        <SelectItem value="none">No Co-assignee</SelectItem>
-                        {users
-                          .filter(u => u.id !== formData.assigned_to)
-                          .map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="co_assignee">Co-assignees</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between border-slate-300" data-testid="task-co-assign-select">
+                          {formData.sub_assignees.length > 0 ? `${formData.sub_assignees.length} selected` : "Select co-assignees..."}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 max-h-60 overflow-y-auto">
+                        <div className="space-y-2">
+                          {users
+                            .filter(u => u.id !== formData.assigned_to)
+                            .map((u) => (
+                              <div key={u.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`sub-${u.id}`}
+                                  checked={formData.sub_assignees.includes(u.id)}
+                                  onCheckedChange={() => toggleSubAssignee(u.id)}
+                                />
+                                <label htmlFor={`sub-${u.id}`} className="text-sm text-slate-700">{u.full_name}</label>
+                              </div>
+                            ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
               )}
@@ -627,33 +627,33 @@ export default function Tasks() {
       {/* Stats Bar */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => setFilterStatus('all')}>
-          <CardContent className="p-4 text-center">
+          <CardContent className="p-3 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total</p>
-            <p className="text-3xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
           </CardContent>
         </Card>
         <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'pending' ? 'ring-2 ring-amber-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')}>
-          <CardContent className="p-4 text-center">
+          <CardContent className="p-3 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">To Do</p>
-            <p className="text-3xl font-bold mt-1 text-amber-600">{stats.todo}</p>
+            <p className="text-2xl font-bold mt-1 text-amber-600">{stats.todo}</p>
           </CardContent>
         </Card>
         <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'in_progress' ? 'ring-2 ring-blue-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')}>
-          <CardContent className="p-4 text-center">
+          <CardContent className="p-3 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">In Progress</p>
-            <p className="text-3xl font-bold mt-1 text-blue-600">{stats.inProgress}</p>
+            <p className="text-2xl font-bold mt-1 text-blue-600">{stats.inProgress}</p>
           </CardContent>
         </Card>
         <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'completed' ? 'ring-2 ring-emerald-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')}>
-          <CardContent className="p-4 text-center">
+          <CardContent className="p-3 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completed</p>
-            <p className="text-3xl font-bold mt-1 text-emerald-600">{stats.completed}</p>
+            <p className="text-2xl font-bold mt-1 text-emerald-600">{stats.completed}</p>
           </CardContent>
         </Card>
         <Card className={`border shadow-sm hover:shadow-md transition-shadow cursor-pointer ${filterStatus === 'overdue' ? 'ring-2 ring-red-400' : 'border-slate-200'}`} onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}>
-          <CardContent className="p-4 text-center">
+          <CardContent className="p-3 text-center">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-            <p className="text-3xl font-bold mt-1 text-red-600">{stats.overdue}</p>
+            <p className="text-2xl font-bold mt-1 text-red-600">{stats.overdue}</p>
           </CardContent>
         </Card>
       </motion.div>
@@ -733,175 +733,177 @@ export default function Tasks() {
       </motion.div>
 
       {/* Task Cards Grid - Responsive with consistent card sizing */}
-      <motion.div 
-        className={viewMode === 'grid' 
-          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
-          : 'space-y-3'}
-        variants={containerVariants}
-      >
-        {filteredTasks.length === 0 ? (
-          <motion.div variants={itemVariants} className="col-span-full text-center py-12">
-            <p className="text-slate-500 text-lg">No tasks found</p>
-            <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
-          </motion.div>
-        ) : (
-          filteredTasks.map((task) => {
-            const taskIsOverdue = isOverdue(task);
-            const displayStatus = getDisplayStatus(task);
-            const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-            const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-            const cardGradient = getCardGradient(task, taskIsOverdue);
-            
-            return (
-              <motion.div key={task.id} variants={itemVariants} className="h-full">
-                <Card 
-                  className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full rounded-2xl
-                    ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
-                  style={{ background: cardGradient !== 'none' ? cardGradient : 'white', minHeight: '320px' }}
-                  data-testid={`task-card-${task.id}`}
-                >
-                  <CardContent className="p-4 sm:p-5 flex flex-col h-full">
-                    {/* Status & Priority Tags */}
-                    <div className="flex items-center gap-2 mb-3 flex-wrap">
-                      <span 
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
-                        style={{ 
-                          background: taskIsOverdue 
-                            ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
-                            : statusStyle.bg.replace('bg-', '').includes('amber') ? '#fef3c7' : '#dbeafe'
-                        }}
-                      >
-                        {statusStyle.label}
-                      </span>
-                      <span 
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
-                        style={{ 
-                          background: (task.priority === 'high' || task.priority === 'critical')
-                            ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
-                            : priorityStyle.bg.replace('bg-', '').includes('blue') ? '#dbeafe' : '#f1f5f9'
-                        }}
-                      >
-                        {priorityStyle.label}
-                      </span>
-                      {task.is_recurring && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                          <Repeat className="h-3 w-3 inline mr-1" />
-                          Recurring
+      <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
+        <motion.div 
+          className={viewMode === 'grid' 
+            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
+            : 'space-y-3'}
+          variants={containerVariants}
+        >
+          {filteredTasks.length === 0 ? (
+            <motion.div variants={itemVariants} className="col-span-full text-center py-12">
+              <p className="text-slate-500 text-lg">No tasks found</p>
+              <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
+            </motion.div>
+          ) : (
+            filteredTasks.map((task) => {
+              const taskIsOverdue = isOverdue(task);
+              const displayStatus = getDisplayStatus(task);
+              const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+              const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+              const cardGradient = getCardGradient(task, taskIsOverdue);
+              
+              return (
+                <motion.div key={task.id} variants={itemVariants} className="h-full">
+                  <Card 
+                    className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full rounded-2xl
+                      ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
+                    style={{ background: cardGradient !== 'none' ? cardGradient : 'white', minHeight: '280px' }}
+                    data-testid={`task-card-${task.id}`}
+                  >
+                    <CardContent className="p-3 sm:p-4 flex flex-col h-full">
+                      {/* Status & Priority Tags */}
+                      <div className="flex items-center gap-2 mb-3 flex-wrap">
+                        <span 
+                          className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
+                          style={{ 
+                            background: taskIsOverdue 
+                              ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
+                              : statusStyle.bg.replace('bg-', '').includes('amber') ? '#fef3c7' : '#dbeafe'
+                          }}
+                        >
+                          {statusStyle.label}
                         </span>
-                      )}
-                    </div>
-
-                    {/* Task Title - Fixed height */}
-                    <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[48px] text-sm sm:text-base" style={{ color: COLORS.deepBlue }}>
-                      {task.title}
-                    </h3>
-
-                    {/* Description - Fixed height for equal cards */}
-                    <div className="h-[44px] mb-3">
-                      {task.description ? (
-                        <p className="text-xs sm:text-sm text-slate-600 line-clamp-2">{task.description}</p>
-                      ) : (
-                        <p className="text-xs sm:text-sm text-slate-400 italic">No description</p>
-                      )}
-                    </div>
-
-                    {/* Meta Info - flex-1 to push footer down */}
-                    <div className="space-y-1.5 text-xs sm:text-sm text-slate-500 flex-1 min-h-[60px]">
-                      {task.client_id && (
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="truncate">{getClientName(task.client_id)}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <User className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="truncate">{getUserName(task.assigned_to)}</span>
-                      </div>
-                      {task.due_date && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Quick Status Change Buttons - Consistent pill shape */}
-                    <div className="flex items-center gap-2 mt-auto pt-3 border-t border-slate-200/50">
-                      <button
-                        onClick={() => handleQuickStatusChange(task, 'pending')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'pending' 
-                            ? 'bg-amber-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
-                        title="Mark as To Do"
-                        data-testid={`status-todo-${task.id}`}
-                      >
-                        <Clock className="h-3.5 w-3.5" />
-                        <span>To Do</span>
-                      </button>
-                      <button
-                        onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'in_progress' 
-                            ? 'bg-blue-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
-                        title="Mark as In Progress"
-                        data-testid={`status-progress-${task.id}`}
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        <span>Progress</span>
-                      </button>
-                      <button
-                        onClick={() => handleQuickStatusChange(task, 'completed')}
-                        className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-full text-xs font-semibold transition-all
-                          ${task.status === 'completed' 
-                            ? 'bg-emerald-500 text-white shadow-md' 
-                            : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
-                        title="Mark as Completed"
-                        data-testid={`status-done-${task.id}`}
-                      >
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        <span>Done</span>
-                      </button>
-                    </div>
-
-                    {/* Category & Actions */}
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
-                      <Badge 
-                        variant="outline" 
-                        className="text-xs rounded-lg px-2.5 py-1"
-                        style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
-                      >
-                        {getCategoryLabel(task.category)}
-                      </Badge>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg hover:bg-blue-50"
-                          onClick={() => handleEdit(task)}
-                          data-testid={`edit-task-${task.id}`}
+                        <span 
+                          className={`px-2.5 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
+                          style={{ 
+                            background: (task.priority === 'high' || task.priority === 'critical')
+                              ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
+                              : priorityStyle.bg.replace('bg-', '').includes('blue') ? '#dbeafe' : '#f1f5f9'
+                          }}
                         >
-                          <Edit className="h-4 w-4 text-blue-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg hover:bg-red-50"
-                          onClick={() => handleDelete(task.id)}
-                          data-testid={`delete-task-${task.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                          {priorityStyle.label}
+                        </span>
+                        {task.is_recurring && (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                            <Repeat className="h-3 w-3 inline mr-1" />
+                            Recurring
+                          </span>
+                        )}
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            );
-          })
-        )}
-      </motion.div>
+
+                      {/* Task Title - Fixed height */}
+                      <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
+                        {task.title}
+                      </h3>
+
+                      {/* Description - Fixed height for equal cards */}
+                      <div className="h-[40px] mb-3">
+                        {task.description ? (
+                          <p className="text-xs text-slate-600 line-clamp-2">{task.description}</p>
+                        ) : (
+                          <p className="text-xs text-slate-400 italic">No description</p>
+                        )}
+                      </div>
+
+                      {/* Meta Info - flex-1 to push footer down */}
+                      <div className="space-y-1.5 text-xs text-slate-500 flex-1 min-h-[50px]">
+                        {task.client_id && (
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span className="truncate">{getClientName(task.client_id)}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <User className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="truncate">{getUserName(task.assigned_to)}</span>
+                        </div>
+                        {task.due_date && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quick Status Change Buttons - Consistent pill shape */}
+                      <div className="flex items-center gap-2 mt-auto pt-3 border-t border-slate-200/50">
+                        <button
+                          onClick={() => handleQuickStatusChange(task, 'pending')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'pending' 
+                              ? 'bg-amber-500 text-white shadow-md' 
+                              : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
+                          title="Mark as To Do"
+                          data-testid={`status-todo-${task.id}`}
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>To Do</span>
+                        </button>
+                        <button
+                          onClick={() => handleQuickStatusChange(task, 'in_progress')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'in_progress' 
+                              ? 'bg-blue-500 text-white shadow-md' 
+                              : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
+                          title="Mark as In Progress"
+                          data-testid={`status-progress-${task.id}`}
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          <span>Progress</span>
+                        </button>
+                        <button
+                          onClick={() => handleQuickStatusChange(task, 'completed')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'completed' 
+                              ? 'bg-emerald-500 text-white shadow-md' 
+                              : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                          title="Mark as Completed"
+                          data-testid={`status-done-${task.id}`}
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          <span>Done</span>
+                        </button>
+                      </div>
+
+                      {/* Category & Actions */}
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
+                        <Badge 
+                          variant="outline" 
+                          className="text-xs rounded-lg px-2.5 py-1"
+                          style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
+                        >
+                          {getCategoryLabel(task.category)}
+                        </Badge>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg hover:bg-blue-50"
+                            onClick={() => handleEdit(task)}
+                            data-testid={`edit-task-${task.id}`}
+                          >
+                            <Edit className="h-4 w-4 text-blue-600" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg hover:bg-red-50"
+                            onClick={() => handleDelete(task.id)}
+                            data-testid={`delete-task-${task.id}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })
+          )}
+        </motion.div>
+      </div>
     </motion.div>
   );
 }
