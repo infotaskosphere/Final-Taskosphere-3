@@ -90,10 +90,29 @@ export default function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [assignedTasks, setAssignedTasks] = useState([]);
   const [newTodo, setNewTodo] = useState('');
-  
-  // ADDED MISSING STATES REQUIRED BY YOUR LOGIC
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
+  const fetchDashboardData = async () => {
+    try {
+      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
+        api.get('/dashboard/stats'),
+        api.get('/tasks'),
+        api.get('/duedates/upcoming?days=30'),
+      ]);
+
+      setStats(statsRes.data);
+      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
+      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
+
+      // Also fetching rankings if user is admin
+      if (user?.role === "admin") {
+        const rankingRes = await api.get(`/staff/rankings?period=${rankingPeriod}`);
+        setRankings(rankingRes.data?.rankings || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    }
+  };
 
   useEffect(() => {
     fetchDashboardData();
