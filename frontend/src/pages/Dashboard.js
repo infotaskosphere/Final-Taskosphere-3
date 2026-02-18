@@ -26,7 +26,6 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -36,7 +35,6 @@ const COLORS = {
   coral: '#FF6B6B',
   amber: '#F59E0B',
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -45,36 +43,10 @@ const containerVariants = {
     transition: { staggerChildren: 0.06 }
   }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
 };
-
-// Define TaskCard here so the JSX below works
-const TaskCard = ({ task, assignedBy, isToMe, onStatusChange }) => {
-  const getPriorityStripeClass = (priority) => {
-    const p = (priority || '').toLowerCase().trim();
-    if (p === 'critical') return 'border-l-8 border-l-red-600';
-    if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
-    if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
-    if (p === 'low')      return 'border-l-8 border-l-blue-500';
-    return 'border-l-8 border-l-slate-300';
-  };
-  return (
-    <div className={`p-4 bg-white rounded-xl border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 mb-3 ${getPriorityStripeClass(task.priority)}`}>
-       <div>
-         <p className="font-bold text-slate-900">{task.title}</p>
-         <p className="text-xs text-slate-500">{isToMe ? 'From' : 'To'}: {assignedBy}</p>
-       </div>
-       <div className="flex gap-2">
-         <Button size="sm" onClick={() => onStatusChange(task.id, 'in_progress')}>In Progress</Button>
-         <Button size="sm" onClick={() => onStatusChange(task.id, 'completed')}>Done</Button>
-       </div>
-    </div>
-  );
-};
-
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -90,18 +62,12 @@ export default function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [assignedTasks, setAssignedTasks] = useState([]);
   const [newTodo, setNewTodo] = useState('');
-  
-  // ADDED MISSING STATES REQUIRED BY YOUR LOGIC
-  const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
-  const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
-
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
-
   useEffect(() => {
     const interval = setInterval(() => {
       api.get('/notifications')
@@ -115,10 +81,10 @@ export default function Dashboard() {
     }, 50000);
     return () => clearInterval(interval);
   }, [chatMessages]);
-
   const fetchMyTodos = async () => {
     try {
-      const res = await api.get('/tasks');
+      const res = await api.get('/tasks'); // Changed to /tasks to avoid 404
+      // Filter tasks assigned to current user or where user is sub-assignee
       const myTasks = res.data.filter(task =>
         task.assigned_to === user?.id ||
         (Array.isArray(task.sub_assignees) && task.sub_assignees.includes(user?.id))
@@ -126,196 +92,176 @@ export default function Dashboard() {
       setTodos(myTasks.map(task => ({
         ...task,
         created_at: task.created_at || new Date().toISOString(),
-        completed: task.status === 'completed'
+        completed: task.status === 'completed' // map for checkbox UI
       })));
     } catch (error) {
       console.error('Failed to fetch todos:', error);
-      setTodos([]);
+      setTodos([]); // fallback to prevent undefined crash
     }
   };
-
-const addTodo = async () => {
-  if (!newTodo?.trim?.()) return;
-  try {
-    const now = new Date().toISOString();
-    const res = await api.post('/tasks', {
-      title: newTodo?.trim?.(),
-      status: 'pending',
-      created_at: now,           // backend should store this
-      // optional: created_by: user?.id
-    });
-    setTodos([...(todos || []), {
-      ...res?.data,
-      completed: false,
-      created_at: now
-    }]);
-    setNewTodo('');
-    toast.success('Todo added');
-  } catch (error) {
-    toast.error('Failed to add todo');
-  }
-};
-
-  // FIXED SYNTAX IN YOUR ORIGINAL BLOCK
-  const fetchMyAssignedTasks = async () => {
+  const addTodo = async () => {
+    if (!newTodo.trim()) return;
     try {
-      const res = await api.get('/tasks');
-      const allTasks = res.data || [];
-
-      const toMe = allTasks.filter(task => task.assigned_to === user?.id);
-
-      const byMe = allTasks.filter(task => 
-        task.created_by === user?.id && task.assigned_to !== user?.id
-      );
-
-      setTasksAssignedToMe(toMe.slice(0, 6));
-      setTasksAssignedByMe(byMe.slice(0, 6));
-      setAssignedTasks(allTasks.slice(0, 6)); // 'filtered' was undefined, using allTasks
-    } catch (error) {
-      console.error("Failed to fetch assigned tasks", error);
-      setTasksAssignedToMe([]);
-      setTasksAssignedByMe([]);
-    }
-  };
-
-  // Preserved exactly as per your line-to-line requirement
-  const getPriorityStripeClass = (priority) => {
-    const p = (priority || '').toLowerCase().trim();
-    if (p === 'critical') return 'border-l-8 border-l-red-600';
-    if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
-    if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
-    if (p === 'low')      return 'border-l-8 border-l-blue-500';
-    return 'border-l-8 border-l-slate-300';
-  };
-
-  const updateAssignedTaskStatus = async (taskId, newStatus) => {
-    try {
-      await api.patch(`/tasks/${taskId}`, {
-        status: newStatus,
-        updated_at: new Date().toISOString()
+      const res = await api.post('/tasks', {  // Changed from /todos to /tasks
+        title: newTodo.trim(),
+        status: 'pending',  // Use backend-compatible fields (status instead of completed)
+        created_at: new Date().toISOString()  // Explicitly add creation date
       });
-      fetchMyAssignedTasks();
-      toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+      setTodos([...todos, {
+        ...res.data,
+        completed: res.data.status === 'completed'  // Map status to completed for frontend
+      }]);
+      setNewTodo('');
+      toast.success('Todo added successfully!');
     } catch (error) {
-      console.error('Failed to update task status:', error);
-      toast.error('Failed to update task');
+      toast.error('Failed to add todo');
     }
   };
-
-<CardContent className="p-4 sm:p-6">
-  <div className="flex gap-2 mb-4">
-    <input
-      type="text"
-      value={newTodo ?? ''}
-      onChange={(e) => setNewTodo(e.target.value)}
-      placeholder="Add new task..."
-      className="flex-1 p-3 text-sm border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500"
-    />
-    <Button onClick={addTodo} disabled={!newTodo?.trim?.()}>Add</Button>
-  </div>
-
-  {(!todos || todos.length === 0) ? (
-    <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
-      No personal tasks yet
-    </div>
-  ) : (
-    <div className="space-y-3 max-h-[320px] sm:max-h-[420px] overflow-y-auto pr-2">
-      {(todos || []).map((todo, index) => (
-        <div
-          key={todo?.id || index}
-          className={`p-4 rounded-2xl border ${
-            todo?.completed 
-              ? 'bg-emerald-50/70 border-emerald-200' 
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <input
-                type="checkbox"
-                checked={todo?.completed || false}
-                onChange={() => handleToggleTodo?.(todo?.id)}
-                className="h-5 w-5 sm:h-6 sm:w-6 accent-emerald-600 flex-shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm sm:text-base ${
-                  todo?.completed ? 'line-through text-slate-600' : 'text-slate-900'
-                }`}>
-                  {todo?.title || 'Untitled Task'}
-                </p>
-              </div>
-            </div>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-              onClick={() => handleDeleteTodo?.(todo?.id)}
-            >
-              Delete
-            </Button>
-          </div>
-
-          {/* Dates & Log line */}
-          <div className="mt-2 text-xs text-slate-500 pl-8">
-            <div>
-              Created: {todo?.created_at 
-                ? format(new Date(todo.created_at), 'dd MMM yyyy • hh:mm a') 
-                : '—'}
-            </div>
-            {todo?.completed_at && (
-              <div className="text-emerald-700 font-medium">
-                Completed: {format(new Date(todo.completed_at), 'dd MMM yyyy • hh:mm a')}
-              </div>
-            )}
-            {todo?.log && (
-              <div className="mt-1 italic text-slate-400 text-[11px]">
-                Log: {todo?.log}
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-</CardContent>;
-
-const handleToggleTodo = async (id) => {
-  const todo = (todos || []).find(t => t.id === id);
-  if (!todo) return;
-
+const fetchMyAssignedTasks = async () => {
   try {
-    const now = new Date().toISOString();
-    const newStatus = todo?.completed ? 'pending' : 'completed';
+    const res = await api.get('/tasks');
+    const allTasks = res.data || [];
 
-    const patchData = {
-      status: newStatus,
-      updated_at: now
-    };
+    // Tasks where current user is the assignee
+    const toMe = allTasks.filter(task => task.assigned_to === user?.id);
 
-    if (newStatus === 'completed') {
-      patchData.completed_at = now;
-      patchData.log = `Completed by ${user?.full_name || user?.email || 'user'} on ${format(new Date(), 'dd MMM yyyy hh:mm a')}`;
-    } else {
-      patchData.completed_at = null;
-      patchData.log = (todo?.log || '') + `\nRe-opened by ${user?.full_name || 'user'} on ${format(new Date(), 'dd MMM yyyy hh:mm a')}`;
-    }
+    // Tasks where current user is the creator/assigner (exclude self-assigned)
+    const byMe = allTasks.filter(task => 
+      task.created_by === user?.id && task.assigned_to !== user?.id
+    );
 
-    const res = await api.patch(`/tasks/${id}`, patchData);
-
-    setTodos((todos || []).map(t => 
-      t.id === id ? { 
-        ...res?.data, 
-        completed: res?.data?.status === 'completed' 
-      } : t
-    ));
-
-    toast.success(newStatus === 'completed' ? 'Marked as done' : 'Re-opened');
+    setTasksAssignedToMe(toMe.slice(0, 6));
+    setTasksAssignedByMe(byMe.slice(0, 6));
   } catch (error) {
-    toast.error('Could not update task');
-    console.error(error);
+    console.error("Failed to fetch assigned tasks", error);
+    setTasksAssignedToMe([]);
+    setTasksAssignedByMe([]);
   }
 };
 
+    setAssignedTasks(filtered.slice(0, 6)); // show max 6
+  } catch (error) {
+    console.error("Failed to fetch assigned tasks", error);
+  }
+};
+
+const getPriorityStripeClass = (priority) => {
+  const p = (priority || '').toLowerCase().trim();
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
+  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
+  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  return 'border-l-8 border-l-slate-300';
+};
+
+const updateAssignedTaskStatus = async (taskId, newStatus) => {
+  try {
+    await api.patch(`/tasks/${taskId}`, { 
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    });
+    fetchMyAssignedTasks(); // refresh both columns
+    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+  } catch (error) {
+    console.error(error);
+    toast.error('Failed to update task');
+  }
+};
+
+  const handleToggleTodo = async (id) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+    try {
+      const newStatus = todo.completed ? 'pending' : 'completed';  // Map completed to backend status
+      const res = await api.patch(`/tasks/${id}`, {  // Changed from /todos/{id} to /tasks/{id}
+        status: newStatus,
+        updated_at: new Date().toISOString()  // Add update date for "done" feature
+      });
+      setTodos(todos.map(t => t.id === id ? {
+        ...res.data,
+        completed: res.data.status === 'completed'
+      } : t));
+      if (newStatus === 'completed') {
+        toast.success('Task marked as done!');
+      }
+    } catch (error) {
+      toast.error('Failed to update todo');
+    }
+  };
+  const handleDeleteTodo = async (id) => {
+    try {
+      await api.delete(`/tasks/${id}`);  // Changed from /todos/{id} to /tasks/{id}
+      setTodos(todos.filter(t => t.id !== id));
+      toast.success('Todo deleted successfully!');
+    } catch (error) {
+      toast.error('Failed to delete todo');
+    }
+  };
+  // 1. Priority stripe class (matches your requested colors: Red-Critical, Orange-Urgent, Green-Medium, Blue-Low)
+const getPriorityStripeClass = (priority) => {
+  const p = (priority || '').toLowerCase().trim();
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
+  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
+  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  return 'border-l-8 border-l-slate-300'; // neutral fallback
+};
+
+// 2. Status update handler for the "In Progress" / "Done" buttons
+const updateAssignedTaskStatus = async (taskId, newStatus) => {
+  try {
+    await api.patch(`/tasks/${taskId}`, { 
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    });
+    // Refresh the assigned tasks list
+    fetchMyAssignedTasks();
+    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+  } catch (error) {
+    console.error('Failed to update task status:', error);
+    toast.error('Failed to update task');
+  }
+};
+  const fetchDashboardData = async () => {
+    try {
+      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
+        api.get('/dashboard/stats'),
+        api.get('/tasks'),
+        api.get('/duedates/upcoming?days=30'),
+      ]);
+      const handleAssignedTaskToggle = async (task) => {
+  try {
+    const updatedStatus = task.status === 'completed' ? 'pending' : 'completed';
+
+    await api.put(`/tasks/${task.id}`, {
+      ...task,
+      status: updatedStatus,
+    });
+
+    fetchMyAssignedTasks();
+    toast.success("Task updated");
+  } catch (error) {
+    toast.error("Failed to update task");
+  }
+};
+      setStats(statsRes.data);
+      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
+      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
+      // Fetch Rankings
+      const rankingRes = await api.get(
+        `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+      );
+      setRankings(rankingRes.data?.rankings || []);
+      // Fetch Chat Notifications
+      const chatRes = await api.get('/notifications');  // Changed from /chat/notifications
+      if (chatRes.data?.length > chatMessages.length) {
+        notificationAudio.current.play().catch(() => {});
+      }
+      setChatMessages(chatRes.data || []);
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    }
+  };
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
@@ -324,7 +270,6 @@ const handleToggleTodo = async (id) => {
       console.error('Failed to fetch attendance:', error);
     }
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -338,7 +283,6 @@ const handleToggleTodo = async (id) => {
       setLoading(false);
     }
   };
-
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -347,7 +291,6 @@ const handleToggleTodo = async (id) => {
     };
     return styles[status] || styles.pending;
   };
-
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -356,7 +299,6 @@ const handleToggleTodo = async (id) => {
     };
     return styles[priority] || styles.medium;
   };
-
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
@@ -392,15 +334,12 @@ const handleToggleTodo = async (id) => {
       text: 'text-yellow-600'
     };
   };
-
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
     : 0;
-
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
-
   return (
     <motion.div
       className="space-y-6"
@@ -585,82 +524,67 @@ const handleToggleTodo = async (id) => {
               Your latest assignments and progress
             </p>
           </CardHeader>
-<CardContent className="p-4 sm:p-6">
-  <div className="flex gap-2 mb-4">
-    <input
-      type="text"
-      value={newTodo ?? ''}
-      onChange={(e) => setNewTodo(e.target.value)}
-      placeholder="Add new task..."
-      className="flex-1 p-3 text-sm border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500"
-    />
-    <Button onClick={addTodo} disabled={!newTodo?.trim?.()}>Add</Button>
-  </div>
-
-  {(!todos || todos.length === 0) ? (
-    <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
-      No personal tasks yet
-    </div>
-  ) : (
-    <div className="space-y-3 max-h-[320px] sm:max-h-[420px] overflow-y-auto pr-2">
-      {(todos || []).map((todo, index) => (
-        <div
-          key={todo?.id || index}
-          className={`p-4 rounded-2xl border ${
-            todo?.completed 
-              ? 'bg-emerald-50/70 border-emerald-200' 
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          }`}
+          <CardContent className="p-4">
+            {recentTasks.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No recent tasks
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentTasks.map((task) => {
+                  const statusStyle = getStatusStyle(task.status);
+                  const priorityStyle = getPriorityStyle(task.priority);
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-sm transition ${priorityStyle.bg} ${priorityStyle.border}`}
+                      onClick={() => navigate('/tasks')}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium text-sm text-slate-900 truncate">
+                          {task.title || 'Untitled Task'}
+                        </p>
+                        <Badge
+                          variant="secondary"
+                          className={`${statusStyle.bg} ${statusStyle.text} text-xs font-medium`}
+                        >
+                          {task.status?.replace('_', ' ')?.toUpperCase() || 'PENDING'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-600">
+                        <Calendar className="h-3 w-3" />
+                        {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="upcoming-duedates-card"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <input
-                type="checkbox"
-                checked={todo?.completed || false}
-                onChange={() => handleToggleTodo?.(todo?.id)}
-                className="h-5 w-5 sm:h-6 sm:w-6 accent-emerald-600 flex-shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm sm:text-base ${
-                  todo?.completed ? 'line-through text-slate-600' : 'text-slate-900'
-                }`}>
-                  {todo?.title || 'Untitled Task'}
-                </p>
-              </div>
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-orange-500" />
+                Upcoming Deadlines
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/duedates')}
+                className="text-blue-600 hover:text-blue-700"
+              >
+                View All
+              </Button>
             </div>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-              onClick={() => handleDeleteTodo?.(todo?.id)}
-            >
-              Delete
-            </Button>
-          </div>
-
-          {/* Dates & Log line */}
-          <div className="mt-2 text-xs text-slate-500 pl-8">
-            <div>
-              Created: {todo?.created_at 
-                ? format(new Date(todo.created_at), 'dd MMM yyyy • hh:mm a') 
-                : '—'}
-            </div>
-            {todo?.completed_at && (
-              <div className="text-emerald-700 font-medium">
-                Completed: {format(new Date(todo.completed_at), 'dd MMM yyyy • hh:mm a')}
-              </div>
-            )}
-            {todo?.log && (
-              <div className="mt-1 italic text-slate-400 text-[11px]">
-                Log: {todo?.log}
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-</CardContent>
+            <p className="text-xs text-slate-500 mt-1">
+              Next 30 days compliance calendar
+            </p>
+          </CardHeader>
           <CardContent className="p-4">
             {upcomingDueDates.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
@@ -776,95 +700,95 @@ const handleToggleTodo = async (id) => {
 
       {/* Star Performers + My To-Do List + Tasks Assigned to Me (Fully Responsive) */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
-
-      {/* Star Performers */}
-<Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
-  <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
-    <div className="flex items-center justify-between flex-wrap gap-3">
-      <CardTitle className="text-lg font-semibold flex items-center gap-2">
-        <TrendingUp className="h-5 w-5 text-yellow-500" />
-        Star Performers
-      </CardTitle>
-      
-      {user?.role === 'admin' && (
-        <div className="flex gap-1.5 sm:gap-2">
-          {["all", "monthly", "weekly"].map(period => (
-            <Button
-              key={period}
-              variant={rankingPeriod === period ? "default" : "outline"}
-              size="sm"
-              onClick={() => setRankingPeriod(period)}
-              className="text-xs sm:text-sm px-3 py-1 min-w-[70px]"
-            >
-              {period.charAt(0).toUpperCase() + period.slice(1)}
-            </Button>
-          ))}
-        </div>
-      )}
-    </div>
-    
-    <p className="text-xs text-slate-500 mt-1.5">
-      Top team members based on performance metrics
-    </p>
-  </CardHeader>
-
-  <CardContent className="p-4 sm:p-6">
-    {(!rankings || rankings.length === 0) ? (
-      <div className="text-center py-12 sm:py-16 text-slate-400">
-        <TrendingUp className="h-10 w-10 mx-auto mb-3 opacity-40" />
-        <p className="text-base font-medium">No rankings yet</p>
-        <p className="text-sm mt-1">Performance data will appear here once available</p>
-      </div>
-    ) : (
-      <div className="space-y-3 max-h-[360px] sm:max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-        {rankings?.slice(0, 5).map((member, index) => {
-          const rank = index + 1;
-          const isTop3 = rank <= 3;
-
-          return (
-            <div
-              key={member?.user_id || index}
-              className={`
-                p-3.5 rounded-xl border transition-all duration-200
-                ${isTop3 
-                  ? 'bg-gradient-to-r from-yellow-50/80 to-amber-50/60 border-amber-200 shadow-sm' 
-                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100 hover:shadow-sm'}
-                flex items-center justify-between gap-4
-              `}
-            >
-              <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                <div className={`
-                  flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm
-                  ${rank === 1 ? 'bg-yellow-400 text-white' : 
-                    rank === 2 ? 'bg-gray-300 text-gray-800' : 
-                    rank === 3 ? 'bg-amber-600 text-white' : 
-                    'bg-slate-200 text-slate-600'}
-                `}>
-                  {rank}
+        
+        {/* Star Performers - Full working card + responsive */}
+        <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
+          <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-yellow-500" />
+                Star Performers
+              </CardTitle>
+              {user?.role === 'admin' && (
+                <div className="flex gap-1 sm:gap-2">
+                  {["all", "monthly", "weekly"].map(p => (
+                    <Button
+                      key={p}
+                      variant={rankingPeriod === p ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setRankingPeriod(p)}
+                      className="text-xs sm:text-sm px-3 py-1"
+                    >
+                      {p.toUpperCase()}
+                    </Button>
+                  ))}
                 </div>
-                
-                <div className="min-w-0">
-                  <p className="font-medium text-slate-900 truncate">
-                    {member?.name || 'Unknown'}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate">
-                    {member?.role || 'Team Member'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-right flex-shrink-0">
-                <p className="text-lg font-bold text-emerald-600">
-                  {Math.round(member?.score ?? 0)}%
-                </p>
-              </div>
+              )}
             </div>
-          );
-        })}
-      </div>
-    )}
-  </CardContent>
-</Card>
+            <p className="text-xs text-slate-500 mt-1">
+              Recognizing top contributors based on performance metrics
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6">
+            {rankings.length === 0 ? (
+              <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
+                No ranking data available
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[340px] sm:max-h-[380px] overflow-y-auto pr-2">
+                {rankings.slice(0, 5).map((member, index) => {
+                  const isTop = index === 0;
+                  const isSecond = index === 1;
+                  const isThird = index === 2;
+                  return (
+                    <div key={member.user_id || index} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl transition border ${
+                      isTop ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md" :
+                      isSecond ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300" :
+                      isThird ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300" :
+                      "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 text-sm font-semibold">
+                          {isTop && "🥇"}{isSecond && "🥈"}{isThird && "🥉"}{!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
+                        </div>
+                        <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0 ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}`}>
+                          {member.profile_picture ? (
+                            <img src={member.profile_picture} alt={member.name || 'User'} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white ${isTop ? "bg-yellow-500" : "bg-emerald-500"}`}>
+                              {member.name ? member.name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className={`text-sm sm:text-base font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                            {member.name || 'Unknown User'}
+                          </p>
+                          <p className="text-xs text-slate-500 capitalize">{member.role || 'Staff'}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm sm:text-base font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                          {member.score ? `${member.score}%` : 'N/A'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {member.hours_worked ? `${member.hours_worked}h` : '0h'} worked
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {rankings.length > 5 && (
+              <div className="text-right mt-4">
+                <button onClick={() => navigate('/reports')} className="text-sm text-blue-600 hover:underline">
+                  View All Rankings →
+                </button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* My To-Do List - Responsive */}
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="todo-list-card">
@@ -874,7 +798,13 @@ const handleToggleTodo = async (id) => {
                 <CheckSquare className="h-5 w-5 text-blue-500" />
                 My To-Do List
               </CardTitle>
+              {user?.role === 'admin' && (
+                <Button variant="ghost" size="sm" onClick={() => navigate('/todo-list')}>
+                  View All
+                </Button>
+              )}
             </div>
+            <p className="text-xs text-slate-500 mt-1">Manage your personal tasks</p>
           </CardHeader>
           <CardContent className="p-4 sm:p-6">
             <div className="flex gap-2 mb-4">
@@ -912,6 +842,9 @@ const handleToggleTodo = async (id) => {
                         <span className={`block text-sm sm:text-base ${todo.completed ? 'line-through text-slate-500' : 'text-slate-900'}`}>
                           {todo.title}
                         </span>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Added: {format(new Date(todo.created_at), 'MMM d, yyyy')}
+                        </p>
                       </div>
                     </div>
                     <Button variant="destructive" size="sm" onClick={() => handleDeleteTodo(todo.id)}>
@@ -934,6 +867,7 @@ const handleToggleTodo = async (id) => {
               {user?.full_name || user?.name || 'User'} - Tasks
             </CardTitle>
           </div>
+          <p className="text-sm text-slate-500 mt-1">Manage tasks assigned to you and by you</p>
         </CardHeader>
 
         <CardContent className="p-6">
@@ -947,6 +881,7 @@ const handleToggleTodo = async (id) => {
                 </div>
                 <h3 className="font-semibold text-lg">Tasks Assigned to Me</h3>
               </div>
+              <p className="text-xs text-slate-500 mb-4">Tasks others assigned to you</p>
 
               {tasksAssignedToMe.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
@@ -975,6 +910,7 @@ const handleToggleTodo = async (id) => {
                 </div>
                 <h3 className="font-semibold text-lg">Tasks Assigned by Me</h3>
               </div>
+              <p className="text-xs text-slate-500 mb-4">Tasks you assigned to others</p>
 
               {tasksAssignedByMe.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
@@ -997,7 +933,30 @@ const handleToggleTodo = async (id) => {
           </div>
         </CardContent>
       </Card>
-      
+                    {/* Action buttons – exact style from your image */}
+                    <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0 mt-2 md:mt-1">
+                      <Button
+                        onClick={() => updateAssignedTaskStatus(task.id, 'in_progress')}
+                        className="bg-[#2563eb] hover:bg-blue-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
+                        size="sm"
+                      >
+                        In Progress
+                      </Button>
+                      <Button
+                        onClick={() => updateAssignedTaskStatus(task.id, 'completed')}
+                        className="bg-[#16a34a] hover:bg-green-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
+                        size="sm"
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
@@ -1062,7 +1021,7 @@ const handleToggleTodo = async (id) => {
             </div>
           </CardContent>
         </Card>
-        {user?.role === 'admin' && (
+{user?.role === 'admin' && (
           <Card
             className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
             onClick={() => navigate('/users')}
