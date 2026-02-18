@@ -134,24 +134,27 @@ export default function Dashboard() {
     }
   };
 
-  const addTodo = async () => {
-    if (!newTodo.trim()) return;
-    try {
-      const res = await api.post('/tasks', {
-        title: newTodo.trim(),
-        status: 'pending',
-        created_at: new Date().toISOString()
-      });
-      setTodos([...todos, {
-        ...res.data,
-        completed: res.data.status === 'completed'
-      }]);
-      setNewTodo('');
-      toast.success('Todo added successfully!');
-    } catch (error) {
-      toast.error('Failed to add todo');
-    }
-  };
+const addTodo = async () => {
+  if (!newTodo?.trim?.()) return;
+  try {
+    const now = new Date().toISOString();
+    const res = await api.post('/tasks', {
+      title: newTodo?.trim?.(),
+      status: 'pending',
+      created_at: now,           // backend should store this
+      // optional: created_by: user?.id
+    });
+    setTodos([...(todos || []), {
+      ...res?.data,
+      completed: false,
+      created_at: now
+    }]);
+    setNewTodo('');
+    toast.success('Todo added');
+  } catch (error) {
+    toast.error('Failed to add todo');
+  }
+};
 
   // FIXED SYNTAX IN YOUR ORIGINAL BLOCK
   const fetchMyAssignedTasks = async () => {
@@ -199,64 +202,119 @@ export default function Dashboard() {
     }
   };
 
-  const handleToggleTodo = async (id) => {
-    const todo = todos.find(t => t.id === id);
-    if (!todo) return;
-    try {
-      const newStatus = todo.completed ? 'pending' : 'completed';
-      const res = await api.patch(`/tasks/${id}`, {
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      });
-      setTodos(todos.map(t => t.id === id ? {
-        ...res.data,
-        completed: res.data.status === 'completed'
-      } : t));
-      if (newStatus === 'completed') {
-        toast.success('Task marked as done!');
-      }
-    } catch (error) {
-      toast.error('Failed to update todo');
+<CardContent className="p-4 sm:p-6">
+  <div className="flex gap-2 mb-4">
+    <input
+      type="text"
+      value={newTodo ?? ''}
+      onChange={(e) => setNewTodo(e.target.value)}
+      placeholder="Add new task..."
+      className="flex-1 p-3 text-sm border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500"
+    />
+    <Button onClick={addTodo} disabled={!newTodo?.trim?.()}>Add</Button>
+  </div>
+
+  {(!todos || todos.length === 0) ? (
+    <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
+      No personal tasks yet
+    </div>
+  ) : (
+    <div className="space-y-3 max-h-[320px] sm:max-h-[420px] overflow-y-auto pr-2">
+      {(todos || []).map((todo, index) => (
+        <div
+          key={todo?.id || index}
+          className={`p-4 rounded-2xl border ${
+            todo?.completed 
+              ? 'bg-emerald-50/70 border-emerald-200' 
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <input
+                type="checkbox"
+                checked={todo?.completed || false}
+                onChange={() => handleToggleTodo?.(todo?.id)}
+                className="h-5 w-5 sm:h-6 sm:w-6 accent-emerald-600 flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm sm:text-base ${
+                  todo?.completed ? 'line-through text-slate-600' : 'text-slate-900'
+                }`}>
+                  {todo?.title || 'Untitled Task'}
+                </p>
+              </div>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              onClick={() => handleDeleteTodo?.(todo?.id)}
+            >
+              Delete
+            </Button>
+          </div>
+
+          {/* Dates & Log line */}
+          <div className="mt-2 text-xs text-slate-500 pl-8">
+            <div>
+              Created: {todo?.created_at 
+                ? format(new Date(todo.created_at), 'dd MMM yyyy • hh:mm a') 
+                : '—'}
+            </div>
+            {todo?.completed_at && (
+              <div className="text-emerald-700 font-medium">
+                Completed: {format(new Date(todo.completed_at), 'dd MMM yyyy • hh:mm a')}
+              </div>
+            )}
+            {todo?.log && (
+              <div className="mt-1 italic text-slate-400 text-[11px]">
+                Log: {todo?.log}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</CardContent>;
+
+const handleToggleTodo = async (id) => {
+  const todo = (todos || []).find(t => t.id === id);
+  if (!todo) return;
+
+  try {
+    const now = new Date().toISOString();
+    const newStatus = todo?.completed ? 'pending' : 'completed';
+
+    const patchData = {
+      status: newStatus,
+      updated_at: now
+    };
+
+    if (newStatus === 'completed') {
+      patchData.completed_at = now;
+      patchData.log = `Completed by ${user?.full_name || user?.email || 'user'} on ${format(new Date(), 'dd MMM yyyy hh:mm a')}`;
+    } else {
+      patchData.completed_at = null;
+      patchData.log = (todo?.log || '') + `\nRe-opened by ${user?.full_name || 'user'} on ${format(new Date(), 'dd MMM yyyy hh:mm a')}`;
     }
-  };
 
-  const handleDeleteTodo = async (id) => {
-    try {
-      await api.delete(`/tasks/${id}`);
-      setTodos(todos.filter(t => t.id !== id));
-      toast.success('Todo deleted successfully!');
-    } catch (error) {
-      toast.error('Failed to delete todo');
-    }
-  };
+    const res = await api.patch(`/tasks/${id}`, patchData);
 
-  const fetchDashboardData = async () => {
-    try {
-      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-        api.get('/duedates/upcoming?days=30'),
-      ]);
+    setTodos((todos || []).map(t => 
+      t.id === id ? { 
+        ...res?.data, 
+        completed: res?.data?.status === 'completed' 
+      } : t
+    ));
 
-      setStats(statsRes.data);
-      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
-      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-
-      const rankingRes = await api.get(
-        `/staff/rankings?period=${user?.role === "admin" ? rankingPeriod : "all"}`
-      );
-      setRankings(rankingRes.data?.rankings || []);
-
-      const chatRes = await api.get('/notifications');
-      if (chatRes.data?.length > chatMessages.length) {
-        notificationAudio.current.play().catch(() => {});
-      }
-      setChatMessages(chatRes.data || []);
-
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-    }
-  };
+    toast.success(newStatus === 'completed' ? 'Marked as done' : 'Re-opened');
+  } catch (error) {
+    toast.error('Could not update task');
+    console.error(error);
+  }
+};
 
   const fetchTodayAttendance = async () => {
     try {
@@ -527,56 +585,82 @@ export default function Dashboard() {
               Your latest assignments and progress
             </p>
           </CardHeader>
-          <CardContent className="p-4">
-            {recentTasks.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm">
-                No recent tasks
+<CardContent className="p-4 sm:p-6">
+  <div className="flex gap-2 mb-4">
+    <input
+      type="text"
+      value={newTodo ?? ''}
+      onChange={(e) => setNewTodo(e.target.value)}
+      placeholder="Add new task..."
+      className="flex-1 p-3 text-sm border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500"
+    />
+    <Button onClick={addTodo} disabled={!newTodo?.trim?.()}>Add</Button>
+  </div>
+
+  {(!todos || todos.length === 0) ? (
+    <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
+      No personal tasks yet
+    </div>
+  ) : (
+    <div className="space-y-3 max-h-[320px] sm:max-h-[420px] overflow-y-auto pr-2">
+      {(todos || []).map((todo, index) => (
+        <div
+          key={todo?.id || index}
+          className={`p-4 rounded-2xl border ${
+            todo?.completed 
+              ? 'bg-emerald-50/70 border-emerald-200' 
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <input
+                type="checkbox"
+                checked={todo?.completed || false}
+                onChange={() => handleToggleTodo?.(todo?.id)}
+                className="h-5 w-5 sm:h-6 sm:w-6 accent-emerald-600 flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm sm:text-base ${
+                  todo?.completed ? 'line-through text-slate-600' : 'text-slate-900'
+                }`}>
+                  {todo?.title || 'Untitled Task'}
+                </p>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {recentTasks.map((task) => {
-                  const statusStyle = getStatusStyle(task.status);
-                  const priorityStyle = getPriorityStyle(task.priority);
-                  return (
-                    <div
-                      key={task.id}
-                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-sm transition ${priorityStyle.bg} ${priorityStyle.border}`}
-                      onClick={() => navigate('/tasks')}
-                    >
-                      <div className="flex items-center gap-2 text-xs text-slate-600">
-                        <Calendar className="h-3 w-3" />
-                        {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
-                      </div>
-                    </div>
-                  );
-                })}
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              onClick={() => handleDeleteTodo?.(todo?.id)}
+            >
+              Delete
+            </Button>
+          </div>
+
+          {/* Dates & Log line */}
+          <div className="mt-2 text-xs text-slate-500 pl-8">
+            <div>
+              Created: {todo?.created_at 
+                ? format(new Date(todo.created_at), 'dd MMM yyyy • hh:mm a') 
+                : '—'}
+            </div>
+            {todo?.completed_at && (
+              <div className="text-emerald-700 font-medium">
+                Completed: {format(new Date(todo.completed_at), 'dd MMM yyyy • hh:mm a')}
               </div>
             )}
-          </CardContent>
-        </Card>
-        <Card
-          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
-          data-testid="upcoming-duedates-card"
-        >
-          <CardHeader className="pb-3 border-b border-slate-100">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-orange-500" />
-                Upcoming Deadlines
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/duedates')}
-                className="text-blue-600 hover:text-blue-700"
-              >
-                View All
-              </Button>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Next 30 days compliance calendar
-            </p>
-          </CardHeader>
+            {todo?.log && (
+              <div className="mt-1 italic text-slate-400 text-[11px]">
+                Log: {todo?.log}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</CardContent>
           <CardContent className="p-4">
             {upcomingDueDates.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
@@ -692,60 +776,95 @@ export default function Dashboard() {
 
       {/* Star Performers + My To-Do List + Tasks Assigned to Me (Fully Responsive) */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
-        
-        {/* Star Performers - Full working card + responsive */}
-        <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
-          <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-yellow-500" />
-                Star Performers
-              </CardTitle>
-              {user?.role === 'admin' && (
-                <div className="flex gap-1 sm:gap-2">
-                  {["all", "monthly", "weekly"].map(p => (
-                    <Button
-                      key={p}
-                      variant={rankingPeriod === p ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setRankingPeriod(p)}
-                      className="text-xs sm:text-sm px-3 py-1"
-                    >
-                      {p.toUpperCase()}
-                    </Button>
-                  ))}
+
+      {/* Star Performers */}
+<Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
+  <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
+    <div className="flex items-center justify-between flex-wrap gap-3">
+      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+        <TrendingUp className="h-5 w-5 text-yellow-500" />
+        Star Performers
+      </CardTitle>
+      
+      {user?.role === 'admin' && (
+        <div className="flex gap-1.5 sm:gap-2">
+          {["all", "monthly", "weekly"].map(period => (
+            <Button
+              key={period}
+              variant={rankingPeriod === period ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRankingPeriod(period)}
+              className="text-xs sm:text-sm px-3 py-1 min-w-[70px]"
+            >
+              {period.charAt(0).toUpperCase() + period.slice(1)}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+    
+    <p className="text-xs text-slate-500 mt-1.5">
+      Top team members based on performance metrics
+    </p>
+  </CardHeader>
+
+  <CardContent className="p-4 sm:p-6">
+    {(!rankings || rankings.length === 0) ? (
+      <div className="text-center py-12 sm:py-16 text-slate-400">
+        <TrendingUp className="h-10 w-10 mx-auto mb-3 opacity-40" />
+        <p className="text-base font-medium">No rankings yet</p>
+        <p className="text-sm mt-1">Performance data will appear here once available</p>
+      </div>
+    ) : (
+      <div className="space-y-3 max-h-[360px] sm:max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
+        {rankings?.slice(0, 5).map((member, index) => {
+          const rank = index + 1;
+          const isTop3 = rank <= 3;
+
+          return (
+            <div
+              key={member?.user_id || index}
+              className={`
+                p-3.5 rounded-xl border transition-all duration-200
+                ${isTop3 
+                  ? 'bg-gradient-to-r from-yellow-50/80 to-amber-50/60 border-amber-200 shadow-sm' 
+                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100 hover:shadow-sm'}
+                flex items-center justify-between gap-4
+              `}
+            >
+              <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                <div className={`
+                  flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm
+                  ${rank === 1 ? 'bg-yellow-400 text-white' : 
+                    rank === 2 ? 'bg-gray-300 text-gray-800' : 
+                    rank === 3 ? 'bg-amber-600 text-white' : 
+                    'bg-slate-200 text-slate-600'}
+                `}>
+                  {rank}
                 </div>
-              )}
+                
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900 truncate">
+                    {member?.name || 'Unknown'}
+                  </p>
+                  <p className="text-xs text-slate-500 truncate">
+                    {member?.role || 'Team Member'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right flex-shrink-0">
+                <p className="text-lg font-bold text-emerald-600">
+                  {Math.round(member?.score ?? 0)}%
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Recognizing top contributors based on performance metrics
-            </p>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-6">
-            {rankings.length === 0 ? (
-              <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
-                No ranking data available
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[340px] sm:max-h-[380px] overflow-y-auto pr-2">
-                {rankings.slice(0, 5).map((member, index) => {
-                  const isTop = index === 0;
-                  return (
-                    <div key={member.user_id || index} className="bg-slate-50 border-slate-200 hover:bg-slate-100 p-3 rounded-xl border flex justify-between items-center">
-                      <div>
-                        <p className="text-sm font-medium">{member.name}</p>
-                        <p className="text-xs text-slate-500">{member.role}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold">{member.score}%</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          );
+        })}
+      </div>
+    )}
+  </CardContent>
+</Card>
 
         {/* My To-Do List - Responsive */}
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="todo-list-card">
