@@ -2185,7 +2185,9 @@ async def get_staff_rankings(
 
         # ================= ATTENDANCE =================
     
-        total_minutes = 0
+       def some_function():
+           print("ok")
+             totalminutes = 0
 
         for record in await db.attendance.find(
             {"user_id": uid},
