@@ -139,11 +139,6 @@ const fetchMyAssignedTasks = async () => {
   }
 };
 
-    setAssignedTasks(filtered.slice(0, 6)); // show max 6
-  } catch (error) {
-    console.error("Failed to fetch assigned tasks", error);
-  }
-};
 
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
