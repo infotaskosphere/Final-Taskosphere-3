@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+const [users, setUsers] = useState([]);
 import { Mail } from "lucide-react";
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -83,6 +84,11 @@ export default function StaffActivity() {
       fetchTaskAnalytics();
     }
   }, [user]);
+  
+  useEffect(() => {
+  fetchUsers();
+}, []);
+
 
   useEffect(() => {
     if (user?.role === 'admin') {
@@ -98,6 +104,13 @@ export default function StaffActivity() {
       setSelectedUserTodos([]);
     }
   }, [selectedUser]);
+
+  const fetchUsers = async () => {
+  try {
+    const res = await api.get('/users');
+    setUsers(res.data || []);
+  } catch {}
+};
 
   const fetchUsers = async () => {
     try {
@@ -226,10 +239,73 @@ export default function StaffActivity() {
     .sort((a, b) => b.duration - a.duration)
     .slice(0, 8);
 
-  // Calculate productivity score
-  const productivityScore = categoryData.length > 0 
-    ? Math.round((categoryData.find(c => c.name === 'productivity')?.value || 0) / totalDuration * 100) || 0
-    : 0;
+// ================= DYNAMIC TIMELY PUNCH-IN SCORE =================
+
+let timelyPunchScore = 0;
+
+if (attendanceReport?.staff_report && selectedUser !== 'all') {
+
+  const userAttendance = attendanceReport.staff_report.find(
+    s => s.user_id === selectedUser
+  );
+
+  const userData = users.find(u => u.id === selectedUser);
+
+  if (userAttendance?.daily_records?.length > 0) {
+
+    const startTime = userData?.office_start_time || "09:30";
+    const [officeHour, officeMinute] = startTime.split(':').map(Number);
+
+    const totalDays = userAttendance.daily_records.length;
+
+    let onTimeCount = 0;
+    let slightLateCount = 0;
+
+    userAttendance.daily_records.forEach(record => {
+
+      if (!record.punch_in) return;
+
+      const punchTime = new Date(record.punch_in);
+
+      const officeTime = new Date(punchTime);
+      officeTime.setHours(officeHour, officeMinute, 0, 0);
+
+      const thirtyMinGrace = new Date(officeTime.getTime() + 30 * 60000);
+
+      if (punchTime <= officeTime) {
+        onTimeCount += 1;
+      }
+      else if (punchTime <= thirtyMinGrace) {
+        slightLateCount += 1;
+      }
+
+    });
+
+  // ================= SAFE TIMELY PUNCH =================
+
+const onTimeRatio =
+  totalDays > 0 ? onTimeCount / totalDays : 0;
+
+const slightLateRatio =
+  totalDays > 0 ? slightLateCount / totalDays : 0;
+
+const timelyPunchScore =
+  (onTimeRatio * 100) +
+  (slightLateRatio * 70);
+
+// ================= FINAL PRODUCTIVITY =================
+
+const productivityScore = Math.round(
+  (taskCompletionRate * 0.35) +
+  (efficiencyScore * 0.25) +
+  (attendanceScore * 0.15) +
+  (timelyPunchScore * 0.15) +
+  (taskLoadScore * 0.10)
+);
+
+const finalProductivity =
+  isNaN(productivityScore) ? 0 : Math.min(productivityScore, 100);
+
 
   // Calculate total attendance hours for selected month
   const totalAttendanceMinutes = attendanceReport?.staff_report?.reduce((sum, s) => sum + s.total_minutes, 0) || 0;
