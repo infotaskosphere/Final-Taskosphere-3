@@ -159,7 +159,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       status: newStatus,
       updated_at: new Date().toISOString()
     });
-    fetchMyAssignedTasks(); // refresh both columns
+    fetchMyAssignedTasks();
     toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
   } catch (error) {
     console.error(error);
@@ -214,7 +214,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       updated_at: new Date().toISOString()
     });
     
-    fetchMyAssignedTasks();  // refresh both columns
+    fetchMyAssignedTasks();
     
     toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
   } catch (error) {
