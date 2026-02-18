@@ -117,23 +117,57 @@ export default function Dashboard() {
       toast.error('Failed to add todo');
     }
   };
-  const fetchMyAssignedTasks = async () => {
+const fetchMyAssignedTasks = async () => {
   try {
     const res = await api.get('/tasks');
+    const allTasks = res.data || [];
 
-    const filtered = res.data.filter(task => {
-      const isAssignedUser = task.assigned_to === user.id;
-      const isAssigningUser = task.created_by === user.id; // ensure backend sends created_by
-      const isAdmin = user.role === 'admin';
+    // Tasks where current user is the assignee
+    const toMe = allTasks.filter(task => task.assigned_to === user?.id);
 
-      return isAssignedUser || isAssigningUser || isAdmin;
-    });
+    // Tasks where current user is the creator/assigner (exclude self-assigned)
+    const byMe = allTasks.filter(task => 
+      task.created_by === user?.id && task.assigned_to !== user?.id
+    );
+
+    setTasksAssignedToMe(toMe.slice(0, 6));
+    setTasksAssignedByMe(byMe.slice(0, 6));
+  } catch (error) {
+    console.error("Failed to fetch assigned tasks", error);
+    setTasksAssignedToMe([]);
+    setTasksAssignedByMe([]);
+  }
+};
 
     setAssignedTasks(filtered.slice(0, 6)); // show max 6
   } catch (error) {
     console.error("Failed to fetch assigned tasks", error);
   }
 };
+
+const getPriorityStripeClass = (priority) => {
+  const p = (priority || '').toLowerCase().trim();
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
+  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
+  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  return 'border-l-8 border-l-slate-300';
+};
+
+const updateAssignedTaskStatus = async (taskId, newStatus) => {
+  try {
+    await api.patch(`/tasks/${taskId}`, { 
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    });
+    fetchMyAssignedTasks(); // refresh both columns
+    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+  } catch (error) {
+    console.error(error);
+    toast.error('Failed to update task');
+  }
+};
+
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
@@ -824,62 +858,81 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
         </Card>
       </motion.div>
 
-      {/* Tasks Assigned to Me – Revised design (exact match to your image) */}
+      {/* Tasks Section - Split into 2 Equal Parts (Assigned to Me / Assigned by Me) */}
       <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
         <CardHeader className="pb-4 border-b border-slate-100 px-6">
           <div className="flex items-center justify-between">
             <CardTitle className="text-2xl font-semibold flex items-center gap-3 tracking-tight">
               <Briefcase className="h-7 w-7 text-emerald-600" />
-              {user?.full_name || 'User'} - Tasks
+              {user?.full_name || user?.name || 'User'} - Tasks
             </CardTitle>
           </div>
-          <p className="text-sm text-slate-500 mt-1">Tasks assigned to you</p>
+          <p className="text-sm text-slate-500 mt-1">Manage tasks assigned to you and by you</p>
         </CardHeader>
 
         <CardContent className="p-6">
-          {assignedTasks.length === 0 ? (
-            <div className="text-center py-16 text-slate-400">
-              No tasks assigned yet
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            
+            {/* ==================== LEFT: Tasks Assigned to Me ==================== */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 bg-emerald-100 rounded-lg flex items-center justify-center">
+                  <Briefcase className="h-4 w-4 text-emerald-600" />
+                </div>
+                <h3 className="font-semibold text-lg">Tasks Assigned to Me</h3>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">Tasks others assigned to you</p>
+
+              {tasksAssignedToMe.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                  No tasks assigned to you yet
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
+                  {tasksAssignedToMe.map((task) => (
+                    <TaskCard 
+                      key={task.id} 
+                      task={task} 
+                      assignedBy={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                      isToMe={true}
+                      onStatusChange={updateAssignedTaskStatus}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-3">
-              {assignedTasks.map((task) => {
-                const dueFormatted = task.due_date
-                  ? format(new Date(task.due_date), 'MMM d, yyyy')
-                  : 'No due date';
 
-                const assignFormatted = task.created_at
-                  ? format(new Date(task.created_at), 'MMM d, yyyy')
-                  : 'N/A';
+            {/* ==================== RIGHT: Tasks Assigned by Me ==================== */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Briefcase className="h-4 w-4 text-blue-600" />
+                </div>
+                <h3 className="font-semibold text-lg">Tasks Assigned by Me</h3>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">Tasks you assigned to others</p>
 
-                const assignedBy = task.assigned_by_name 
-                  ?? task.created_by_name 
-                  ?? (task.created_by === user?.id ? 'You' : 'Unknown');
-
-                return (
-                  <div
-                    key={task.id}
-                    className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-start gap-6 ${getPriorityStripeClass(task.priority)}`}
-                  >
-                    {/* Main content */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-2xl text-slate-950 tracking-tight mb-4 leading-tight">
-                        {task.title || 'Untitled Task'}
-                      </h3>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-2 text-sm text-slate-600">
-                        <div>
-                          Due Date: <span className="font-medium text-slate-900">{dueFormatted}</span>
-                        </div>
-                        <div>
-                          Date of Assignment: <span className="font-medium text-slate-900">{assignFormatted}</span>
-                        </div>
-                        <div>
-                          Assigned by: <span className="font-medium text-slate-900">{assignedBy}</span>
-                        </div>
-                      </div>
-                    </div>
-
+              {tasksAssignedByMe.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                  You haven't assigned any tasks yet
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
+                  {tasksAssignedByMe.map((task) => (
+                    <TaskCard 
+                      key={task.id} 
+                      task={task} 
+                      assignedBy={task.assigned_to_name || 'Unknown User'}
+                      isToMe={false}
+                      onStatusChange={updateAssignedTaskStatus}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
                     {/* Action buttons – exact style from your image */}
                     <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0 mt-2 md:mt-1">
                       <Button
