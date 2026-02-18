@@ -138,7 +138,6 @@ const fetchMyAssignedTasks = async () => {
     setTasksAssignedByMe([]);
   }
 };
-
     setAssignedTasks(filtered.slice(0, 6)); // show max 6
   } catch (error) {
     console.error("Failed to fetch assigned tasks", error);
@@ -214,54 +213,45 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       status: newStatus,
       updated_at: new Date().toISOString()
     });
-    // Refresh the assigned tasks list
-    fetchMyAssignedTasks();
+    
+    fetchMyAssignedTasks();  // refresh both columns
+    
     toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
   } catch (error) {
     console.error('Failed to update task status:', error);
     toast.error('Failed to update task');
   }
 };
-  const fetchDashboardData = async () => {
-    try {
-      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-        api.get('/duedates/upcoming?days=30'),
-      ]);
-      const handleAssignedTaskToggle = async (task) => {
+
+const fetchDashboardData = async () => {
   try {
-    const updatedStatus = task.status === 'completed' ? 'pending' : 'completed';
+    const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
+      api.get('/dashboard/stats'),
+      api.get('/tasks'),
+      api.get('/duedates/upcoming?days=30'),
+    ]);
 
-    await api.put(`/tasks/${task.id}`, {
-      ...task,
-      status: updatedStatus,
-    });
+    setStats(statsRes.data);
+    setRecentTasks(tasksRes.data?.slice(0, 5) || []);
+    setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
 
-    fetchMyAssignedTasks();
-    toast.success("Task updated");
+    // Fetch Rankings (keeping your original logic)
+    const rankingRes = await api.get(
+      `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+    );
+    setRankings(rankingRes.data?.rankings || []);
+
+    // Fetch Chat Notifications
+    const chatRes = await api.get('/notifications');
+    if (chatRes.data?.length > chatMessages.length) {
+      notificationAudio.current.play().catch(() => {});
+    }
+    setChatMessages(chatRes.data || []);
+
   } catch (error) {
-    toast.error("Failed to update task");
+    console.error('Failed to fetch dashboard data:', error);
   }
 };
-      setStats(statsRes.data);
-      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
-      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-      // Fetch Rankings
-      const rankingRes = await api.get(
-        `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
-      );
-      setRankings(rankingRes.data?.rankings || []);
-      // Fetch Chat Notifications
-      const chatRes = await api.get('/notifications');  // Changed from /chat/notifications
-      if (chatRes.data?.length > chatMessages.length) {
-        notificationAudio.current.play().catch(() => {});
-      }
-      setChatMessages(chatRes.data || []);
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-    }
-  };
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
