@@ -129,7 +129,7 @@ export default function Tasks() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchAllUsers = async () => {
     try {
       const response = await api.get('/users');
       setUsers(response.data || []);
