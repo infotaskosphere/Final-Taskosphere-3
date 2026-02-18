@@ -704,6 +704,206 @@ export default function Dashboard() {
         </Card>
       </motion.div>
 
+        {/* Star Performers - full working card */}
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+          data-testid="staff-ranking-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-yellow-500" />
+                Star Performers
+              </CardTitle>
+              {user?.role === 'admin' && (
+                <div className="flex gap-2">
+                  <Button
+                    variant={rankingPeriod === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setRankingPeriod('all')}
+                  >
+                    ALL
+                  </Button>
+                  <Button
+                    variant={rankingPeriod === 'monthly' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setRankingPeriod('monthly')}
+                  >
+                    MONTHLY
+                  </Button>
+                  <Button
+                    variant={rankingPeriod === 'weekly' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setRankingPeriod('weekly')}
+                  >
+                    WEEKLY
+                  </Button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Recognizing top contributors based on performance metrics
+            </p>
+          </CardHeader>
+          <CardContent className="p-4">
+            {rankings.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No ranking data available
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {rankings.slice(0, 5).map((member, index) => {
+                  const isTop = index === 0;
+                  const isSecond = index === 1;
+                  const isThird = index === 2;
+                  return (
+                    <div
+                      key={member.user_id || index}
+                      className={`flex items-center justify-between p-3 rounded-xl transition border
+                        ${
+                          isTop
+                            ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md"
+                            : isSecond
+                            ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300"
+                            : isThird
+                            ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300"
+                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                        }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 text-sm font-semibold">
+                          {isTop && "🥇"}
+                          {isSecond && "🥈"}
+                          {isThird && "🥉"}
+                          {!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
+                        </div>
+                        <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
+                          ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
+                        `}>
+                          {member.profile_picture ? (
+                            <img
+                              src={member.profile_picture}
+                              alt={member.name || 'User'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div
+                              className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white
+                                ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
+                              `}
+                            >
+                              {member.name ? member.name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                            {member.name || 'Unknown User'}
+                          </p>
+                          <p className="text-xs text-slate-500 capitalize">
+                            {member.role || 'Staff'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
+                          {member.score ? `${member.score}%` : 'N/A'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {member.hours_worked ? `${member.hours_worked}h` : '0h'} worked
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {rankings.length > 5 && (
+              <div className="text-right mt-4">
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  View All Rankings →
+                </button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+      {/* Tasks Assigned to Me - Renamed as per your request */}
+      <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
+        <CardHeader className="pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <Briefcase className="h-5 w-5 text-emerald-500" />
+              Tasks Assigned to Me
+            </CardTitle>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Tasks assigned to you
+          </p>
+        </CardHeader>
+
+        <CardContent className="p-4">
+          {assignedTasks.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm">
+              No assigned tasks
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+              {assignedTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className={`flex items-center justify-between p-3 rounded-xl border ${
+                    task.status === 'completed'
+                      ? 'bg-emerald-50 border-emerald-200'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <input
+                      type="checkbox"
+                      checked={task.status === 'completed'}
+                      onChange={() => handleAssignedTaskToggle(task)}
+                      className="h-5 w-5"
+                    />
+
+                    <div className="flex-1">
+                      <p
+                        className={`text-sm font-medium ${
+                          task.status === 'completed'
+                            ? 'line-through text-slate-500'
+                            : 'text-slate-900'
+                        }`}
+                      >
+                        {task.title}
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        Due: {task.due_date
+                          ? format(new Date(task.due_date), 'MMM d, yyyy')
+                          : 'No due date'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Badge
+                    className={`text-xs ${
+                      task.status === 'completed'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-blue-600 text-white'
+                    }`}
+                  >
+                    {task.status === 'completed' ? 'Done' : 'Open'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
