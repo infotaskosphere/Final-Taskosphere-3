@@ -60,11 +60,13 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [todos, setTodos] = useState([]);
+  const [assignedTasks, setAssignedTasks] = useState([]);
   const [newTodo, setNewTodo] = useState('');
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
+    fetchMyAssignedTasks();
   }, [rankingPeriod]);
   useEffect(() => {
     const interval = setInterval(() => {
@@ -115,6 +117,23 @@ export default function Dashboard() {
       toast.error('Failed to add todo');
     }
   };
+  const fetchMyAssignedTasks = async () => {
+  try {
+    const res = await api.get('/tasks');
+
+    const filtered = res.data.filter(task => {
+      const isAssignedUser = task.assigned_to === user.id;
+      const isAssigningUser = task.created_by === user.id; // ensure backend sends created_by
+      const isAdmin = user.role === 'admin';
+
+      return isAssignedUser || isAssigningUser || isAdmin;
+    });
+
+    setAssignedTasks(filtered.slice(0, 6)); // show max 6
+  } catch (error) {
+    console.error("Failed to fetch assigned tasks", error);
+  }
+};
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
@@ -151,6 +170,21 @@ export default function Dashboard() {
         api.get('/tasks'),
         api.get('/duedates/upcoming?days=30'),
       ]);
+      const handleAssignedTaskToggle = async (task) => {
+  try {
+    const updatedStatus = task.status === 'completed' ? 'pending' : 'completed';
+
+    await api.put(`/tasks/${task.id}`, {
+      ...task,
+      status: updatedStatus,
+    });
+
+    fetchMyAssignedTasks();
+    toast.success("Task updated");
+  } catch (error) {
+    toast.error("Failed to update task");
+  }
+};
       setStats(statsRes.data);
       setRecentTasks(tasksRes.data?.slice(0, 5) || []);
       setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
@@ -605,7 +639,7 @@ export default function Dashboard() {
         </Card>
       </motion.div>
       {/* Star Performers + My To-Do List */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="staff-ranking-card"
@@ -801,6 +835,80 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
+<Card
+  className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
+>
+  <CardHeader className="pb-3 border-b border-slate-100">
+    <div className="flex items-center justify-between">
+      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+        <Briefcase className="h-5 w-5 text-emerald-500" />
+        My Assigned Tasks
+      </CardTitle>
+    </div>
+    <p className="text-xs text-slate-500 mt-1">
+      Tasks assigned to you or by you
+    </p>
+  </CardHeader>
+
+  <CardContent className="p-4">
+    {assignedTasks.length === 0 ? (
+      <div className="text-center py-8 text-slate-400 text-sm">
+        No assigned tasks
+      </div>
+    ) : (
+      <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+        {assignedTasks.map((task) => (
+          <div
+            key={task.id}
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              task.status === 'completed'
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-slate-50 border-slate-200'
+            }`}
+          >
+            <div className="flex items-center gap-3 flex-1">
+              <input
+                type="checkbox"
+                checked={task.status === 'completed'}
+                onChange={() => handleAssignedTaskToggle(task)}
+                className="h-5 w-5"
+              />
+
+              <div className="flex-1">
+                <p
+                  className={`text-sm font-medium ${
+                    task.status === 'completed'
+                      ? 'line-through text-slate-500'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {task.title}
+                </p>
+
+                <p className="text-xs text-slate-500">
+                  Due: {task.due_date
+                    ? format(new Date(task.due_date), 'MMM d, yyyy')
+                    : 'No due date'}
+                </p>
+              </div>
+            </div>
+
+            <Badge
+              className={`text-xs ${
+                task.status === 'completed'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-blue-600 text-white'
+              }`}
+            >
+              {task.status === 'completed' ? 'Done' : 'Open'}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    )}
+  </CardContent>
+</Card>
+
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
