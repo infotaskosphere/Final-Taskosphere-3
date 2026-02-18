@@ -1,7 +1,6 @@
 import pytz
 import logging
 import smtplib
-import { fetchDashboardData } from './api';
 from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
