@@ -15,6 +15,8 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import List
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -42,14 +44,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 # ... your existing code up to line 41 ...
 
-ALGORITM = "HS256"
+ALGORITHM = "HS256"
 
 # ────────────────────────────────────────────────
 # PASTE THE WEBSOCKET CODE STARTS HERE
 # ────────────────────────────────────────────────
-
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
 
 class ConnectionManager:
     def __init__(self):
