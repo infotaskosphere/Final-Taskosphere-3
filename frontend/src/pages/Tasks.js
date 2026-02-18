@@ -12,14 +12,14 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User, LayoutGrid, List, Filter, CheckCircle, Clock, Play, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User, LayoutGrid, List, Filter, CheckCircle, Clock, Play, AlertCircle, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 
 // Import shared animation variants
 import { containerVariants, itemVariants } from '@/lib/animations';
 
-// Brand Colors (darker variants used where needed)
+// Brand Colors (KEEPING ALL INTACT)
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
@@ -32,7 +32,7 @@ const COLORS = {
   darkAmber: '#f57c00',
 };
 
-// Department categories for CA/CS firms
+// Department categories (KEEPING ALL INTACT)
 const DEPARTMENTS = [
   { value: 'gst', label: 'GST' },
   { value: 'income_tax', label: 'INCOME TAX' },
@@ -61,26 +61,6 @@ const STATUS_STYLES = {
   completed: { bg: 'bg-emerald-200', text: 'text-emerald-700', label: 'Done', btn: 'bg-emerald-600 hover:bg-emerald-700' },
   review: { bg: 'bg-purple-200', text: 'text-purple-900', label: 'Review', btn: 'bg-purple-700 hover:bg-purple-800' },
   overdue: { bg: 'bg-red-200', text: 'text-red-900', label: 'Overdue', btn: 'bg-red-700 hover:bg-red-800' },
-};
-
-const PRIORITY_STYLES = {
-  low: { bg: 'bg-slate-200', text: 'text-slate-900', label: 'LOW' },
-  medium: { bg: 'bg-amber-200', text: 'text-amber-900', label: 'MEDIUM' },
-  high: { bg: 'bg-orange-200', text: 'text-orange-900', label: 'HIGH' },
-  critical: { bg: 'bg-red-200', text: 'text-red-900', label: 'CRITICAL' },
-};
-
-const CATEGORY_STYLES = {
-  gst: { bg: 'bg-green-200', text: 'text-green-900' },
-  income_tax: { bg: 'bg-indigo-200', text: 'text-indigo-900' },
-  accounts: { bg: 'bg-purple-200', text: 'text-purple-900' },
-  tds: { bg: 'bg-teal-200', text: 'text-teal-900' },
-  roc: { bg: 'bg-orange-200', text: 'text-orange-900' },
-  trademark: { bg: 'bg-pink-200', text: 'text-pink-900' },
-  msme_smadhan: { bg: 'bg-cyan-200', text: 'text-cyan-900' },
-  fema: { bg: 'bg-lime-200', text: 'text-lime-900' },
-  dsc: { bg: 'bg-amber-200', text: 'text-amber-900' },
-  other: { bg: 'bg-gray-200', text: 'text-gray-900' },
 };
 
 export default function Tasks() {
@@ -129,7 +109,7 @@ export default function Tasks() {
     }
   };
 
-  const fetchAllUsers = async () => {
+  const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
       setUsers(response.data || []);
@@ -252,22 +232,6 @@ export default function Tasks() {
     setEditingTask(null);
   };
 
-  const toggleSubAssignee = (userId) => {
-    setFormData(prev => {
-      const isSelected = prev.sub_assignees.includes(userId);
-      if (isSelected) {
-        return { ...prev, sub_assignees: prev.sub_assignees.filter(id => id !== userId) };
-      } else {
-        return { ...prev, sub_assignees: [...prev.sub_assignees, userId] };
-      }
-    });
-  };
-
-  const getUserName = (userId) => {
-    const foundUser = users.find(u => u.id === userId);
-    return foundUser?.full_name || 'Unassigned';
-  };
-
   const getClientName = (clientId) => {
     const client = clients.find(c => c.id === clientId);
     return client?.company_name || 'No Client';
@@ -310,8 +274,127 @@ export default function Tasks() {
       initial="hidden"
       animate="visible"
     >
-      {/* Header, Stats Bar, and Search Filters – keep your original UI code here */}
-      {/* ... (you can paste back your header, search, filters, stats cards, view toggle, etc.) ... */}
+      {/* RESTORED HEADER & ADD TASK BUTTON */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
+          <p className="text-slate-600">Create, assign, and track compliance tasks</p>
+        </div>
+
+        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if(!open) resetForm(); }}>
+          <DialogTrigger asChild>
+            <Button 
+              className="bg-[#1FAF5A] hover:bg-[#0f9d58] text-white rounded-full px-6 py-6 shadow-lg transition-all hover:scale-105"
+              onClick={() => { resetForm(); setDialogOpen(true); }}
+            >
+              <Plus className="mr-2 h-5 w-5" />
+              Add New Task
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem]">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>
+                {editingTask ? 'Edit Task' : 'Create New Task'}
+              </DialogTitle>
+              <DialogDescription>Fill in the details to manage your compliance task.</DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={handleSubmit} className="space-y-6 pt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="col-span-full space-y-2">
+                  <Label className="font-bold">Task Title</Label>
+                  <Input value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., GST Filing" required />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Department</Label>
+                  <Select value={formData.category} onValueChange={(v) => setFormData({...formData, category: v})}>
+                    <SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger>
+                    <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Client</Label>
+                  <Select value={formData.client_id} onValueChange={(v) => setFormData({...formData, client_id: v})}>
+                    <SelectTrigger><SelectValue placeholder="Select Client" /></SelectTrigger>
+                    <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Assignee</Label>
+                  <Select value={formData.assigned_to} onValueChange={(v) => setFormData({...formData, assigned_to: v})}>
+                    <SelectTrigger><SelectValue placeholder="Select Staff" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Due Date</Label>
+                  <Input type="date" value={formData.due_date} onChange={(e) => setFormData({...formData, due_date: e.target.value})} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={loading} className="w-full bg-[#1FAF5A] py-6 text-lg">{loading ? 'Saving...' : 'Save Task'}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* RESTORED STATS CARDS */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {[
+          { label: 'Total', count: stats.total, color: COLORS.deepBlue, icon: Briefcase },
+          { label: 'To Do', count: stats.todo, color: COLORS.mediumBlue, icon: Clock },
+          { label: 'Progress', count: stats.inProgress, color: COLORS.mediumBlue, icon: Play },
+          { label: 'Done', count: stats.completed, color: COLORS.emeraldGreen, icon: CheckCircle },
+          { label: 'Overdue', count: stats.overdue, color: '#EF4444', icon: AlertCircle },
+        ].map((s, idx) => (
+          <Card key={idx} className="border-none shadow-sm p-4 text-center">
+            <p className="text-xs font-bold text-slate-500 uppercase">{s.label}</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: s.color }}>{s.count}</p>
+          </Card>
+        ))}
+      </div>
+
+      {/* RESTORED SEARCH & FILTER CONTROLS */}
+      <Card className="p-4 border-none shadow-sm rounded-3xl">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
+            <Input 
+              className="pl-10 rounded-2xl" 
+              placeholder="Search by title..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[130px] rounded-xl"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">To Do</SelectItem>
+                <SelectItem value="in_progress">Progress</SelectItem>
+                <SelectItem value="completed">Done</SelectItem>
+                <SelectItem value="overdue">Overdue</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={filterCategory} onValueChange={setFilterCategory}>
+              <SelectTrigger className="w-[130px] rounded-xl"><SelectValue placeholder="Dept" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Dept</SelectItem>
+                {DEPARTMENTS.map(d => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <Button variant={viewMode === 'grid' ? 'white' : 'ghost'} size="sm" onClick={() => setViewMode('grid')} className="rounded-lg shadow-sm"><LayoutGrid size={16} /></Button>
+              <Button variant={viewMode === 'list' ? 'white' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="rounded-lg"><List size={16} /></Button>
+            </div>
+          </div>
+        </div>
+      </Card>
 
       <motion.div
         className={
