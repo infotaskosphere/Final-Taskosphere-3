@@ -2127,34 +2127,60 @@ async def get_staff_rankings(
     period: str = "all",
     current_user: User = Depends(get_current_user)
 ):
-
-    # Allow Admin, Manager, Staff to view
     if current_user.role not in ["admin", "manager", "staff"]:
         raise HTTPException(status_code=403, detail="Not authorized")
-
-    # Only Admin can change period
+    
     if current_user.role != "admin":
         period = "all"
 
     now = datetime.now(timezone.utc)
     start_date = None
-
-    # Date filtering
     if period == "weekly":
         start_date = now - timedelta(days=7)
     elif period == "monthly":
         start_date = now.replace(day=1)
 
-    # Get only Manager & Staff (exclude Admin)
     users = await db.users.find(
         {"role": {"$in": ["manager", "staff"]}},
         {"_id": 0, "password": 0}
     ).to_list(1000)
 
     rankings = []
-
     for user in users:
         uid = user["id"]
+        
+        # ... your query to get records for this user ...
+        # Example using aggregate (adjust match conditions)
+        pipeline = [
+            {"$match": {
+                "user_id": uid,           # adjust field name
+                # "date": {"$gte": start_date} if start_date else {}
+            }},
+            {"$group": {
+                "_id": None,
+                "total_minutes": {"$sum": {"$ifNull": ["$duration_minutes", 0]}},
+                # ... other metrics
+            }}
+        ]
+        
+        result = await db.attendance.aggregate(pipeline).to_list(1)  # or db.activity, etc.
+        
+        if result:
+            agg = result[0]
+            total_minutes = agg["total_minutes"]
+        else:
+            total_minutes = 0
+
+        # ... build user ranking entry ...
+        rankings.append({
+            "user": user,
+            "total_minutes": total_minutes,
+            # ... other fields
+        })
+
+    # Sort, limit, return
+    rankings.sort(key=lambda x: x["total_minutes"], reverse=True)
+    return {"rankings": rankings[:50]}  # or whatever limit
 
         # ================= ATTENDANCE =================
         attendance_records = await db.attendance.find(
