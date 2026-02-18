@@ -78,7 +78,7 @@ export default function Dashboard() {
           setChatMessages(res.data);
         })
         .catch(err => console.warn('Chat notifications failed:', err));
-    }, 10000);
+    }, 50000);
     return () => clearInterval(interval);
   }, [chatMessages]);
   const fetchMyTodos = async () => {
