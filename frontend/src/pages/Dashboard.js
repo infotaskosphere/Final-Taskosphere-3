@@ -5,17 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  CheckSquare, 
-  FileText, 
-  Clock, 
-  TrendingUp, 
-  AlertCircle, 
-  LogIn, 
-  LogOut, 
-  Calendar, 
-  Users, 
-  Key, 
+import {
+  CheckSquare,
+  FileText,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  LogIn,
+  LogOut,
+  Calendar,
+  Users,
+  Key,
   Briefcase,
   ArrowUpRight,
   Building2,
@@ -26,7 +26,6 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -36,7 +35,6 @@ const COLORS = {
   coral: '#FF6B6B',
   amber: '#F59E0B',
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -45,12 +43,10 @@ const containerVariants = {
     transition: { staggerChildren: 0.06 }
   }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
 };
-
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -65,41 +61,42 @@ export default function Dashboard() {
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [todos, setTodos] = useState([]);
   const [newTodo, setNewTodo] = useState('');
-
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
   }, [rankingPeriod]);
-
   useEffect(() => {
     const interval = setInterval(() => {
-      api.get('/notifications')  // Changed from /chat/notifications to match backend route
+      api.get('/notifications')
         .then(res => {
           if (res.data.length > chatMessages.length) {
-            notificationAudio.current.play().catch(() => {}); // silent fail if audio missing
+            notificationAudio.current.play().catch(() => {});
           }
           setChatMessages(res.data);
         })
         .catch(err => console.warn('Chat notifications failed:', err));
     }, 10000);
-
     return () => clearInterval(interval);
   }, [chatMessages]);
-
   const fetchMyTodos = async () => {
     try {
-      const res = await api.get('/tasks/my');  // Changed from /todos/my to match backend (assuming /tasks/my exists; if not, use /tasks and filter client-side)
-      setTodos(res.data.map(task => ({
+      const res = await api.get('/tasks'); // Changed to /tasks to avoid 404
+      // Filter tasks assigned to current user or where user is sub-assignee
+      const myTasks = res.data.filter(task =>
+        task.assigned_to === user?.id ||
+        (Array.isArray(task.sub_assignees) && task.sub_assignees.includes(user?.id))
+      );
+      setTodos(myTasks.map(task => ({
         ...task,
-        created_at: task.created_at || new Date().toISOString()  // Ensure created_at exists
-      })) || []);
+        created_at: task.created_at || new Date().toISOString(),
+        completed: task.status === 'completed' // map for checkbox UI
+      })));
     } catch (error) {
       console.error('Failed to fetch todos:', error);
       setTodos([]); // fallback to prevent undefined crash
     }
   };
-
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
@@ -118,7 +115,6 @@ export default function Dashboard() {
       toast.error('Failed to add todo');
     }
   };
-
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
@@ -139,7 +135,6 @@ export default function Dashboard() {
       toast.error('Failed to update todo');
     }
   };
-
   const handleDeleteTodo = async (id) => {
     try {
       await api.delete(`/tasks/${id}`);  // Changed from /todos/{id} to /tasks/{id}
@@ -149,7 +144,6 @@ export default function Dashboard() {
       toast.error('Failed to delete todo');
     }
   };
-
   const fetchDashboardData = async () => {
     try {
       const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
@@ -157,17 +151,14 @@ export default function Dashboard() {
         api.get('/tasks'),
         api.get('/duedates/upcoming?days=30'),
       ]);
-
       setStats(statsRes.data);
       setRecentTasks(tasksRes.data?.slice(0, 5) || []);
       setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-
       // Fetch Rankings
       const rankingRes = await api.get(
         `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
       );
       setRankings(rankingRes.data?.rankings || []);
-
       // Fetch Chat Notifications
       const chatRes = await api.get('/notifications');  // Changed from /chat/notifications
       if (chatRes.data?.length > chatMessages.length) {
@@ -178,7 +169,6 @@ export default function Dashboard() {
       console.error('Failed to fetch dashboard data:', error);
     }
   };
-
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
@@ -187,7 +177,6 @@ export default function Dashboard() {
       console.error('Failed to fetch attendance:', error);
     }
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -201,7 +190,6 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -210,7 +198,6 @@ export default function Dashboard() {
     };
     return styles[status] || styles.pending;
   };
-
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -219,7 +206,6 @@ export default function Dashboard() {
     };
     return styles[priority] || styles.medium;
   };
-
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
@@ -255,15 +241,12 @@ export default function Dashboard() {
       text: 'text-yellow-600'
     };
   };
-
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
     : 0;
-
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
-
   return (
     <motion.div
       className="space-y-6"
@@ -294,7 +277,6 @@ export default function Dashboard() {
                   Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
                 </p>
               </div>
-
               {nextDeadline && (
                 <div
                   className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
@@ -315,7 +297,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Key Metrics Row */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
         <Card
@@ -344,7 +325,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         <Card
           className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
             stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
@@ -373,7 +353,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
           onClick={() => navigate('/tasks')}
@@ -400,7 +379,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
           onClick={() => navigate('/attendance')}
@@ -428,7 +406,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Recent Tasks + Upcoming Due Dates + Attendance */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         <Card
@@ -454,7 +431,6 @@ export default function Dashboard() {
               Your latest assignments and progress
             </p>
           </CardHeader>
-
           <CardContent className="p-4">
             {recentTasks.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
@@ -465,7 +441,6 @@ export default function Dashboard() {
                 {recentTasks.map((task) => {
                   const statusStyle = getStatusStyle(task.status);
                   const priorityStyle = getPriorityStyle(task.priority);
-
                   return (
                     <div
                       key={task.id}
@@ -494,7 +469,6 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="upcoming-duedates-card"
@@ -518,7 +492,6 @@ export default function Dashboard() {
               Next 30 days compliance calendar
             </p>
           </CardHeader>
-
           <CardContent className="p-4">
             {upcomingDueDates.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
@@ -528,7 +501,6 @@ export default function Dashboard() {
               <div className="space-y-3">
                 {upcomingDueDates.map((due) => {
                   const color = getDeadlineColor(due.days_remaining || 0);
-
                   return (
                     <div
                       key={due.id}
@@ -554,7 +526,6 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="attendance-card"
@@ -578,7 +549,6 @@ export default function Dashboard() {
               Track your daily work hours
             </p>
           </CardHeader>
-
           <CardContent className="p-4">
             <div className="space-y-4">
               {todayAttendance?.punch_in ? (
@@ -592,7 +562,6 @@ export default function Dashboard() {
                       {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
                     </p>
                   </div>
-
                   {todayAttendance?.punch_out ? (
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -612,11 +581,10 @@ export default function Dashboard() {
                       Punch Out
                     </Button>
                   )}
-
                   <div className="text-center py-3 bg-slate-50 rounded-xl">
                     <p className="text-xs text-slate-500">Total Hours Today</p>
                     <p className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
-                      {todayAttendance.duration_minutes 
+                      {todayAttendance.duration_minutes
                         ? `${Math.floor(todayAttendance.duration_minutes / 60)}h ${todayAttendance.duration_minutes % 60}m`
                         : '0h 0m'
                       }
@@ -636,7 +604,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card
@@ -649,7 +616,6 @@ export default function Dashboard() {
                 <TrendingUp className="h-5 w-5 text-yellow-500" />
                 Star Performers
               </CardTitle>
-
               {user.role === "admin" && (
                 <div className="flex gap-2">
                   {["all", "monthly", "weekly"].map(p => (
@@ -668,12 +634,10 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-
             <p className="text-xs text-slate-500 mt-1">
               Recognizing top contributors based on performance metrics
             </p>
           </CardHeader>
-
           <CardContent className="p-4">
             {rankings.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
@@ -685,7 +649,6 @@ export default function Dashboard() {
                   const isTop = index === 0;
                   const isSecond = index === 1;
                   const isThird = index === 2;
-
                   return (
                     <div
                       key={member.user_id || index}
@@ -707,7 +670,6 @@ export default function Dashboard() {
                           {isThird && "🥉"}
                           {!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
                         </div>
-
                         <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
                           ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
                         `}>
@@ -727,7 +689,6 @@ export default function Dashboard() {
                             </div>
                           )}
                         </div>
-
                         <div>
                           <p className={`text-sm font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
                             {member.name || 'Unknown User'}
@@ -737,7 +698,6 @@ export default function Dashboard() {
                           </p>
                         </div>
                       </div>
-
                       <div className="text-right">
                         <p className={`text-sm font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
                           {member.score ? `${member.score}%` : 'N/A'}
@@ -751,7 +711,6 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-
             {rankings.length > 5 && (
               <div className="text-right mt-4">
                 <button
@@ -764,7 +723,6 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="todo-list-card"
@@ -780,7 +738,6 @@ export default function Dashboard() {
               Manage your personal tasks
             </p>
           </CardHeader>
-
           <CardContent className="p-4">
             <div className="flex gap-2 mb-4">
               <input
@@ -844,7 +801,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
@@ -867,7 +823,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
           onClick={() => navigate('/dsc')}
@@ -889,7 +844,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         <Card
           className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
           onClick={() => navigate('/duedates')}
@@ -911,7 +865,6 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
         {user?.role === 'admin' && (
           <Card
             className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
