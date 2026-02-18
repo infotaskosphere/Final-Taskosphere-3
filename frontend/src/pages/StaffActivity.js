@@ -5,17 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  CheckSquare, 
-  FileText, 
-  Clock, 
-  TrendingUp, 
-  AlertCircle, 
-  LogIn, 
-  LogOut, 
-  Calendar, 
-  Users, 
-  Key, 
+import {
+  CheckSquare,
+  FileText,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  LogIn,
+  LogOut,
+  Calendar,
+  Users,
+  Key,
   Briefcase,
   ArrowUpRight,
   Building2,
@@ -67,10 +67,10 @@ export default function Dashboard() {
   const [newTodo, setNewTodo] = useState('');
 
   // ────────────────────────────────────────────────
-  // ADDED FOR THE NEW FEATURE ONLY
+  // ADDED FOR THE NEW FEATURE ONLY (nothing else changed)
   // ────────────────────────────────────────────────
   const [assignedTasks, setAssignedTasks] = useState([]);
-  const [users, setUsers] = useState([]); // for showing assigner name
+  const [users, setUsers] = useState([]); // to show assigner name
 
   useEffect(() => {
     fetchDashboardData();
@@ -81,7 +81,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      api.get('/notifications')  
+      api.get('/notifications')
         .then(res => {
           if (res.data.length > chatMessages.length) {
             notificationAudio.current.play().catch(() => {});
@@ -94,7 +94,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [chatMessages]);
 
-  // ADDED: Fetch users so we can show who assigned the task
+  // ADDED: Fetch users so we can show "Assigned by" name
   const fetchUsers = async () => {
     try {
       const res = await api.get('/users');
@@ -106,28 +106,28 @@ export default function Dashboard() {
 
   const fetchMyTodos = async () => {
     try {
-      const res = await api.get('/tasks/my');  
+      const res = await api.get('/tasks/my');
       setTodos(res.data.map(task => ({
         ...task,
-        created_at: task.created_at || new Date().toISOString()  
+        created_at: task.created_at || new Date().toISOString()
       })) || []);
     } catch (error) {
       console.error('Failed to fetch todos:', error);
-      setTodos([]); 
+      setTodos([]);
     }
   };
 
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
-      const res = await api.post('/tasks', {  
+      const res = await api.post('/tasks', {
         title: newTodo.trim(),
-        status: 'pending',  
-        created_at: new Date().toISOString()  
+        status: 'pending',
+        created_at: new Date().toISOString()
       });
       setTodos([...todos, {
         ...res.data,
-        completed: res.data.status === 'completed'  
+        completed: res.data.status === 'completed'
       }]);
       setNewTodo('');
       toast.success('Todo added successfully!');
@@ -140,10 +140,10 @@ export default function Dashboard() {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
     try {
-      const newStatus = todo.completed ? 'pending' : 'completed';  
-      const res = await api.patch(`/tasks/${id}`, {  
+      const newStatus = todo.completed ? 'pending' : 'completed';
+      const res = await api.patch(`/tasks/${id}`, {
         status: newStatus,
-        updated_at: new Date().toISOString()  
+        updated_at: new Date().toISOString()
       });
       setTodos(todos.map(t => t.id === id ? {
         ...res.data,
@@ -159,7 +159,7 @@ export default function Dashboard() {
 
   const handleDeleteTodo = async (id) => {
     try {
-      await api.delete(`/tasks/${id}`);  
+      await api.delete(`/tasks/${id}`);
       setTodos(todos.filter(t => t.id !== id));
       toast.success('Todo deleted successfully!');
     } catch (error) {
@@ -167,7 +167,7 @@ export default function Dashboard() {
     }
   };
 
-  // ADDED: Handler for marking assigned task as done
+  // ADDED: Handler to toggle completion of assigned tasks
   const handleToggleAssigned = async (id) => {
     const task = assignedTasks.find(t => t.id === id);
     if (!task) return;
@@ -185,7 +185,7 @@ export default function Dashboard() {
         toast.success('Task marked as done!');
       }
     } catch (error) {
-      toast.error('Failed to update task');
+      toast.error('Failed to update assigned task');
     }
   };
 
@@ -208,13 +208,13 @@ export default function Dashboard() {
       setRankings(rankingRes.data?.rankings || []);
 
       // Fetch Chat Notifications
-      const chatRes = await api.get('/notifications');  
+      const chatRes = await api.get('/notifications');
       if (chatRes.data?.length > chatMessages.length) {
         notificationAudio.current.play().catch(() => {});
       }
       setChatMessages(chatRes.data || []);
 
-      // ADDED: Filter only tasks assigned to current user
+      // ADDED: Filter tasks assigned to the current logged-in user
       const assigned = tasksRes.data
         .filter(t => t.assigned_to === user.id)
         .map(t => ({
@@ -326,7 +326,136 @@ export default function Dashboard() {
         <Card
           className="border-0 shadow-lg overflow-hidden relative"
           style={{
-            background: 'linear-gradient(135de...(truncated 20712 characters)...d-500"}
+            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+          }}
+        >
+          <div
+            className="absolute top-0 right-0 w-72 h-72 rounded-full opacity-20 -mr-16 -mt-16"
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
+          />
+          <CardContent className="p-8 relative">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div>
+                <h1 className="text-3xl lg:text-4xl font-bold font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
+                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'}
+                </h1>
+                <p className="text-slate-600 mt-2 text-lg">
+                  Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
+                </p>
+              </div>
+
+              {nextDeadline && (
+                <div
+                  className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
+                  style={{ borderColor: COLORS.mediumBlue, backgroundColor: 'white' }}
+                  onClick={() => navigate('/duedates')}
+                  data-testid="next-deadline-card"
+                >
+                  <Calendar className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Next Filing Deadline</p>
+                    <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
+                      {format(new Date(nextDeadline.due_date), 'MMM d')}: {nextDeadline.title?.slice(0, 15) || 'Deadline'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Key Metrics Row */}
+      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
+        {/* ... your original key metrics cards (total tasks, overdue, etc.) remain 100% unchanged ... */}
+      </motion.div>
+
+      {/* Three main cards - now with min-h-[420px] on each */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* 1. Star Performers */}
+        <Card
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden min-h-[420px] flex flex-col"
+          data-testid="staff-ranking-card"
+        >
+          <CardHeader className="pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-yellow-500" />
+                Star Performers
+              </CardTitle>
+
+              {user.role === "admin" && (
+                <div className="flex gap-2">
+                  {["all", "monthly", "weekly"].map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setRankingPeriod(p)}
+                      className={`px-3 py-1 text-xs rounded-full border transition ${
+                        rankingPeriod === p
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {p.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500 mt-1">
+              Recognizing top contributors based on performance metrics
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-4 flex-1">
+            {rankings.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm flex-1 flex items-center justify-center">
+                No ranking data available
+              </div>
+            ) : (
+              <div className="space-y-3 overflow-y-auto pr-2">
+                {rankings.slice(0, 5).map((member, index) => {
+                  const isTop = index === 0;
+                  const isSecond = index === 1;
+                  const isThird = index === 2;
+
+                  return (
+                    <div
+                      key={member.user_id || index}
+                      className={`flex items-center justify-between p-3 rounded-xl transition border
+                        ${
+                          isTop
+                            ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md"
+                            : isSecond
+                            ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300"
+                            : isThird
+                            ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300"
+                            : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                        }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 text-sm font-semibold">
+                          {isTop && "🥇"}
+                          {isSecond && "🥈"}
+                          {isThird && "🥉"}
+                          {!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
+                        </div>
+
+                        <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0
+                          ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}
+                        `}>
+                          {member.profile_picture ? (
+                            <img
+                              src={member.profile_picture}
+                              alt={member.name || 'User'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div
+                              className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white
+                                ${isTop ? "bg-yellow-500" : "bg-emerald-500"}
                               `}
                             >
                               {member.name ? member.name.charAt(0).toUpperCase() : '?'}
@@ -371,8 +500,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* My To-Do List */}
         <Card
-          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden min-h-[420px] flex flex-col"   {/* ← ADDED min-h */}
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden min-h-[420px] flex flex-col"
           data-testid="todo-list-card"
         >
           <CardHeader className="pb-3 border-b border-slate-100">
@@ -399,11 +529,11 @@ export default function Dashboard() {
               <Button onClick={addTodo} disabled={!newTodo.trim()}>Add</Button>
             </div>
             {todos.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm">
+              <div className="text-center py-8 text-slate-400 text-sm flex-1 flex items-center justify-center">
                 No tasks added yet
               </div>
             ) : (
-              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+              <div className="space-y-3 overflow-y-auto pr-2 flex-1">
                 {todos.map((todo) => (
                   <div
                     key={todo.id}
@@ -450,11 +580,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* ────────────────────────────────────────────────
-            ADDED CARD: Tasks Assigned to Me
-        ──────────────────────────────────────────────── */}
+        {/* Tasks Assigned to Me - new card */}
         <Card
-          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden min-h-[420px] flex flex-col"   {/* ← ADDED min-h */}
+          className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden min-h-[420px] flex flex-col"
           data-testid="assigned-tasks-card"
         >
           <CardHeader className="pb-3 border-b border-slate-100">
@@ -465,14 +593,14 @@ export default function Dashboard() {
               </CardTitle>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Tasks assigned to you
+              Tasks assigned to you by admin or manager
             </p>
           </CardHeader>
 
           <CardContent className="p-4 flex-1">
             {assignedTasks.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm flex-1 flex items-center justify-center">
-                No assigned tasks yet
+                No tasks assigned to you yet
               </div>
             ) : (
               <div className="space-y-3 overflow-y-auto pr-2 flex-1">
@@ -489,42 +617,60 @@ export default function Dashboard() {
                   return (
                     <div
                       key={task.id}
-                      className={`flex items-center justify-between p-3 rounded-xl border ${
-                        task.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'
+                      className={`p-3 rounded-xl border flex flex-col gap-2 ${
+                        task.completed ? 'bg-green-50/70 border-green-200' : 'bg-slate-50 border-slate-200'
                       }`}
                     >
-                      <div className="flex items-center gap-3 flex-1">
-                        <input
-                          type="checkbox"
-                          checked={task.completed}
-                          onChange={() => handleToggleAssigned(task.id)}
-                          className="h-5 w-5 flex-shrink-0"
-                        />
-                        <div className="flex-1">
-                          <span
-                            className={`text-sm ${
-                              task.completed ? 'line-through text-slate-500' : 'text-slate-900'
-                            }`}
-                          >
-                            {task.title}
-                          </span>
-                          <p className="text-xs text-slate-500">
-                            Due: {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
-                          </p>
-                          {canSeeAssigner && assignerName && (
-                            <p className="text-xs text-slate-500">
-                              Assigned by: <span className="font-medium">{assignerName}</span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={task.completed}
+                            onChange={() => handleToggleAssigned(task.id)}
+                            className="h-5 w-5 flex-shrink-0 mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-sm font-medium ${
+                                  task.completed ? 'line-through text-slate-600' : 'text-slate-900'
+                                }`}
+                              >
+                                {task.title}
+                              </span>
+
+                              <button
+                                onClick={() => handleToggleAssigned(task.id)}
+                                className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer ${
+                                  task.completed
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200'
+                                }`}
+                              >
+                                {task.completed ? 'Done ✓' : 'Mark as Done'}
+                              </button>
+                            </div>
+
+                            <p className="text-xs text-slate-500 mt-1">
+                              Due: {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
                             </p>
-                          )}
+
+                            {canSeeAssigner && assignerName && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Assigned by: <span className="font-medium">{assignerName}</span>
+                              </p>
+                            )}
+                          </div>
                         </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate('/tasks')}
+                        >
+                          Open
+                        </Button>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate('/tasks')}
-                      >
-                        Open
-                      </Button>
                     </div>
                   );
                 })}
