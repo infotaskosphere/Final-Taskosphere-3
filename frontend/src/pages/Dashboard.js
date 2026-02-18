@@ -440,7 +440,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Recent Tasks + Upcoming Due Dates + Attendance */}
+      {/* Recent Tasks + Upcoming Deadlines + Attendance */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
@@ -511,7 +511,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-orange-500" />
-                Upcoming Due Dates
+                Upcoming Deadlines
               </CardTitle>
               <Button
                 variant="ghost"
@@ -529,7 +529,7 @@ export default function Dashboard() {
           <CardContent className="p-4">
             {upcomingDueDates.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm">
-                No upcoming due dates
+                No Upcoming Deadlines
               </div>
             ) : (
               <div className="space-y-3">
