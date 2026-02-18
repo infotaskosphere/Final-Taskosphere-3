@@ -41,6 +41,59 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production'
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
+# ... your existing code up to line 41 ...
+
+ALGORITM = "HS256"   # ← line 41 (or similar)
+
+# ────────────────────────────────────────────────
+# PASTE THE WEBSOCKET CODE STARTS HERE
+# ────────────────────────────────────────────────
+
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import List
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+async def send_new_notification(notification_data: dict):
+    await manager.broadcast({
+        "type": "new_notification",
+        "data": notification_data
+    })
+
+@app.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            # You can handle incoming messages here later if needed
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+# ────────────────────────────────────────────────
+# PASTE ENDS HERE
+# ────────────────────────────────────────────────
+
+# Now continue with your existing routes...
+# e.g. @app.get("/api/staff/rankings") ...
 security = HTTPBearer()
 
 app = FastAPI()
