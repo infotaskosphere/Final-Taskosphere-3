@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { containerVariants, itemVariants } from '@/lib/animations';  // adjust path if needed
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,17 +16,20 @@ import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 
+// Import shared animation variants
+import { containerVariants, itemVariants } from '@/lib/animations';
+
 // Brand Colors (darker variants used where needed)
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
-  darkGreen: '#0f9d58',     // darker green for DONE
-  darkBlue: '#0d47a1',      // darker blue for PROGRESS
-  darkOrange: '#e65100',    // darker orange for HIGH
-  darkRed: '#c62828',       // darker red for CRITICAL/OVERDUE
-  darkAmber: '#f57c00',     // darker amber for MEDIUM
+  darkGreen: '#0f9d58',
+  darkBlue: '#0d47a1',
+  darkOrange: '#e65100',
+  darkRed: '#c62828',
+  darkAmber: '#f57c00',
 };
 
 // Department categories for CA/CS firms
@@ -56,7 +58,7 @@ const RECURRENCE_PATTERNS = [
 const STATUS_STYLES = {
   pending: { bg: 'bg-amber-200', text: 'text-amber-900', label: 'To Do', btn: 'bg-amber-600 hover:bg-amber-700' },
   in_progress: { bg: 'bg-blue-200', text: 'text-blue-900', label: 'Progress', btn: 'bg-blue-700 hover:bg-blue-800' },
-  completed: { bg: 'bg-emerald-200', text: 'text-emerald-900', label: 'Done', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+  completed: { bg: 'bg-emerald-200', text: 'text-emerald-700', label: 'Done', btn: 'bg-emerald-600 hover:bg-emerald-700' },
   review: { bg: 'bg-purple-200', text: 'text-purple-900', label: 'Review', btn: 'bg-purple-700 hover:bg-purple-800' },
   overdue: { bg: 'bg-red-200', text: 'text-red-900', label: 'Overdue', btn: 'bg-red-700 hover:bg-red-800' },
 };
@@ -120,22 +122,29 @@ export default function Tasks() {
   const fetchTasks = async () => {
     try {
       const response = await api.get('/tasks');
-      setTasks(response.data);
-    } catch (error) { toast.error('Failed to fetch tasks'); }
+      setTasks(response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
+      toast.error('Failed to load tasks');
+    }
   };
 
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
-      setUsers(response.data);
-    } catch (error) { console.error('Failed to fetch users'); }
+      setUsers(response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
   };
 
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
-      setClients(response.data);
-    } catch (error) { console.error('Failed to fetch clients'); }
+      setClients(response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch clients:', error);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -149,6 +158,7 @@ export default function Tasks() {
         client_id: formData.client_id || null,
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       };
+
       if (editingTask) {
         await api.put(`/tasks/${editingTask.id}`, taskData);
         toast.success('Task updated successfully!');
@@ -156,11 +166,16 @@ export default function Tasks() {
         await api.post('/tasks', taskData);
         toast.success('Task created successfully!');
       }
+
       setDialogOpen(false);
       resetForm();
       fetchTasks();
-    } catch (error) { toast.error('Failed to save task'); }
-    finally { setLoading(false); }
+    } catch (error) {
+      toast.error('Failed to save task');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleEdit = (task) => {
@@ -181,6 +196,7 @@ export default function Tasks() {
     });
     setDialogOpen(true);
   };
+
   const handleDelete = async (taskId) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
     try {
@@ -189,6 +205,7 @@ export default function Tasks() {
       fetchTasks();
     } catch (error) {
       toast.error('Failed to delete task');
+      console.error(error);
     }
   };
 
@@ -213,6 +230,7 @@ export default function Tasks() {
       fetchTasks();
     } catch (error) {
       toast.error('Failed to update task status');
+      console.error(error);
     }
   };
 
@@ -267,8 +285,9 @@ export default function Tasks() {
   };
 
   const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = 
+      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (task.description || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || getDisplayStatus(task) === filterStatus;
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category === filterCategory;
@@ -285,18 +304,27 @@ export default function Tasks() {
   };
 
   return (
-    <motion.div className="space-y-6 pb-10" variants={containerVariants} initial="hidden" animate="visible">
-      {/* Header, Stats Bar, and Search Filters (All Original 250+ Lines of UI preserved) */}
-      {/* ... Filter and Header Code ... */}
+    <motion.div 
+      className="space-y-6 pb-10"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      {/* Header, Stats Bar, and Search Filters – keep your original UI code here */}
+      {/* ... (you can paste back your header, search, filters, stats cards, view toggle, etc.) ... */}
 
       <motion.div
-        className={viewMode === 'grid' 
-          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5 auto-rows-fr' 
-          : 'space-y-4'}
+        className={
+          viewMode === 'grid'
+            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5 auto-rows-fr'
+            : 'space-y-4'
+        }
         variants={containerVariants}
       >
         {filteredTasks.length === 0 ? (
-          <div className="col-span-full text-center py-16 text-slate-500">No tasks found</div>
+          <div className="col-span-full text-center py-16 text-slate-500">
+            No tasks found
+          </div>
         ) : (
           filteredTasks.map((task) => {
             const taskIsOverdue = isOverdue(task);
@@ -304,7 +332,11 @@ export default function Tasks() {
             const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
 
             return (
-              <motion.div key={task.id} variants={itemVariants} className="h-full">
+              <motion.div 
+                key={task.id} 
+                variants={itemVariants} 
+                className="h-full"
+              >
                 <Card className={`rounded-[2.5rem] border border-slate-200 p-0 overflow-hidden shadow-md flex flex-col h-full ${taskIsOverdue ? 'bg-red-50/30' : 'bg-white'}`}>
                   
                   {/* Top Badges */}
@@ -319,16 +351,14 @@ export default function Tasks() {
                     <h3 className="text-lg font-bold text-slate-800 leading-tight mb-1">{task.title}</h3>
                     <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{getClientName(task.client_id)}</p>
                     <div className="flex items-center gap-2 mt-3 text-slate-500 text-xs">
-                       <Calendar size={14} />
-                       <span>{task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}</span>
+                      <Calendar size={14} />
+                      <span>{task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : 'No Date'}</span>
                     </div>
                   </div>
 
-                  {/* ACTION FOOTER - THE FIXED TAB LAYOUT */}
+                  {/* ACTION FOOTER */}
                   <div className="p-4 mt-auto">
                     <div className="bg-slate-50 rounded-[1.5rem] p-2 border border-slate-100">
-                      
-                      {/* FIXED GRID TAB LAYOUT */}
                       <div className="grid grid-cols-3 gap-1 bg-white p-1 rounded-xl border border-slate-200 w-full shadow-sm">
                         <button
                           onClick={() => handleQuickStatusChange(task, 'pending')}
@@ -355,7 +385,6 @@ export default function Tasks() {
                         </button>
                       </div>
 
-                      {/* Meta and Icon Actions */}
                       <div className="flex items-center justify-between mt-3 px-1">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
                           {task.category || 'other'}
