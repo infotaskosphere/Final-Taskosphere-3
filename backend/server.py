@@ -1,5 +1,4 @@
 import pytz
-import { Briefcase } from "lucide-react";
 import logging
 import smtplib
 from datetime import datetime, timedelta
