@@ -122,10 +122,8 @@ const fetchMyAssignedTasks = async () => {
     const res = await api.get('/tasks');
     const allTasks = res.data || [];
 
-    // Tasks where current user is the assignee
     const toMe = allTasks.filter(task => task.assigned_to === user?.id);
 
-    // Tasks where current user is the creator/assigner (exclude self-assigned)
     const byMe = allTasks.filter(task => 
       task.created_by === user?.id && task.assigned_to !== user?.id
     );
@@ -155,14 +153,14 @@ const getPriorityStripeClass = (priority) => {
 
 const updateAssignedTaskStatus = async (taskId, newStatus) => {
   try {
-    await api.patch(`/tasks/${taskId}`, { 
+    await api.patch(`/tasks/${taskId}`, {
       status: newStatus,
       updated_at: new Date().toISOString()
     });
-    fetchMyAssignedTasks();
+    fetchMyAssignedTasks(); // refresh both columns
     toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
   } catch (error) {
-    console.error(error);
+    console.error('Failed to update task status:', error);
     toast.error('Failed to update task');
   }
 };
