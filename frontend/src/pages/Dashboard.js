@@ -101,20 +101,22 @@ export default function Dashboard() {
     fetchMyTodos();
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
-
-  useEffect(() => {
+ useEffect(() => {
     const interval = setInterval(() => {
-      api.get('/notifications')
-        .then(res => {
-          if (res.data.length > chatMessages.length) {
-            notificationAudio.current.play().catch(() => {});
-          }
-          setChatMessages(res.data);
-        })
-        .catch(err => console.warn('Chat notifications failed:', err));
-    }, 50000);
-    return () => clearInterval(interval);
-  }, [chatMessages]);
+    api.get('/notifications')
+      .then(res => {
+        // Compare the count of notifications from the server vs current chat count
+        if (res.data && res.data.length > chatMessages.length) {
+          // Play the sound from your /public/notification.mp3 file
+          notificationAudio.current.play().catch((err) => {
+            console.log("Audio play blocked by browser. Click anywhere to enable sound.");
+          });
+        }
+      })
+      .catch(err => console.error("Notification fetch failed:", err));
+  }, 5000);
+     return () => clearInterval(interval);
+  },  [chatMessages]);
 
   const fetchMyTodos = async () => {
     try {
