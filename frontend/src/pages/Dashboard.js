@@ -994,7 +994,7 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        )}
+        )
       </motion.div>
     </motion.div>
   );
