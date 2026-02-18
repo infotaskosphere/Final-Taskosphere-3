@@ -973,7 +973,7 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-        {user?.role === 'admin' && (
+{user?.role === 'admin' && (
           <Card
             className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
             onClick={() => navigate('/users')}
@@ -994,8 +994,8 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        )
+        )}
       </motion.div>
     </motion.div>
   );
-  }
+}
