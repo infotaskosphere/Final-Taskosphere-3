@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -95,28 +94,27 @@ export default function Dashboard() {
   // ADDED MISSING STATES REQUIRED BY YOUR LOGIC
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
-  const fetchDashboardData = async () => {
-  try {
-    setLoading(true);
-    // Adjust the endpoint if your backend uses a different path
-    const res = await api.get('/dashboard/stats'); 
-    setStats(res.data.stats);
-    setRankings(res.data.rankings);
-    setUpcomingDueDates(res.data.upcoming_due_dates);
-  } catch (error) {
-    console.error("Failed to fetch dashboard data", error);
-    toast.error("Could not load dashboard statistics");
-  } finally {
-    setLoading(false);
-  }
-};
-  
+
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api.get('/notifications')
+        .then(res => {
+          if (res.data.length > chatMessages.length) {
+            notificationAudio.current.play().catch(() => {});
+          }
+          setChatMessages(res.data);
+        })
+        .catch(err => console.warn('Chat notifications failed:', err));
+    }, 50000);
+    return () => clearInterval(interval);
+  }, [chatMessages]);
 
   const fetchMyTodos = async () => {
     try {
