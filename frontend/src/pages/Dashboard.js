@@ -163,6 +163,31 @@ export default function Dashboard() {
       toast.error('Failed to delete todo');
     }
   };
+  // 1. Priority stripe class (matches your requested colors: Red-Critical, Orange-Urgent, Green-Medium, Blue-Low)
+const getPriorityStripeClass = (priority) => {
+  const p = (priority || '').toLowerCase().trim();
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
+  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
+  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  return 'border-l-8 border-l-slate-300'; // neutral fallback
+};
+
+// 2. Status update handler for the "In Progress" / "Done" buttons
+const updateAssignedTaskStatus = async (taskId, newStatus) => {
+  try {
+    await api.patch(`/tasks/${taskId}`, { 
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    });
+    // Refresh the assigned tasks list
+    fetchMyAssignedTasks();
+    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+  } catch (error) {
+    console.error('Failed to update task status:', error);
+    toast.error('Failed to update task');
+  }
+};
   const fetchDashboardData = async () => {
     try {
       const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
@@ -799,57 +824,86 @@ export default function Dashboard() {
         </Card>
       </motion.div>
 
-      {/* Tasks Assigned to Me - Full width + responsive */}
+      {/* Tasks Assigned to Me – Revised design (exact match to your image) */}
       <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
-        <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
+        <CardHeader className="pb-4 border-b border-slate-100 px-6">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-emerald-500" />
-              Tasks Assigned to Me
+            <CardTitle className="text-2xl font-semibold flex items-center gap-3 tracking-tight">
+              <Briefcase className="h-7 w-7 text-emerald-600" />
+              {user?.full_name || 'User'} - Tasks
             </CardTitle>
           </div>
-          <p className="text-xs text-slate-500 mt-1">Tasks assigned to you</p>
+          <p className="text-sm text-slate-500 mt-1">Tasks assigned to you</p>
         </CardHeader>
-        <CardContent className="p-4 sm:p-6">
+
+        <CardContent className="p-6">
           {assignedTasks.length === 0 ? (
-            <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
-              No assigned tasks
+            <div className="text-center py-16 text-slate-400">
+              No tasks assigned yet
             </div>
           ) : (
-            <div className="space-y-3 sm:space-y-4 max-h-[340px] sm:max-h-[420px] overflow-y-auto pr-2">
-              {assignedTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={`flex items-center justify-between gap-3 p-4 rounded-2xl border ${
-                    task.status === 'completed' ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 flex-1">
-                    <input
-                      type="checkbox"
-                      checked={task.status === 'completed'}
-                      onChange={() => handleAssignedTaskToggle(task)}
-                      className="h-5 w-5 sm:h-6 sm:w-6 flex-shrink-0"
-                    />
+            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-3">
+              {assignedTasks.map((task) => {
+                const dueFormatted = task.due_date
+                  ? format(new Date(task.due_date), 'MMM d, yyyy')
+                  : 'No due date';
+
+                const assignFormatted = task.created_at
+                  ? format(new Date(task.created_at), 'MMM d, yyyy')
+                  : 'N/A';
+
+                const assignedBy = task.assigned_by_name 
+                  ?? task.created_by_name 
+                  ?? (task.created_by === user?.id ? 'You' : 'Unknown');
+
+                return (
+                  <div
+                    key={task.id}
+                    className={`bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-start gap-6 ${getPriorityStripeClass(task.priority)}`}
+                  >
+                    {/* Main content */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm sm:text-base font-medium ${task.status === 'completed' ? 'line-through text-slate-500' : 'text-slate-900'}`}>
-                        {task.title}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Due: {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
-                      </p>
+                      <h3 className="font-semibold text-2xl text-slate-950 tracking-tight mb-4 leading-tight">
+                        {task.title || 'Untitled Task'}
+                      </h3>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-2 text-sm text-slate-600">
+                        <div>
+                          Due Date: <span className="font-medium text-slate-900">{dueFormatted}</span>
+                        </div>
+                        <div>
+                          Date of Assignment: <span className="font-medium text-slate-900">{assignFormatted}</span>
+                        </div>
+                        <div>
+                          Assigned by: <span className="font-medium text-slate-900">{assignedBy}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons – exact style from your image */}
+                    <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0 mt-2 md:mt-1">
+                      <Button
+                        onClick={() => updateAssignedTaskStatus(task.id, 'in_progress')}
+                        className="bg-[#2563eb] hover:bg-blue-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
+                        size="sm"
+                      >
+                        In Progress
+                      </Button>
+                      <Button
+                        onClick={() => updateAssignedTaskStatus(task.id, 'completed')}
+                        className="bg-[#16a34a] hover:bg-green-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
+                        size="sm"
+                      >
+                        Done
+                      </Button>
                     </div>
                   </div>
-                  <Badge className={`text-xs px-3 py-1 ${task.status === 'completed' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
-                    {task.status === 'completed' ? 'Done' : 'Open'}
-                  </Badge>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
-
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
