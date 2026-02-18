@@ -66,11 +66,13 @@ export default function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [assignedTasks, setAssignedTasks] = useState([]);
   const [newTodo, setNewTodo] = useState('');
+  const [users, setUsers] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
+    fetchUsers();
   }, [rankingPeriod]);
 
   useEffect(() => {
@@ -88,12 +90,22 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [chatMessages]);
 
+  const fetchUsers = async () => {
+    try {
+      const res = await api.get('/users');
+      setUsers(res.data || []);
+    } catch (err) {
+      console.error('Failed to load users list');
+    }
+  };
+
   const fetchMyTodos = async () => {
     try {
       const res = await api.get('/tasks/my');  // Changed from /todos/my to match backend (assuming /tasks/my exists; if not, use /tasks and filter client-side)
       setTodos(res.data.map(task => ({
         ...task,
-        created_at: task.created_at || new Date().toISOString()  // Ensure created_at exists
+        created_at: task.created_at || new Date().toISOString(),  // Ensure created_at exists
+        completed: task.status === 'completed'
       })) || []);
     } catch (error) {
       console.error('Failed to fetch todos:', error);
@@ -345,94 +357,100 @@ export default function Dashboard() {
         </Card>
       </motion.div>
 
-      {/* Key Metrics Row */}
-      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
+      {/* Quick Access Row */}
+      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
-          className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
-          onClick={() => navigate('/tasks')}
-          data-testid="stat-total-tasks"
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/clients')}
+          data-testid="quick-clients"
         >
-          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
-                  {stats?.total_tasks || 0}
-                </p>
-              </div>
-              <div
-                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0"
-                style={{ backgroundColor: `${COLORS.deepBlue}15` }}
-              >
-                <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: COLORS.deepBlue }} />
-              </div>
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className="p-3 rounded-xl group-hover:scale-110 transition-transform"
+              style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
+            >
+              <Building2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
             </div>
-            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
-              <span>View all</span>
-              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.total_clients || 0}
+              </p>
+              <p className="text-sm text-slate-500">Clients</p>
             </div>
           </CardContent>
         </Card>
 
         <Card
-          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
-            stats?.overdue_tasks > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
-          }`}
-          onClick={() => navigate('/tasks')}
-          data-testid="stat-overdue-tasks"
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/dsc')}
+          data-testid="quick-dsc"
         >
-          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Overdue Tasks</p>
-                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit" style={{ color: COLORS.coral }}>
-                  {stats?.overdue_tasks || 0}
-                </p>
-              </div>
-              <div
-                className="p-2 sm:p-3 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-sh...(truncated 11794 characters)...
-              </div>
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
+                stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
+              }`}
+            >
+              <Key className={`h-5 w-5 ${stats?.expiring_dsc_count > 0 ? 'text-red-600' : 'text-slate-500'}`} />
             </div>
-            {todayAttendance?.punch_in_time ? (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                  <LogIn className="h-4 w-4 text-green-600" />
-                  <p className="text-sm text-slate-600">
-                    In: {format(new Date(todayAttendance.punch_in_time), 'hh:mm a')}
-                  </p>
-                </div>
-                {todayAttendance.punch_out_time ? (
-                  <div className="flex items-center gap-2">
-                    <LogOut className="h-4 w-4 text-red-600" />
-                    <p className="text-sm text-slate-600">
-                      Out: {format(new Date(todayAttendance.punch_out_time), 'hh:mm a')}
-                    </p>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={() => handlePunchAction('punch_out')}
-                    className="w-full bg-red-600 hover:bg-red-700"
-                    disabled={loading}
-                  >
-                    Punch Out
-                  </Button>
-                )}
-              </>
-            ) : (
-              <Button
-                onClick={() => handlePunchAction('punch_in')}
-                className="w-full bg-green-600 hover:bg-green-700"
-                disabled={loading}
-              >
-                Punch In
-              </Button>
-            )}
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.total_dsc || 0}
+              </p>
+              <p className="text-sm text-slate-500">DSC Certificates</p>
+            </div>
           </CardContent>
         </Card>
+
+        <Card
+          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+          onClick={() => navigate('/duedates')}
+          data-testid="quick-duedates"
+        >
+          <CardContent className="p-5 flex items-center gap-4">
+            <div
+              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
+                stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
+              }`}
+            >
+              <Calendar className={`h-5 w-5 ${stats?.upcoming_due_dates > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                {stats?.upcoming_due_dates || 0}
+              </p>
+              <p className="text-sm text-slate-500">Compliance Calendar</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {user?.role === 'admin' && (
+          <Card
+            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+            onClick={() => navigate('/users')}
+            data-testid="quick-users"
+          >
+            <CardContent className="p-5 flex items-center gap-4">
+              <div
+                className="p-3 rounded-xl group-hover:scale-110 transition-transform"
+                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
+              >
+                <Users className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
+                  {stats?.team_workload?.length || 0}
+                </p>
+                <p className="text-sm text-slate-500">Team Members</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </motion.div>
 
-      {/* Star Performers + My To-Do List + My Assigned Tasks */}
+      {/* Star Performers + My To-Do List + Tasks Assigned to Me */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Star Performers */}
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="staff-ranking-card"
@@ -559,6 +577,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* My To-Do List */}
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="todo-list-card"
@@ -638,6 +657,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Tasks Assigned to Me */}
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="assigned-tasks-card"
@@ -646,7 +666,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
                 <Briefcase className="h-5 w-5 text-indigo-500" />
-                My Assigned Tasks
+                Tasks Assigned to Me
               </CardTitle>
             </div>
             <p className="text-xs text-slate-500 mt-1">
@@ -661,142 +681,81 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-                {assignedTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`flex items-center justify-between p-3 rounded-xl border ${
-                      task.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <input
-                        type="checkbox"
-                        checked={task.completed}
-                        onChange={() => handleToggleAssigned(task.id)}
-                        className="h-5 w-5 flex-shrink-0"
-                      />
-                      <div className="flex-1">
-                        <span
-                          className={`text-sm ${
-                            task.completed ? 'line-through text-slate-500' : 'text-slate-900'
-                          }`}
+                {assignedTasks.map((task) => {
+                  // Determine if current user can see who assigned it
+                  const canSeeAssigner =
+                    user.role === 'admin' ||
+                    task.assigned_by === user.id ||           // I assigned it
+                    task.assigned_to === user.id;             // It's assigned to me
+
+                  const assignerName = canSeeAssigner
+                    ? users.find(u => u.id === task.assigned_by)?.full_name || 'Unknown'
+                    : null;
+
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-3 rounded-xl border flex flex-col gap-2 ${
+                        task.completed ? 'bg-green-50/70 border-green-200' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={task.completed}
+                            onChange={() => handleToggleAssigned(task.id)}
+                            className="h-5 w-5 flex-shrink-0 mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-sm font-medium ${
+                                  task.completed ? 'line-through text-slate-600' : 'text-slate-900'
+                                }`}
+                              >
+                                {task.title}
+                              </span>
+
+                              {/* Done capsule */}
+                              <button
+                                onClick={() => handleToggleAssigned(task.id)}
+                                className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                                  task.completed
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200'
+                                }`}
+                              >
+                                {task.completed ? 'Done ✓' : 'Mark as Done'}
+                              </button>
+                            </div>
+
+                            <p className="text-xs text-slate-500 mt-1">
+                              Due: {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
+                            </p>
+
+                            {canSeeAssigner && assignerName && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Assigned by: <span className="font-medium">{assignerName}</span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate('/tasks')}  // Navigate to tasks page for details/edit
                         >
-                          {task.title}
-                        </span>
-                        <p className="text-xs text-slate-500">
-                          Due: {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
-                        </p>
-                        {task.completed && task.updated_at && (
-                          <p className="text-xs text-green-600">
-                            Done: {format(new Date(task.updated_at), 'MMM d, yyyy')}
-                          </p>
-                        )}
+                          Open
+                        </Button>
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate('/tasks')}  // Navigate to tasks page for details/edit
-                    >
-                      Open
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
-      </motion.div>
-
-      {/* Quick Access Row */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
-        <Card
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/clients')}
-          data-testid="quick-clients"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div
-              className="p-3 rounded-xl group-hover:scale-110 transition-transform"
-              style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
-            >
-              <Building2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
-                {stats?.total_clients || 0}
-              </p>
-              <p className="text-sm text-slate-500">Clients</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/dsc')}
-          data-testid="quick-dsc"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div
-              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
-              }`}
-            >
-              <Key className={`h-5 w-5 ${stats?.expiring_dsc_count > 0 ? 'text-red-600' : 'text-slate-500'}`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
-                {stats?.total_dsc || 0}
-              </p>
-              <p className="text-sm text-slate-500">DSC Certificates</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-          onClick={() => navigate('/duedates')}
-          data-testid="quick-duedates"
-        >
-          <CardContent className="p-5 flex items-center gap-4">
-            <div
-              className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
-                stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
-              }`}
-            >
-              <Calendar className={`h-5 w-5 ${stats?.upcoming_due_dates > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
-                {stats?.upcoming_due_dates || 0}
-              </p>
-              <p className="text-sm text-slate-500">Compliance Calendar</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {user?.role === 'admin' && (
-          <Card
-            className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
-            onClick={() => navigate('/users')}
-            data-testid="quick-users"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div
-                className="p-3 rounded-xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
-              >
-                <Users className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
-              </div>
-              <div>
-                <p className="text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>
-                  {stats?.team_workload?.length || 0}
-                </p>
-                <p className="text-sm text-slate-500">Team Members</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </motion.div>
     </motion.div>
   );
