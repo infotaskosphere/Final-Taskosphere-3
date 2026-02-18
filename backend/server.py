@@ -642,6 +642,25 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
     if task.get("due_date") and isinstance(task["due_date"], str):
         task["due_date"] = datetime.fromisoformat(task["due_date"])
     return Task(**task)
+@api_router.patch("/tasks/{task_id}", response_model=Task)
+async def update_task(
+    task_id: str,
+    updates: dict,
+    current_user: User = Depends(get_current_user)
+):
+    existing_task = await db.tasks.find_one({"id": task_id})
+    
+    if not existing_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": updates}
+    )
+
+    updated_task = await db.tasks.find_one({"id": task_id})
+    return Task(**updated_task)
+
 
 @api_router.put("/tasks/{task_id}", response_model=Task)
 async def update_task(task_id: str, task_data: TaskCreate, current_user: User = Depends(get_current_user)):
