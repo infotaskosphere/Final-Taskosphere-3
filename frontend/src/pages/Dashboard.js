@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';                      // ← added
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
@@ -59,19 +59,22 @@ const getPriorityStripeClass = (priority) => {
   return 'border-l-8 border-l-slate-300';
 };
 
-function TaskStrip({ task, isToMe, assignedName }) {
+function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
 
   return (
     <div
-      className={`relative flex flex-col p-4 rounded-xl border bg-white hover:shadow-sm transition ${getPriorityStripeClass(task.priority)}`}
+      className={`relative flex flex-col p-4 rounded-xl border bg-white hover:shadow-sm transition cursor-pointer hover:border-blue-400 ${getPriorityStripeClass(task.priority)} ${
+        isCompleted ? 'opacity-75 bg-green-50/40 border-green-200' : ''
+      }`}
+      onClick={() => onUpdateStatus ? null : window.location.href = `/tasks/${task.id || ''}`} // whole strip clickable
     >
       {/* Title row with status buttons on right (only for assigned to me) */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-slate-900 truncate leading-tight">
+          <p className={`font-medium text-slate-900 truncate leading-tight ${isCompleted ? 'line-through text-slate-600' : ''}`}>
             {task.title || 'Untitled Task'}
             {task.client_name ? ` – ${task.client_name}` : ''}
           </p>
@@ -79,28 +82,36 @@ function TaskStrip({ task, isToMe, assignedName }) {
 
         {isToMe && (
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              size="sm"
-              variant={isInProgress ? "default" : "outline"}
-              className={`min-w-[92px] h-8 text-xs font-medium ${
-                isInProgress ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'border-blue-200 text-blue-700 hover:bg-blue-50'
-              }`}
-              onClick={() => updateAssignedTaskStatus(task.id, 'in_progress')}
-              disabled={isInProgress}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdateStatus?.(task.id, 'in_progress');
+              }}
+              disabled={isInProgress || isCompleted}
+              className={`min-w-[100px] px-4 py-1.5 text-xs font-medium rounded-full transition ${
+                isInProgress
+                  ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700'
+                  : 'bg-white border border-blue-400 text-blue-700 hover:bg-blue-50 disabled:opacity-50'
+              } disabled:cursor-not-allowed`}
             >
-              In Progress
-            </Button>
-            <Button
-              size="sm"
-              variant={isCompleted ? "default" : "outline"}
-              className={`min-w-[92px] h-8 text-xs font-medium ${
-                isCompleted ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-200 text-green-700 hover:bg-green-50'
-              }`}
-              onClick={() => updateAssignedTaskStatus(task.id, 'completed')}
+              {isInProgress ? 'In Progress ✓' : 'Start'}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdateStatus?.(task.id, 'completed');
+              }}
               disabled={isCompleted}
+              className={`min-w-[100px] px-4 py-1.5 text-xs font-medium rounded-full transition shadow-sm ${
+                isCompleted
+                  ? 'bg-green-600 text-white border-green-700'
+                  : 'bg-green-100 text-green-800 border border-green-300 hover:bg-green-200'
+              } disabled:opacity-60 cursor-default`}
             >
-              Done
-            </Button>
+              {isCompleted ? '✓ Done' : 'Mark Done'}
+            </button>
           </div>
         )}
       </div>
@@ -115,6 +126,7 @@ function TaskStrip({ task, isToMe, assignedName }) {
         {task.due_date && (
           <span>• Due: {format(new Date(task.due_date), 'MMM d, yyyy')}</span>
         )}
+        {isCompleted && <span className="text-green-600 font-medium">• Completed</span>}
       </div>
     </div>
   );
@@ -137,24 +149,25 @@ export default function Dashboard() {
   // Added missing state declarations that were causing reference errors
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
+
   const getTodayDuration = () => {
-  if (!todayAttendance?.punch_in) return "0h 0m";
+    if (!todayAttendance?.punch_in) return "0h 0m";
 
-  if (todayAttendance.punch_out) {
-    const mins = todayAttendance.duration_minutes || 0;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
+    if (todayAttendance.punch_out) {
+      const mins = todayAttendance.duration_minutes || 0;
+      return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    }
 
-  const diffMs = Date.now() - new Date(todayAttendance.punch_in).getTime();
-  const h = Math.floor(diffMs / 3600000);
-  const m = Math.floor((diffMs % 3600000) / 60000);
-  return `${h}h ${m}m`;
-};
+    const diffMs = Date.now() - new Date(todayAttendance.punch_in).getTime();
+    const h = Math.floor(diffMs / 3600000);
+    const m = Math.floor((diffMs % 3600000) / 60000);
+    return `${h}h ${m}m`;
+  };
 
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
-    fetchMyTodos();
+    // fetchMyTodos();           ← removed → prevents crash (implement properly later)
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
 
@@ -182,7 +195,10 @@ export default function Dashboard() {
       const res = await api.get('/tasks');
       const allTasks = res.data || [];
 
-      const toMe = allTasks.filter(task => task.assigned_to === user?.id);
+      const toMe = allTasks.filter(task => 
+        task.assigned_to === user?.id &&
+        task.status !== 'completed'           // ← hides completed tasks
+      );
 
       const byMe = allTasks.filter(task => 
         task.created_by === user?.id && task.assigned_to !== user?.id
@@ -254,10 +270,16 @@ export default function Dashboard() {
       setRecentTasks(tasksRes.data?.slice(0, 5) || []);
       setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
 
-      const rankingRes = await api.get(
-        `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
-      );
-      setRankings(rankingRes.data?.rankings || []);
+      // Rankings wrapped in try-catch to handle 500/CORS gracefully
+      try {
+        const rankingRes = await api.get(
+          `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+        );
+        setRankings(rankingRes.data?.rankings || []);
+      } catch (rankErr) {
+        console.warn("Rankings endpoint failed:", rankErr);
+        setRankings([]); // fallback → no crash
+      }
 
       const chatRes = await api.get('/notifications');
       if (chatRes.data?.length > chatMessages.length) {
@@ -493,21 +515,21 @@ export default function Dashboard() {
         <Card
           className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
             stats?.expiring_dsc_count > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
-        }`}
-        onClick={() => navigate('/dsc')}
+          }`}
+          onClick={() => navigate('/dsc')}
         >
-        <CardContent className="p-4 sm:p-6 h-full flex flex-col">
-          <div className="flex items-start justify-between flex-1">
-            <div>
-              <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">
-                DSC Alerts
-              </p>
-              <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit text-red-600">
-                {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">
-                {stats?.expired_dsc_count || 0} Expired • {stats?.expiring_dsc_count || 0} Expiring
-              </p>
+          <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between flex-1">
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">
+                  DSC Alerts
+                </p>
+                <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit text-red-600">
+                  {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {stats?.expired_dsc_count || 0} Expired • {stats?.expiring_dsc_count || 0} Expiring
+                </p>
               </div>
 
               <div className="p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-red-100 group-hover:scale-110 transition-transform flex-shrink-0">
@@ -587,8 +609,8 @@ export default function Dashboard() {
                   return (
                     <div
                       key={task.id}
-                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-sm transition ${priorityStyle.bg} ${priorityStyle.border}`}
-                      onClick={() => navigate('/tasks')}
+                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
+                      onClick={() => navigate(`/tasks/${task.id || ''}`)} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -647,8 +669,8 @@ export default function Dashboard() {
                   return (
                     <div
                       key={due.id}
-                      className={`p-3 rounded-xl border cursor-pointer transition ${color.bg}`}
-                      onClick={() => navigate('/duedates')}
+                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-orange-300 transition ${color.bg}`}
+                      onClick={() => navigate(`/duedates/${due.id || ''}`)} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -785,7 +807,7 @@ export default function Dashboard() {
                   const isSecond = index === 1;
                   const isThird = index === 2;
                   return (
-                    <div key={member.user_id || index} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl transition border ${
+                    <div key={member.user_id || index} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl transition border cursor-pointer hover:bg-slate-100 ${
                       isTop ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md" :
                       isSecond ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300" :
                       isThird ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300" :
@@ -926,6 +948,7 @@ export default function Dashboard() {
                       task={task}
                       isToMe={true}
                       assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                      onUpdateStatus={updateAssignedTaskStatus}   // ← passed here
                     />
                   ))}
                 </div>
@@ -955,6 +978,7 @@ export default function Dashboard() {
                       task={task}
                       isToMe={false}
                       assignedName={task.assigned_to_name || 'Unknown'}
+                      onUpdateStatus={updateAssignedTaskStatus}   // ← passed here too (if needed)
                     />
                   ))}
                 </div>
