@@ -1969,240 +1969,171 @@ async def get_staff_rankings(
 ):
     if current_user.role not in ["admin", "manager", "staff"]:
         raise HTTPException(status_code=403, detail="Not authorized")
-    # Restrict non-admins to "all" period
+
     if current_user.role != "admin":
         period = "all"
+
     now = datetime.now(timezone.utc)
     start_date = None
+
     if period == "weekly":
         start_date = now - timedelta(days=7)
     elif period == "monthly":
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    # Fetch all manager/staff users (no password)
+
     users = await db.users.find(
         {"role": {"$in": ["manager", "staff"]}},
         {"_id": 0, "password": 0}
     ).to_list(1000)
+
     rankings = []
+
     for user in users:
         uid = user.get("id")
         if not uid:
-            continue # skip invalid users
+            continue
+
         total_minutes = 0
 
-    # ================= TASKS =================
-    tasks = await db.tasks.find(
-        {"assigned_to": uid},
-        {"_id": 0}
-    ).to_list(1000)
+        # ================= ATTENDANCE =================
+        attendance_cursor = await db.attendance.find(
+            {"user_id": uid},
+            {"_id": 0, "date": 1, "duration_minutes": 1}
+        ).to_list(1000)
 
-    filtered_tasks = []
-    for task in tasks:
-        created = task.get("created_at")
-        if not created:
-            continue
+        for record in attendance_cursor:
+            date_str = record.get("date")
+            if not date_str:
+                continue
 
-        if isinstance(created, str):
             try:
-                created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-
-        if start_date and created < start_date:
-            continue
-
-        filtered_tasks.append(task)
-
-    total_tasks = len(filtered_tasks)
-    completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
-    completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-        # ================= OVERDUE LOGIC =================
-        overdue_with_reason = 0
-        overdue_without_reason = 0
-        for task in filtered_tasks:
-            status = task.get("status")
-            due_date = task.get("due_date")
-            if not due_date:
-                continue
-            if isinstance(due_date, str):
+                record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
+            except:
                 try:
-                    due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
+                    record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
                 except:
                     continue
-            if status != "completed" and due_date < now:
-                description = task.get("description", "")
-                if description and description.strip() and len(description.strip()) >= 20:
-                    overdue_with_reason += 1
-                else:
-                    overdue_without_reason += 1
-        # ================= SPEED =================
-        completion_times = []
-        for task in filtered_tasks:
-            if task.get("status") == "completed":
-                created = task.get("created_at")
-                updated = task.get("updated_at")
-                if not created or not updated:
-                    continue
-                try:
-                    if isinstance(created, str):
-                        created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-                    if isinstance(updated, str):
-                        updated = datetime.fromisoformat(updated).replace(tzinfo=timezone.utc)
-                    diff = (updated - created).total_seconds()
-                    if diff > 0:
-                        completion_times.append(diff)
-                except (ValueError, TypeError):
-                    continue
-        speed_score = 0
-        if completion_times:
-            avg_seconds = sum(completion_times) / len(completion_times)
-            speed_score = max(0, 100 - (avg_seconds / 86400) * 10)
-        # ================= OVERDUE PENALTY =================
-        penalty_without_reason = (overdue_without_reason / total_tasks * 100) if total_tasks > 0 else 0
-        penalty_with_reason = (overdue_with_reason / total_tasks * 100) if total_tasks > 0 else 0
-        overdue_penalty_score = (
-            penalty_without_reason * 0.20 +
-            penalty_with_reason * 0.05
-        )
-        adjusted_completion = max(0, completion_percent - overdue_penalty_score)
-        # ================= FINAL SCORE =================
-        # Weights: 35% work, 40% completion, 25% speed
-        efficiency = (
-            0.35 * work_score +
-            0.40 * adjusted_completion +
-            0.25 * speed_score
-        )
-        rankings.append({
-            "user_id": uid,
-            "name": user.get("full_name", "Unknown"),
-            "role": user.get("role", "staff"),
-            "profile_picture": user.get("profile_picture"),
-            "score": round(efficiency, 2),
-            "hours_worked": round(total_minutes / 60, 2),
-            "completion_percent": round(completion_percent, 2),
-        })
-    # Sort by descending score
-    rankings.sort(key=lambda x: x["score"], reverse=True)
-    # Assign ranks (1 = best)
-    for i, r in enumerate(rankings):
-        r["rank"] = i + 1
-    return {
-        "period": period,
-        "rankings": rankings[:50] # top 50
-    }
-# ================= ATTENDANCE =================
 
-attendance_cursor = await db.attendance.find(
-    {"user_id": uid},
-    {"_id": 0, "date": 1, "duration_minutes": 1}
-).to_list(1000)
+            if start_date and record_date < start_date:
+                continue
 
-for record in attendance_cursor:
-    date_str = record.get("date")
-    if not date_str:
-        continue
+            total_minutes += record.get("duration_minutes") or 0
 
-    try:
-        record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError, NameError):
-        try:
-            record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            continue
+        # 160 hour baseline
+        work_score = min(total_minutes / (60 * 160), 1.0) * 100
 
-    if start_date and record_date < start_date:
-        continue
-
-    total_minutes += record.get("duration_minutes") or 0
-
-
-# 160 hours baseline
-work_score = min(total_minutes / (60 * 160), 1.0) * 100
-
-
-# ✅ RETURN MUST BE LAST
-return {
-    "period": period,
-    "rankings": rankings[:50]
-}
         # ================= TASKS =================
         tasks = await db.tasks.find(
             {"assigned_to": uid},
             {"_id": 0}
         ).to_list(1000)
+
         filtered_tasks = []
+
         for task in tasks:
             created = task.get("created_at")
             if not created:
                 continue
+
             if isinstance(created, str):
                 try:
                     created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
                 except ValueError:
                     continue
+
             if start_date and created < start_date:
                 continue
+
             filtered_tasks.append(task)
+
         total_tasks = len(filtered_tasks)
-        completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
-        completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+        completed_tasks = len(
+            [t for t in filtered_tasks if t.get("status") == "completed"]
+        )
+
+        completion_percent = (
+            (completed_tasks / total_tasks * 100)
+            if total_tasks > 0 else 0
+        )
+
         # ================= OVERDUE LOGIC =================
         overdue_with_reason = 0
         overdue_without_reason = 0
+
         for task in filtered_tasks:
             status = task.get("status")
             due_date = task.get("due_date")
-        if not due_date:
-            continue
-        if isinstance(due_date, str):
-            try:
-                due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
-            except:
+
+            if not due_date:
                 continue
-        if status != "completed" and due_date < now:
-            description = task.get("description")
-        if description and description.strip() and len(description.strip()) >= 20:
-            overdue_with_reason += 1
-        else:
-            overdue_without_reason += 1
+
+            if isinstance(due_date, str):
+                try:
+                    due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
+                except:
+                    continue
+
+            if status != "completed" and due_date < now:
+                description = task.get("description", "")
+
+                if description and description.strip() and len(description.strip()) >= 20:
+                    overdue_with_reason += 1
+                else:
+                    overdue_without_reason += 1
+
         # ================= SPEED =================
         completion_times = []
+
         for task in filtered_tasks:
             if task.get("status") == "completed":
                 created = task.get("created_at")
                 updated = task.get("updated_at")
+
                 if not created or not updated:
                     continue
+
                 try:
                     if isinstance(created, str):
                         created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
                     if isinstance(updated, str):
                         updated = datetime.fromisoformat(updated).replace(tzinfo=timezone.utc)
+
                     diff = (updated - created).total_seconds()
                     if diff > 0:
                         completion_times.append(diff)
-                except (ValueError, TypeError):
+                except:
                     continue
+
+        speed_score = 0
         if completion_times:
             avg_seconds = sum(completion_times) / len(completion_times)
             speed_score = max(0, 100 - (avg_seconds / 86400) * 10)
-        else:
-            speed_score = 0
-        # ================= FINAL SCORE =================
-        # Retained original weights: 35% Work, 40% Completion, 25% Speed
-        # ================= APPLY OVERDUE PENALTY =================
-        penalty_without_reason = (overdue_without_reason / total_tasks * 100) if total_tasks > 0 else 0
-        penalty_with_reason = (overdue_with_reason / total_tasks * 100) if total_tasks > 0 else 0
+
+        # ================= OVERDUE PENALTY =================
+        penalty_without_reason = (
+            (overdue_without_reason / total_tasks * 100)
+            if total_tasks > 0 else 0
+        )
+
+        penalty_with_reason = (
+            (overdue_with_reason / total_tasks * 100)
+            if total_tasks > 0 else 0
+        )
+
         overdue_penalty_score = (
             penalty_without_reason * 0.20 +
             penalty_with_reason * 0.05
         )
+
         adjusted_completion = max(0, completion_percent - overdue_penalty_score)
+
+        # ================= FINAL SCORE =================
         efficiency = (
             0.35 * work_score +
             0.40 * adjusted_completion +
             0.25 * speed_score
         )
+
         rankings.append({
             "user_id": uid,
             "name": user.get("full_name", "Unknown"),
@@ -2212,11 +2143,12 @@ return {
             "hours_worked": round(total_minutes / 60, 2),
             "completion_percent": round(completion_percent, 2),
         })
-    # Sort by descending score
+
     rankings.sort(key=lambda x: x["score"], reverse=True)
-    # Assign ranks
+
     for i, r in enumerate(rankings):
         r["rank"] = i + 1
+
     return {
         "period": period,
         "rankings": rankings[:50]
