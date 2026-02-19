@@ -442,7 +442,7 @@ export default function Dashboard() {
       </motion.div>
 
       {/* Key Metrics Row */}
-      <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
+      <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4" variants={itemVariants}>
         <Card
           className="border border-slate-200 hover:shadow-lg hover:border-slate-300 transition-all duration-200 cursor-pointer group rounded-2xl h-full"
           onClick={() => navigate('/tasks')}
@@ -519,6 +519,37 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
               <span>View all</span>
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card
+          className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
+            stats?.expiring_dsc_count > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
+        }`}
+        onClick={() => navigate('/dsc')}
+        >
+        <CardContent className="p-4 sm:p-6 h-full flex flex-col">
+          <div className="flex items-start justify-between flex-1">
+            <div>
+              <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">
+                DSC Alerts
+              </p>
+              <p className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 font-outfit text-red-600">
+                {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {stats?.expired_dsc_count || 0} Expired • {stats?.expiring_dsc_count || 0} Expiring
+              </p>
+              </div>
+
+              <div className="p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-red-100 group-hover:scale-110 transition-transform flex-shrink-0">
+                <Key className="h-5 w-5 sm:h-6 sm:w-6 text-red-600" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
+              <span>View alerts</span>
               <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </CardContent>
