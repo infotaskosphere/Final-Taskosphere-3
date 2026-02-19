@@ -136,7 +136,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 export default function Users() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [allUsers, setAllUsers] = useState([]);
+  const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
