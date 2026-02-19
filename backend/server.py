@@ -2241,7 +2241,7 @@ async def send_reminder_to_user(
 # ================= STAFF RANKING ROUTE =================
 
 @api_router.get("/staff/rankings")
-async def get_staff_rankings(
+async def get_staff_rankings():
     period: str = "all",
     current_user: User = Depends(get_current_user)
 ):
