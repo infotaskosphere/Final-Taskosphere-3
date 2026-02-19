@@ -136,7 +136,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 export default function Users() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [users, setUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
@@ -163,12 +163,12 @@ export default function Users() {
 const fetchUsers = async () => {
   try {
     const res = await api.get('/users');
-    setUsers(res.data || []);
+    setAllUsers(res.data || []);
   } catch (error) {
     console.error('Failed to fetch users:', error);
   }
 };
-
+  
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
     can_view_all_clients: false,
