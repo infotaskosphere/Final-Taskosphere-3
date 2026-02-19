@@ -94,6 +94,7 @@ const itemVariants = {
 
 export default function Tasks() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
