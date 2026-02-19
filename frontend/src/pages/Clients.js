@@ -39,7 +39,6 @@ const SERVICES = [
 export default function Clients() {
   const { user } = useAuth();
   const [clients, setClients] = useState([]);
-  const location = useLocation()
   const navigate = useNavigate();
   const location = useLocation();
   const [users, setUsers] = useState([]);
