@@ -1,3 +1,4 @@
+from fastapi.middleware.gzip import GZipMiddleware
 import pytz
 import logging
 import smtplib
@@ -44,6 +45,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 security = HTTPBearer()
 
 app = FastAPI()
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
