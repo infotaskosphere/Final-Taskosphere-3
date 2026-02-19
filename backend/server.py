@@ -412,6 +412,44 @@ def send_birthday_email(recipient_email: str, client_name: str):
     except Exception as e:
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
+# Task Analytics
+@api_router.get("/tasks/analytics")
+async def get_task_analytics(
+    month: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get task analytics for a specific month (YYYY-MM)
+    """
+
+    # Fetch tasks (role-based filtering same as your /tasks endpoint)
+    query = {}
+    if current_user.role == "staff":
+        query["$or"] = [
+            {"assigned_to": current_user.id},
+            {"sub_assignees": current_user.id}
+        ]
+
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+
+    total = 0
+    completed = 0
+    pending = 0
+
+    for task in tasks:
+        if task.get("created_at", "").startswith(month):
+            total += 1
+            if task.get("status") == "completed":
+                completed += 1
+            elif task.get("status") == "pending":
+                pending += 1
+
+    return {
+        "month": month,
+        "total_tasks": total,
+        "completed_tasks": completed,
+        "pending_tasks": pending
+    }
 # Root route
 @api_router.get("/")
 async def root():
