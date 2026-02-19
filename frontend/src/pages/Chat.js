@@ -53,6 +53,7 @@ export default function Chat() {
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState([]);
   const [sendingMessage, setSendingMessage] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -90,6 +91,16 @@ export default function Chat() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+const fetchUsers = async () => {
+  try {
+    const res = await api.get('/users');
+    setUsers(res.data || []);
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+  }
+};
+
 
   const fetchGroups = async () => {
     try {
