@@ -8,12 +8,30 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Monitor, Clock, User, Activity, BarChart3, Users, Calendar, TrendingUp, Target, CheckSquare, Briefcase, PieChart as PieIcon, AlertCircle } from 'lucide-react';
-import { Calendar as CalendarIcon, Clock, TrendingUp, Target, LogIn, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Timer } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+import {
+  Monitor,
+  Clock,
+  User,
+  Activity,
+  BarChart3,
+  Users,
+  Calendar as CalendarIcon,
+  TrendingUp,
+  Target,
+  CheckSquare,
+  Briefcase,
+  PieChart as PieIcon,
+  AlertCircle,
+  LogIn,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  Timer,
+  Mail
+} from 'lucide-react';
 
 // Brand Colors
 const COLORS = {
