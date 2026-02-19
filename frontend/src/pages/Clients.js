@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
+import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { 
   Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
   FileText, Calendar, Search, Users, 
@@ -38,6 +40,8 @@ const SERVICES = [
 export default function Clients() {
   const { user } = useAuth();
   const [clients, setClients] = useState([]);
+  const location = useLocation()
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -69,7 +73,12 @@ export default function Clients() {
   useEffect(() => {
     fetchClients();
     if (user?.role !== 'staff') fetchUsers();
-  }, []);
+
+    const params = new URLSearchParams(location.search);
+    if (params.get("openAddClient") === "true") {
+      setDialogOpen(true);
+    }
+  }, [location]);
 
   const fetchClients = async () => {
     try {
