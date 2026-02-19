@@ -32,9 +32,18 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
+
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+@app.on_event("startup")
+async def create_indexes():
+    await db.tasks.create_index("assigned_to")
+    await db.tasks.create_index("created_by")
+    await db.tasks.create_index("due_date")
+    await db.users.create_index("email")
+
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
