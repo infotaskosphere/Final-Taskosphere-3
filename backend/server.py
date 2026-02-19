@@ -1989,28 +1989,33 @@ async def get_staff_rankings(
         if not uid:
             continue # skip invalid users
         total_minutes = 0
-       
-        # ================= TASKS =================
-        tasks = await db.tasks.find(
-            {"assigned_to": uid},
-            {"_id": 0}
-        ).to_list(1000)
-        filtered_tasks = []
-        for task in tasks:
-            created = task.get("created_at")
-            if not created:
+
+    # ================= TASKS =================
+    tasks = await db.tasks.find(
+        {"assigned_to": uid},
+        {"_id": 0}
+    ).to_list(1000)
+
+    filtered_tasks = []
+    for task in tasks:
+        created = task.get("created_at")
+        if not created:
+            continue
+
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
+            except ValueError:
                 continue
-            if isinstance(created, str):
-                try:
-                    created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-                except ValueError:
-                    continue
-            if start_date and created < start_date:
-                continue
-            filtered_tasks.append(task)
-        total_tasks = len(filtered_tasks)
-        completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
-        completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+
+        if start_date and created < start_date:
+            continue
+
+        filtered_tasks.append(task)
+
+    total_tasks = len(filtered_tasks)
+    completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
+    completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
         # ================= OVERDUE LOGIC =================
         overdue_with_reason = 0
         overdue_without_reason = 0
