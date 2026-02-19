@@ -1989,27 +1989,7 @@ async def get_staff_rankings(
         if not uid:
             continue # skip invalid users
         total_minutes = 0
-        # ================= ATTENDANCE =================
-        attendance_cursor = await db.attendance.find(
-            {"user_id": uid},
-            {"_id": 0, "date": 1, "duration_minutes": 1}
-        ).to_list(1000)
-        for record in attendance_cursor:
-            date_str = record.get("date")
-            if not date_str:
-                continue
-            try:
-                record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
-            except Exception:
-                try:
-                    record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-                except Exception:
-                    continue
-            if start_date and record_date < start_date:
-                continue
-            total_minutes += record.get("duration_minutes") or 0
-        # Work score (baseline 160 hours = 100%)
-        work_score = min(total_minutes / (60 * 160), 1.0) * 100
+       
         # ================= TASKS =================
         tasks = await db.tasks.find(
             {"assigned_to": uid},
