@@ -26,6 +26,7 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -35,6 +36,7 @@ const COLORS = {
   coral: '#FF6B6B',
   amber: '#F59E0B',
 };
+
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -47,6 +49,77 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
 };
+
+const getPriorityStripeClass = (priority) => {
+  const p = (priority || '').toLowerCase().trim();
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
+  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
+  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  return 'border-l-8 border-l-slate-300';
+};
+
+function TaskStrip({ task, isToMe, assignedName }) {
+  const status = task.status || 'pending';
+  const isCompleted = status === 'completed';
+  const isInProgress = status === 'in_progress';
+
+  return (
+    <div
+      className={`relative flex flex-col p-4 rounded-xl border bg-white hover:shadow-sm transition ${getPriorityStripeClass(task.priority)}`}
+    >
+      {/* Title row with status buttons on right (only for assigned to me) */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-slate-900 truncate leading-tight">
+            {task.title || 'Untitled Task'}
+            {task.client_name ? ` – ${task.client_name}` : ''}
+          </p>
+        </div>
+
+        {isToMe && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              size="sm"
+              variant={isInProgress ? "default" : "outline"}
+              className={`min-w-[92px] h-8 text-xs font-medium ${
+                isInProgress ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'border-blue-200 text-blue-700 hover:bg-blue-50'
+              }`}
+              onClick={() => updateAssignedTaskStatus(task.id, 'in_progress')}
+              disabled={isInProgress}
+            >
+              In Progress
+            </Button>
+            <Button
+              size="sm"
+              variant={isCompleted ? "default" : "outline"}
+              className={`min-w-[92px] h-8 text-xs font-medium ${
+                isCompleted ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-200 text-green-700 hover:bg-green-50'
+              }`}
+              onClick={() => updateAssignedTaskStatus(task.id, 'completed')}
+              disabled={isCompleted}
+            >
+              Done
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Meta line - smaller font, aligned under title */}
+      <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+        <span>
+          {isToMe ? 'Assigned by: ' : 'Assigned to: '}
+          <span className="font-medium text-slate-700">{assignedName || 'Unknown'}</span>
+        </span>
+        <span>• {format(new Date(task.created_at || Date.now()), 'MMM d, yyyy • hh:mm a')}</span>
+        {task.due_date && (
+          <span>• Due: {format(new Date(task.due_date), 'MMM d, yyyy')}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -60,15 +133,18 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [todos, setTodos] = useState([]);
+  const [newTodo, setNewTodo] = useState('');
+  // Added missing state declarations that were causing reference errors
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
-  const [newTodo, setNewTodo] = useState('');
+
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
     fetchMyTodos();
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       api.get('/notifications')
@@ -82,10 +158,10 @@ export default function Dashboard() {
     }, 50000);
     return () => clearInterval(interval);
   }, [chatMessages]);
+
   const fetchMyTodos = async () => {
     try {
-      const res = await api.get('/tasks'); // Changed to /tasks to avoid 404
-      // Filter tasks assigned to current user or where user is sub-assignee
+      const res = await api.get('/tasks');
       const myTasks = res.data.filter(task =>
         task.assigned_to === user?.id ||
         (Array.isArray(task.sub_assignees) && task.sub_assignees.includes(user?.id))
@@ -93,24 +169,25 @@ export default function Dashboard() {
       setTodos(myTasks.map(task => ({
         ...task,
         created_at: task.created_at || new Date().toISOString(),
-        completed: task.status === 'completed' // map for checkbox UI
+        completed: task.status === 'completed'
       })));
     } catch (error) {
       console.error('Failed to fetch todos:', error);
-      setTodos([]); // fallback to prevent undefined crash
+      setTodos([]);
     }
   };
+
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
-      const res = await api.post('/tasks', {  // Changed from /todos to /tasks
+      const res = await api.post('/tasks', {
         title: newTodo.trim(),
-        status: 'pending',  // Use backend-compatible fields (status instead of completed)
-        created_at: new Date().toISOString()  // Explicitly add creation date
+        status: 'pending',
+        created_at: new Date().toISOString()
       });
       setTodos([...todos, {
         ...res.data,
-        completed: res.data.status === 'completed'  // Map status to completed for frontend
+        completed: res.data.status === 'completed'
       }]);
       setNewTodo('');
       toast.success('Todo added successfully!');
@@ -120,66 +197,47 @@ export default function Dashboard() {
   };
 
   const fetchMyAssignedTasks = async () => {
-  try {
-    const res = await api.get('/tasks');
-    const allTasks = res.data || [];
+    try {
+      const res = await api.get('/tasks');
+      const allTasks = res.data || [];
 
-    let visibleTasks = [];
+      const toMe = allTasks.filter(task => task.assigned_to === user?.id);
 
-    // 👑 Admin can see all tasks
-    if (user?.role === "admin") {
-      visibleTasks = allTasks;
-    } else {
-      // 👤 Normal user can see:
-      // - tasks assigned TO them
-      // - tasks created BY them
-      visibleTasks = allTasks.filter(
-        (task) =>
-          task.assigned_to === user?.id ||
-          task.created_by === user?.id
+      const byMe = allTasks.filter(task => 
+        task.created_by === user?.id && task.assigned_to !== user?.id
       );
+
+      setTasksAssignedToMe(toMe.slice(0, 6));
+      setTasksAssignedByMe(byMe.slice(0, 6));
+    } catch (error) {
+      console.error("Failed to fetch assigned tasks", error);
+      setTasksAssignedToMe([]);
+      setTasksAssignedByMe([]);
     }
+  };
 
-    // Split into 2 cards
-    const toMe = visibleTasks.filter(
-      (task) => task.assigned_to === user?.id
-    );
-
-    const byMe = visibleTasks.filter(
-      (task) =>
-        task.created_by === user?.id &&
-        task.assigned_to !== user?.id
-    );
-
-    setTasksAssignedToMe(toMe.slice(0, 6));
-    setTasksAssignedByMe(byMe.slice(0, 6));
-
-  } catch (error) {
-    console.error("Failed to fetch assigned tasks", error);
-    setTasksAssignedToMe([]);
-    setTasksAssignedByMe([]);
-  }
-};
-
-
-const getPriorityStripeClass = (priority) => {
-  const p = (priority || '').toLowerCase().trim();
-  if (p === 'critical') return 'border-l-8 border-l-red-600';
-  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
-  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
-  if (p === 'low')      return 'border-l-8 border-l-blue-500';
-  return 'border-l-8 border-l-slate-300';
-};
-
+  const updateAssignedTaskStatus = async (taskId, newStatus) => {
+    try {
+      await api.patch(`/tasks/${taskId}`, { 
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      });
+      fetchMyAssignedTasks();
+      toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
+    } catch (error) {
+      console.error('Failed to update task status:', error);
+      toast.error('Failed to update task');
+    }
+  };
 
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
     try {
-      const newStatus = todo.completed ? 'pending' : 'completed';  // Map completed to backend status
-      const res = await api.patch(`/tasks/${id}`, {  // Changed from /todos/{id} to /tasks/{id}
+      const newStatus = todo.completed ? 'pending' : 'completed';
+      const res = await api.patch(`/tasks/${id}`, {
         status: newStatus,
-        updated_at: new Date().toISOString()  // Add update date for "done" feature
+        updated_at: new Date().toISOString()
       });
       setTodos(todos.map(t => t.id === id ? {
         ...res.data,
@@ -192,9 +250,10 @@ const getPriorityStripeClass = (priority) => {
       toast.error('Failed to update todo');
     }
   };
+
   const handleDeleteTodo = async (id) => {
     try {
-      await api.delete(`/tasks/${id}`);  // Changed from /todos/{id} to /tasks/{id}
+      await api.delete(`/tasks/${id}`);
       setTodos(todos.filter(t => t.id !== id));
       toast.success('Todo deleted successfully!');
     } catch (error) {
@@ -202,21 +261,6 @@ const getPriorityStripeClass = (priority) => {
     }
   };
 
-// 1. Status update handler for the "In Progress" / "Done" buttons
-const updateAssignedTaskStatus = async (taskId, newStatus) => {
-  try {
-    await api.patch(`/tasks/${taskId}`, { 
-      status: newStatus,
-      updated_at: new Date().toISOString()
-    });
-    // Refresh the assigned tasks list
-    fetchMyAssignedTasks();
-    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
-  } catch (error) {
-    console.error('Failed to update task status:', error);
-    toast.error('Failed to update task');
-  }
-};
   const fetchDashboardData = async () => {
     try {
       const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
@@ -224,31 +268,17 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
         api.get('/tasks'),
         api.get('/duedates/upcoming?days=30'),
       ]);
-      const handleAssignedTaskToggle = async (task) => {
-  try {
-    const updatedStatus = task.status === 'completed' ? 'pending' : 'completed';
 
-    await api.put(`/tasks/${task.id}`, {
-      ...task,
-      status: updatedStatus,
-    });
-
-    fetchMyAssignedTasks();
-    toast.success("Task updated");
-  } catch (error) {
-    toast.error("Failed to update task");
-  }
-};
       setStats(statsRes.data);
       setRecentTasks(tasksRes.data?.slice(0, 5) || []);
       setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-      // Fetch Rankings
+
       const rankingRes = await api.get(
         `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
       );
       setRankings(rankingRes.data?.rankings || []);
-      // Fetch Chat Notifications
-      const chatRes = await api.get('/notifications');  // Changed from /chat/notifications
+
+      const chatRes = await api.get('/notifications');
       if (chatRes.data?.length > chatMessages.length) {
         notificationAudio.current.play().catch(() => {});
       }
@@ -257,6 +287,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       console.error('Failed to fetch dashboard data:', error);
     }
   };
+
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
@@ -265,6 +296,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       console.error('Failed to fetch attendance:', error);
     }
   };
+
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -278,6 +310,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       setLoading(false);
     }
   };
+
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -286,6 +319,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
     };
     return styles[status] || styles.pending;
   };
+
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -294,6 +328,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
     };
     return styles[priority] || styles.medium;
   };
+
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
@@ -329,12 +364,18 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
       text: 'text-yellow-600'
     };
   };
+
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
     : 0;
+
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
+
+  const isAdmin = user?.role === 'admin';
+  const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
+
   return (
     <motion.div
       className="space-y-6"
@@ -385,6 +426,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Key Metrics Row */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" variants={itemVariants}>
         <Card
@@ -494,6 +536,7 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Recent Tasks + Upcoming Deadlines + Attendance */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         <Card
@@ -693,10 +736,9 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
         </Card>
       </motion.div>
 
-      {/* Star Performers + My To-Do List + Tasks Assigned to Me (Fully Responsive) */}
+      {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
         
-        {/* Star Performers - Full working card + responsive */}
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -785,7 +827,6 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
           </CardContent>
         </Card>
 
-        {/* My To-Do List - Responsive */}
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="todo-list-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -853,195 +894,70 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
         </Card>
       </motion.div>
 
-      {/* Tasks Section - Split into 2 Equal Parts (Assigned to Me / Assigned by Me) */}
-      <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
-        <CardHeader className="pb-4 border-b border-slate-100 px-6">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-2xl font-semibold flex items-center gap-3 tracking-tight">
-              <Briefcase className="h-7 w-7 text-emerald-600" />
-              {user?.full_name || user?.name || 'User'} - Tasks
-            </CardTitle>
-          </div>
-          <p className="text-sm text-slate-500 mt-1">Manage tasks assigned to you and by you</p>
-        </CardHeader>
-
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            
-            {/* ==================== LEFT: Tasks Assigned to Me ==================== */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 bg-emerald-100 rounded-lg flex items-center justify-center">
-                  <Briefcase className="h-4 w-4 text-emerald-600" />
-                </div>
-                <h3 className="font-semibold text-lg">Tasks Assigned to Me</h3>
-              </div>
-              <p className="text-xs text-slate-500 mb-4">Tasks others assigned to you</p>
-
+      {/* Tasks Assigned – Two Column Layout */}
+      {showTaskSection && (
+        <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
+          {/* Tasks Assigned to Me */}
+          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
+            <CardHeader className="pb-4 border-b border-slate-100 px-6">
+              <CardTitle className="text-xl font-semibold flex items-center gap-3">
+                <Briefcase className="h-6 w-6 text-emerald-600" />
+                Tasks Assigned to Me
+              </CardTitle>
+              <p className="text-sm text-slate-500 mt-1">Tasks others assigned to you</p>
+            </CardHeader>
+            <CardContent className="p-6 flex-1">
               {tasksAssignedToMe.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
                   No tasks assigned to you yet
                 </div>
               ) : (
                 <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
                   {tasksAssignedToMe.map((task) => (
-                    <TaskCard 
-                      key={task.id} 
-                      task={task} 
-                      assignedBy={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                    <TaskStrip
+                      key={task.id}
+                      task={task}
                       isToMe={true}
-                      onStatusChange={updateAssignedTaskStatus}
+                      assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
                     />
                   ))}
                 </div>
               )}
-            </div>
+            </CardContent>
+          </Card>
 
-            {/* ==================== RIGHT: Tasks Assigned by Me ==================== */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Briefcase className="h-4 w-4 text-blue-600" />
-                </div>
-                <h3 className="font-semibold text-lg">Tasks Assigned by Me</h3>
-              </div>
-              <p className="text-xs text-slate-500 mb-4">Tasks you assigned to others</p>
-
+          {/* Tasks Assigned by Me */}
+          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
+            <CardHeader className="pb-4 border-b border-slate-100 px-6">
+              <CardTitle className="text-xl font-semibold flex items-center gap-3">
+                <Briefcase className="h-6 w-6 text-blue-600" />
+                Tasks Assigned by Me
+              </CardTitle>
+              <p className="text-sm text-slate-500 mt-1">Tasks you assigned to others</p>
+            </CardHeader>
+            <CardContent className="p-6 flex-1">
               {tasksAssignedByMe.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
                   You haven't assigned any tasks yet
                 </div>
               ) : (
                 <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
                   {tasksAssignedByMe.map((task) => (
-                    <TaskCard 
-                      key={task.id} 
-                      task={task} 
-                      assignedBy={task.assigned_to_name || 'Unknown User'}
+                    <TaskStrip
+                      key={task.id}
+                      task={task}
                       isToMe={false}
-                      onStatusChange={updateAssignedTaskStatus}
+                      assignedName={task.assigned_to_name || 'Unknown'}
                     />
                   ))}
                 </div>
               )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
-const TaskCard = ({ task, assignedBy, isToMe, onStatusChange }) => {
-  
-  const isCompleted = task.status === "completed";
-
-  const isOverdue =
-    task.due_date &&
-    new Date(task.due_date) < new Date() &&
-    !isCompleted;
-
-  const isCritical =
-    (task.priority || "").toLowerCase().trim() === "critical";
-
-  return (
-    <div
-      className={`
-        rounded-2xl p-4 bg-white transition border
-        ${getPriorityStripeClass(task.priority)}
-        ${isOverdue ? "bg-red-50 border-red-300" : "border-slate-200"}
-        ${isCritical ? "animate-pulse" : ""}
-      `}
-    >
-      <div className="flex items-start justify-between gap-4">
-        
-        {/* LEFT SIDE */}
-        <div className="flex-1 min-w-0">
-          
-          {/* Title */}
-          <p className={`font-semibold text-base truncate ${
-            isOverdue ? "text-red-700" : "text-slate-800"
-          }`}>
-            {task.title}
-          </p>
-
-          {/* Small Meta Line */}
-          <p className="text-[11px] text-slate-400 mt-1 truncate leading-tight">
-            {isToMe
-              ? `Assigned by: ${assignedBy}`
-              : `Assigned to: ${assignedBy}`}
-            
-            {task.created_at &&
-              ` | ${format(new Date(task.created_at), "MMM d, yyyy • hh:mm a")}`
-            }
-
-            {task.due_date &&
-              ` | Due: ${format(new Date(task.due_date), "MMM d, yyyy")}`
-            }
-
-            {isOverdue && " | Overdue"}
-          </p>
-        </div>
-
-        {/* RIGHT SIDE BUTTONS */}
-        {isToMe && (
-          <div className="flex gap-2 flex-shrink-0">
-            <Button
-              size="sm"
-              disabled={isCompleted}
-              onClick={() => onStatusChange(task.id, "in_progress")}
-              className={`
-                rounded-full px-4 text-xs font-semibold text-white
-                ${isCompleted 
-                  ? "bg-slate-300 cursor-not-allowed"
-                  : "bg-amber-500 hover:bg-amber-600"}
-              `}
-            >
-              In Progress
-            </Button>
-
-            <Button
-              size="sm"
-              disabled={isCompleted}
-              onClick={() => onStatusChange(task.id, "completed")}
-              className={`
-                rounded-full px-4 text-xs font-semibold text-white
-                ${isCompleted
-                  ? "bg-slate-300 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"}
-              `}
-            >
-              Done
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-        {/* RIGHT SIDE - ACTION BUTTONS (Only for Tasks Assigned To Me) */}
-        {isToMe && (
-          <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
-            <Button
-              size="sm"
-              onClick={() => onStatusChange(task.id, "in_progress")}
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4"
-            >
-              In Progress
-            </Button>
-
-            <Button
-              size="sm"
-              onClick={() => onStatusChange(task.id, "completed")}
-              className="bg-green-600 hover:bg-green-700 text-white rounded-xl px-4"
-            >
-              Done
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-{/* Quick Access Row */}
+      {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
           className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
@@ -1105,7 +1021,7 @@ const TaskCard = ({ task, assignedBy, isToMe, onStatusChange }) => {
             </div>
           </CardContent>
         </Card>
-{user?.role === 'admin' && (
+        {user?.role === 'admin' && (
           <Card
             className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
             onClick={() => navigate('/users')}
