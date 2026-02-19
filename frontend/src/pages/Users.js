@@ -13,7 +13,7 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { 
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, 
-  CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, 
+  CheckCircle, XCircle, Search, allUsers as allUsersIcon, Crown, Briefcase, 
   MoreVertical, Mail, Phone, Calendar, Camera, Cake, Clock 
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -133,10 +133,10 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
   );
 };
 
-export default function Users() {
+export default function allUsers() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [allUsers, setAllUsers] = useState([]);
+  const [allallUsers, setAllallUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('all');
@@ -160,12 +160,12 @@ export default function Users() {
     late_grace_minutes: 15,       // NEW (default 15 minutes grace)
   });
 
-const fetchUsers = async () => {
+const fetchallUsers = async () => {
   try {
-    const res = await api.get('/users');
-    setAllUsers(res.data || []);
+    const res = await api.get('/allUsers');
+    setAllallUsers(res.data || []);
   } catch (error) {
-    console.error('Failed to fetch users:', error);
+    console.error('Failed to fetch allUsers:', error);
   }
 };
   
@@ -175,7 +175,7 @@ const fetchUsers = async () => {
     can_view_all_dsc: false,
     can_view_all_duedates: false,
     can_view_reports: false,
-    can_manage_users: false,
+    can_manage_allUsers: false,
     can_assign_tasks: false,
     assigned_clients: [],
     can_view_staff_activity: false,
@@ -186,12 +186,12 @@ const fetchUsers = async () => {
 
   useEffect(() => {
     if (isAdmin) {
-      fetchUsers();
+      fetchallUsers();
       fetchClients();
     }
   }, [isAdmin]);
 
-  // ... all your existing functions (fetchUsers, fetchClients, etc.) remain 100% unchanged ...
+  // ... all your existing functions (fetchallUsers, fetchClients, etc.) remain 100% unchanged ...
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -223,14 +223,14 @@ const fetchUsers = async () => {
     setLoading(true);
     try {
       if (selectedUser) {
-        await api.put(`/users/${selectedUser.id}`, formData);
+        await api.put(`/allUsers/${selectedUser.id}`, formData);
         toast.success('User updated successfully');
       } else {
         await api.post('/auth/register', formData);
         toast.success('User created successfully');
       }
       setDialogOpen(false);
-      fetchUsers();
+      fetchallUsers();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to save user');
     } finally {
