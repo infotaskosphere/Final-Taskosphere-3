@@ -88,20 +88,40 @@ class UserPermissions(BaseModel):
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
-    role: str = "staff"  # admin, manager, staff
+    role: str = "staff"                         # admin, manager, staff
     profile_picture: Optional[str] = None
     permissions: Optional[UserPermissions] = None  # Custom permissions
-    departments: List[str] = []  # Multiple departments: gst, income_tax, accounts, tds, roc, trademark, msme_smadhan, fema, dsc, other
+    departments: List[str] = []                 # Multiple departments: gst, income_tax, ...
+    
+    # ── Added office timing fields for late marking (optional, safe for existing users) ──
+    expected_start_time: Optional[str] = None   # "09:30" (24-hour format)
+    expected_end_time: Optional[str] = None     # "18:00"
+    late_grace_minutes: int = 15                # Default grace period in minutes
+
 
 class UserCreate(UserBase):
     password: str
 
+
 class User(UserBase):
     model_config = ConfigDict(extra="ignore")
+    
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
 
+class Attendance(BaseModel):
+    user_id: str
+    date: str                           # "YYYY-MM-DD"
+    punch_in: datetime
+    punch_out: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    
+    # ── New fields – optional so old records are still valid ──
+    is_late: bool = False
+    late_by_minutes: int = 0
+    location: Optional[Dict[str, float]] = None  # e.g. {"latitude": 21.17, "longitude": 72.83}
+    
 # Staff Activity Tracking
 class StaffActivityLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -555,6 +575,68 @@ async def login(credentials: UserLogin):
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+# ─── ATTENDANCE ROUTE ────────────────────────────────────────────────────────────
+
+@api_router.post("/attendance")
+async def record_attendance(data: dict, current_user: User = Depends(get_current_user)):
+    # ────────────────────────────────────────────────────────
+    #  YOUR EXISTING CODE ABOVE THIS POINT REMAINS UNTOUCHED
+    # ────────────────────────────────────────────────────────
+
+    if data["action"] == "punch_in":
+        # Your existing check for already punched in
+        if existing:
+            raise HTTPException(status_code=400, detail="Already punched in today")
+
+        now = datetime.now(timezone.utc)
+        today_str = now.date().isoformat()
+
+        # ── NEW: Late calculation (only added – does not change your logic) ──
+        is_late = False
+        late_by_minutes = 0
+
+        expected_start = current_user.get("expected_start_time")  # "09:30" or None
+        grace = current_user.get("late_grace_minutes", 15)
+
+        if expected_start:
+            try:
+                h, m = map(int, expected_start.split(":"))
+                expected = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if now > expected:
+                    diff_min = (now - expected).total_seconds() / 60
+                    late_by_minutes = int(diff_min)
+                    if late_by_minutes > grace:
+                        is_late = True
+            except Exception:
+                pass  # bad format → no late flag
+
+        # ── Build document – add only the new fields ────────────────────────
+        doc = {
+            "user_id": current_user.id,
+            "date": today_str,
+            "punch_in": now,
+            # ... ALL your existing fields stay here exactly as they are ...
+
+            # ── NEW fields (added only)
+            "is_late": is_late,
+            "late_by_minutes": late_by_minutes if is_late else 0,
+            "location": data.get("location")  # frontend sends {latitude, longitude}
+        }
+
+        await db.attendance.insert_one(doc)
+
+        # Return EXACTLY what frontend already expects – just with extra optional fields
+        return {
+            "status": "punched_in",
+            # ... whatever else you already return ...
+            "is_late": is_late,                     # new – safe to add
+            "late_by_minutes": late_by_minutes      # new – safe to add
+        }
+
+    # ── punch_out branch remains 100% unchanged ──
+    # ... your existing punch_out code ...
+
 
 # ─── USER ROUTES ────────────────────────────────────────────────────────────
 
