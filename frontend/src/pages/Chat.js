@@ -45,7 +45,6 @@ export default function Chat() {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
@@ -92,15 +91,14 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-const fetchUsers = async () => {
-  try {
-    const res = await api.get('/users');
-    setUsers(res.data || []);
-  } catch (error) {
-    console.error('Failed to fetch users:', error);
-  }
-};
-
+  const fetchUsers = async () => {
+    try {
+      const res = await api.get('/users');
+      setUsers(res.data || []);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+  };
 
   const fetchGroups = async () => {
     try {
