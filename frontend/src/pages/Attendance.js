@@ -7,8 +7,8 @@ import { Calendar } from '@/components/ui/calendar';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { format, startOfMonth, endOfMonth, parseISO, subDays } from 'date-fns';
-import { Calendar as CalendarIcon, Clock, AlertTriangle, LogIn, LogOut, CheckCircle2, CalendarX, TrendingUp } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Calendar as CalendarIcon, Clock, AlertTriangle, LogIn, Timer } from 'lucide-react';
+import { Calendar motion, Clock, AlertTriangle, LogIn, LogOut, CheckCircle2, CalendarX, TrendingUp, Timer } from 'lucide-react';import { motion } from 'framer-motion';
 
 // Brand Colors
 const COLORS = {
