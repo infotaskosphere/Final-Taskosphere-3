@@ -160,6 +160,15 @@ export default function Users() {
     late_grace_minutes: 15,       // NEW (default 15 minutes grace)
   });
 
+const fetchUsers = async () => {
+  try {
+    const res = await api.get('/users');
+    setUsers(res.data || []);
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+  }
+};
+
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
     can_view_all_clients: false,
