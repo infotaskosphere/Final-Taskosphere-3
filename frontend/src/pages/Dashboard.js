@@ -149,19 +149,6 @@ const getPriorityStripeClass = (priority) => {
   return 'border-l-8 border-l-slate-300';
 };
 
-const updateAssignedTaskStatus = async (taskId, newStatus) => {
-  try {
-    await api.patch(`/tasks/${taskId}`, { 
-      status: newStatus,
-      updated_at: new Date().toISOString()
-    });
-    fetchMyAssignedTasks(); // refresh both columns
-    toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
-  } catch (error) {
-    console.error(error);
-    toast.error('Failed to update task');
-  }
-};
 
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
