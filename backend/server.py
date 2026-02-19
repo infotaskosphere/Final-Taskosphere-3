@@ -575,7 +575,23 @@ async def login(credentials: UserLogin):
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    # Explicitly build the response to guarantee the fields are included
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "profile_picture": current_user.profile_picture,
+        "permissions": current_user.permissions.model_dump() if current_user.permissions else None,
+        "departments": current_user.departments,
+        # ───────────────────────────────────────────────────────────────
+        # These are the two fields you need for per-user late calculation
+        "expected_start_time": current_user.expected_start_time,
+        "late_grace_minutes": current_user.late_grace_minutes,
+        # ───────────────────────────────────────────────────────────────
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "is_active": current_user.is_active
+    }
 
 # ��������� ATTENDANCE ROUTE ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 
