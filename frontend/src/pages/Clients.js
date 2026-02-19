@@ -41,6 +41,7 @@ export default function Clients() {
   const [clients, setClients] = useState([]);
   const location = useLocation()
   const navigate = useNavigate();
+  const location = useLocation();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
