@@ -157,23 +157,6 @@ export default function Dashboard() {
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
 
-    try {
-      const res = await api.get('/tasks');
-      const myTasks = res.data.filter(task =>
-        task.assigned_to === user?.id ||
-        (Array.isArray(task.sub_assignees) && task.sub_assignees.includes(user?.id))
-      );
-      setTodos(myTasks.map(task => ({
-        ...task,
-        created_at: task.created_at || new Date().toISOString(),
-        completed: task.status === 'completed'
-      })));
-    } catch (error) {
-      console.error('Failed to fetch todos:', error);
-      setTodos([]);
-    }
-  };
-
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
