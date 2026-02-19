@@ -906,31 +906,49 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
           </div>
         </CardContent>
       </Card>
-                    {/* Action buttons – exact style from your image */}
-                    <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0 mt-2 md:mt-1">
-                      <Button
-                        onClick={() => updateAssignedTaskStatus(task.id, 'in_progress')}
-                        className="bg-[#2563eb] hover:bg-blue-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
-                        size="sm"
-                      >
-                        In Progress
-                      </Button>
-                      <Button
-                        onClick={() => updateAssignedTaskStatus(task.id, 'completed')}
-                        className="bg-[#16a34a] hover:bg-green-700 text-white px-7 py-3 rounded-xl text-sm font-semibold shadow-sm transition"
-                        size="sm"
-                      >
-                        Done
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      {/* Quick Access Row */}
+    {/* Action buttons – exact style from your image */}
+    {tasksAssignedByMe.map((task) => {
+  return (
+    <div
+      key={task.id}
+      className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border border-slate-200 rounded-2xl p-4 bg-white hover:shadow-sm transition"
+    >
+      
+      {/* Left Side – Task Info */}
+      <div className="flex-1">
+        <p className="font-semibold text-slate-800">
+          {task.title}
+        </p>
+        <p className="text-sm text-slate-500 mt-1">
+          Assigned to: {task.assigned_to_name || "Unknown User"}
+        </p>
+      </div>
+
+      {/* Right Side – Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0">
+        <Button
+          onClick={() => updateAssignedTaskStatus(task.id, "in_progress")}
+          className="bg-[#2563eb] hover:bg-blue-700 text-white px-6 py-2 rounded-xl text-sm font-semibold shadow-sm transition"
+          size="sm"
+        >
+          In Progress
+        </Button>
+
+        <Button
+          onClick={() => updateAssignedTaskStatus(task.id, "completed")}
+          className="bg-[#16a34a] hover:bg-green-700 text-white px-6 py-2 rounded-xl text-sm font-semibold shadow-sm transition"
+          size="sm"
+        >
+          Done
+        </Button>
+      </div>
+
+    </div>
+  );
+})}
+
+
+{/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
           className="border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
