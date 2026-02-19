@@ -592,25 +592,29 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
 
         now = datetime.now(timezone.utc)
         today_str = now.date().isoformat()
-
-        # ������ NEW: Late calculation (only added ��� does not change your logic) ������
+        # ── NEW: Late calculation ────────────────────────────────────────
         is_late = False
         late_by_minutes = 0
 
-        expected_start = current_user.get("expected_start_time")  # "09:30" or None
-        grace = current_user.get("late_grace_minutes", 15)
+        expected_str = current_user.expected_start_time   # "09:30" or similar or None
+        grace = current_user.late_grace_minutes or 15
 
-        if expected_start:
+        if expected_str:
             try:
-                h, m = map(int, expected_start.split(":"))
-                expected = now.replace(hour=h, minute=m, second=0, microsecond=0)
-                if now > expected:
-                    diff_min = (now - expected).total_seconds() / 60
-                    late_by_minutes = int(diff_min)
+                h, m = map(int, expected_str.split(":"))
+                expected_time = time(h, m)
+                expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
+
+                if now > expected_datetime:
+                    diff = now - expected_datetime
+                    late_by_minutes = int(diff.total_seconds() / 60)
+
                     if late_by_minutes > grace:
                         is_late = True
-            except Exception:
-                pass  # bad format ��� no late flag
+
+            except (ValueError, AttributeError):
+                # Invalid time format or missing field → skip late check silently
+                pass
 
         # ������ Build document ��� add only the new fields ������������������������������������������������������������������������
         doc = {
