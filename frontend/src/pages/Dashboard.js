@@ -150,7 +150,6 @@ export default function Dashboard() {
   return `${h}h ${m}m`;
 };
 
-
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
@@ -159,19 +158,23 @@ export default function Dashboard() {
   }, [rankingPeriod]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      api.get('/notifications')
-        .then(res => {
-          setChatMessages(prev => {
-            if (res.data.length > prev.length) {
-              notificationAudio.current?.play().catch(() => {});
-            }
-            return res.data;
-          });
-        })
-        .catch(err => console.warn('Chat notifications failed:', err));
-    }, 50000);
-    return () => clearInterval(interval);
+     const interval = setInterval(async () => {
+        try {
+           const res = await api.get('/notifications');
+
+           setChatMessages(prev => {
+              if (res.data.length > prev.length) {
+                 notificationAudio.current?.play().catch(() => {});
+              }
+              return res.data;
+           });
+
+        } catch (err) {
+           console.warn("Chat notifications failed:", err);
+        }
+     }, 5000);
+
+     return () => clearInterval(interval);
   }, []);
 
     try {
