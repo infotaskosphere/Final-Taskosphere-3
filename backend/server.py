@@ -31,19 +31,6 @@ logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-@app.on_event("startup")
-async def create_indexes():
-    await db.tasks.create_index("assigned_to")
-    await db.tasks.create_index("created_by")
-    await db.tasks.create_index("due_date")
-    await db.users.create_index("email")
-
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -53,6 +40,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 security = HTTPBearer()
 
+# MongoDB connection
+
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+    
 app = FastAPI()
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -69,6 +63,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def create_indexes():
+    await db.tasks.create_index("assigned_to")
+    await db.tasks.create_index("created_by")
+    await db.tasks.create_index("due_date")
+    await db.users.create_index("email")
+
 
 # ─── ALL MODELS ─────────────────────────────────────────────────────────────
 
