@@ -158,22 +158,21 @@ export default function Dashboard() {
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
 
-useEffect(() => {
-  const interval = setInterval(() => {
-    api.get('/notifications')
-      .then(res => {
-        setChatMessages(prev => {
-          if (res.data.length > prev.length) {
-            notificationAudio.current?.play().catch(() => {});
-          }
-          return res.data;
-        });
-      })
-      .catch(err => console.warn('Chat notifications failed:', err));
-  }, 50000);
-
-  return () => clearInterval(interval);
-}, []);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api.get('/notifications')
+        .then(res => {
+          setChatMessages(prev => {
+            if (res.data.length > prev.length) {
+              notificationAudio.current?.play().catch(() => {});
+            }
+            return res.data;
+          });
+        })
+        .catch(err => console.warn('Chat notifications failed:', err));
+    }, 50000);
+    return () => clearInterval(interval);
+  }, []);
 
     try {
       const res = await api.get('/tasks');
