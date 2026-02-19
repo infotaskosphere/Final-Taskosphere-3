@@ -27,6 +27,21 @@ import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 
+function getTodayDuration() {
+  if (!todayAttendance?.punchIn) return "0h 0m";
+
+  if (todayAttendance.punchOut) {
+    const mins = todayAttendance.duration_minutes || 0;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  }
+
+  // live time since punch-in
+  const diffMs = Date.now() - new Date(todayAttendance.punchIn).getTime();
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  return `${h}h ${m}m`;
+}
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -713,13 +728,8 @@ export default function Dashboard() {
                     </Button>
                   )}
                   <div className="text-center py-3 bg-slate-50 rounded-xl">
-                    <p className="text-xs text-slate-500">Total Hours Today</p>
-                    <p className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
-                      {todayAttendance.duration_minutes
-                        ? `${Math.floor(todayAttendance.duration_minutes / 60)}h ${todayAttendance.duration_minutes % 60}m`
-                        : '0h 0m'
-                      }
-                    </p>
+                    <p className="text-sm text-slate-500">Total Hours Today</p>
+                    <p className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>{getTodayDuration()}</p>
                   </div>
                 </>
               ) : (
