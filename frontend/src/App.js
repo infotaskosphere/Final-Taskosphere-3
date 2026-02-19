@@ -18,6 +18,7 @@ import StaffActivity from '@/pages/StaffActivity';
 import Chat from '@/pages/Chat';
 import '@/App.css';
 
+// Protected Route (requires login)
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -39,6 +40,7 @@ const ProtectedRoute = ({ children }) => {
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
+// Public Route (redirects to dashboard if already logged in)
 const PublicRoute = ({ children }) => {
   const { user } = useAuth();
 
@@ -52,6 +54,7 @@ const PublicRoute = ({ children }) => {
 function AppRoutes() {
   return (
     <Routes>
+      {/* Root → Login */}
       <Route
         path="/"
         element={
@@ -60,6 +63,8 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+
+      {/* Login */}
       <Route
         path="/login"
         element={
@@ -68,6 +73,8 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+
+      {/* Register */}
       <Route
         path="/register"
         element={
@@ -76,6 +83,8 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+
+      {/* Protected Routes */}
       <Route
         path="/dashboard"
         element={
@@ -100,12 +109,12 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-        <Route
-         path="/documents"
-         element={
-           <ProtectedRoute>
-             <DocumentsRegister />
-           </ProtectedRoute>
+      <Route
+        path="/documents"
+        element={
+          <ProtectedRoute>
+            <DocumentsRegister />
+          </ProtectedRoute>
         }
       />
       <Route
@@ -164,6 +173,9 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
+      {/* Catch-all: redirect unknown routes to login */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }
