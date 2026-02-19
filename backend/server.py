@@ -369,6 +369,7 @@ class DashboardStats(BaseModel):
     upcoming_due_dates: int
     team_workload: List[dict]
     compliance_status: dict
+    expired_dsc_count: int = 0
 
 # ===================== DOCUMENT MODELS =====================
 
@@ -1637,20 +1638,21 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         "expiring_certificates": expiring_dsc_count
     }
     
-    return DashboardStats(
-        total_tasks=total_tasks,
-        completed_tasks=completed_tasks,
-        pending_tasks=pending_tasks,
-        overdue_tasks=overdue_tasks,
-        total_dsc=total_dsc,
-        expiring_dsc_count=expiring_dsc_count,
-        expiring_dsc_list=expiring_dsc_list,
-        total_clients=total_clients,
-        upcoming_birthdays=upcoming_birthdays,
-        upcoming_due_dates=upcoming_due_dates_count,
-        team_workload=team_workload,
-        compliance_status=compliance_status
-    )
+return DashboardStats(
+    total_tasks=total_tasks,
+    completed_tasks=completed_tasks,
+    pending_tasks=pending_tasks,
+    overdue_tasks=overdue_tasks,
+    total_dsc=total_dsc,
+    expiring_dsc_count=expiring_dsc_count,
+    expiring_dsc_list=expiring_dsc_list,
+    total_clients=total_clients,
+    upcoming_birthdays=upcoming_birthdays,
+    upcoming_due_dates=upcoming_due_dates_count,
+    team_workload=team_workload,
+    compliance_status=compliance_status
+)
+
 
 # ─── STAFF ACTIVITY ROUTES ──────────────────────────────────────────────────
 
