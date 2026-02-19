@@ -2323,6 +2323,31 @@ async def get_staff_rankings(
         total_tasks = len(filtered_tasks)
         completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
         completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+# ================= OVERDUE LOGIC =================
+overdue_with_reason = 0
+overdue_without_reason = 0
+
+for task in filtered_tasks:
+    status = task.get("status")
+    due_date = task.get("due_date")
+
+    if not due_date:
+        continue
+
+    if isinstance(due_date, str):
+        try:
+            due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
+        except:
+            continue
+
+    if status != "completed" and due_date < now:
+        description = task.get("description")
+
+        if description and description.strip() and len(description.strip()) >= 20:
+            overdue_with_reason += 1
+        else:
+            overdue_without_reason += 1
+
 
         # ================= SPEED =================
         completion_times = []
@@ -2354,9 +2379,20 @@ async def get_staff_rankings(
 
         # ================= FINAL SCORE =================
         # Retained original weights: 35% Work, 40% Completion, 25% Speed
+        # ================= APPLY OVERDUE PENALTY =================
+        penalty_without_reason = (overdue_without_reason / total_tasks * 100) if total_tasks > 0 else 0
+        penalty_with_reason = (overdue_with_reason / total_tasks * 100) if total_tasks > 0 else 0
+
+        overdue_penalty_score = (
+            penalty_without_reason * 0.20 +
+            penalty_with_reason * 0.05
+        )
+
+        adjusted_completion = max(0, completion_percent - overdue_penalty_score)
+
         efficiency = (
             0.35 * work_score +
-            0.40 * completion_percent +
+            0.40 * adjusted_completion +
             0.25 * speed_score
         )
 
