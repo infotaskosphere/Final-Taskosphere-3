@@ -2323,25 +2323,25 @@ async def get_staff_rankings():
         total_tasks = len(filtered_tasks)
         completed_tasks = len([t for t in filtered_tasks if t.get("status") == "completed"])
         completion_percent = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-# ================= OVERDUE LOGIC =================
-overdue_with_reason = 0
-overdue_without_reason = 0
+        # ================= OVERDUE LOGIC =================
+        overdue_with_reason = 0
+        overdue_without_reason = 0
 
-for task in filtered_tasks:
-    status = task.get("status")
-    due_date = task.get("due_date")
+        for task in filtered_tasks:
+            status = task.get("status")
+            due_date = task.get("due_date")
 
-    if not due_date:
-        continue
-
-    if isinstance(due_date, str):
-        try:
-            due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
-        except:
+        if not due_date:
             continue
 
-    if status != "completed" and due_date < now:
-        description = task.get("description")
+        if isinstance(due_date, str):
+            try:
+                due_date = datetime.fromisoformat(due_date).replace(tzinfo=timezone.utc)
+            except:
+                continue
+
+        if status != "completed" and due_date < now:
+            description = task.get("description")
 
         if description and description.strip() and len(description.strip()) >= 20:
             overdue_with_reason += 1
