@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -391,8 +392,18 @@ export default function Tasks() {
                   <Label>Client</Label>
                   <Select
                     value={formData.client_id || 'no_client'}
-                    onValueChange={(value) => setFormData({ ...formData, client_id: value === 'no_client' ? '' : value })}
+                    onValueChange={(value) => {
+                      if (value === '__add_new_client__') {
+                        navigate('/clients?openAddClient=true&returnTo=tasks');
+                      } else {
+                        setFormData({
+                          ...formData,
+                          client_id: value === 'no_client' ? '' : value
+                        });
+                      }
+                    }}
                   >
+
                     <SelectTrigger className="border-slate-300">
                       <SelectValue placeholder="No Client" />
                     </SelectTrigger>
@@ -403,6 +414,12 @@ export default function Tasks() {
                           {client.company_name}
                         </SelectItem>
                       ))}
+                      <SelectItem
+                        value="__add_new_client__"
+                        className="text-blue-600 font-semibold"
+                      >
+                        + Add New Client
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
