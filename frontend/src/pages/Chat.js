@@ -58,6 +58,15 @@ export default function Chat() {
   const fileInputRef = useRef(null);
   const pollIntervalRef = useRef(null);
 
+  const fetchGroups = async () => {
+  try {
+    const res = await api.get("/groups");
+    setGroups(res.data);
+  } catch (error) {
+    console.error("Error fetching groups:", error);
+  }
+};
+
   useEffect(() => {
     fetchGroups();
     fetchUsers();
