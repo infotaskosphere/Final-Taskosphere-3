@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+const [todayAttendance, setTodayAttendance] = useState(null);
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,21 +27,6 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-
-function getTodayDuration() {
-  if (!todayAttendance?.punchIn) return "0h 0m";
-
-  if (todayAttendance.punchOut) {
-    const mins = todayAttendance.duration_minutes || 0;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
-
-  // live time since punch-in
-  const diffMs = Date.now() - new Date(todayAttendance.punchIn).getTime();
-  const h = Math.floor(diffMs / 3600000);
-  const m = Math.floor((diffMs % 3600000) / 60000);
-  return `${h}h ${m}m`;
-}
 
 // Brand Colors
 const COLORS = {
@@ -152,6 +138,20 @@ export default function Dashboard() {
   // Added missing state declarations that were causing reference errors
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
+  const getTodayDuration = () => {
+  if (!todayAttendance?.punch_in) return "0h 0m";
+
+  if (todayAttendance.punch_out) {
+    const mins = todayAttendance.duration_minutes || 0;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  }
+
+  const diffMs = Date.now() - new Date(todayAttendance.punch_in).getTime();
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  return `${h}h ${m}m`;
+};
+
 
   useEffect(() => {
     fetchDashboardData();
