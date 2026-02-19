@@ -168,6 +168,15 @@ const fetchUsers = async () => {
     console.error('Failed to fetch users:', error);
   }
 };
+
+const fetchClients = async () => {
+  try {
+    const res = await api.get('/clients');
+    setClients(res.data || []);
+  } catch (error) {
+    console.error('Failed to fetch clients:', error);
+  }
+};
   
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
