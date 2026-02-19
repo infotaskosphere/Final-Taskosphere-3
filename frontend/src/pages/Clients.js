@@ -12,7 +12,6 @@ import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
 import { 
   Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
   FileText, Calendar, Search, Users, 
