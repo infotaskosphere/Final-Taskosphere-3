@@ -93,21 +93,13 @@ export default function Chat() {
 
   const fetchUsers = async () => {
     try {
-      const res = await api.get('/users');
-      setUsers(res.data || []);
+      const response = await api.get('/chat/users');
+      setUsers(response.data);
     } catch (error) {
-      console.error('Failed to fetch users:', error);
+      console.error('Failed to fetch users');
     }
   };
 
-  const fetchGroups = async () => {
-    try {
-      const response = await api.get('/chat/groups');
-      setGroups(response.data);
-    } catch (error) {
-      console.error('Failed to fetch groups');
-    }
-  };
 
   const fetchUsers = async () => {
     try {
