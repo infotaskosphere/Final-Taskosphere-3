@@ -60,7 +60,8 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [todos, setTodos] = useState([]);
-  const [assignedTasks, setAssignedTasks] = useState([]);
+  const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
+  const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
   const [newTodo, setNewTodo] = useState('');
   useEffect(() => {
     fetchDashboardData();
@@ -117,21 +118,42 @@ export default function Dashboard() {
       toast.error('Failed to add todo');
     }
   };
-const fetchMyAssignedTasks = async () => {
+
+  const fetchMyAssignedTasks = async () => {
   try {
     const res = await api.get('/tasks');
     const allTasks = res.data || [];
 
-    // Tasks where current user is the assignee
-    const toMe = allTasks.filter(task => task.assigned_to === user?.id);
+    let visibleTasks = [];
 
-    // Tasks where current user is the creator/assigner (exclude self-assigned)
-    const byMe = allTasks.filter(task => 
-      task.created_by === user?.id && task.assigned_to !== user?.id
+    // 👑 Admin can see all tasks
+    if (user?.role === "admin") {
+      visibleTasks = allTasks;
+    } else {
+      // 👤 Normal user can see:
+      // - tasks assigned TO them
+      // - tasks created BY them
+      visibleTasks = allTasks.filter(
+        (task) =>
+          task.assigned_to === user?.id ||
+          task.created_by === user?.id
+      );
+    }
+
+    // Split into 2 cards
+    const toMe = visibleTasks.filter(
+      (task) => task.assigned_to === user?.id
+    );
+
+    const byMe = visibleTasks.filter(
+      (task) =>
+        task.created_by === user?.id &&
+        task.assigned_to !== user?.id
     );
 
     setTasksAssignedToMe(toMe.slice(0, 6));
     setTasksAssignedByMe(byMe.slice(0, 6));
+
   } catch (error) {
     console.error("Failed to fetch assigned tasks", error);
     setTasksAssignedToMe([]);
@@ -906,47 +928,118 @@ const updateAssignedTaskStatus = async (taskId, newStatus) => {
           </div>
         </CardContent>
       </Card>
-    {/* Action buttons – exact style from your image */}
-    {tasksAssignedByMe.map((task) => {
+
+const TaskCard = ({ task, assignedBy, isToMe, onStatusChange }) => {
+  
+  const isCompleted = task.status === "completed";
+
+  const isOverdue =
+    task.due_date &&
+    new Date(task.due_date) < new Date() &&
+    !isCompleted;
+
+  const isCritical =
+    (task.priority || "").toLowerCase().trim() === "critical";
+
   return (
     <div
-      key={task.id}
-      className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border border-slate-200 rounded-2xl p-4 bg-white hover:shadow-sm transition"
+      className={`
+        rounded-2xl p-4 bg-white transition border
+        ${getPriorityStripeClass(task.priority)}
+        ${isOverdue ? "bg-red-50 border-red-300" : "border-slate-200"}
+        ${isCritical ? "animate-pulse" : ""}
+      `}
     >
-      
-      {/* Left Side – Task Info */}
-      <div className="flex-1">
-        <p className="font-semibold text-slate-800">
-          {task.title}
-        </p>
-        <p className="text-sm text-slate-500 mt-1">
-          Assigned to: {task.assigned_to_name || "Unknown User"}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        
+        {/* LEFT SIDE */}
+        <div className="flex-1 min-w-0">
+          
+          {/* Title */}
+          <p className={`font-semibold text-base truncate ${
+            isOverdue ? "text-red-700" : "text-slate-800"
+          }`}>
+            {task.title}
+          </p>
+
+          {/* Small Meta Line */}
+          <p className="text-[11px] text-slate-400 mt-1 truncate leading-tight">
+            {isToMe
+              ? `Assigned by: ${assignedBy}`
+              : `Assigned to: ${assignedBy}`}
+            
+            {task.created_at &&
+              ` | ${format(new Date(task.created_at), "MMM d, yyyy • hh:mm a")}`
+            }
+
+            {task.due_date &&
+              ` | Due: ${format(new Date(task.due_date), "MMM d, yyyy")}`
+            }
+
+            {isOverdue && " | Overdue"}
+          </p>
+        </div>
+
+        {/* RIGHT SIDE BUTTONS */}
+        {isToMe && (
+          <div className="flex gap-2 flex-shrink-0">
+            <Button
+              size="sm"
+              disabled={isCompleted}
+              onClick={() => onStatusChange(task.id, "in_progress")}
+              className={`
+                rounded-full px-4 text-xs font-semibold text-white
+                ${isCompleted 
+                  ? "bg-slate-300 cursor-not-allowed"
+                  : "bg-amber-500 hover:bg-amber-600"}
+              `}
+            >
+              In Progress
+            </Button>
+
+            <Button
+              size="sm"
+              disabled={isCompleted}
+              onClick={() => onStatusChange(task.id, "completed")}
+              className={`
+                rounded-full px-4 text-xs font-semibold text-white
+                ${isCompleted
+                  ? "bg-slate-300 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"}
+              `}
+            >
+              Done
+            </Button>
+          </div>
+        )}
       </div>
-
-      {/* Right Side – Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0">
-        <Button
-          onClick={() => updateAssignedTaskStatus(task.id, "in_progress")}
-          className="bg-[#2563eb] hover:bg-blue-700 text-white px-6 py-2 rounded-xl text-sm font-semibold shadow-sm transition"
-          size="sm"
-        >
-          In Progress
-        </Button>
-
-        <Button
-          onClick={() => updateAssignedTaskStatus(task.id, "completed")}
-          className="bg-[#16a34a] hover:bg-green-700 text-white px-6 py-2 rounded-xl text-sm font-semibold shadow-sm transition"
-          size="sm"
-        >
-          Done
-        </Button>
-      </div>
-
     </div>
   );
-})}
+};
+        {/* RIGHT SIDE - ACTION BUTTONS (Only for Tasks Assigned To Me) */}
+        {isToMe && (
+          <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+            <Button
+              size="sm"
+              onClick={() => onStatusChange(task.id, "in_progress")}
+              className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4"
+            >
+              In Progress
+            </Button>
 
+            <Button
+              size="sm"
+              onClick={() => onStatusChange(task.id, "completed")}
+              className="bg-green-600 hover:bg-green-700 text-white rounded-xl px-4"
+            >
+              Done
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
