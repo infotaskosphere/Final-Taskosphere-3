@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-const [todayAttendance, setTodayAttendance] = useState(null);
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
