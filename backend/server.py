@@ -2085,32 +2085,41 @@ async def get_staff_rankings(
         "period": period,
         "rankings": rankings[:50] # top 50
     }
-        # ================= ATTENDANCE =================
-        # Fixed: Correctly indented inside the user loop to avoid IndentationError
-        attendance_cursor = await db.attendance.find(
-            {"user_id": uid},
-            {"_id": 0, "date": 1, "duration_minutes": 1}
-        ).to_list(1000)
-        for record in attendance_cursor:
-            date_str = record.get("date")
-            if not date_str:
-                continue
-       
-            try:
-                # Retained: Support for isoparse with fallback to fromisoformat
-                record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
-            except (ValueError, TypeError, NameError):
-                try:
-                    record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-                except (ValueError, TypeError):
-                    continue
-       
-            if start_date and record_date < start_date:
-                continue
-       
-            total_minutes += record.get("duration_minutes") or 0
-        # Retained: 160 hours baseline for score
-        work_score = min(total_minutes / (60 * 160), 1.0) * 100
+# ================= ATTENDANCE =================
+
+attendance_cursor = await db.attendance.find(
+    {"user_id": uid},
+    {"_id": 0, "date": 1, "duration_minutes": 1}
+).to_list(1000)
+
+for record in attendance_cursor:
+    date_str = record.get("date")
+    if not date_str:
+        continue
+
+    try:
+        record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError, NameError):
+        try:
+            record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+
+    if start_date and record_date < start_date:
+        continue
+
+    total_minutes += record.get("duration_minutes") or 0
+
+
+# 160 hours baseline
+work_score = min(total_minutes / (60 * 160), 1.0) * 100
+
+
+# ✅ RETURN MUST BE LAST
+return {
+    "period": period,
+    "rankings": rankings[:50]
+}
         # ================= TASKS =================
         tasks = await db.tasks.find(
             {"assigned_to": uid},
