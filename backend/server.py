@@ -49,6 +49,13 @@ db = client[os.environ['DB_NAME']]
     
 app = FastAPI()
 
+@app.on_event("startup")
+async def create_indexes():
+    await db.tasks.create_index("assigned_to")
+    await db.tasks.create_index("created_by")
+    await db.tasks.create_index("due_date")
+    await db.users.create_index("email")
+
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
@@ -63,13 +70,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def create_indexes():
-    await db.tasks.create_index("assigned_to")
-    await db.tasks.create_index("created_by")
-    await db.tasks.create_index("due_date")
-    await db.users.create_index("email")
 
 
 # ─── ALL MODELS ─────────────────────────────────────────────────────────────
