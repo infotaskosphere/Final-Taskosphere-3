@@ -86,6 +86,7 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+  
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,15 +101,6 @@ export default function Chat() {
     }
   };
 
-
-  const fetchUsers = async () => {
-    try {
-      const response = await api.get('/chat/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error('Failed to fetch users');
-    }
-  };
 
   const fetchMessages = async (groupId, silent = false) => {
     try {
