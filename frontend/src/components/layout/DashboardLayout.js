@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
+import { toast } from 'sonner';
 
 // Brand Colors
 const COLORS = {
@@ -54,7 +55,6 @@ const DashboardLayout = ({ children }) => {
         setSidebarOpen(true);
       }
     };
-
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -66,9 +66,26 @@ const DashboardLayout = ({ children }) => {
     }
   };
 
+  // Fixed & working logout
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    // Clear token & auth state
+    localStorage.removeItem('token');
+    // Optional: clear more if you store other auth data
+    // localStorage.removeItem('user');
+
+    // Call context logout if it exists (safe even if not)
+    if (logout) {
+      logout();
+    }
+
+    // Show toast (optional but nice UX)
+    toast.success("Logged out successfully");
+
+    // Redirect to login - using navigate with replace
+    navigate('/login', { replace: true });
+    
+    // Fallback: force reload to ensure clean state
+    // window.location.href = '/login';
   };
 
   const navItems = [
@@ -202,20 +219,16 @@ const DashboardLayout = ({ children }) => {
                   >
                     {user?.full_name?.charAt(0).toUpperCase()}
                   </div>
-
                   <div className="hidden md:block text-left">
                     <p className="text-sm font-semibold text-slate-900 truncate max-w-[120px] lg:max-w-[150px]" data-testid="header-user-name">
                       {user?.full_name}
                     </p>
-
-                    {/* ── ONLY ADMIN SEES ROLE DESIGNATION ── */}
                     {user?.role === 'admin' && (
                       <p className="text-xs font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full inline-block mt-0.5">
                         Admin
                       </p>
                     )}
                   </div>
-
                   <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform hidden sm:block ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -227,13 +240,12 @@ const DashboardLayout = ({ children }) => {
                     <div className="px-4 py-3 border-b border-slate-100">
                       <p className="text-sm font-semibold text-slate-900 truncate">{user?.full_name}</p>
                       <p className="text-xs text-slate-500 truncate">{user?.email}</p>
-
-                      {/* Optional: show role also inside dropdown only for admin */}
                       {user?.role === 'admin' && (
                         <p className="text-xs text-purple-700 mt-1.5 font-medium">Admin</p>
                       )}
                     </div>
 
+                    {/* Logout button */}
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center space-x-3 px-4 py-3 text-left text-red-600 hover:bg-red-50 transition-colors"
