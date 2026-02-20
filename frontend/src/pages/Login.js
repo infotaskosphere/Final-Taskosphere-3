@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { User, Lock, Eye, EyeOff } from 'lucide-react';
@@ -33,15 +33,14 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await axios.post(`${API}/auth/login`, { email, password });
+      const response = await api.post('/auth/login', { email, password });
       const { access_token, user } = response.data;
       
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(user));
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
       
       toast.success('Welcome back!');
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
       toast.error(error.response?.data?.detail || 'Invalid email or password');
