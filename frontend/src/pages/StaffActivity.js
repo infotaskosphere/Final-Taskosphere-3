@@ -170,19 +170,19 @@ export default function StaffActivity() {
       // Fallback to computing from tasks if no dedicated endpoint
       const tasksRes = await api.get('/tasks');
       const tasks = tasksRes.data;
-      const filteredTasks = selectedUser === 'all' ? tasks : tasks.filter(t => t.assigned_to === selectedUser);
+      const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
      
-      const statusCounts = filteredTasks.reduce((acc, task) => {
+      const statusCounts = (filteredTasks || []).reduce((acc, task) => {
         acc[task.status] = (acc[task.status] || 0) + 1;
         return acc;
       }, {});
      
-      const priorityCounts = filteredTasks.reduce((acc, task) => {
+      const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
         acc[task.priority] = (acc[task.priority] || 0) + 1;
         return acc;
       }, {});
      
-      const overdue = filteredTasks.filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
+      const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
      
       setTaskAnalytics({
         total: filteredTasks.length,
@@ -210,15 +210,15 @@ export default function StaffActivity() {
 
   // Filter by selected user
   const filteredData = selectedUser === 'all' 
-    ? activityData 
-    : activityData.filter(d => d.user_id === selectedUser);
+    ? (activityData || []) 
+    : (activityData || []).filter(d => d.user_id === selectedUser);
 
   // Aggregate stats
-  const totalDuration = filteredData.reduce((sum, d) => sum + d.total_duration, 0);
-  const totalApps = filteredData.reduce((sum, d) => sum + Object.keys(d.apps).length, 0);
+  const totalDuration = (filteredData || []).reduce((sum, d) => sum + (d.total_duration || 0), 0);
+  const totalApps = (filteredData || []).reduce((sum, d) => sum + Object.keys(d.apps || {}).length, 0);
 
   // Category data for pie chart
-  const categoryData = filteredData.reduce((acc, userData) => {
+  const categoryData = (filteredData || []).reduce((acc, userData) => {
     Object.entries(userData.categories || {}).forEach(([cat, duration]) => {
       const existing = acc.find(c => c.name === cat);
       if (existing) {
@@ -231,7 +231,7 @@ export default function StaffActivity() {
   }, []);
 
   // Top apps data for bar chart
-  const topApps = filteredData.flatMap(d => d.apps_list || [])
+  const topApps = (filteredData || []).flatMap(d => d.apps_list || [])
     .reduce((acc, app) => {
       const existing = acc.find(a => a.name === app.name);
       if (existing) {
@@ -251,7 +251,7 @@ export default function StaffActivity() {
     : 0;
 
   // Calculate total attendance hours for selected month
-  const totalAttendanceMinutes = attendanceReport?.staff_report?.reduce((sum, s) => sum + s.total_minutes, 0) || 0;
+  const totalAttendanceMinutes = attendanceReport?.staff_report?.reduce((sum, s) => sum + (s.total_minutes || 0), 0) || 0;
   const onlineEmployees = attendanceReport?.staff_report?.filter(s => s.days_present > 0).length || 0;
 
   if (user?.role !== 'admin') {
@@ -295,7 +295,7 @@ export default function StaffActivity() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {months.map((m) => (
+              {(months || []).map((m) => (
                 <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
               ))}
             </SelectContent>
@@ -308,7 +308,7 @@ export default function StaffActivity() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Employees</SelectItem>
-              {users.map((u) => (
+              {(users || []).map((u) => (
                 <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
               ))}
             </SelectContent>
@@ -341,7 +341,7 @@ export default function StaffActivity() {
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Average Active Time</p>
                 <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>
-                  {filteredData.length > 0 ? formatDuration(Math.round(totalDuration / filteredData.length)) : '0m'}
+                  {filteredData?.length > 0 ? formatDuration(Math.round(totalDuration / filteredData.length)) : '0m'}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">Per employee</p>
               </div>
@@ -358,9 +358,9 @@ export default function StaffActivity() {
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Employees</p>
                 <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.emeraldGreen }}>
-                  {filteredData.length}
+                  {filteredData?.length || 0}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">Out of {users.length} total</p>
+                <p className="text-xs text-slate-500 mt-1">Out of {users?.length || 0} total</p>
               </div>
               <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
                 <Users className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
@@ -405,7 +405,7 @@ export default function StaffActivity() {
             <Card className="border border-slate-200 shadow-sm">
               <CardHeader className="pb-2 border-b border-slate-100">
                 <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
-                  <PieChart className="h-5 w-5" />
+                  <PieIcon className="h-5 w-5" />
                   Time Distribution
                 </CardTitle>
                 <CardDescription>
@@ -413,7 +413,7 @@ export default function StaffActivity() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                {categoryData.length === 0 ? (
+                {(categoryData?.length === 0 || !categoryData) ? (
                   <div className="text-center py-12 text-slate-500">
                     No category data available
                   </div>
@@ -431,7 +431,7 @@ export default function StaffActivity() {
                           dataKey="value"
                           label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                         >
-                          {categoryData.map((entry, index) => (
+                          {(categoryData || []).map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
@@ -458,7 +458,7 @@ export default function StaffActivity() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                {topApps.length === 0 ? (
+                {(topApps?.length === 0 || !topApps) ? (
                   <div className="text-center py-12 text-slate-500">
                     No application data available
                   </div>
@@ -508,7 +508,7 @@ export default function StaffActivity() {
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Avg Hours/Day</p>
                     <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.mediumBlue }}>
-                      {attendanceReport?.staff_report?.length > 0 
+                      {(attendanceReport?.staff_report?.length > 0)
                         ? formatMinutes(Math.round(totalAttendanceMinutes / attendanceReport.staff_report.length / 22))
                         : '0h'}
                     </p>
@@ -568,7 +568,7 @@ export default function StaffActivity() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              {!attendanceReport?.staff_report || attendanceReport.staff_report.length === 0 ? (
+              {(!attendanceReport?.staff_report || attendanceReport.staff_report.length === 0) ? (
                 <div className="text-center py-12 text-slate-500">
                   <CalendarIcon className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                   <p>No attendance data for this month</p>
@@ -587,7 +587,7 @@ export default function StaffActivity() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {attendanceReport.staff_report.map((staff, index) => {
+                      {(attendanceReport?.staff_report || []).map((staff, index) => {
                         const progressPercent = Math.min(100, (staff.total_minutes / (22 * 8 * 60)) * 100); // 22 working days * 8 hours
                         return (
                           <tr key={staff.user_id} className="hover:bg-slate-50">
@@ -697,7 +697,7 @@ export default function StaffActivity() {
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {users.map((user) => (
+                  {(users || []).map((user) => (
                     <Button
                       key={user.id}
                       variant="outline"
@@ -740,13 +740,13 @@ export default function StaffActivity() {
                 <div className="text-center py-12 text-slate-500">
                   Please select a specific employee to view their to-do list
                 </div>
-              ) : selectedUserTodos.length === 0 ? (
+              ) : (!selectedUserTodos || selectedUserTodos.length === 0) ? (
                 <div className="text-center py-12 text-slate-500">
                   No to-do items for this employee
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {selectedUserTodos.map((todo) => (
+                  {(selectedUserTodos || []).map((todo) => (
                     <div
                       key={todo.id}
                       className={`flex items-center p-3 rounded-xl border ${todo.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}
@@ -807,13 +807,13 @@ export default function StaffActivity() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.coral }}>
+                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: '#EF4444' }}>
                         {taskAnalytics?.overdue || 0}
                       </p>
                       <p className="text-xs text-slate-500 mt-1">Past due</p>
                     </div>
-                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.coral}15` }}>
-                      <AlertCircle className="h-5 w-5" style={{ color: COLORS.coral }} />
+                    <div className="p-3 rounded-xl" style={{ backgroundColor: '#EF444415' }}>
+                      <AlertCircle className="h-5 w-5" style={{ color: '#EF4444' }} />
                     </div>
                   </div>
                 </CardContent>
@@ -851,7 +851,7 @@ export default function StaffActivity() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="p-6">
-                  {taskAnalytics?.statusData?.length === 0 ? (
+                  {(!taskAnalytics?.statusData || taskAnalytics.statusData.length === 0) ? (
                     <div className="text-center py-12 text-slate-500">
                       No status data available
                     </div>
@@ -869,7 +869,7 @@ export default function StaffActivity() {
                             dataKey="value"
                             label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                           >
-                            {taskAnalytics.statusData.map((entry, index) => (
+                            {(taskAnalytics?.statusData || []).map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={TASK_STATUS_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]} />
                             ))}
                           </Pie>
@@ -894,7 +894,7 @@ export default function StaffActivity() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="p-6">
-                  {taskAnalytics?.priorityData?.length === 0 ? (
+                  {(!taskAnalytics?.priorityData || taskAnalytics.priorityData.length === 0) ? (
                     <div className="text-center py-12 text-slate-500">
                       No priority data available
                     </div>
