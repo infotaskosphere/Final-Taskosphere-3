@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 import os
 
-from database import db  # make sure this import matches your project
+from .database import db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
