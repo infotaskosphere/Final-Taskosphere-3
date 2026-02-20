@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';                      // ← added
+import { useNavigate } from 'react-router-dom'; // ← added
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
@@ -26,7 +26,12 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-
+// ── Additions for due date picker ───────────────────────────────────────────
+import { CalendarIcon } from "lucide-react";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+// ──────────────────────────────────────────────────────────────────────────────
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -36,7 +41,6 @@ const COLORS = {
   coral: '#FF6B6B',
   amber: '#F59E0B',
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -49,27 +53,24 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
 };
-
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
   if (p === 'critical') return 'border-l-8 border-l-red-600';
-  if (p === 'urgent')   return 'border-l-8 border-l-orange-500';
-  if (p === 'medium')   return 'border-l-8 border-l-emerald-500';
-  if (p === 'low')      return 'border-l-8 border-l-blue-500';
+  if (p === 'urgent') return 'border-l-8 border-l-orange-500';
+  if (p === 'medium') return 'border-l-8 border-l-emerald-500';
+  if (p === 'low') return 'border-l-8 border-l-blue-500';
   return 'border-l-8 border-l-slate-300';
 };
-
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
-
   return (
     <div
       className={`relative flex flex-col p-4 rounded-xl border bg-white hover:shadow-sm transition cursor-pointer hover:border-blue-400 ${getPriorityStripeClass(task.priority)} ${
         isCompleted ? 'opacity-75 bg-green-50/40 border-green-200' : ''
       }`}
-      onClick={() => onUpdateStatus ? null : window.location.href = `/tasks/${task.id || ''}`} // whole strip clickable
+      onClick={() => window.location.href = `/tasks/${task.id || ''}`}
     >
       {/* Title row with status buttons on right (only for assigned to me) */}
       <div className="flex items-start justify-between gap-3">
@@ -79,7 +80,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
             {task.client_name ? ` – ${task.client_name}` : ''}
           </p>
         </div>
-
         {isToMe && (
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
@@ -115,7 +115,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
           </div>
         )}
       </div>
-
       {/* Meta line - smaller font, aligned under title */}
       <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
         <span>
@@ -131,7 +130,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
     </div>
   );
 }
-
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -149,61 +147,63 @@ export default function Dashboard() {
   // Added missing state declarations that were causing reference errors
   const [tasksAssignedToMe, setTasksAssignedToMe] = useState([]);
   const [tasksAssignedByMe, setTasksAssignedByMe] = useState([]);
-
+  // ── New state for due date picker ──────────────────────────────────────────
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
+  const [selectedDueDate, setSelectedDueDate] = useState(undefined);
+  // ────────────────────────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
-
     if (todayAttendance.punch_out) {
       const mins = todayAttendance.duration_minutes || 0;
       return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     }
-
     const diffMs = Date.now() - new Date(todayAttendance.punch_in).getTime();
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
-
   useEffect(() => {
     fetchDashboardData();
     fetchTodayAttendance();
-    // fetchMyTodos();           ← removed → prevents crash (implement properly later)
+    // fetchMyTodos(); ← removed → prevents crash (implement properly later)
     fetchMyAssignedTasks();
   }, [rankingPeriod]);
-
   const addTodo = async () => {
     if (!newTodo.trim()) return;
     try {
-      const res = await api.post('/tasks', {
+      // ── New code: prepare payload with due_date (will be used when endpoint is fixed) ──
+      const todoPayload = {
         title: newTodo.trim(),
         status: 'pending',
-        created_at: new Date().toISOString()
-      });
+        created_at: new Date().toISOString(),
+        due_date: selectedDueDate ? selectedDueDate.toISOString() : null,
+      };
+      // ────────────────────────────────────────────────────────────────────────────────
+      const res = await api.post('/tasks', todoPayload);
       setTodos([...todos, {
         ...res.data,
         completed: res.data.status === 'completed'
       }]);
       setNewTodo('');
+      // ── Clear due date after successful add ──────────────────────────────────────
+      setSelectedDueDate(undefined);
+      // ────────────────────────────────────────────────────────────────────────────────
       toast.success('Todo added successfully!');
     } catch (error) {
       toast.error('Failed to add todo');
     }
   };
-
   const fetchMyAssignedTasks = async () => {
     try {
       const res = await api.get('/tasks');
       const allTasks = res.data || [];
-
-      const toMe = allTasks.filter(task => 
+      const toMe = allTasks.filter(task =>
         task.assigned_to === user?.id &&
-        task.status !== 'completed'           // ← hides completed tasks
+        task.status !== 'completed' // ← hides completed tasks
       );
-
-      const byMe = allTasks.filter(task => 
+      const byMe = allTasks.filter(task =>
         task.created_by === user?.id && task.assigned_to !== user?.id
       );
-
       setTasksAssignedToMe(toMe.slice(0, 6));
       setTasksAssignedByMe(byMe.slice(0, 6));
     } catch (error) {
@@ -212,10 +212,9 @@ export default function Dashboard() {
       setTasksAssignedByMe([]);
     }
   };
-
   const updateAssignedTaskStatus = async (taskId, newStatus) => {
     try {
-      await api.patch(`/tasks/${taskId}`, { 
+      await api.patch(`/tasks/${taskId}`, {
         status: newStatus,
         updated_at: new Date().toISOString()
       });
@@ -226,7 +225,6 @@ export default function Dashboard() {
       toast.error('Failed to update task');
     }
   };
-
   const handleToggleTodo = async (id) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
@@ -247,7 +245,6 @@ export default function Dashboard() {
       toast.error('Failed to update todo');
     }
   };
-
   const handleDeleteTodo = async (id) => {
     try {
       await api.delete(`/tasks/${id}`);
@@ -257,7 +254,6 @@ export default function Dashboard() {
       toast.error('Failed to delete todo');
     }
   };
-
   const fetchDashboardData = async () => {
     try {
       const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
@@ -265,11 +261,9 @@ export default function Dashboard() {
         api.get('/tasks'),
         api.get('/duedates/upcoming?days=30'),
       ]);
-
       setStats(statsRes.data);
       setRecentTasks(tasksRes.data?.slice(0, 5) || []);
       setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-
       // Rankings wrapped in try-catch to handle 500/CORS gracefully
       try {
         const rankingRes = await api.get(
@@ -280,7 +274,6 @@ export default function Dashboard() {
         console.warn("Rankings endpoint failed:", rankErr);
         setRankings([]); // fallback → no crash
       }
-
       const chatRes = await api.get('/notifications');
       if (chatRes.data?.length > chatMessages.length) {
         notificationAudio.current.play().catch(() => {});
@@ -290,7 +283,6 @@ export default function Dashboard() {
       console.error('Failed to fetch dashboard data:', error);
     }
   };
-
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
@@ -299,7 +291,6 @@ export default function Dashboard() {
       console.error('Failed to fetch attendance:', error);
     }
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -313,7 +304,6 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -322,7 +312,6 @@ export default function Dashboard() {
     };
     return styles[status] || styles.pending;
   };
-
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -331,7 +320,6 @@ export default function Dashboard() {
     };
     return styles[priority] || styles.medium;
   };
-
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
@@ -367,18 +355,20 @@ export default function Dashboard() {
       text: 'text-yellow-600'
     };
   };
-
+  // ── New helper for overdue check ───────────────────────────────────────────
+  const isOverdue = (dueDate) => {
+    if (!dueDate) return false;
+    return new Date(dueDate) < new Date();
+  };
+  // ────────────────────────────────────────────────────────────────────────────
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
     : 0;
-
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
-
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-
   return (
     <motion.div
       className="space-y-6"
@@ -429,7 +419,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Key Metrics Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4" variants={itemVariants}>
         <Card
@@ -531,12 +520,10 @@ export default function Dashboard() {
                   {stats?.expired_dsc_count || 0} Expired • {stats?.expiring_dsc_count || 0} Expiring
                 </p>
               </div>
-
               <div className="p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-red-100 group-hover:scale-110 transition-transform flex-shrink-0">
                 <Key className="h-5 w-5 sm:h-6 sm:w-6 text-red-600" />
               </div>
             </div>
-
             <div className="flex items-center gap-1 mt-3 text-xs sm:text-sm text-slate-500 group-hover:text-slate-700">
               <span>View alerts</span>
               <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover:translate-x-1 transition-transform" />
@@ -570,7 +557,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Recent Tasks + Upcoming Deadlines + Attendance */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         <Card
@@ -764,10 +750,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
-        
+       
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -855,7 +840,6 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="todo-list-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -880,9 +864,42 @@ export default function Dashboard() {
                 placeholder="Add new task..."
                 className="flex-1 p-3 text-sm border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500"
               />
+              {/* ── Due date picker button ──────────────────────────────────────── */}
+              <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn(
+                      "border-slate-300",
+                      !selectedDueDate && "text-slate-400"
+                    )}
+                  >
+                    <CalendarIcon className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={selectedDueDate}
+                    onSelect={(date) => {
+                      setSelectedDueDate(date);
+                      setShowDueDatePicker(false);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              {/* ────────────────────────────────────────────────────────────────── */}
               <Button onClick={addTodo} disabled={!newTodo.trim()} className="px-6">Add</Button>
+              {/* ── Show selected due date ──────────────────────────────────────── */}
+              {selectedDueDate && (
+                <span className="text-xs text-slate-500 self-center ml-2">
+                  Due: {format(selectedDueDate, 'MMM d, yyyy')}
+                </span>
+              )}
+              {/* ────────────────────────────────────────────────────────────────── */}
             </div>
-
             {todos.length === 0 ? (
               <div className="text-center py-10 sm:py-12 text-slate-400 text-sm sm:text-base">
                 No tasks added yet
@@ -894,7 +911,7 @@ export default function Dashboard() {
                     key={todo.id}
                     className={`flex items-center justify-between gap-3 p-4 rounded-2xl border ${
                       todo.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'
-                    }`}
+                    } ${!todo.completed && isOverdue(todo.due_date) ? 'border-red-400 bg-red-50/60' : ''}`}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <input
@@ -906,10 +923,29 @@ export default function Dashboard() {
                       <div className="flex-1 min-w-0">
                         <span className={`block text-sm sm:text-base ${todo.completed ? 'line-through text-slate-500' : 'text-slate-900'}`}>
                           {todo.title}
+                          {/* ── Overdue badge ──────────────────────────────────────── */}
+                          {!todo.completed && isOverdue(todo.due_date) && (
+                            <span className="inline-block ml-2 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded-full">
+                              Overdue
+                            </span>
+                          )}
+                          {/* ──────────────────────────────────────────────────────── */}
                         </span>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Added: {format(new Date(todo.created_at), 'MMM d, yyyy')}
+                          Added: {todo.created_at ? format(new Date(todo.created_at), 'MMM d, yyyy') : 'Recently added'}
                         </p>
+                        {/* ── Due date display with overdue coloring ────────────────── */}
+                        {todo.due_date && isOverdue(todo.due_date) && (
+                          <p className="text-xs text-red-600 font-medium mt-0.5">
+                            Due: {format(new Date(todo.due_date), 'MMM d, yyyy')} (overdue)
+                          </p>
+                        )}
+                        {todo.due_date && !isOverdue(todo.due_date) && (
+                          <p className="text-xs text-amber-600 mt-0.5">
+                            Due: {format(new Date(todo.due_date), 'MMM d, yyyy')}
+                          </p>
+                        )}
+                        {/* ──────────────────────────────────────────────────────────── */}
                       </div>
                     </div>
                     <Button variant="destructive" size="sm" onClick={() => handleDeleteTodo(todo.id)}>
@@ -922,7 +958,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Tasks Assigned – Two Column Layout */}
       {showTaskSection && (
         <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
@@ -948,14 +983,13 @@ export default function Dashboard() {
                       task={task}
                       isToMe={true}
                       assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus}   // ← passed here
+                      onUpdateStatus={updateAssignedTaskStatus} // ← passed here
                     />
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
-
           {/* Tasks Assigned by Me */}
           <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
             <CardHeader className="pb-4 border-b border-slate-100 px-6">
@@ -978,7 +1012,7 @@ export default function Dashboard() {
                       task={task}
                       isToMe={false}
                       assignedName={task.assigned_to_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus}   // ← passed here too (if needed)
+                      onUpdateStatus={updateAssignedTaskStatus} // ← passed here too (if needed)
                     />
                   ))}
                 </div>
@@ -987,7 +1021,6 @@ export default function Dashboard() {
           </Card>
         </motion.div>
       )}
-
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
