@@ -2,7 +2,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import pytz
 import logging
 import smtplib
-from backend.auth import get_current_user
+from auth import get_current_user
 from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
