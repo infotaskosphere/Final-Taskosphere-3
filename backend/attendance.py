@@ -9,8 +9,7 @@ import uuid
 import math
 
 from backend.database import db
-from backend.server import get_current_user
-from backend.server import User
+from backend.auth import get_current_user
 
 
 # ================= GEO CONFIG =================
@@ -72,7 +71,7 @@ def calculate_distance_meters(lat1, lon1, lat2, lon2):
 @router.post("/", response_model=Attendance)
 async def record_attendance(
     action_data: AttendanceCreate,
-    current_user: User = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
