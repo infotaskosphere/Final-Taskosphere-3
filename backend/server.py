@@ -71,6 +71,11 @@ async def create_indexes():
     await db.tasks.create_index("created_by")
     await db.tasks.create_index("due_date")
     await db.users.create_index("email")
+
+    await db.staff_activity.create_index("user_id")
+    await db.staff_activity.create_index("timestamp")
+    await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+    await db.staff_activity.create_index("category")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -654,7 +659,6 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted successfully"}
-
 # Task routes
 @api_router.post("/tasks", response_model=Task)
 async def create_task(task_data: TaskCreate, current_user: User = Depends(get_current_user)):
@@ -1480,7 +1484,7 @@ async def get_activity_summary(
     current_user: User = Depends(get_current_user)
 ):
     """Get staff activity summary (admin only)"""
-    if current_user.role != "admin":
+    if current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="Admin access required")
    
     query = {}
@@ -1534,6 +1538,15 @@ async def get_activity_summary(
             key=lambda x: x["duration"],
             reverse=True
         )
+        # Productivity score
+        productive_duration = data["categories"].get("productivity", 0)
+        entertainment_duration = data["categories"].get("entertainment", 0)
+        communication_duration = data["categories"].get("communication", 0)
+        total_duration = data["total_duration"]
+        if total_duration > 0:
+            data["productivity_percent"] = (productive_duration / total_duration) * 100
+        else:
+            data["productivity_percent"] = 0
         result.append(data)
    
     return result
@@ -1544,7 +1557,7 @@ async def get_user_activity(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed activity for a specific user (admin only)"""
-    if current_user.role != "admin":
+    if current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="Admin access required")
    
     activities = await db.staff_activity.find(
@@ -1924,6 +1937,10 @@ async def auto_daily_reminder(request, call_next):
                 {"$set": {"value": today_str}},
                 upsert=True
             )
+            # Add automatic cleanup for staff_activity (90 days retention)
+            await db.staff_activity.delete_many({
+                "timestamp": {"$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()}
+            })
     except Exception as e:
         logger.error(f"Auto reminder middleware error: {str(e)}")
     response = await call_next(request)
