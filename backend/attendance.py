@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from pydantic import BaseModel, Field, ConfigDict
+from fastapi import HTTPException
 import uuid
 import math
 
@@ -14,8 +15,8 @@ from backend.server import User
 
 # ================= GEO CONFIG =================
 
-OFFICE_LATITUDE = 21.1702   # <-- CHANGE to your real office latitude
-OFFICE_LONGITUDE = 72.8311  # <-- CHANGE to your real office longitude
+OFFICE_LATITUDE = 21.169476208317974   # <-- CHANGE to your real office latitude
+OFFICE_LONGITUDE = 72.81688168823885  # <-- CHANGE to your real office longitude
 ALLOWED_RADIUS_METERS = 200  # allowed punch radius
 
 
@@ -137,6 +138,7 @@ async def record_attendance(
             raise HTTPException(status_code=400, detail="Already punched out today")
 
         punch_out_time = now
+
         punch_in_time = (
             datetime.fromisoformat(existing["punch_in"])
             if isinstance(existing["punch_in"], str)
@@ -145,6 +147,26 @@ async def record_attendance(
 
         duration = int((punch_out_time - punch_in_time).total_seconds() / 60)
 
+        # -------- GEO CHECK FOR PUNCH OUT --------
+        outside_office = False
+        distance = None
+
+        if action_data.location:
+            user_lat = action_data.location.get("latitude")
+            user_lon = action_data.location.get("longitude")
+
+            if user_lat is not None and user_lon is not None:
+                distance = calculate_distance_meters(
+                    user_lat,
+                    user_lon,
+                    OFFICE_LATITUDE,
+                    OFFICE_LONGITUDE
+                )
+
+                if distance > ALLOWED_RADIUS_METERS:
+                    outside_office = True
+
+        # -------- UPDATE ATTENDANCE --------
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today},
             {
@@ -155,6 +177,20 @@ async def record_attendance(
             }
         )
 
+        # -------- LOG STAFF ACTIVITY IF OUTSIDE --------
+        if outside_office:
+            await db.staff_activity.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": current_user.id,
+                "app_name": "Attendance",
+                "window_title": "Punch Out Outside Office",
+                "category": "attendance",
+                "duration_seconds": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "notes": f"Punched out outside office. Distance: {int(distance)} meters",
+                "location": action_data.location
+            })
+
         updated = await db.attendance.find_one(
             {"user_id": current_user.id, "date": today},
             {"_id": 0}
@@ -162,12 +198,11 @@ async def record_attendance(
 
         if isinstance(updated["punch_in"], str):
             updated["punch_in"] = datetime.fromisoformat(updated["punch_in"])
+
         if isinstance(updated.get("punch_out"), str):
             updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
 
         return Attendance(**updated)
-
-
 # ================= TODAY =================
 
 @router.get("/today", response_model=Optional[Attendance])
