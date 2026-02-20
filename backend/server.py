@@ -92,18 +92,7 @@ class User(UserBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
-class Attendance(BaseModel):
-    user_id: str
-    date: str # "YYYY-MM-DD"
-    punch_in: datetime
-    punch_out: Optional[datetime] = None
-    duration_minutes: Optional[int] = None
-   
-    # ������ New fields ��� optional so old records are still valid ������
-    is_late: bool = False
-    late_by_minutes: int = 0
-    location: Optional[Dict[str, float]] = None # e.g. {"latitude": 21.17, "longitude": 72.83}
-   
+
 # Staff Activity Tracking
 class StaffActivityLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -200,17 +189,8 @@ class DueDate(DueDateBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-class AttendanceBase(BaseModel):
-    punch_in: datetime
-    punch_out: Optional[datetime] = None
 class AttendanceCreate(BaseModel):
     action: str # "punch_in" or "punch_out"
-class Attendance(AttendanceBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    date: str
-    duration_minutes: Optional[int] = None
 class NotificationBase(BaseModel):
     title: str
     message: str
