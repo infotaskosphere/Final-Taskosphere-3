@@ -951,3 +951,44 @@ export default function StaffActivity() {
                     <PieIcon className="h-5 w-5" />
                     Task Status Distribution
                   </CardTitle>
+                                  </CardHeader>
+                <CardContent className="p-6">
+                  {(!taskAnalytics?.statusData || taskAnalytics.statusData.length === 0) ? (
+                    <div className="text-center py-12 text-slate-500">
+                      No task status data available
+                    </div>
+                  ) : (
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={taskAnalytics.statusData}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={90}
+                            dataKey="value"
+                            label={({ name, percent }) =>
+                              `${name} ${(percent * 100).toFixed(0)}%`
+                            }
+                          >
+                            {(taskAnalytics.statusData || []).map((entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={TASK_STATUS_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </motion.div>
+  );
+}
