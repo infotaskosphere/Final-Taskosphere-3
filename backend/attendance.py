@@ -172,7 +172,7 @@ async def punch_attendance(
                 )
 
         attendance = Attendance(
-            user_id=current_user.id,
+            user_id=current_user["_id"],
             date=today,
             punch_in=now,
             location=action_data.location
@@ -225,7 +225,7 @@ async def punch_attendance(
 
         # -------- UPDATE ATTENDANCE --------
         await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today},
+            {"user_id": current_user["_id"], "date": today},
             {
                 "$set": {
                     "punch_out": punch_out_time.isoformat(),
@@ -238,7 +238,7 @@ async def punch_attendance(
         if outside_office:
             await db.staff_activity.insert_one({
                 "id": str(uuid.uuid4()),
-                "user_id": current_user.id,
+                "user_id": current_user["_id"],
                 "app_name": "Attendance",
                 "window_title": "Punch Out Outside Office",
                 "category": "attendance",
@@ -249,7 +249,7 @@ async def punch_attendance(
             })
 
         updated = await db.attendance.find_one(
-            {"user_id": current_user.id, "date": today},
+            {"user_id": current_user["_id"], "date": today},
             {"_id": 0}
         )
 
@@ -267,7 +267,7 @@ async def get_today_attendance(current_user = Depends(get_current_user)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today},
+        {"user_id": current_user["_id"], "date": today},
         {"_id": 0}
     )
 
@@ -286,7 +286,7 @@ async def get_today_attendance(current_user = Depends(get_current_user)):
 
 @router.get("/history", response_model=List[Attendance])
 async def get_attendance_history(current_user = Depends(get_current_user)):
-    query = {"user_id": current_user.id} if current_user.role == "staff" else {}
+    query = {"user_id": current_user["_id"]} if current_user.role == "staff" else {}
 
     attendance_list = await db.attendance.find(
         query,
@@ -308,7 +308,7 @@ async def get_attendance_history(current_user = Depends(get_current_user)):
 async def get_my_attendance_summary(current_user = Depends(get_current_user)):
 
     attendance_list = await db.attendance.find(
-        {"user_id": current_user.id},
+        {"user_id": current_user["_id"]},
         {"_id": 0}
     ).to_list(1000)
 
