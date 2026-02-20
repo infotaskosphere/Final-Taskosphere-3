@@ -54,6 +54,9 @@ export default function Attendance() {
   const [loading, setLoading] = useState(false);
   const [showPunchInModal, setShowPunchInModal] = useState(false);
   const [yesterdayUnfinishedTodos, setYesterdayUnfinishedTodos] = useState([]);
+  // --- ADDED STATES (NO DELETIONS) ---
+  const [myRank, setMyRank] = useState('—');
+  const [tasksCompleted, setTasksCompleted] = useState(0);
 
   useEffect(() => {
     fetchData();
@@ -98,14 +101,31 @@ export default function Attendance() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [historyRes, summaryRes, todayRes] = await Promise.all([
+      // --- EXPANDED PROMISE.ALL TO INCLUDE RANKINGS AND TASKS (NO DELETIONS) ---
+      const [historyRes, summaryRes, todayRes, rankingRes, tasksRes] = await Promise.all([
         api.get('/attendance/history'),
         api.get('/attendance/my-summary'),
-        api.get('/attendance/today')
+        api.get('/attendance/today'),
+        api.get('/staff/rankings?period=monthly'),
+        api.get('/tasks')
       ]);
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
+
+      // --- LOGIC FOR DYNAMIC RANKING ---
+      const rankingList = rankingRes.data.rankings || [];
+      const myEntry = rankingList.find(r => r.user_id === user?.id);
+      if (myEntry) {
+        setMyRank(`#${myEntry.rank}`);
+      }
+
+      // --- LOGIC FOR REAL COMPLETED TASKS COUNT ---
+      const completedCount = tasksRes.data.filter(
+        task => task.assigned_to === user?.id && task.status === 'completed'
+      ).length;
+      setTasksCompleted(completedCount);
+
     } catch (error) {
       toast.error('Failed to fetch attendance data');
       console.error(error);
@@ -376,7 +396,8 @@ export default function Attendance() {
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Tasks Completed</p>
                 <p className="text-2xl font-bold mt-1 font-outfit" style={{ color: COLORS.emeraldGreen }}>
-                  {tasksCompletedThisMonth || '0'}
+                  {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
+                  {tasksCompleted}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">this month</p>
               </div>
@@ -412,7 +433,8 @@ export default function Attendance() {
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Your Star Performance Rank</p>
                 <p className="text-5xl font-extrabold mt-1 font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
-                  #3
+                  {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
+                  {myRank}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">overall</p>
               </div>
