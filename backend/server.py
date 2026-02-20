@@ -76,13 +76,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://final-taskosphere-frontend.onrender.com",
+        "https://final-taskosphere-3.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://final-taskosphere-3.vercel.app",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
+    expose_headers=["*"],
 )
 # ��������� ALL MODELS ����������������������������������������������
 class UserPermissions(BaseModel):
