@@ -57,6 +57,8 @@ export default function Attendance() {
   // --- ADDED STATES (NO DELETIONS) ---
   const [myRank, setMyRank] = useState('—');
   const [tasksCompleted, setTasksCompleted] = useState(0);
+  const [isEarlyLeaveToday, setIsEarlyLeaveToday] = useState(false);
+  const [earlyByMinutesToday, setEarlyByMinutesToday] = useState(0);
 
   useEffect(() => {
     fetchData();
@@ -95,6 +97,8 @@ export default function Attendance() {
     if (todayAttendance?.date !== todayStr) {
       setIsLateToday(false);
       setLateByMinutesToday(0);
+      setIsEarlyLeaveToday(false);
+      setEarlyByMinutesToday(0);
     }
   }, [todayAttendance]);
 
@@ -159,10 +163,12 @@ export default function Attendance() {
 
       let isLate = false;
       let lateByMinutes = 0;
+      let isEarlyLeave = false;
+      let earlyByMinutes = 0;
 
-      if (action === 'punch_in' && user?.expected_start_time) {
+      if (action === 'punch_in' && user?.punch_in_time) {
         try {
-          const [expH, expM] = user.expected_start_time.split(':').map(Number);
+          const [expH, expM] = user.punch_in_time.split(':').map(Number);
           const expected = new Date();
           expected.setHours(expH, expM, 0, 0);
 
@@ -171,7 +177,8 @@ export default function Attendance() {
           if (actual > expected) {
             const diffMs = actual.getTime() - expected.getTime();
             lateByMinutes = Math.floor(diffMs / 60000);
-            const grace = user.late_grace_minutes ?? 15;
+            const [graceH, graceM] = user.grace_time ? user.grace_time.split(':').map(Number) : [0, 15];
+            const grace = graceH * 60 + graceM;
 
             if (lateByMinutes > grace) {
               isLate = true;
@@ -187,12 +194,35 @@ export default function Attendance() {
         } catch (err) {
           console.warn("Cannot calculate late status:", err);
         }
+      } else if (action === 'punch_out' && user?.punch_out_time && todayAttendance?.punch_in) {
+        try {
+          const [expH, expM] = user.punch_out_time.split(':').map(Number);
+          const expectedOut = new Date();
+          expectedOut.setHours(expH, expM, 0, 0);
+
+          const actualOut = new Date();
+
+          if (actualOut < expectedOut) {
+            const diffMs = expectedOut.getTime() - actualOut.getTime();
+            earlyByMinutes = Math.floor(diffMs / 60000);
+            isEarlyLeave = true;
+            setIsEarlyLeaveToday(true);
+            setEarlyByMinutesToday(earlyByMinutes);
+
+            toast.warning(
+              `Early leave by ${earlyByMinutes} minutes (expected out: ${user.punch_out_time})`,
+              { duration: 6000 }
+            );
+          }
+        } catch (err) {
+          console.warn("Cannot calculate early leave status:", err);
+        }
       }
 
       toast.success(
         action === 'punch_in'
           ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
-          : 'Punched out successfully!'
+          : (isEarlyLeave ? 'Punched out (early leave)' : 'Punched out successfully!')
       );
 
       fetchData();
@@ -319,11 +349,23 @@ export default function Attendance() {
                       {todayAttendance?.punch_out && ` • Out: ${format(new Date(todayAttendance.punch_out), 'hh:mm a')}`}
                     </p>
                   )}
+                  {/* Added expected times display */}
+                  <p className="text-sm text-blue-100/80 mt-1">
+                    Expected: In {user.punch_in_time || 'N/A'} (Grace {user.grace_time || 'N/A'}) • Out {user.punch_out_time || 'N/A'}
+                  </p>
                   {isLateToday && (
                     <div className="mt-2 inline-flex items-center gap-2 bg-red-500/30 backdrop-blur px-3 py-1 rounded-full">
                       <AlertTriangle className="h-4 w-4 text-red-300" />
                       <span className="text-red-200 font-medium text-sm">
                         Late by {lateByMinutesToday} min
+                      </span>
+                    </div>
+                  )}
+                  {isEarlyLeaveToday && (
+                    <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/30 backdrop-blur px-3 py-1 rounded-full">
+                      <AlertTriangle className="h-4 w-4 text-amber-300" />
+                      <span className="text-amber-200 font-medium text-sm">
+                        Early leave by {earlyByMinutesToday} min
                       </span>
                     </div>
                   )}
