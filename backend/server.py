@@ -1,13 +1,10 @@
 from fastapi.middleware.gzip import GZipMiddleware
 import pytz
-import logging
 import smtplib
 from auth import get_current_user
 from backend.attendance import router as attendance_router
-from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
-from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -189,8 +186,6 @@ class DueDate(DueDateBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-class AttendanceCreate(BaseModel):
-    action: str # "punch_in" or "punch_out"
 class NotificationBase(BaseModel):
     title: str
     message: str
@@ -332,10 +327,9 @@ class DocumentMovementUpdateRequest(BaseModel):
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
-# ��������� ROUTER ���������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# ROUTER 
 api_router = APIRouter(prefix="/api")
-app.include_router(api_router)
-# ��������� HELPERS ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# HELPERS
 # Root route
 @api_router.get("/")
 async def root():
@@ -432,10 +426,6 @@ async def get_task_analytics(
         "completed_tasks": completed,
         "pending_tasks": pending
     }
-# Root route
-@api_router.get("/")
-async def root():
-    return {"message": "Taskosphere API", "status": "running"}
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -528,60 +518,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "is_active": current_user.is_active
     }
-# ��������� ATTENDANCE ROUTE ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-@api_router.post("/attendance")
-async def record_attendance(data: dict, current_user: User = Depends(get_current_user)):
-    # ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-    # YOUR EXISTING CODE ABOVE THIS POINT REMAINS UNTOUCHED
-    # ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-    if data["action"] == "punch_in":
-        # Your existing check for already punched in
-        if existing:
-            raise HTTPException(status_code=400, detail="Already punched in today")
-        now = datetime.now(timezone.utc)
-        today_str = now.date().isoformat()
-        # ── NEW: Late calculation ────────────────────────────────────────
-        is_late = False
-        late_by_minutes = 0
-        expected_str = current_user.expected_start_time # "09:30" or similar or None
-        grace = current_user.late_grace_minutes or 15
-        if expected_str:
-            try:
-                from datetime import time
-                h, m = map(int, expected_str.split(":"))
-                expected_time = time(h, m)
-                expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
-                if now > expected_datetime:
-                    diff = now - expected_datetime
-                    late_by_minutes = int(diff.total_seconds() / 60)
-                    if late_by_minutes > grace:
-                        is_late = True
-            except (ValueError, AttributeError):
-                # Invalid time format or missing field → skip late check silently
-                pass
-        # ������ Build document ��� add only the new fields ������������������������������������������������������������������������
-        doc = {
-            "user_id": current_user.id,
-            "date": today_str,
-            "punch_in": now,
-            # ... ALL your existing fields stay here exactly as they are ...
-            # ������ NEW fields (added only)
-            "is_late": is_late,
-            "late_by_minutes": late_by_minutes if is_late else 0,
-            "location": data.get("location") # frontend sends {latitude, longitude}
-        }
-        await db.attendance.insert_one(doc)
-        # Return EXACTLY what frontend already expects ��� just with extra optional fields
-        return {
-            "status": "punched_in",
-            # ... whatever else you already return ...
-            "is_late": is_late, # new ��� safe to add
-            "late_by_minutes": late_by_minutes # new ��� safe to add
-        }
-    # ������ punch_out branch remains 100% unchanged ������
-    # ... your existing punch_out code ...
-# ��������� USER ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-# User routes
+
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(get_current_user)):
     if current_user.role not in ["admin", "manager"]:
@@ -955,186 +892,7 @@ async def update_document_movement(
         }
     )
     return {"message": "Movement updated successfully"}
-# ��������� ATTENDANCE ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������
-# Attendance routes
-@api_router.post("/attendance", response_model=Attendance)
-async def record_attendance(action_data: AttendanceCreate, current_user: User = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    existing = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-   
-    if action_data.action == "punch_in":
-        if existing:
-            raise HTTPException(status_code=400, detail="Already punched in today")
-       
-        attendance = Attendance(
-            user_id=current_user.id,
-            date=today,
-            punch_in=datetime.now(timezone.utc)
-        )
-       
-        doc = attendance.model_dump()
-        doc["punch_in"] = doc["punch_in"].isoformat()
-        await db.attendance.insert_one(doc)
-        return attendance
-   
-    elif action_data.action == "punch_out":
-        if not existing:
-            raise HTTPException(status_code=400, detail="No punch in record found")
-        if existing.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out today")
-       
-        punch_out_time = datetime.now(timezone.utc)
-        punch_in_time = datetime.fromisoformat(existing["punch_in"]) if isinstance(existing["punch_in"], str) else existing["punch_in"]
-        duration = int((punch_out_time - punch_in_time).total_seconds() / 60)
-       
-        await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today},
-            {"$set": {"punch_out": punch_out_time.isoformat(), "duration_minutes": duration}}
-        )
-       
-        updated = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-        if isinstance(updated["punch_in"], str):
-            updated["punch_in"] = datetime.fromisoformat(updated["punch_in"])
-        if isinstance(updated["punch_out"], str):
-            updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
-        return Attendance(**updated)
-@api_router.get("/attendance/today", response_model=Optional[Attendance])
-async def get_today_attendance(current_user: User = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    attendance = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-   
-    if not attendance:
-        return None
-   
-    if isinstance(attendance["punch_in"], str):
-        attendance["punch_in"] = datetime.fromisoformat(attendance["punch_in"])
-    if attendance.get("punch_out") and isinstance(attendance["punch_out"], str):
-        attendance["punch_out"] = datetime.fromisoformat(attendance["punch_out"])
-    return Attendance(**attendance)
-@api_router.get("/attendance/history", response_model=List[Attendance])
-async def get_attendance_history(current_user: User = Depends(get_current_user)):
-    query = {"user_id": current_user.id} if current_user.role == "staff" else {}
-    attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-   
-    for attendance in attendance_list:
-        if isinstance(attendance["punch_in"], str):
-            attendance["punch_in"] = datetime.fromisoformat(attendance["punch_in"])
-        if attendance.get("punch_out") and isinstance(attendance["punch_out"], str):
-            attendance["punch_out"] = datetime.fromisoformat(attendance["punch_out"])
-    return attendance_list
-@api_router.get("/attendance/my-summary")
-async def get_my_attendance_summary(
-    current_user: User = Depends(get_current_user)
-):
-    """Get current user's attendance summary with monthly hours"""
-    now = datetime.now(timezone.utc)
-    current_month = now.strftime("%Y-%m")
-    attendance_list = await db.attendance.find(
-        {"user_id": current_user.id},
-        {"_id": 0}
-    ).sort("date", -1).to_list(1000)
-    monthly_data = {}
-    total_minutes_all = 0
-    total_days = 0
-    for attendance in attendance_list:
-        month = attendance["date"][:7]
-        if month not in monthly_data:
-            monthly_data[month] = {
-                "total_minutes": 0,
-                "days_present": 0
-            }
-        duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)):
-            monthly_data[month]["total_minutes"] += duration
-            total_minutes_all += duration
-        monthly_data[month]["days_present"] += 1
-        total_days += 1
-    formatted_data = []
-    for month, data in monthly_data.items():
-        minutes = data["total_minutes"]
-        hours = minutes // 60
-        mins = minutes % 60
-        formatted_data.append({
-            "month": month,
-            "total_minutes": minutes,
-            "total_hours": f"{hours}h {mins}m",
-            "days_present": data["days_present"]
-        })
-    return {
-        "current_month": current_month,
-        "total_days": total_days,
-        "total_minutes": total_minutes_all,
-        "monthly_summary": formatted_data
-    }
-@api_router.get("/attendance/staff-report")
-async def get_staff_attendance_report(
-    month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """Get all staff attendance report (admin only)"""
-    # Admin check
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    now = datetime.now(timezone.utc)
-    target_month = month or now.strftime("%Y-%m")
-    # Get all users
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
-    user_map = {u["id"]: u for u in users}
-    # Get attendance records for selected month
-    attendance_list = await db.attendance.find(
-        {"date": {"$regex": f"^{target_month}"}},
-        {"_id": 0}
-    ).to_list(5000)
-    # Aggregate by user
-    staff_report = {}
-    for attendance in attendance_list:
-        uid = attendance["user_id"]
-        # Initialize user record if not exists
-        if uid not in staff_report:
-            user_info = user_map.get(uid, {})
-            staff_report[uid] = {
-                "user_id": uid,
-                "user_name": user_info.get("full_name", "Unknown"),
-                "role": user_info.get("role", "staff"),
-                "total_minutes": 0,
-                "days_present": 0,
-                "records": []
-            }
-        duration = attendance.get("duration_minutes")
-        # Safely add duration
-        if isinstance(duration, (int, float)):
-            staff_report[uid]["total_minutes"] += duration
-        # Count day regardless of duration
-        staff_report[uid]["days_present"] += 1
-        # Add record
-        staff_report[uid]["records"].append({
-            "date": attendance["date"],
-            "punch_in": attendance.get("punch_in"),
-            "punch_out": attendance.get("punch_out"),
-            "duration_minutes": duration
-        })
-    # Convert to list and calculate formatted values
-    result = []
-    for uid, data in staff_report.items():
-        total_minutes = data["total_minutes"]
-        hours = total_minutes // 60
-        minutes = total_minutes % 60
-        data["total_hours"] = f"{hours}h {minutes}m"
-        if data["days_present"] > 0:
-            data["avg_hours_per_day"] = round(
-                (total_minutes / data["days_present"]) / 60, 1
-            )
-        else:
-            data["avg_hours_per_day"] = 0
-        result.append(data)
-    # Sort by highest total minutes
-    result.sort(key=lambda x: x["total_minutes"], reverse=True)
-    return {
-        "month": target_month,
-        "total_staff": len(result),
-        "staff_report": result
-    }
-# ��������� DUE DATE ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+
 # ================= DUE DATE ROUTES =================
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
