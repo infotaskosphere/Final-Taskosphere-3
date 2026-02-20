@@ -3,7 +3,7 @@ import pytz
 import logging
 import smtplib
 from auth import get_current_user
-from backend.attendance import Attendance, AttendanceCreate
+from backend.attendance import router as attendance_router
 from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
@@ -2175,3 +2175,4 @@ async def get_staff_rankings(
     }
 # ================= INCLUDE ROUTER =================
 app.include_router(api_router)
+app.include_router(attendance_router, prefix="/api")
