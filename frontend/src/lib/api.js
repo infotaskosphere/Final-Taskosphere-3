@@ -41,7 +41,7 @@ api.interceptors.response.use(
     const status = error.response?.status;
 
     // 401/403: Session expired or insufficient permissions
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       console.error(`${status}: Access denied. Clearing local session...`);
       localStorage.removeItem("token");
       localStorage.removeItem("user");
