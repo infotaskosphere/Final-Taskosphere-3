@@ -34,7 +34,7 @@ import {
 
 // Brand Colors
 const COLORS = {
-  deepBlue: '#0D3B66',
+  lightBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
@@ -269,7 +269,7 @@ export default function StaffActivity() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: COLORS.deepBlue }}></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: COLORS.lightBlue }}></div>
       </div>
     );
   }
@@ -284,7 +284,7 @@ export default function StaffActivity() {
       {/* Header */}
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Time Tracking</h1>
+          <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.lightBlue }}>Time Tracking</h1>
           <p className="text-slate-600 mt-1">Monitor employee screen active time and productivity</p>
         </div>
         
@@ -323,13 +323,13 @@ export default function StaffActivity() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Active Time</p>
-                <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
+                <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.lightBlue }}>
                   {formatDuration(totalDuration)}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">Across all employees</p>
               </div>
-              <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                <Clock className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
+              <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.lightBlue}15` }}>
+                <Clock className="h-5 w-5" style={{ color: COLORS.lightBlue }} />
               </div>
             </div>
           </CardContent>
@@ -404,7 +404,7 @@ export default function StaffActivity() {
             {/* Category Pie Chart */}
             <Card className="border border-slate-200 shadow-sm">
               <CardHeader className="pb-2 border-b border-slate-100">
-                <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
                   <PieChart className="h-5 w-5" />
                   Time Distribution
                 </CardTitle>
@@ -449,7 +449,7 @@ export default function StaffActivity() {
             {/* Top Apps Bar Chart */}
             <Card className="border border-slate-200 shadow-sm">
               <CardHeader className="pb-2 border-b border-slate-100">
-                <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
                   <BarChart3 className="h-5 w-5" />
                   Top Applications
                 </CardTitle>
@@ -472,7 +472,7 @@ export default function StaffActivity() {
                         <XAxis dataKey="name" angle={-45} textAnchor="end" height={70} />
                         <YAxis tickFormatter={(value) => formatDuration(value / 3600)} />
                         <Tooltip formatter={(value) => formatDuration(value)} />
-                        <Bar dataKey="duration" fill={COLORS.deepBlue} />
+                        <Bar dataKey="duration" fill={COLORS.lightBlue} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -490,13 +490,13 @@ export default function StaffActivity() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Hours</p>
-                    <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
+                    <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.lightBlue }}>
                       {formatMinutes(totalAttendanceMinutes)}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">This month</p>
                   </div>
-                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                    <Timer className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
+                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.lightBlue}15` }}>
+                    <Timer className="h-5 w-5" style={{ color: COLORS.lightBlue }} />
                   </div>
                 </div>
               </CardContent>
@@ -549,7 +549,7 @@ export default function StaffActivity() {
                     <p className="text-xs text-slate-500 mt-1">Selected period</p>
                   </div>
                   <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.lightGreen}15` }}>
-                    <Calendar className="h-5 w-5" style={{ color: COLORS.lightGreen }} />
+                    <CalendarIcon className="h-5 w-5" style={{ color: COLORS.lightGreen }} />
                   </div>
                 </div>
               </CardContent>
@@ -559,7 +559,7 @@ export default function StaffActivity() {
           {/* Staff Attendance Report Table */}
           <Card className="border border-slate-200 shadow-sm">
             <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+              <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
                 <Users className="h-5 w-5" />
                 Staff Monthly Attendance Report
               </CardTitle>
@@ -570,7 +570,7 @@ export default function StaffActivity() {
             <CardContent className="p-0">
               {!attendanceReport?.staff_report || attendanceReport.staff_report.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <Calendar className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                  <CalendarIcon className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                   <p>No attendance data for this month</p>
                 </div>
               ) : (
@@ -608,14 +608,14 @@ export default function StaffActivity() {
                               </Badge>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="font-semibold" style={{ color: COLORS.deepBlue }}>
+                              <span className="font-semibold" style={{ color: COLORS.lightBlue }}>
                                 {staff.days_present}
                               </span>
                               <span className="text-slate-400 text-sm"> days</span>
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex flex-col">
-                                <span className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
+                                <span className="font-bold text-lg" style={{ color: COLORS.lightBlue }}>
                                   {staff.total_hours}
                                 </span>
                                 <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
@@ -662,7 +662,7 @@ export default function StaffActivity() {
             <CardHeader>
               <CardTitle 
                 className="text-lg font-outfit" 
-                style={{ color: COLORS.deepBlue }}
+                style={{ color: COLORS.lightBlue }}
               >
                 Send Task Reminders
               </CardTitle>
@@ -726,7 +726,7 @@ export default function StaffActivity() {
             <CardHeader>
               <CardTitle 
                 className="text-lg font-outfit flex items-center gap-2" 
-                style={{ color: COLORS.deepBlue }}
+                style={{ color: COLORS.lightBlue }}
               >
                 <CheckSquare className="h-5 w-5" />
                 Employee To-Do List
@@ -773,13 +773,13 @@ export default function StaffActivity() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Tasks</p>
-                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.deepBlue }}>
+                      <p className="text-3xl font-bold mt-2 font-outfit" style={{ color: COLORS.lightBlue }}>
                         {taskAnalytics?.total || 0}
                       </p>
                       <p className="text-xs text-slate-500 mt-1">This period</p>
                     </div>
-                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                      <Briefcase className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
+                    <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.lightBlue}15` }}>
+                      <Briefcase className="h-5 w-5" style={{ color: COLORS.lightBlue }} />
                     </div>
                   </div>
                 </CardContent>
@@ -842,7 +842,7 @@ export default function StaffActivity() {
               {/* Status Pie Chart */}
               <Card className="border border-slate-200 shadow-sm">
                 <CardHeader className="pb-2 border-b border-slate-100">
-                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
                     <PieIcon className="h-5 w-5" />
                     Task Status Distribution
                   </CardTitle>
@@ -885,7 +885,7 @@ export default function StaffActivity() {
               {/* Priority Bar Chart */}
               <Card className="border border-slate-200 shadow-sm">
                 <CardHeader className="pb-2 border-b border-slate-100">
-                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                  <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.lightBlue }}>
                     <BarChart3 className="h-5 w-5" />
                     Task Priority Distribution
                   </CardTitle>
