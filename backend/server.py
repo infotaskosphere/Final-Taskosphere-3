@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
@@ -39,7 +40,30 @@ security = HTTPBearer()
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-   
+
+async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if user is None:
+        raise credentials_exception
+        
+    if isinstance(user.get("created_at"), str):
+        user["created_at"] = datetime.fromisoformat(user["created_at"])
+        
+    return User(**user)
+
 app = FastAPI()
 @app.on_event("startup")
 async def create_indexes():
@@ -60,7 +84,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ��������� ALL MODELS ���������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# ��������� ALL MODELS ����������������������������������������������
 class UserPermissions(BaseModel):
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
@@ -506,28 +530,6 @@ async def login(credentials: UserLogin):
     access_token = create_access_token({"sub": user_obj.id})
     return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
    
-async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-        
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if user is None:
-        raise credentials_exception
-        
-    if isinstance(user.get("created_at"), str):
-        user["created_at"] = datetime.fromisoformat(user["created_at"])
-        
-    return User(**user)
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     # Explicitly build the response to guarantee the fields are included
