@@ -146,7 +146,7 @@ async def punch_attendance(
             raise HTTPException(status_code=400, detail="Already punched in today")
 
         # -------- GEO VALIDATION --------
-        if current_user.role not in ["admin", "manager"]:
+        if current_user["role"] not in ["admin", "manager"]:
             location = action_data.location
 
             if not location:
