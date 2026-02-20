@@ -205,7 +205,7 @@ async def record_attendance(
 # ================= TODAY =================
 
 @router.get("/today", response_model=Optional[Attendance])
-async def get_today_attendance(current_user: User = Depends(get_current_user)):
+async def get_today_attendance(current_user = Depends(get_current_user)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     attendance = await db.attendance.find_one(
@@ -227,7 +227,7 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
 # ================= HISTORY =================
 
 @router.get("/history", response_model=List[Attendance])
-async def get_attendance_history(current_user: User = Depends(get_current_user)):
+async def get_attendance_history(current_user = Depends(get_current_user)):
     query = {"user_id": current_user.id} if current_user.role == "staff" else {}
 
     attendance_list = await db.attendance.find(
@@ -247,7 +247,7 @@ async def get_attendance_history(current_user: User = Depends(get_current_user))
 # ================= MY SUMMARY =================
 
 @router.get("/my-summary")
-async def get_my_attendance_summary(current_user: User = Depends(get_current_user)):
+async def get_my_attendance_summary(current_user = Depends(get_current_user)):
 
     attendance_list = await db.attendance.find(
         {"user_id": current_user.id},
@@ -302,7 +302,7 @@ async def get_my_attendance_summary(current_user: User = Depends(get_current_use
 @router.get("/staff-report")
 async def get_staff_attendance_report(
     month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
 
     if current_user.role != "admin":
