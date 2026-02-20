@@ -3,6 +3,7 @@ import pytz
 import logging
 import smtplib
 from auth import get_current_user
+from backend.attendance import Attendance, AttendanceCreate
 from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
