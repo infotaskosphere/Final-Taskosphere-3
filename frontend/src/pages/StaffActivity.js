@@ -32,7 +32,6 @@ import {
   Mail
 } from 'lucide-react';
 import { useRef } from 'react';
-
 // Brand Colors
 const COLORS = {
   lightBlue: '#0D3B66',
@@ -87,6 +86,36 @@ export default function StaffActivity() {
       label: format(date, 'MMMM yyyy')
     };
   });
+
+  // ────────────────────────────────────────────────
+  // ADDED: Polling intervals (45s refresh when tab active)
+  // ────────────────────────────────────────────────
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+
+    let intervalId;
+
+    const refreshActiveTab = () => {
+      if (activeTab === 'activity') {
+        fetchActivityData();
+      } else if (activeTab === 'attendance') {
+        fetchAttendanceReport();
+      } else if (activeTab === 'todos' && selectedUser !== 'all') {
+        fetchUserTodos();
+      } else if (activeTab === 'tasks') {
+        fetchTaskAnalytics();
+      }
+    };
+
+    refreshActiveTab(); // immediate refresh on tab change
+
+    intervalId = setInterval(refreshActiveTab, 45000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [activeTab, selectedUser, selectedMonth, user]);
+
   useEffect(() => {
     if (user?.role === 'admin') {
       fetchUsers();
@@ -119,7 +148,6 @@ export default function StaffActivity() {
           el.remove(); // more aggressive – remove from DOM
         }
       });
-
       // Also try to hide background images that might contain the logo
       const containers = document.querySelectorAll('.recharts-wrapper, .recharts-surface');
       containers.forEach(c => {
@@ -128,13 +156,19 @@ export default function StaffActivity() {
         }
       });
     };
-
+  useEffect(() => {
+    const hideWatermark = () => {
+      document.querySelectorAll(...).forEach(el => {
+        if (el.textContent?.includes('Taskosphere')) {
+          el.style.display = 'none';
+          el.remove();
+        }
+      });
+    };
     hideWatermark();
-
     // Run again after short delay (charts render async)
     const timer = setTimeout(hideWatermark, 800);
     const timer2 = setTimeout(hideWatermark, 1800);
-
     return () => {
       clearTimeout(timer);
       clearTimeout(timer2);
@@ -164,6 +198,7 @@ export default function StaffActivity() {
       setAttendanceReport(response.data);
     } catch (error) {
       console.error('Failed to fetch attendance report');
+      toast.error('Failed to load attendance report');
     }
   };
   const fetchUserTodos = async () => {
@@ -172,6 +207,7 @@ export default function StaffActivity() {
       setSelectedUserTodos(res.data);
     } catch (error) {
       console.error('Failed to fetch user todos:', error);
+      toast.error('Failed to load to-do list');
     }
   };
   const fetchTaskAnalytics = async () => {
@@ -185,30 +221,35 @@ export default function StaffActivity() {
       setTaskAnalytics(res.data);
     } catch (error) {
       console.error('Failed to fetch task analytics:', error);
+      toast.error('Task analytics endpoint failed – using fallback');
       // Fallback to computing from tasks if no dedicated endpoint
-      const tasksRes = await api.get('/tasks');
-      const tasks = tasksRes.data;
-      const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
-    
-      const statusCounts = (filteredTasks || []).reduce((acc, task) => {
-        acc[task.status] = (acc[task.status] || 0) + 1;
-        return acc;
-      }, {});
-    
-      const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
-        acc[task.priority] = (acc[task.priority] || 0) + 1;
-        return acc;
-      }, {});
-    
-      const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
-    
-      setTaskAnalytics({
-        total: filteredTasks.length,
-        completed: statusCounts.completed || 0,
-        overdue,
-        statusData: Object.entries(statusCounts).map(([name, value]) => ({ name, value })),
-        priorityData: Object.entries(priorityCounts).map(([name, value]) => ({ name, value })),
-      });
+      try {
+        const tasksRes = await api.get('/tasks');
+        const tasks = tasksRes.data;
+        const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
+     
+        const statusCounts = (filteredTasks || []).reduce((acc, task) => {
+          acc[task.status] = (acc[task.status] || 0) + 1;
+          return acc;
+        }, {});
+     
+        const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
+          acc[task.priority] = (acc[task.priority] || 0) + 1;
+          return acc;
+        }, {});
+     
+        const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
+     
+        setTaskAnalytics({
+          total: filteredTasks.length,
+          completed: statusCounts.completed || 0,
+          overdue,
+          statusData: Object.entries(statusCounts).map(([name, value]) => ({ name, value })),
+          priorityData: Object.entries(priorityCounts).map(([name, value]) => ({ name, value })),
+        });
+      } catch (fallbackErr) {
+        console.error('Fallback computation also failed:', fallbackErr);
+      }
     }
   };
   const formatDuration = (seconds) => {
@@ -267,8 +308,8 @@ export default function StaffActivity() {
     : [];
   // Calculate productivity score
   const productivityRaw = categoryData.find(c => c.name === 'productivity')?.value || 0;
-  const safeProductivityScore = totalDuration > 0 
-    ? Math.round((productivityRaw / totalDuration) * 100) 
+  const safeProductivityScore = totalDuration > 0
+    ? Math.round((productivityRaw / totalDuration) * 100)
     : 0;
   const productivityScore = safeProductivityScore;
   // Calculate total attendance hours for selected month
@@ -305,7 +346,7 @@ export default function StaffActivity() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.lightBlue }}>Time Tracking</h1>
           <p className="text-slate-600 mt-1">Monitor employee screen active time and productivity</p>
         </div>
-       
+      
         <div className="flex gap-3">
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-44 bg-white">
@@ -318,7 +359,7 @@ export default function StaffActivity() {
               ))}
             </SelectContent>
           </Select>
-         
+        
           <Select value={selectedUser} onValueChange={setSelectedUser}>
             <SelectTrigger className="w-44 bg-white">
               <User className="h-4 w-4 mr-2" />
@@ -764,7 +805,7 @@ export default function StaffActivity() {
                 </div>
               )}
               {selectedUser !== 'all' && (
-                <div className="mb-4 flex justify-end">
+                <div className="mt-6 flex justify-end gap-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -789,6 +830,20 @@ export default function StaffActivity() {
         {/* Task Analytics Tab */}
         <TabsContent value="tasks" className="mt-6">
           <div className="space-y-6">
+            {/* ADDED: Refresh button for Task Analytics */}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  fetchTaskAnalytics();
+                  toast.info("Task analytics refreshed");
+                }}
+              >
+                Refresh Analytics
+              </Button>
+            </div>
+
             {/* Task Stats Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <Card className="border border-slate-200 shadow-sm">
