@@ -353,12 +353,7 @@ class DocumentMovementUpdateRequest(BaseModel):
     notes: Optional[str] = None
 # ��������� ROUTER ���������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 api_router = APIRouter(prefix="/api")
-app.include_router(api_router)
 # ��������� HELPERS ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-# Root route
-@api_router.get("/")
-async def root():
-    return {"message": "Taskosphere API", "status": "running"}
 # Email Service Functions
 def send_birthday_email(recipient_email: str, client_name: str):
     """Send birthday wish email to client"""
@@ -451,10 +446,6 @@ async def get_task_analytics(
         "completed_tasks": completed,
         "pending_tasks": pending
     }
-# Root route
-@api_router.get("/")
-async def root():
-    return {"message": "Taskosphere API", "status": "running"}
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -483,20 +474,6 @@ def send_email(to_email: str, subject: str, body: str):
         return response.status_code == 202
     except Exception as e:
         raise Exception(f"SendGrid error: {str(e)}")
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-   
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return User(**user)
 # ��������� AUTH ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 # Auth routes
 @api_router.post("/auth/register", response_model=Token)
@@ -550,16 +527,12 @@ async def get_me(current_user: User = Depends(get_current_user)):
 # ��������� ATTENDANCE ROUTE ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 @api_router.post("/attendance")
 async def record_attendance(data: dict, current_user: User = Depends(get_current_user)):
-    # ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-    # YOUR EXISTING CODE ABOVE THIS POINT REMAINS UNTOUCHED
-    # ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
     if data["action"] == "punch_in":
-        # Your existing check for already punched in
-        if existing:
-            raise HTTPException(status_code=400, detail="Already punched in today")
         now = datetime.now(timezone.utc)
         today_str = now.date().isoformat()
-        # ── NEW: Late calculation ────────────────────────────────────────
+        existing = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Already punched in today")
         is_late = False
         late_by_minutes = 0
         expected_str = current_user.expected_start_time # "09:30" or similar or None
@@ -576,29 +549,42 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
                     if late_by_minutes > grace:
                         is_late = True
             except (ValueError, AttributeError):
-                # Invalid time format or missing field → skip late check silently
                 pass
-        # ������ Build document ��� add only the new fields ������������������������������������������������������������������������
         doc = {
+            "id": str(uuid.uuid4()),
             "user_id": current_user.id,
             "date": today_str,
-            "punch_in": now,
-            # ... ALL your existing fields stay here exactly as they are ...
-            # ������ NEW fields (added only)
+            "punch_in": now.isoformat(),
+            "punch_out": None,
+            "duration_minutes": None,
             "is_late": is_late,
             "late_by_minutes": late_by_minutes if is_late else 0,
-            "location": data.get("location") # frontend sends {latitude, longitude}
+            "location": data.get("location")
         }
         await db.attendance.insert_one(doc)
-        # Return EXACTLY what frontend already expects ��� just with extra optional fields
-        return {
-            "status": "punched_in",
-            # ... whatever else you already return ...
-            "is_late": is_late, # new ��� safe to add
-            "late_by_minutes": late_by_minutes # new ��� safe to add
-        }
-    # ������ punch_out branch remains 100% unchanged ������
-    # ... your existing punch_out code ...
+        attendance = Attendance(**doc)
+        attendance.punch_in = now
+        return attendance
+    elif data["action"] == "punch_out":
+        now = datetime.now(timezone.utc)
+        today_str = now.date().isoformat()
+        existing = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=400, detail="No punch in record found")
+        if existing.get("punch_out"):
+            raise HTTPException(status_code=400, detail="Already punched out today")
+        punch_in_time = datetime.fromisoformat(existing["punch_in"]) if isinstance(existing["punch_in"], str) else existing["punch_in"]
+        duration = int((now - punch_in_time).total_seconds() / 60)
+        await db.attendance.update_one(
+            {"user_id": current_user.id, "date": today_str},
+            {"$set": {"punch_out": now.isoformat(), "duration_minutes": duration}}
+        )
+        updated = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
+        if isinstance(updated["punch_in"], str):
+            updated["punch_in"] = datetime.fromisoformat(updated["punch_in"])
+        if isinstance(updated["punch_out"], str):
+            updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
+        return Attendance(**updated)
 # ��������� USER ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 # User routes
 @api_router.get("/users", response_model=List[User])
@@ -976,47 +962,6 @@ async def update_document_movement(
     return {"message": "Movement updated successfully"}
 # ��������� ATTENDANCE ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������
 # Attendance routes
-@api_router.post("/attendance", response_model=Attendance)
-async def record_attendance(action_data: AttendanceCreate, current_user: User = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    existing = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-   
-    if action_data.action == "punch_in":
-        if existing:
-            raise HTTPException(status_code=400, detail="Already punched in today")
-       
-        attendance = Attendance(
-            user_id=current_user.id,
-            date=today,
-            punch_in=datetime.now(timezone.utc)
-        )
-       
-        doc = attendance.model_dump()
-        doc["punch_in"] = doc["punch_in"].isoformat()
-        await db.attendance.insert_one(doc)
-        return attendance
-   
-    elif action_data.action == "punch_out":
-        if not existing:
-            raise HTTPException(status_code=400, detail="No punch in record found")
-        if existing.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out today")
-       
-        punch_out_time = datetime.now(timezone.utc)
-        punch_in_time = datetime.fromisoformat(existing["punch_in"]) if isinstance(existing["punch_in"], str) else existing["punch_in"]
-        duration = int((punch_out_time - punch_in_time).total_seconds() / 60)
-       
-        await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today},
-            {"$set": {"punch_out": punch_out_time.isoformat(), "duration_minutes": duration}}
-        )
-       
-        updated = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
-        if isinstance(updated["punch_in"], str):
-            updated["punch_in"] = datetime.fromisoformat(updated["punch_in"])
-        if isinstance(updated["punch_out"], str):
-            updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
-        return Attendance(**updated)
 @api_router.get("/attendance/today", response_model=Optional[Attendance])
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -2192,5 +2137,4 @@ async def get_staff_rankings(
         "period": period,
         "rankings": rankings[:50]
     }
-# ================= INCLUDE ROUTER =================
 app.include_router(api_router)
