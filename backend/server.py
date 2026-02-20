@@ -2,7 +2,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 import pytz
 import logging
 import smtplib
-from auth import get_current_user
 from datetime import datetime, timedelta
 from bson import ObjectId
 from dateutil import parser
@@ -506,6 +505,29 @@ async def login(credentials: UserLogin):
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
     access_token = create_access_token({"sub": user_obj.id})
     return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
+   
+async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if user is None:
+        raise credentials_exception
+        
+    if isinstance(user.get("created_at"), str):
+        user["created_at"] = datetime.fromisoformat(user["created_at"])
+        
+    return User(**user)
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     # Explicitly build the response to guarantee the fields are included
@@ -525,7 +547,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "is_active": current_user.is_active
     }
-# ��������� ATTENDANCE ROUTE ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# ATTENDANCE ROUTE 
 @api_router.post("/attendance")
 async def record_attendance(data: dict, current_user: User = Depends(get_current_user)):
     if data["action"] == "punch_in":
@@ -586,7 +608,7 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
         if isinstance(updated["punch_out"], str):
             updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
         return Attendance(**updated)
-# ��������� USER ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(get_current_user)):
@@ -629,7 +651,7 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted successfully"}
-# ��������� TASK ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+
 # Task routes
 @api_router.post("/tasks", response_model=Task)
 async def create_task(task_data: TaskCreate, current_user: User = Depends(get_current_user)):
@@ -723,8 +745,7 @@ async def delete_task(task_id: str, current_user: User = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task deleted successfully"}
-# ��������� DSC ROUTES ���������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-# DSC routes
+# Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
     dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
