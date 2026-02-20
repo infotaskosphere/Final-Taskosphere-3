@@ -56,6 +56,6 @@ api.interceptors.response.use(
 
 export default api;
 export const fetchDashboardData = async () => {
-  const response = await api.get("/dashboard"); // or whatever your endpoint is
+  const response = await api.get("/dashboard/stats");
   return response.data;
 };
