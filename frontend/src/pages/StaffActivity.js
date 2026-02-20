@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -37,6 +37,12 @@ import {
   Timer,
   Mail
 } from 'lucide-react';
+import Chart from 'chart.js/auto';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
+
+// Register the datalabels plugin globally
+Chart.register(ChartDataLabels);
+
 // Brand Colors
 const COLORS = {
   lightBlue: '#0D3B66',
@@ -213,19 +219,19 @@ export default function StaffActivity() {
         const tasksRes = await api.get('/tasks');
         const tasks = tasksRes.data;
         const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
-   
+  
         const statusCounts = (filteredTasks || []).reduce((acc, task) => {
           acc[task.status] = (acc[task.status] || 0) + 1;
           return acc;
         }, {});
-   
+  
         const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
           acc[task.priority] = (acc[task.priority] || 0) + 1;
           return acc;
         }, {});
-   
+  
         const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
-   
+  
         setTaskAnalytics({
           total: filteredTasks.length,
           completed: statusCounts.completed || 0,
@@ -274,24 +280,130 @@ export default function StaffActivity() {
         return acc;
       }, [])
     : [];
-  // Top apps data for bar chart
-  const topApps = Array.isArray(filteredData)
-    ? filteredData
-        .flatMap(d => Array.isArray(d?.apps_list) ? d.apps_list : [])
-        .reduce((acc, app) => {
-          if (!app?.name) return acc;
-          const existing = acc.find(a => a.name === app.name);
-          if (existing) {
-            existing.duration += Number(app.duration) || 0;
-            existing.count += Number(app.count) || 0;
-          } else {
-            acc.push({ ...app, duration: Number(app.duration) || 0, count: Number(app.count) || 0 });
+// Modified top apps data processing to exclude any app containing 'taskosphere' (case-insensitive)
+const topApps = Array.isArray(filteredData)
+  ? filteredData
+      .flatMap(d => Array.isArray(d?.apps_list) ? d.apps_list : [])
+      .reduce((acc, app) => {
+        if (!app?.name || app.name.toLowerCase().includes('taskosphere')) return acc; // Skip if no name or contains 'taskosphere'
+        const existing = acc.find(a => a.name === app.name);
+        if (existing) {
+          existing.duration += Number(app.duration) || 0;
+          existing.count += Number(app.count) || 0;
+        } else {
+          acc.push({ ...app, duration: Number(app.duration) || 0, count: Number(app.count) || 0 });
+        }
+        return acc;
+      }, [])
+      .sort((a, b) => b.duration - a.duration)
+      .slice(0, 8)
+  : [];
+// Assuming Chart.js is included in your project, along with chartjs-plugin-datalabels for labels
+// <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+// <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+// Register the datalabels plugin
+// Prepare bubble chart data
+// Assuming duration is in seconds; convert to hours for y-axis (adjust if units differ)
+const bubbleData = topApps.map((app, index) => ({
+  x: index + 1, // X-axis as rank (1 to 8)
+  y: app.duration / 3600, // Y-axis as hours spent
+  r: Math.max(5, Math.sqrt(app.count) * 10), // Radius based on count (min 5 for visibility, scale as needed)
+  label: app.name // Custom property for tooltip/label
+}));
+// Array of colors for bubbles (cycle through shades of blue, green, purple, etc.)
+const colors = [
+  'rgba(0, 123, 255, 0.7)', // Blue
+  'rgba(40, 167, 69, 0.7)', // Green
+  'rgba(102, 16, 242, 0.7)', // Purple
+  'rgba(23, 162, 184, 0.7)', // Cyan
+  'rgba(220, 53, 69, 0.7)', // Red
+  'rgba(255, 193, 7, 0.7)', // Yellow
+  'rgba(255, 87, 34, 0.7)', // Orange
+  'rgba(134, 142, 150, 0.7)' // Gray
+];
+// Chart configuration
+const chartRef = useRef(null);
+const chartInstanceRef = useRef(null); // To store the chart instance for cleanup
+
+useEffect(() => {
+  if (chartRef.current) {
+    const ctx = chartRef.current.getContext('2d');
+
+    // Destroy existing chart instance if it exists (to prevent duplicates on re-render)
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy();
+    }
+
+    // Create new chart instance
+    chartInstanceRef.current = new Chart(ctx, {
+      type: 'bubble',
+      data: {
+        datasets: [{
+          label: 'Time Spent',
+          data: bubbleData,
+          backgroundColor: bubbleData.map((_, index) => colors[index % colors.length]),
+          borderColor: bubbleData.map((_, index) => colors[index % colors.length].replace('0.7', '1')),
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            display: false // Hide legend if not needed
+          },
+          datalabels: {
+            color: '#333',
+            anchor: 'end',
+            align: 'end',
+            offset: 4,
+            formatter: (value, context) => {
+              return context.dataset.data[context.dataIndex].label; // Display app name as label
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const data = context.raw;
+                return `${data.label}: ${data.y.toFixed(2)} hours, Count: ${Math.pow(data.r / 10, 2)}`; // Adjust based on radius scaling (reverse sqrt)
+              }
+            }
           }
-          return acc;
-        }, [])
-        .sort((a, b) => b.duration - a.duration)
-        .slice(0, 8)
-    : [];
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            position: 'bottom',
+            title: {
+              display: true,
+              text: 'App Rank'
+            },
+            min: 0.5,
+            max: topApps.length + 0.5,
+            ticks: {
+              stepSize: 1
+            }
+          },
+          y: {
+            type: 'linear',
+            title: {
+              display: true,
+              text: 'Time Spent (Hours)'
+            },
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  }
+
+  // Cleanup on unmount or data change
+  return () => {
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy();
+    }
+  };
+}, [topApps]); // Depend on topApps to recreate chart when data changes
   // Calculate productivity score
   const productivityRaw = categoryData.find(c => c.name === 'productivity')?.value || 0;
   const safeProductivityScore = totalDuration > 0
@@ -332,7 +444,7 @@ export default function StaffActivity() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.lightBlue }}>Time Tracking</h1>
           <p className="text-slate-600 mt-1">Monitor employee screen active time and productivity</p>
         </div>
-     
+    
         <div className="flex gap-3">
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-44 bg-white">
@@ -345,7 +457,7 @@ export default function StaffActivity() {
               ))}
             </SelectContent>
           </Select>
-       
+      
           <Select value={selectedUser} onValueChange={setSelectedUser}>
             <SelectTrigger className="w-44 bg-white">
               <User className="h-4 w-4 mr-2" />
@@ -504,6 +616,7 @@ export default function StaffActivity() {
                   </div>
                 ) : (
                   <div className="h-[340px] w-full">
+                    <canvas ref={chartRef} style={{ width: '100%', height: '100%' }} />
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart
                         data={topApps}
