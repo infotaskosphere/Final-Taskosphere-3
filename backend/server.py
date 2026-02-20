@@ -2160,6 +2160,22 @@ async def get_staff_rankings(
             0.25 * speed_score
         )
 
+        # ================= STAFF ACTIVITY =================
+        activities = await db.staff_activity.find(
+            {"user_id": uid, "timestamp": {"$gte": start_date.isoformat() if start_date else "1970-01-01"}},
+            {"_id": 0}
+        ).to_list(None)
+
+        productive_duration = 0
+        total_duration = 0
+        for act in activities:
+            duration = act.get("duration_seconds", 0)
+            total_duration += duration
+            if act.get("category") == "productivity":
+                productive_duration += duration
+
+        productivity_percent = (productive_duration / total_duration * 100) if total_duration > 0 else 0
+
         rankings.append({
             "user_id": uid,
             "name": user.get("full_name", "Unknown"),
@@ -2168,6 +2184,7 @@ async def get_staff_rankings(
             "score": round(efficiency, 2),
             "hours_worked": round(total_minutes / 60, 2),
             "completion_percent": round(completion_percent, 2),
+            "productivity_percent": round(productivity_percent, 2)
         })
 
     rankings.sort(key=lambda x: x["score"], reverse=True)
