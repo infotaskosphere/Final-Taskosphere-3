@@ -11,14 +11,13 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff, 
-  CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase, 
-  MoreVertical, Mail, Phone, Calendar, Camera, Cake 
+import {
+  Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff,
+  CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
+  MoreVertical, Mail, Phone, Calendar, Camera, Cake
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -27,7 +26,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Department categories with colors
 const DEPARTMENTS = [
   { value: 'gst', label: 'GST', color: '#EF4444' },
@@ -41,27 +39,24 @@ const DEPARTMENTS = [
   { value: 'dsc', label: 'DSC', color: '#14B8A6' },
   { value: 'other', label: 'OTHER', color: '#6B7280' },
 ];
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
-  
+ 
   return (
-    <span 
+    <span
       className={`inline-flex items-center font-semibold rounded-full ${
         size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'
       }`}
-      style={{ 
+      style={{
         background: `${deptInfo.color}15`,
         color: deptInfo.color,
         border: `1px solid ${deptInfo.color}30`
@@ -71,11 +66,10 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
-
 const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS, isAdmin }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
-  
+ 
   const getRoleIcon = (role) => {
     switch(role) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -83,7 +77,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
-  
+ 
   const getRoleStyle = (role) => {
     switch(role) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -91,11 +85,10 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
-  
+ 
   const roleStyle = getRoleStyle(userData.role);
-
   return (
-    <motion.div 
+    <motion.div
       variants={itemVariants}
       className="group relative bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 hover:shadow-xl hover:border-blue-200 transition-all duration-300 hover:-translate-y-1"
       onMouseEnter={() => setShowActions(true)}
@@ -128,7 +121,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
           </button>
         )}
       </div>
-
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -161,7 +153,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
           </div>
         </div>
       </div>
-
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => (
@@ -169,7 +160,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
           ))}
         </div>
       )}
-
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -193,7 +183,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
     </motion.div>
   );
 };
-
 export default function Users() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -214,6 +203,9 @@ export default function Users() {
     phone: '',
     birthday: '',
     profile_picture: '',
+    punch_in_time: '',
+    grace_time: '',
+    punch_out_time: '',
   });
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
@@ -230,14 +222,12 @@ export default function Users() {
     can_send_reminders: false,
   });
   const [loading, setLoading] = useState(false);
-
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
       fetchClients();
     }
   }, [isAdmin]);
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -246,7 +236,6 @@ export default function Users() {
       toast.error('Failed to fetch users');
     }
   };
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -255,7 +244,6 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
-
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
@@ -264,12 +252,10 @@ export default function Users() {
       console.error('Failed to fetch permissions');
     }
   };
-
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
-
   const handleDepartmentChange = (dept) => {
     setFormData(prev => ({
       ...prev,
@@ -278,11 +264,9 @@ export default function Users() {
         : [...prev.departments, dept]
     }));
   };
-
   const handleProfilePictureChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     try {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -293,7 +277,6 @@ export default function Users() {
       toast.error('Failed to upload profile picture');
     }
   };
-
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -312,7 +295,6 @@ export default function Users() {
       setLoading(false);
     }
   };
-
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
@@ -324,10 +306,12 @@ export default function Users() {
       phone: userData.phone || '',
       birthday: userData.birthday || '',
       profile_picture: userData.profile_picture || '',
+      punch_in_time: userData.punch_in_time || '',
+      grace_time: userData.grace_time || '',
+      punch_out_time: userData.punch_out_time || '',
     });
     setDialogOpen(true);
   };
-
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
@@ -338,13 +322,11 @@ export default function Users() {
       toast.error('Failed to delete user');
     }
   };
-
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
     await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
-
   const toggleClientAssignment = (clientId) => {
     setPermissions(prev => ({
       ...prev,
@@ -353,7 +335,6 @@ export default function Users() {
         : [...prev.assigned_clients, clientId]
     }));
   };
-
   const handleSavePermissions = async () => {
     setLoading(true);
     try {
@@ -366,14 +347,12 @@ export default function Users() {
       setLoading(false);
     }
   };
-
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
-
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -385,10 +364,9 @@ export default function Users() {
       </div>
     );
   }
-
   return (
-    <motion.div 
-      className="space-y-6" 
+    <motion.div
+      className="space-y-6"
       initial="hidden"
       animate="visible"
       variants={containerVariants}
@@ -400,10 +378,10 @@ export default function Users() {
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button 
+            <Button
               className="rounded-xl font-medium text-white w-full md:w-auto"
               style={{ background: COLORS.deepBlue }}
-              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '' }); }}
+              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '', grace_time: '', punch_out_time: '' }); }}
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Team Member
@@ -434,7 +412,6 @@ export default function Users() {
                   </label>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="full_name">Full Name</Label>
@@ -445,7 +422,6 @@ export default function Users() {
                   <Input id="email" name="email" type="email" value={formData.email} onChange={handleInputChange} />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="password">{selectedUser ? 'New Password (optional)' : 'Password'}</Label>
@@ -456,7 +432,6 @@ export default function Users() {
                   <Input id="phone" name="phone" value={formData.phone} onChange={handleInputChange} />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="birthday">Birthdate</Label>
@@ -474,7 +449,20 @@ export default function Users() {
                   </Select>
                 </div>
               </div>
-
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="punch_in_time">Punch In Time</Label>
+                  <Input id="punch_in_time" name="punch_in_time" type="time" value={formData.punch_in_time} onChange={handleInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="grace_time">Grace Time</Label>
+                  <Input id="grace_time" name="grace_time" type="time" value={formData.grace_time} onChange={handleInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="punch_out_time">Punch Out Time</Label>
+                  <Input id="punch_out_time" name="punch_out_time" type="time" value={formData.punch_out_time} onChange={handleInputChange} />
+                </div>
+              </div>
               <div>
                 <Label>Departments</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-2">
@@ -502,7 +490,6 @@ export default function Users() {
           </DialogContent>
         </Dialog>
       </div>
-
       <div className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -517,7 +504,6 @@ export default function Users() {
           </TabsList>
         </Tabs>
       </div>
-
       <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredUsers.length === 0 ? (
           <div className="col-span-full text-center py-16">
@@ -532,7 +518,6 @@ export default function Users() {
           ))
         )}
       </motion.div>
-
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -541,7 +526,6 @@ export default function Users() {
             </DialogTitle>
             <DialogDescription>Configure access for {selectedUserForPermissions?.full_name}</DialogDescription>
           </DialogHeader>
-
           <div className="space-y-4 py-4">
             <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
               <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Data Access</h4>
@@ -560,7 +544,6 @@ export default function Users() {
                 </div>
               ))}
             </div>
-
             <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
               <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UsersIcon className="h-4 w-4" /> Staff Management</h4>
               {[
@@ -574,7 +557,6 @@ export default function Users() {
                 </div>
               ))}
             </div>
-
             <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
               <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UserIcon className="h-4 w-4" /> Assigned Clients</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
