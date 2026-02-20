@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import uuid
 import math
 
-from backend.server import db
+from backend.database import db
 from backend.server import get_current_user
 from backend.server import User
 
