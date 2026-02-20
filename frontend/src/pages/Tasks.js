@@ -13,11 +13,10 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User, LayoutGrid, List, Filter, CheckCircle, Clock, Play, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Users, X, Repeat, Calendar, Building2, User, LayoutGrid, List, Filter, Circle, ArrowRight, Check, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -25,7 +24,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Department categories for CA/CS firms
 const DEPARTMENTS = [
   { value: 'gst', label: 'GST' },
@@ -39,10 +37,8 @@ const DEPARTMENTS = [
   { value: 'dsc', label: 'DSC' },
   { value: 'other', label: 'OTHER' },
 ];
-
 // Predefined task categories for CA/CS firms (alias for backward compatibility)
 const TASK_CATEGORIES = DEPARTMENTS;
-
 // Recurrence pattern options
 const RECURRENCE_PATTERNS = [
   { value: 'daily', label: 'Daily' },
@@ -50,7 +46,6 @@ const RECURRENCE_PATTERNS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
 ];
-
 // Status colors with gradients for cards
 const STATUS_STYLES = {
   pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do' },
@@ -60,38 +55,56 @@ const STATUS_STYLES = {
   overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
 };
 
+const STATUS_GRADIENTS = {
+  overdue: 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)',
+  pending: 'linear-gradient(135deg, #fef3c7 0%, #f59e0b 100%)',
+  in_progress: 'linear-gradient(135deg, #dbeafe 0%, #3b82f6 100%)',
+  completed: 'linear-gradient(135deg, #d1fae5 0%, #10b981 100%)',
+  review: 'linear-gradient(135deg, #e9d5ff 0%, #a855f7 100%)',
+};
 // Priority colors
 const PRIORITY_STYLES = {
-  low: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'LOW' },
+  low: { bg: 'bg-green-100', text: 'text-green-600', label: 'LOW' },
   medium: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'MEDIUM' },
   high: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'HIGH' },
   critical: { bg: 'bg-red-100', text: 'text-red-700', label: 'CRITICAL' },
 };
-
 // Card gradient styles based on status/priority
 const getCardGradient = (task, isOverdue) => {
   if (isOverdue) {
-    // Red gradient for overdue tasks
     return 'linear-gradient(135deg, rgba(254, 202, 202, 0.6) 0%, rgba(252, 165, 165, 0.4) 50%, rgba(248, 113, 113, 0.2) 100%)';
   }
-  if (task.priority === 'high' || task.priority === 'critical') {
-    // Orange gradient for high priority/urgent tasks
-    return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
+  if (task.status === 'completed') {
+    return 'linear-gradient(135deg, rgba(167, 243, 208, 0.6) 0%, rgba(134, 239, 172, 0.4) 50%, rgba(110, 231, 148, 0.2) 100%)';
+  }
+  if (task.status === 'in_progress') {
+    return 'linear-gradient(135deg, rgba(191, 219, 254, 0.6) 0%, rgba(147, 197, 253, 0.4) 50%, rgba(96, 165, 250, 0.2) 100%)';
+  }
+  if (task.status === 'pending') {
+    if (task.priority === 'high' || task.priority === 'critical') {
+      return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
+    } else {
+      return 'linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, rgba(253, 230, 138, 0.4) 50%, rgba(252, 211, 77, 0.2) 100%)';
+    }
   }
   return 'none';
 };
-
+const getPriorityLightBg = (displayStatus) => {
+  if (displayStatus === 'overdue') return 'bg-red-100 text-red-700';
+  if (displayStatus === 'pending') return 'bg-amber-100 text-amber-700';
+  if (displayStatus === 'in_progress') return 'bg-blue-100 text-blue-700';
+  if (displayStatus === 'completed') return 'bg-emerald-100 text-emerald-700';
+  return 'bg-slate-100 text-slate-600';
+};
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 export default function Tasks() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -102,13 +115,12 @@ export default function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
-  
+ 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
-
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -123,13 +135,11 @@ export default function Tasks() {
     recurrence_pattern: 'monthly',
     recurrence_interval: 1,
   });
-
   useEffect(() => {
     fetchTasks();
     fetchUsers();
     fetchClients();
   }, []);
-
   const fetchTasks = async () => {
     try {
       const response = await api.get('/tasks');
@@ -138,7 +148,6 @@ export default function Tasks() {
       toast.error('Failed to fetch tasks');
     }
   };
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -147,7 +156,6 @@ export default function Tasks() {
       console.error('Failed to fetch users');
     }
   };
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -156,11 +164,9 @@ export default function Tasks() {
       console.error('Failed to fetch clients');
     }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const taskData = {
         ...formData,
@@ -169,7 +175,6 @@ export default function Tasks() {
         client_id: formData.client_id || null,
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       };
-
       if (editingTask) {
         await api.put(`/tasks/${editingTask.id}`, taskData);
         toast.success('Task updated successfully!');
@@ -177,7 +182,6 @@ export default function Tasks() {
         await api.post('/tasks', taskData);
         toast.success('Task created successfully!');
       }
-
       setDialogOpen(false);
       resetForm();
       fetchTasks();
@@ -187,7 +191,6 @@ export default function Tasks() {
       setLoading(false);
     }
   };
-
   const handleEdit = (task) => {
     setEditingTask(task);
     setFormData({
@@ -206,10 +209,8 @@ export default function Tasks() {
     });
     setDialogOpen(true);
   };
-
   const handleDelete = async (taskId) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
-
     try {
       await api.delete(`/tasks/${taskId}`);
       toast.success('Task deleted successfully!');
@@ -218,7 +219,6 @@ export default function Tasks() {
       toast.error('Failed to delete task');
     }
   };
-
   // Quick status update from task card
   const handleQuickStatusChange = async (task, newStatus) => {
     try {
@@ -236,7 +236,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-      
+     
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
       fetchTasks();
@@ -244,7 +244,6 @@ export default function Tasks() {
       toast.error('Failed to update task status');
     }
   };
-
   const resetForm = () => {
     setFormData({
       title: '',
@@ -262,7 +261,6 @@ export default function Tasks() {
     });
     setEditingTask(null);
   };
-
   const toggleSubAssignee = (userId) => {
     setFormData(prev => {
       const isSelected = prev.sub_assignees.includes(userId);
@@ -273,35 +271,29 @@ export default function Tasks() {
       }
     });
   };
-
   const getUserName = (userId) => {
     const foundUser = users.find(u => u.id === userId);
     return foundUser?.full_name || 'Unassigned';
   };
-
   const getClientName = (clientId) => {
     const client = clients.find(c => c.id === clientId);
     return client?.company_name || 'No Client';
   };
-
   const getCategoryLabel = (value) => {
     const cat = TASK_CATEGORIES.find(c => c.value === value);
     return cat ? cat.label : value || 'Other';
   };
-
   // Check if task is overdue
   const isOverdue = (task) => {
     if (task.status === 'completed') return false;
     if (!task.due_date) return false;
     return new Date(task.due_date) < new Date();
   };
-
   // Get task status for display
   const getDisplayStatus = (task) => {
     if (isOverdue(task)) return 'overdue';
     return task.status;
   };
-
   // Filter tasks
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -311,7 +303,6 @@ export default function Tasks() {
     const matchesCategory = filterCategory === 'all' || task.category === filterCategory;
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory;
   });
-
   // Stats
   const stats = {
     total: tasks.length,
@@ -320,9 +311,8 @@ export default function Tasks() {
     completed: tasks.filter(t => t.status === 'completed').length,
     overdue: tasks.filter(t => isOverdue(t)).length,
   };
-
   return (
-    <motion.div 
+    <motion.div
       className="space-y-6"
       variants={containerVariants}
       initial="hidden"
@@ -334,7 +324,7 @@ export default function Tasks() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
           <p className="text-slate-600 mt-1">Manage and track all your compliance tasks</p>
         </div>
-        
+       
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) resetForm();
@@ -372,7 +362,6 @@ export default function Tasks() {
                   data-testid="task-title-input"
                 />
               </div>
-
               {/* Description */}
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
@@ -386,7 +375,6 @@ export default function Tasks() {
                   data-testid="task-description-input"
                 />
               </div>
-
               {/* Client and Due Date Row */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -404,7 +392,6 @@ export default function Tasks() {
                       }
                     }}
                   >
-
                     <SelectTrigger className="border-slate-300">
                       <SelectValue placeholder="No Client" />
                     </SelectTrigger>
@@ -424,7 +411,6 @@ export default function Tasks() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="due_date">Due Date</Label>
                   <Input
@@ -437,7 +423,6 @@ export default function Tasks() {
                   />
                 </div>
               </div>
-
               {/* Assignee and Co-assignee Row */}
               {user?.role !== 'staff' && (
                 <div className="grid grid-cols-2 gap-4">
@@ -460,7 +445,6 @@ export default function Tasks() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="co_assignee">Co-assignees</Label>
                     <Popover>
@@ -489,7 +473,6 @@ export default function Tasks() {
                   </div>
                 </div>
               )}
-
               {/* Department Selection with Toggle Buttons */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">Department</Label>
@@ -502,16 +485,16 @@ export default function Tasks() {
                         type="button"
                         onClick={() => setFormData({ ...formData, category: dept.value })}
                         className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2
-                          ${isSelected 
-                            ? 'text-white shadow-md' 
+                          ${isSelected
+                            ? 'text-white shadow-md'
                             : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                           }`}
                         style={isSelected ? { background: COLORS.mediumBlue } : {}}
                         data-testid={`dept-${dept.value}`}
                       >
                         {isSelected && (
-                          <Switch 
-                            checked={true} 
+                          <Switch
+                            checked={true}
                             className="h-4 w-7 pointer-events-none"
                             style={{ background: 'rgba(255,255,255,0.3)' }}
                           />
@@ -522,7 +505,6 @@ export default function Tasks() {
                   })}
                 </div>
               </div>
-
               {/* Priority and Status Row */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -542,7 +524,6 @@ export default function Tasks() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="status">Status</Label>
                   <Select
@@ -560,7 +541,6 @@ export default function Tasks() {
                   </Select>
                 </div>
               </div>
-
               {/* Recurring Task Section */}
               <div className="border rounded-lg p-4 bg-slate-50 space-y-4">
                 <div className="flex items-center justify-between">
@@ -575,7 +555,7 @@ export default function Tasks() {
                     data-testid="task-recurring-switch"
                   />
                 </div>
-                
+               
                 {formData.is_recurring && (
                   <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                     <div className="space-y-2">
@@ -618,11 +598,10 @@ export default function Tasks() {
                   </div>
                 )}
               </div>
-
               <DialogFooter className="pt-4 border-t border-slate-200">
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => { setDialogOpen(false); resetForm(); }}
                   className="px-6"
                 >
@@ -641,7 +620,6 @@ export default function Tasks() {
           </DialogContent>
         </Dialog>
       </motion.div>
-
       {/* Stats Bar */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => setFilterStatus('all')}>
@@ -675,7 +653,6 @@ export default function Tasks() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Search and Filters */}
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4 items-center">
         <div className="relative flex-1 max-w-md">
@@ -688,7 +665,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
-        
+       
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -703,7 +680,6 @@ export default function Tasks() {
               <SelectItem value="overdue">Overdue</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={filterPriority} onValueChange={setFilterPriority}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Priority" />
@@ -716,7 +692,6 @@ export default function Tasks() {
               <SelectItem value="critical">Critical</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Category" />
@@ -728,7 +703,6 @@ export default function Tasks() {
               ))}
             </SelectContent>
           </Select>
-
           <div className="flex border rounded-lg overflow-hidden">
             <Button
               variant="ghost"
@@ -749,12 +723,11 @@ export default function Tasks() {
           </div>
         </div>
       </motion.div>
-
       {/* Task Cards Grid - Responsive with consistent card sizing */}
       <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
-        <motion.div 
-          className={viewMode === 'grid' 
-            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr' 
+        <motion.div
+          className={viewMode === 'grid'
+            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 auto-rows-fr'
             : 'space-y-3'}
           variants={containerVariants}
         >
@@ -770,10 +743,16 @@ export default function Tasks() {
               const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
               const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
               const cardGradient = getCardGradient(task, taskIsOverdue);
-              
+              const lightClass = getPriorityLightBg(displayStatus);
+              const isHighPriority = task.priority === 'high' || task.priority === 'critical';
+              let priorityGradient = isHighPriority ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' : null;
+              if (task.priority === 'critical') priorityGradient = 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)';
+              const priorityClass = `px-2.5 py-1 rounded-full text-xs font-semibold ${isHighPriority ? 'text-white' : lightClass}`;
+              const priorityBgStyle = isHighPriority ? { background: priorityGradient } : {};
+             
               return (
                 <motion.div key={task.id} variants={itemVariants} className="h-full">
-                  <Card 
+                  <Card
                     className={`border hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden group h-full rounded-2xl
                       ${taskIsOverdue ? 'border-red-300' : task.priority === 'high' || task.priority === 'critical' ? 'border-orange-300' : 'border-slate-200'}`}
                     style={{ background: cardGradient !== 'none' ? cardGradient : 'white', minHeight: '280px' }}
@@ -782,23 +761,15 @@ export default function Tasks() {
                     <CardContent className="p-3 sm:p-4 flex flex-col h-full">
                       {/* Status & Priority Tags */}
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
-                        <span 
-                          className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.text}`}
-                          style={{ 
-                            background: taskIsOverdue 
-                              ? 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)' 
-                              : statusStyle.bg.replace('bg-', '').includes('amber') ? '#fef3c7' : '#dbeafe'
-                          }}
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-xs font-semibold text-white`}
+                          style={{ background: STATUS_GRADIENTS[displayStatus] }}
                         >
                           {statusStyle.label}
                         </span>
-                        <span 
-                          className={`px-2.5 py-1 rounded-full text-xs font-semibold ${priorityStyle.text}`}
-                          style={{ 
-                            background: (task.priority === 'high' || task.priority === 'critical')
-                              ? 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)' 
-                              : priorityStyle.bg.replace('bg-', '').includes('blue') ? '#dbeafe' : '#f1f5f9'
-                          }}
+                        <span
+                          className={priorityClass}
+                          style={priorityBgStyle}
                         >
                           {priorityStyle.label}
                         </span>
@@ -809,12 +780,10 @@ export default function Tasks() {
                           </span>
                         )}
                       </div>
-
                       {/* Task Title - Fixed height */}
                       <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
                         {task.title}
                       </h3>
-
                       {/* Description - Fixed height for equal cards */}
                       <div className="h-[40px] mb-3">
                         {task.description ? (
@@ -823,7 +792,6 @@ export default function Tasks() {
                           <p className="text-xs text-slate-400 italic">No description</p>
                         )}
                       </div>
-
                       {/* Meta Info - flex-1 to push footer down */}
                       <div className="space-y-1.5 text-xs text-slate-500 flex-1 min-h-[50px]">
                         {task.client_id && (
@@ -843,51 +811,43 @@ export default function Tasks() {
                           </div>
                         )}
                       </div>
-
                       {/* Quick Status Change Buttons - Consistent pill shape */}
-                      <div className="flex items-center gap-2 mt-auto pt-3 border-t border-slate-200/50">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-auto pt-3 border-t border-slate-200/50">
                         <button
                           onClick={() => handleQuickStatusChange(task, 'pending')}
-                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                            ${task.status === 'pending' 
-                              ? 'bg-amber-500 text-white shadow-md' 
-                              : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
+                          className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'pending' ? (task.priority === 'high' || task.priority === 'critical' ? 'bg-orange-500 text-white shadow-md' : 'bg-amber-500 text-white shadow-md') : 'bg-slate-100 text-slate-600 hover:bg-amber-100 hover:text-amber-700'}`}
                           title="Mark as To Do"
                           data-testid={`status-todo-${task.id}`}
                         >
-                          <Clock className="h-3.5 w-3.5" />
+                          <Circle className="h-3.5 w-3.5" />
                           <span>To Do</span>
                         </button>
                         <button
                           onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                            ${task.status === 'in_progress' 
-                              ? 'bg-blue-500 text-white shadow-md' 
-                              : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
+                          className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'in_progress' ? 'bg-blue-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
                           title="Mark as In Progress"
                           data-testid={`status-progress-${task.id}`}
                         >
-                          <Play className="h-3.5 w-3.5" />
+                          <ArrowRight className="h-3.5 w-3.5" />
                           <span>Progress</span>
                         </button>
                         <button
                           onClick={() => handleQuickStatusChange(task, 'completed')}
-                          className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                            ${task.status === 'completed' 
-                              ? 'bg-emerald-500 text-white shadow-md' 
-                              : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                          className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                            ${task.status === 'completed' ? 'bg-emerald-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
                           title="Mark as Completed"
                           data-testid={`status-done-${task.id}`}
                         >
-                          <CheckCircle className="h-3.5 w-3.5" />
+                          <Check className="h-3.5 w-3.5" />
                           <span>Done</span>
                         </button>
                       </div>
-
                       {/* Category & Actions */}
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
-                        <Badge 
-                          variant="outline" 
+                        <Badge
+                          variant="outline"
                           className="text-xs rounded-lg px-2.5 py-1"
                           style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
                         >
