@@ -31,6 +31,7 @@ import {
   Timer,
   Mail
 } from 'lucide-react';
+import { useRef } from 'react';
 
 // Brand Colors
 const COLORS = {
@@ -39,9 +40,7 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 const CHART_COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
-
 const CATEGORY_COLORS = {
   browser: '#1F6FB2',
   productivity: '#1FAF5A',
@@ -49,30 +48,25 @@ const CATEGORY_COLORS = {
   entertainment: '#EF4444',
   other: '#94A3B8',
 };
-
 const TASK_STATUS_COLORS = {
   completed: '#1FAF5A',
   in_progress: '#1F6FB2',
   pending: '#F59E0B',
   overdue: '#EF4444'
 };
-
 const TASK_PRIORITY_COLORS = {
   high: '#EF4444',
   medium: '#F59E0B',
   low: '#1FAF5A'
 };
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 export default function StaffActivity() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('activity');
@@ -84,7 +78,7 @@ export default function StaffActivity() {
   const [loading, setLoading] = useState(true);
   const [selectedUserTodos, setSelectedUserTodos] = useState([]);
   const [taskAnalytics, setTaskAnalytics] = useState(null);
-
+  const chartContainerRef = useRef(null);
   // Generate last 12 months for dropdown
   const months = Array.from({ length: 12 }, (_, i) => {
     const date = subMonths(new Date(), i);
@@ -93,7 +87,6 @@ export default function StaffActivity() {
       label: format(date, 'MMMM yyyy')
     };
   });
-
   useEffect(() => {
     if (user?.role === 'admin') {
       fetchUsers();
@@ -102,14 +95,12 @@ export default function StaffActivity() {
       fetchTaskAnalytics();
     }
   }, [user]);
-
   useEffect(() => {
     if (user?.role === 'admin') {
       fetchAttendanceReport();
       fetchTaskAnalytics();
     }
   }, [selectedMonth, selectedUser]);
-
   useEffect(() => {
     if (user?.role === 'admin' && selectedUser !== 'all') {
       fetchUserTodos();
@@ -117,7 +108,38 @@ export default function StaffActivity() {
       setSelectedUserTodos([]);
     }
   }, [selectedUser]);
+  useEffect(() => {
+    // Quick & dirty way to hide "Taskosphere" watermark / wordmark
+    // Adjust selector if className or structure is different
+    const hideWatermark = () => {
+      // Common patterns we see in Recharts + custom overlays
+      document.querySelectorAll('[style*="Taskosphere"], .recharts-wrapper svg text, .watermark, [class*="watermark"], text[text-anchor][font-size]')?.forEach(el => {
+        if (el.textContent?.includes('Taskosphere') || el.textContent?.includes('© 2026 Taskosphere')) {
+          el.style.display = 'none';
+          el.remove(); // more aggressive – remove from DOM
+        }
+      });
 
+      // Also try to hide background images that might contain the logo
+      const containers = document.querySelectorAll('.recharts-wrapper, .recharts-surface');
+      containers.forEach(c => {
+        if (c.style.backgroundImage?.includes('taskosphere') || c.style.backgroundImage?.includes('logo')) {
+          c.style.backgroundImage = 'none';
+        }
+      });
+    };
+
+    hideWatermark();
+
+    // Run again after short delay (charts render async)
+    const timer = setTimeout(hideWatermark, 800);
+    const timer2 = setTimeout(hideWatermark, 1800);
+
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(timer2);
+    };
+  }, [activeTab]); // re-run when switching tabs (charts re-render)
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -126,7 +148,6 @@ export default function StaffActivity() {
       console.error('Failed to fetch users');
     }
   };
-
   const fetchActivityData = async () => {
     try {
       const response = await api.get('/activity/summary');
@@ -137,7 +158,6 @@ export default function StaffActivity() {
       setLoading(false);
     }
   };
-
   const fetchAttendanceReport = async () => {
     try {
       const response = await api.get(`/attendance/staff-report?month=${selectedMonth}`);
@@ -146,7 +166,6 @@ export default function StaffActivity() {
       console.error('Failed to fetch attendance report');
     }
   };
-
   const fetchUserTodos = async () => {
     try {
       const res = await api.get(`/todos/${selectedUser}`);
@@ -155,7 +174,6 @@ export default function StaffActivity() {
       console.error('Failed to fetch user todos:', error);
     }
   };
-
   const fetchTaskAnalytics = async () => {
     try {
       const params = new URLSearchParams();
@@ -171,19 +189,19 @@ export default function StaffActivity() {
       const tasksRes = await api.get('/tasks');
       const tasks = tasksRes.data;
       const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
-     
+    
       const statusCounts = (filteredTasks || []).reduce((acc, task) => {
         acc[task.status] = (acc[task.status] || 0) + 1;
         return acc;
       }, {});
-     
+    
       const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
         acc[task.priority] = (acc[task.priority] || 0) + 1;
         return acc;
       }, {});
-     
+    
       const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
-     
+    
       setTaskAnalytics({
         total: filteredTasks.length,
         completed: statusCounts.completed || 0,
@@ -193,67 +211,69 @@ export default function StaffActivity() {
       });
     }
   };
-
   const formatDuration = (seconds) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     if (hours > 0) return `${hours}h ${minutes}m`;
     return `${minutes}m`;
   };
-
   const formatMinutes = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
-
   // Filter by selected user
-  const filteredData = selectedUser === 'all' 
-    ? (activityData || []) 
+  const filteredData = selectedUser === 'all'
+    ? (activityData || [])
     : (activityData || []).filter(d => d.user_id === selectedUser);
-
   // Aggregate stats
-  const totalDuration = (filteredData || []).reduce((sum, d) => sum + (d.total_duration || 0), 0);
-  const totalApps = (filteredData || []).reduce((sum, d) => sum + Object.keys(d.apps || {}).length, 0);
-
-  // Category data for pie chart
-  const categoryData = (filteredData || []).reduce((acc, userData) => {
-    Object.entries(userData.categories || {}).forEach(([cat, duration]) => {
-      const existing = acc.find(c => c.name === cat);
-      if (existing) {
-        existing.value += duration;
-      } else {
-        acc.push({ name: cat, value: duration, color: CATEGORY_COLORS[cat] || CATEGORY_COLORS.other });
-      }
-    });
-    return acc;
-  }, []);
-
-  // Top apps data for bar chart
-  const topApps = (filteredData || []).flatMap(d => d.apps_list || [])
-    .reduce((acc, app) => {
-      const existing = acc.find(a => a.name === app.name);
-      if (existing) {
-        existing.duration += app.duration;
-        existing.count += app.count;
-      } else {
-        acc.push({ ...app });
-      }
-      return acc;
-    }, [])
-    .sort((a, b) => b.duration - a.duration)
-    .slice(0, 8);
-
-  // Calculate productivity score
-  const productivityScore = categoryData.length > 0 
-    ? Math.round((categoryData.find(c => c.name === 'productivity')?.value || 0) / totalDuration * 100) || 0
+  const totalDuration = Array.isArray(filteredData)
+    ? filteredData.reduce((sum, d) => sum + (Number(d?.total_duration) || 0), 0)
     : 0;
-
+  const totalApps = (filteredData || []).reduce((sum, d) => sum + Object.keys(d.apps || {}).length, 0);
+  // Category data for pie chart
+  const categoryData = Array.isArray(filteredData)
+    ? filteredData.reduce((acc, userData) => {
+        if (!userData?.categories) return acc;
+        Object.entries(userData.categories).forEach(([cat, duration]) => {
+          const existing = acc.find(c => c.name === cat);
+          if (existing) {
+            existing.value += Number(duration) || 0;
+          } else {
+            acc.push({ name: cat, value: Number(duration) || 0, color: CATEGORY_COLORS[cat] || CATEGORY_COLORS.other });
+          }
+        });
+        return acc;
+      }, [])
+    : [];
+  // Top apps data for bar chart
+  const topApps = Array.isArray(filteredData)
+    ? filteredData
+        .flatMap(d => Array.isArray(d?.apps_list) ? d.apps_list : [])
+        .reduce((acc, app) => {
+          if (!app?.name) return acc;
+          const existing = acc.find(a => a.name === app.name);
+          if (existing) {
+            existing.duration += Number(app.duration) || 0;
+            existing.count += Number(app.count) || 0;
+          } else {
+            acc.push({ ...app, duration: Number(app.duration) || 0, count: Number(app.count) || 0 });
+          }
+          return acc;
+        }, [])
+        .sort((a, b) => b.duration - a.duration)
+        .slice(0, 8)
+    : [];
+  // Calculate productivity score
+  const productivityRaw = categoryData.find(c => c.name === 'productivity')?.value || 0;
+  const safeProductivityScore = totalDuration > 0 
+    ? Math.round((productivityRaw / totalDuration) * 100) 
+    : 0;
+  const productivityScore = safeProductivityScore;
   // Calculate total attendance hours for selected month
   const totalAttendanceMinutes = attendanceReport?.staff_report?.reduce((sum, s) => sum + (s.total_minutes || 0), 0) || 0;
   const onlineEmployees = attendanceReport?.staff_report?.filter(s => s.days_present > 0).length || 0;
-
   if (user?.role !== 'admin') {
     return (
       <div className="flex items-center justify-center h-64">
@@ -265,7 +285,6 @@ export default function StaffActivity() {
       </div>
     );
   }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -273,9 +292,8 @@ export default function StaffActivity() {
       </div>
     );
   }
-
   return (
-    <motion.div 
+    <motion.div
       className="space-y-6"
       variants={containerVariants}
       initial="hidden"
@@ -287,7 +305,7 @@ export default function StaffActivity() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.lightBlue }}>Time Tracking</h1>
           <p className="text-slate-600 mt-1">Monitor employee screen active time and productivity</p>
         </div>
-        
+       
         <div className="flex gap-3">
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-44 bg-white">
@@ -300,7 +318,7 @@ export default function StaffActivity() {
               ))}
             </SelectContent>
           </Select>
-          
+         
           <Select value={selectedUser} onValueChange={setSelectedUser}>
             <SelectTrigger className="w-44 bg-white">
               <User className="h-4 w-4 mr-2" />
@@ -315,7 +333,6 @@ export default function StaffActivity() {
           </Select>
         </div>
       </motion.div>
-
       {/* Stats Cards - FirmSync Pro Style */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border border-slate-200 shadow-sm">
@@ -334,7 +351,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-start justify-between">
@@ -351,7 +367,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-start justify-between">
@@ -368,7 +383,6 @@ export default function StaffActivity() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-start justify-between">
@@ -386,7 +400,6 @@ export default function StaffActivity() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <motion.div variants={itemVariants}>
@@ -398,7 +411,6 @@ export default function StaffActivity() {
             <TabsTrigger value="tasks" className="rounded-lg">Task Analytics</TabsTrigger>
           </TabsList>
         </motion.div>
-
         <TabsContent value="activity" className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Category Pie Chart */}
@@ -435,7 +447,7 @@ export default function StaffActivity() {
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
-                        <Tooltip 
+                        <Tooltip
                           formatter={(value) => formatDuration(value)}
                           contentStyle={{ background: 'white', border: '1px solid #e2e8f0' }}
                         />
@@ -445,7 +457,6 @@ export default function StaffActivity() {
                 )}
               </CardContent>
             </Card>
-
             {/* Top Apps Bar Chart */}
             <Card className="border border-slate-200 shadow-sm">
               <CardHeader className="pb-2 border-b border-slate-100">
@@ -470,7 +481,12 @@ export default function StaffActivity() {
                         margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
                       >
                         <XAxis dataKey="name" angle={-45} textAnchor="end" height={70} />
-                        <YAxis tickFormatter={(value) => formatDuration(value / 3600)} />
+                        <YAxis
+                          tickFormatter={(value) => {
+                            const hours = Math.floor(value / 3600);
+                            return `${hours}h`;
+                          }}
+                        />
                         <Tooltip formatter={(value) => formatDuration(value)} />
                         <Bar dataKey="duration" fill={COLORS.lightBlue} />
                       </BarChart>
@@ -481,7 +497,6 @@ export default function StaffActivity() {
             </Card>
           </div>
         </TabsContent>
-
         <TabsContent value="attendance" className="mt-6">
           {/* Attendance Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -501,7 +516,6 @@ export default function StaffActivity() {
                 </div>
               </CardContent>
             </Card>
-
             <Card className="border border-slate-200 shadow-sm">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between">
@@ -520,7 +534,6 @@ export default function StaffActivity() {
                 </div>
               </CardContent>
             </Card>
-
             <Card className="border border-slate-200 shadow-sm">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between">
@@ -537,7 +550,6 @@ export default function StaffActivity() {
                 </div>
               </CardContent>
             </Card>
-
             <Card className="border border-slate-200 shadow-sm">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between">
@@ -555,7 +567,6 @@ export default function StaffActivity() {
               </CardContent>
             </Card>
           </div>
-
           {/* Staff Attendance Report Table */}
           <Card className="border border-slate-200 shadow-sm">
             <CardHeader className="pb-2 border-b border-slate-100">
@@ -593,7 +604,7 @@ export default function StaffActivity() {
                           <tr key={staff.user_id} className="hover:bg-slate-50">
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <div 
+                                <div
                                   className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
                                   style={{ background: `linear-gradient(135deg, ${CHART_COLORS[index % CHART_COLORS.length]} 0%, ${CHART_COLORS[(index + 1) % CHART_COLORS.length]} 100%)` }}
                                 >
@@ -619,9 +630,9 @@ export default function StaffActivity() {
                                   {staff.total_hours}
                                 </span>
                                 <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
-                                  <div 
+                                  <div
                                     className="h-full rounded-full"
-                                    style={{ 
+                                    style={{
                                       width: `${progressPercent}%`,
                                       background: `linear-gradient(90deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`
                                     }}
@@ -633,10 +644,10 @@ export default function StaffActivity() {
                               {staff.avg_hours_per_day}h
                             </td>
                             <td className="px-6 py-4">
-                              <Badge 
+                              <Badge
                                 className={`border-0 ${
-                                  staff.avg_hours_per_day >= 7 
-                                    ? 'bg-emerald-100 text-emerald-700' 
+                                  staff.avg_hours_per_day >= 7
+                                    ? 'bg-emerald-100 text-emerald-700'
                                     : staff.avg_hours_per_day >= 5
                                     ? 'bg-amber-100 text-amber-700'
                                     : 'bg-red-100 text-red-700'
@@ -655,13 +666,12 @@ export default function StaffActivity() {
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* Reminder Tab */}
         <TabsContent value="reminder" className="mt-6">
           <Card className="border border-slate-200 shadow-sm">
             <CardHeader>
-              <CardTitle 
-                className="text-lg font-outfit" 
+              <CardTitle
+                className="text-lg font-outfit"
                 style={{ color: COLORS.lightBlue }}
               >
                 Send Task Reminders
@@ -670,9 +680,7 @@ export default function StaffActivity() {
                 Send pending task reminders to employees
               </CardDescription>
             </CardHeader>
-
             <CardContent className="space-y-6">
-
               {/* Send to All */}
               <Button
                 className="w-full bg-blue-600 hover:bg-blue-700"
@@ -689,13 +697,11 @@ export default function StaffActivity() {
               >
                 Send Reminder to All Employees
               </Button>
-
               {/* Individual */}
               <div className="border-t pt-4">
                 <p className="text-sm text-slate-500 mb-3">
                   Or send individually:
                 </p>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {(users || []).map((user) => (
                     <Button
@@ -715,17 +721,15 @@ export default function StaffActivity() {
                   ))}
                 </div>
               </div>
-
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* To-Do Lists Tab */}
         <TabsContent value="todos" className="mt-6">
           <Card className="border border-slate-200 shadow-sm">
             <CardHeader>
-              <CardTitle 
-                className="text-lg font-outfit flex items-center gap-2" 
+              <CardTitle
+                className="text-lg font-outfit flex items-center gap-2"
                 style={{ color: COLORS.lightBlue }}
               >
                 <CheckSquare className="h-5 w-5" />
@@ -759,10 +763,29 @@ export default function StaffActivity() {
                   ))}
                 </div>
               )}
+              {selectedUser !== 'all' && (
+                <div className="mb-4 flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      fetchUserTodos();
+                      toast.info("To-do list refreshed");
+                    }}
+                  >
+                    Refresh To-Do List
+                  </Button>
+                </div>
+              )}
+              {selectedUser !== 'all' && !selectedUserTodos && (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                  <p className="mt-3 text-slate-500">Loading to-do items...</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* Task Analytics Tab */}
         <TabsContent value="tasks" className="mt-6">
           <div className="space-y-6">
@@ -784,7 +807,6 @@ export default function StaffActivity() {
                   </div>
                 </CardContent>
               </Card>
-
               <Card className="border border-slate-200 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
@@ -801,7 +823,6 @@ export default function StaffActivity() {
                   </div>
                 </CardContent>
               </Card>
-
               <Card className="border border-slate-200 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
@@ -818,7 +839,6 @@ export default function StaffActivity() {
                   </div>
                 </CardContent>
               </Card>
-
               <Card className="border border-slate-200 shadow-sm">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
@@ -836,7 +856,6 @@ export default function StaffActivity() {
                 </CardContent>
               </Card>
             </div>
-
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Status Pie Chart */}
@@ -881,7 +900,6 @@ export default function StaffActivity() {
                   )}
                 </CardContent>
               </Card>
-
               {/* Priority Bar Chart */}
               <Card className="border border-slate-200 shadow-sm">
                 <CardHeader className="pb-2 border-b border-slate-100">
@@ -917,7 +935,6 @@ export default function StaffActivity() {
           </div>
         </TabsContent>
       </Tabs>
-
       {/* Info Note */}
       <motion.div variants={itemVariants}>
         <Card className="border border-emerald-200 bg-emerald-50">
@@ -927,7 +944,7 @@ export default function StaffActivity() {
               <div>
                 <p className="font-medium text-emerald-800">Activity Tracking Active</p>
                 <p className="text-sm text-emerald-700 mt-1">
-                  Activity is tracked automatically based on keyboard and mouse activity while users work in Taskosphere. 
+                  Activity is tracked automatically based on keyboard and mouse activity while users work in Taskosphere.
                   Attendance data is based on daily punch-in/punch-out records.
                 </p>
               </div>
