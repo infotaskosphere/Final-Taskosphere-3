@@ -68,19 +68,77 @@ def calculate_distance_meters(lat1, lon1, lat2, lon2):
 
 # ================= ROUTES =================
 
-@router.post("/", response_model=Attendance)
-async def record_attendance(
-    action_data: AttendanceCreate,
-    current_user = Depends(get_current_user)
+@router.post("/")
+async def punch_attendance(
+    attendance_data: AttendanceCreate,
+    current_user: str = Depends(get_current_user)
 ):
-    now = datetime.now(timezone.utc)
-    today = now.strftime("%Y-%m-%d")
+    try:
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
 
-    existing = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today},
-        {"_id": 0}
-    )
+        existing_attendance = await db.attendance.find_one(
+            {"user_id": current_user, "date": today_str}
+        )
 
+        if attendance_data.action == "punch_in":
+            if existing_attendance:
+                raise HTTPException(status_code=400, detail="Already punched in today")
+
+            # Location check if provided
+            if attendance_data.location:
+                user_lat = attendance_data.location.get("latitude")
+                user_lon = attendance_data.location.get("longitude")
+
+                if user_lat is None or user_lon is None:
+                    raise HTTPException(status_code=400, detail="Invalid location data")
+
+                distance = calculate_distance_meters(
+                    user_lat, user_lon, OFFICE_LATITUDE, OFFICE_LONGITUDE
+                )
+
+                if distance > ALLOWED_RADIUS_METERS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"You are {round(distance)} meters away from office. Must be within {ALLOWED_RADIUS_METERS}m"
+                    )
+
+            new_attendance = Attendance(
+                user_id=current_user,
+                date=today_str,
+                punch_in=now,
+                location=attendance_data.location
+            )
+
+            await db.attendance.insert_one(new_attendance.dict())
+
+            return {"message": "Punched in successfully", "attendance": new_attendance}
+
+        elif attendance_data.action == "punch_out":
+            if not existing_attendance:
+                raise HTTPException(status_code=400, detail="No punch in record for today")
+
+            if existing_attendance.get("punch_out"):
+                raise HTTPException(status_code=400, detail="Already punched out today")
+
+            duration = (now - parser.parse(existing_attendance["punch_in"])).total_seconds() / 60
+
+            await db.attendance.update_one(
+                {"_id": existing_attendance["_id"]},
+                {"$set": {"punch_out": now, "duration_minutes": int(duration)}}
+            )
+
+            return {"message": "Punched out successfully", "duration_minutes": int(duration)}
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action")
+
+    except HTTPException as he:
+        raise he  # Keep user errors
+    except Exception as e:
+        logger.error(f"Error in punch_attendance: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error - check logs")
+        
     # ================= PUNCH IN =================
     if action_data.action == "punch_in":
 
