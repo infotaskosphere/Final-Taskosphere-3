@@ -65,7 +65,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
-
   return (
     <motion.div
       whileHover={{ y: -3 }}
@@ -74,7 +73,10 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
         ${getPriorityStripeClass(task.priority)}
         ${isCompleted ? 'opacity-80 bg-green-50/40 border-green-200' : 'hover:shadow-lg hover:border-blue-400'}
       `}
-      onClick={() => navigate(`/tasks/${task.id || ''}`)}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigate(`/tasks/${task.id || ''}`);
+      }}
     >
       {/* Title + Capsules */}
       <div className="flex items-start justify-between gap-3">
@@ -86,10 +88,8 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
             {task.client_name ? ` – ${task.client_name}` : ''}
           </p>
         </div>
-
         {isToMe && (
           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-
             {/* IN PROGRESS */}
             <motion.button
               whileTap={{ scale: 0.92 }}
@@ -107,7 +107,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
             >
               {isInProgress ? '✓ In Progress' : 'Start'}
             </motion.button>
-
             {/* DONE */}
             <motion.button
               whileTap={{ scale: 0.92 }}
@@ -128,7 +127,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
           </div>
         )}
       </div>
-
       {/* Meta */}
       <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
         <span>
@@ -137,11 +135,9 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
             {assignedName || 'Unknown'}
           </span>
         </span>
-
         <span>
           • {format(new Date(task.created_at || Date.now()), 'MMM d, yyyy • hh:mm a')}
         </span>
-
         {task.due_date && (
           <span>
             • Due: {format(new Date(task.due_date), 'MMM d, yyyy')}
@@ -324,6 +320,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+    navigate('/attendance');
   };
   const getStatusStyle = (status) => {
     const styles = {
@@ -392,7 +389,7 @@ export default function Dashboard() {
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   return (
     <motion.div
-      className="space-y-6"
+      className="space-y-4 sm:space-y-6"
       data-testid="dashboard-page"
       variants={containerVariants}
       initial="hidden"
@@ -410,27 +407,27 @@ export default function Dashboard() {
             className="absolute top-0 right-0 w-72 h-72 rounded-full opacity-20 -mr-16 -mt-16"
             style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
           />
-          <CardContent className="p-8 relative">
+          <CardContent className="p-4 sm:p-8 relative">
             <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
               <div>
-                <h1 className="text-3xl lg:text-4xl font-bold font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
                   Welcome back, {user?.full_name?.split(' ')[0] || 'User'}
                 </h1>
-                <p className="text-slate-600 mt-2 text-lg">
+                <p className="text-slate-600 mt-2 text-base sm:text-lg">
                   Here's what's happening with your firm's compliance and tasks today, {format(new Date(), 'MMMM d, yyyy')}.
                 </p>
               </div>
               {nextDeadline && (
                 <div
-                  className="flex items-center gap-4 px-6 py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
+                  className="flex items-center gap-4 px-4 py-3 sm:px-6 sm:py-4 rounded-2xl border-2 cursor-pointer hover:shadow-md transition-all"
                   style={{ borderColor: COLORS.mediumBlue, backgroundColor: 'white' }}
                   onClick={() => navigate('/duedates')}
                   data-testid="next-deadline-card"
                 >
-                  <Calendar className="h-8 w-8" style={{ color: COLORS.mediumBlue }} />
+                  <Calendar className="h-6 w-6 sm:h-8 sm:w-8" style={{ color: COLORS.mediumBlue }} />
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Next Filing Deadline</p>
-                    <p className="font-bold text-lg" style={{ color: COLORS.deepBlue }}>
+                    <p className="font-bold text-base sm:text-lg" style={{ color: COLORS.deepBlue }}>
                       {format(new Date(nextDeadline.due_date), 'MMM d')}: {nextDeadline.title?.slice(0, 15) || 'Deadline'}
                     </p>
                   </div>
@@ -579,14 +576,14 @@ export default function Dashboard() {
         </Card>
       </motion.div>
       {/* Recent Tasks + Upcoming Deadlines + Attendance */}
-      <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
+      <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6" variants={itemVariants}>
         <Card
           className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden"
           data-testid="recent-tasks-card"
         >
           <CardHeader className="pb-3 border-b border-slate-100">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 <Target className="h-5 w-5 text-blue-500" />
                 Recent Tasks
               </CardTitle>
@@ -617,7 +614,7 @@ export default function Dashboard() {
                     <div
                       key={task.id}
                       className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
-                      onClick={() => navigate(`/tasks/${task.id || ''}`)} // ← made clickable
+                      onClick={() => navigate('/tasks')} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -647,7 +644,7 @@ export default function Dashboard() {
         >
           <CardHeader className="pb-3 border-b border-slate-100">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-orange-500" />
                 Upcoming Deadlines
               </CardTitle>
@@ -677,7 +674,7 @@ export default function Dashboard() {
                     <div
                       key={due.id}
                       className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-orange-300 transition ${color.bg}`}
-                      onClick={() => navigate(`/duedates/${due.id || ''}`)} // ← made clickable
+                      onClick={() => navigate('/duedates')} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -704,7 +701,7 @@ export default function Dashboard() {
         >
           <CardHeader className="pb-3 border-b border-slate-100">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 <Activity className="h-5 w-5 text-purple-500" />
                 Attendance
               </CardTitle>
@@ -771,13 +768,84 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
+      {/* Tasks Assigned – Two Column Layout */}
+      {showTaskSection && (
+        <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
+          {/* Tasks Assigned to Me */}
+          <Card
+            onClick={() => navigate('/tasks')}
+            className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col cursor-pointer hover:shadow-md transition"
+          >
+            <CardHeader className="pb-4 border-b border-slate-100 px-4 sm:px-6">
+              <CardTitle className="text-lg sm:text-xl font-semibold flex items-center gap-3">
+                <Briefcase className="h-6 w-6 text-emerald-600" />
+                Tasks Assigned to Me
+              </CardTitle>
+              <p className="text-sm text-slate-500 mt-1">Tasks others assigned to you</p>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 flex-1">
+              {tasksAssignedToMe.length === 0 ? (
+                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                  No tasks assigned to you yet
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
+                  {tasksAssignedToMe.map((task) => (
+                    <TaskStrip
+                      key={task.id}
+                      task={task}
+                      isToMe={true}
+                      assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                      onUpdateStatus={updateAssignedTaskStatus}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {/* Tasks Assigned by Me */}
+          <Card
+            onClick={() => navigate('/tasks')}
+            className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col cursor-pointer hover:shadow-md transition"
+          >
+            <CardHeader className="pb-4 border-b border-slate-100 px-4 sm:px-6">
+              <CardTitle className="text-lg sm:text-xl font-semibold flex items-center gap-3">
+                <Briefcase className="h-6 w-6 text-blue-600" />
+                Tasks Assigned by Me
+              </CardTitle>
+              <p className="text-sm text-slate-500 mt-1">Tasks you assigned to others</p>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 flex-1">
+              {tasksAssignedByMe.length === 0 ? (
+                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                  You haven't assigned any tasks yet
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
+                  {tasksAssignedByMe.map((task) => (
+                    <TaskStrip
+                      key={task.id}
+                      task={task}
+                      isToMe={false}
+                      assignedName={task.assigned_to_name || 'Unknown'}
+                      onUpdateStatus={updateAssignedTaskStatus}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
       {/* Star Performers + My To-Do List */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
-      
+      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-8">
+    
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-yellow-500" />
                 Star Performers
               </CardTitle>
@@ -864,7 +932,7 @@ export default function Dashboard() {
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="todo-list-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 <CheckSquare className="h-5 w-5 text-blue-500" />
                 My To-Do List
               </CardTitle>
@@ -877,7 +945,7 @@ export default function Dashboard() {
             <p className="text-xs text-slate-500 mt-1">Manage your personal tasks</p>
           </CardHeader>
           <CardContent className="p-4 sm:p-6">
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4">
               <input
                 type="text"
                 value={newTodo}
@@ -979,71 +1047,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Tasks Assigned – Two Column Layout */}
-      {showTaskSection && (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
-          {/* Tasks Assigned to Me */}
-          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
-            <CardHeader className="pb-4 border-b border-slate-100 px-6">
-              <CardTitle className="text-xl font-semibold flex items-center gap-3">
-                <Briefcase className="h-6 w-6 text-emerald-600" />
-                Tasks Assigned to Me
-              </CardTitle>
-              <p className="text-sm text-slate-500 mt-1">Tasks others assigned to you</p>
-            </CardHeader>
-            <CardContent className="p-6 flex-1">
-              {tasksAssignedToMe.length === 0 ? (
-                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                  No tasks assigned to you yet
-                </div>
-              ) : (
-                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
-                  {tasksAssignedToMe.map((task) => (
-                    <TaskStrip
-                      key={task.id}
-                      task={task}
-                      isToMe={true}
-                      assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus}
-                      navigate={navigate}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          {/* Tasks Assigned by Me */}
-          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
-            <CardHeader className="pb-4 border-b border-slate-100 px-6">
-              <CardTitle className="text-xl font-semibold flex items-center gap-3">
-                <Briefcase className="h-6 w-6 text-blue-600" />
-                Tasks Assigned by Me
-              </CardTitle>
-              <p className="text-sm text-slate-500 mt-1">Tasks you assigned to others</p>
-            </CardHeader>
-            <CardContent className="p-6 flex-1">
-              {tasksAssignedByMe.length === 0 ? (
-                <div className="h-48 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                  You haven't assigned any tasks yet
-                </div>
-              ) : (
-                <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
-                  {tasksAssignedByMe.map((task) => (
-                    <TaskStrip
-                      key={task.id}
-                      task={task}
-                      isToMe={false}
-                      assignedName={task.assigned_to_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus}
-                      navigate={navigate}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
       {/* Quick Access Row */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <Card
@@ -1051,7 +1054,7 @@ export default function Dashboard() {
           onClick={() => navigate('/clients')}
           data-testid="quick-clients"
         >
-          <CardContent className="p-5 flex items-center gap-4">
+          <CardContent className="p-4 sm:p-5 flex items-center gap-4">
             <div
               className="p-3 rounded-xl group-hover:scale-110 transition-transform"
               style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}
@@ -1071,7 +1074,7 @@ export default function Dashboard() {
           onClick={() => navigate('/dsc')}
           data-testid="quick-dsc"
         >
-          <CardContent className="p-5 flex items-center gap-4">
+          <CardContent className="p-4 sm:p-5 flex items-center gap-4">
             <div
               className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
                 stats?.expiring_dsc_count > 0 ? 'bg-red-100' : 'bg-slate-100'
@@ -1092,7 +1095,7 @@ export default function Dashboard() {
           onClick={() => navigate('/duedates')}
           data-testid="quick-duedates"
         >
-          <CardContent className="p-5 flex items-center gap-4">
+          <CardContent className="p-4 sm:p-5 flex items-center gap-4">
             <div
               className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${
                 stats?.upcoming_due_dates > 0 ? 'bg-amber-100' : 'bg-slate-100'
@@ -1114,7 +1117,7 @@ export default function Dashboard() {
             onClick={() => navigate('/users')}
             data-testid="quick-users"
           >
-            <CardContent className="p-5 flex items-center gap-4">
+            <CardContent className="p-4 sm:p-5 flex items-center gap-4">
               <div
                 className="p-3 rounded-xl group-hover:scale-110 transition-transform"
                 style={{ backgroundColor: `${COLORS.mediumBlue}15` }}
