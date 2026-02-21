@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import {
@@ -183,6 +184,9 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 export default function Users() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canManageUsers =
+  user?.role === "admin" ||
+  user?.permissions?.can_manage_users;
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -208,17 +212,19 @@ export default function Users() {
     can_view_all_tasks: false,
     can_view_all_clients: false,
     can_view_all_dsc: false,
+    can_view_documents: false,
     can_view_all_duedates: false,
     can_view_reports: false,
     can_manage_users: false,
     can_assign_tasks: false,
     assigned_clients: [],
     can_view_staff_activity: false,
-    can_view_attendance_reports: false,
-    can_view_staff_activity: false,
+    can_view_attendance: false,
+    can_use_chat: false,
     can_send_reminders: false,
   });
   const [loading, setLoading] = useState(false);
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
@@ -350,6 +356,24 @@ export default function Users() {
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
+  const filteredClients = clients.filter(client => 
+    client.company_name.toLowerCase().includes(clientSearchQuery.toLowerCase())
+  );
+  if (!canManageUsers) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Card className="p-8 text-center max-w-md">
+          <UsersIcon className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-slate-700">
+            Access Restricted
+          </h2>
+          <p className="text-slate-500 mt-2">
+            You do not have permission to manage users.
+          </p>
+        </Card>
+      </div>
+    );
+  }
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -530,52 +554,83 @@ export default function Users() {
             <DialogDescription>Configure access for {selectedUserForPermissions?.full_name}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Data Access</h4>
-              {[
-                { key: 'can_view_all_tasks', label: 'View All Tasks' },
-                { key: 'can_view_all_clients', label: 'View All Clients' },
-                { key: 'can_view_all_dsc', label: 'View All DSC' },
-                { key: 'can_view_all_duedates', label: 'View All Due Dates' },
-                { key: 'can_view_reports', label: 'View Reports' },
-                { key: 'can_manage_users', label: 'Manage Users' },
-                { key: 'can_assign_tasks', label: 'Assign Tasks' },
-              ].map((perm) => (
-                <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
-                  <span className="text-sm text-slate-700">{perm.label}</span>
-                  <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
-                </div>
-              ))}
-            </div>
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UsersIcon className="h-4 w-4" /> Staff Management</h4>
-              {[
-                { key: 'can_view_staff_activity', label: 'View Staff Activity' },
-                { key: 'can_view_attendance_reports', label: 'View Attendance Reports' },
-                { key: 'can_send_reminders', label: 'Send Task Reminders' },
-              ].map((perm) => (
-                <div key={perm.key} className="flex items-center justify-between py-2 px-3 bg-white rounded-xl">
-                  <span className="text-sm text-slate-700">{perm.label}</span>
-                  <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
-                </div>
-              ))}
-            </div>
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-              <h4 className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UserIcon className="h-4 w-4" /> Assigned Clients</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                {clients.map((client) => {
-                  const isAssigned = (permissions.assigned_clients || []).includes(client.id);
-                  return (
-                    <div key={client.id} onClick={() => toggleClientAssignment(client.id)} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${isAssigned ? 'bg-emerald-100 border-2 border-emerald-300' : 'bg-white border-2 border-transparent hover:border-slate-200'}`}>
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
-                        {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="data-access">
+                <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Data Access</AccordionTrigger>
+                <AccordionContent>
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                    {[
+                      { key: 'can_view_all_tasks', label: 'View All Tasks', description: 'Allows viewing all tasks in the system.' },
+                      { key: 'can_view_all_clients', label: 'View All Clients', description: 'Allows viewing all client information.' },
+                      { key: 'can_view_all_dsc', label: 'View All DSC', description: 'Allows viewing all digital signature certificates.' },
+                      { key: 'can_view_documents', label: 'View Documents', description: 'Allows viewing all documents.' },
+                      { key: 'can_view_all_duedates', label: 'View All Due Dates', description: 'Allows viewing all due dates.' },
+                      { key: 'can_view_reports', label: 'View Reports', description: 'Allows viewing all reports.' },
+                      { key: 'can_manage_users', label: 'Manage Users', description: 'Allows managing user accounts.' },
+                      { key: 'can_assign_tasks', label: 'Assign Tasks', description: 'Allows assigning tasks to users.' },
+                    ].map((perm) => (
+                      <div key={perm.key} className="flex flex-col py-2 px-3 bg-white rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-700">{perm.label}</span>
+                          <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">{perm.description}</p>
                       </div>
-                      <span className="text-sm font-medium text-slate-700 truncate">{client.company_name}</span>
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="staff-management">
+                <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UsersIcon className="h-4 w-4" /> Staff Management</AccordionTrigger>
+                <AccordionContent>
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                    {[
+                      { key: 'can_view_staff_activity', label: 'View Staff Activity', description: 'Allows viewing activity of staff members.' },
+                      { key: 'can_view_attendance', label: 'View Attendance Reports', description: 'Allows viewing attendance reports.' },
+                      { key: 'can_use_chat', label: 'Use Chat', description: 'Allows using the chat feature.' },
+                      { key: 'can_send_reminders', label: 'Send Task Reminders', description: 'Allows sending reminders for tasks.' },
+                    ].map((perm) => (
+                      <div key={perm.key} className="flex flex-col py-2 px-3 bg-white rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-700">{perm.label}</span>
+                          <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">{perm.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="assigned-clients">
+                <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UserIcon className="h-4 w-4" /> Assigned Clients</AccordionTrigger>
+                <AccordionContent>
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <Input 
+                        placeholder="Search clients..." 
+                        value={clientSearchQuery} 
+                        onChange={(e) => setClientSearchQuery(e.target.value)} 
+                        className="pl-9 rounded-xl" 
+                      />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                      {filteredClients.map((client) => {
+                        const isAssigned = (permissions.assigned_clients || []).includes(client.id);
+                        return (
+                          <div key={client.id} onClick={() => toggleClientAssignment(client.id)} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${isAssigned ? 'bg-emerald-100 border-2 border-emerald-300' : 'bg-white border-2 border-transparent hover:border-slate-200'}`}>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                              {isAssigned ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                            </div>
+                            <span className="text-sm font-medium text-slate-700 truncate">{client.company_name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
