@@ -22,7 +22,6 @@ import {
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
 const CHART_COLORS = {
@@ -32,7 +31,6 @@ const CHART_COLORS = {
   warning: '#5CCB5F', // Light Green
   accent: '#0A2D4D', // Darker Blue
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -45,21 +43,22 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
-
 export default function Reports() {
   const { user, hasPermission } = useAuth();
   const canViewReports = hasPermission("can_view_reports");
-  const canViewTeamReports = hasPermission("can_view_team_reports");
-  const isAdmin = canViewTeamReports; // Assuming can_view_team_reports indicates admin-level access
+  const canViewAllReports = hasPermission("can_view_all_reports");
+  const canViewSelectedReports = hasPermission("can_view_selected_reports");
+  const canDownloadReports = hasPermission("can_download_reports");
+
+  const isAdmin = user?.role === "admin";
   const [reportData, setReportData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-
+  const [selectedUserId, setSelectedUserId] = useState("all");
   useEffect(() => {
     fetchAllData();
   }, []);
-
   const fetchAllData = async () => {
     try {
       const [reportsRes, statsRes, tasksRes] = await Promise.all([
@@ -76,23 +75,19 @@ export default function Reports() {
       setLoading(false);
     }
   };
-
   const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
-
   const getAverageScreenTime = () => {
-    if (reportData.length === 0) return 0;
-    const total = reportData.reduce((sum, item) => sum + item.total_screen_time, 0);
-    return Math.round(total / reportData.length);
+    if (filteredReportData.length === 0) return 0;
+    const total = filteredReportData.reduce((sum, item) => sum + item.total_screen_time, 0);
+    return Math.round(total / filteredReportData.length);
   };
-
   const getTotalTasksCompleted = () => {
-    return reportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
+    return filteredReportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
   };
-
   // Task Status Distribution for Pie Chart
   const getTaskStatusData = () => {
     const pending = tasks.filter(t => t.status === 'pending').length;
@@ -104,7 +99,6 @@ export default function Reports() {
       { name: 'Completed', value: completed, color: CHART_COLORS.success },
     ].filter(item => item.value > 0);
   };
-
   // Task Category Distribution
   const getTaskCategoryData = () => {
     const categoryCount = {};
@@ -121,12 +115,11 @@ export default function Reports() {
       .sort((a, b) => b.tasks - a.tasks)
       .slice(0, 6);
   };
-
   // Employee Performance Data for Bar Chart
   const getEmployeePerformanceData = () => {
     if (!isAdmin) {
-      if (reportData.length > 0) {
-        const item = reportData[0];
+      if (filteredReportData.length > 0) {
+        const item = filteredReportData[0];
         return [{
           name: 'You',
           tasks: item.total_tasks_completed,
@@ -136,7 +129,7 @@ export default function Reports() {
       }
       return [];
     } else {
-      return reportData.slice(0, 5).map((item, index) => ({
+      return filteredReportData.slice(0, 5).map((item, index) => ({
         name: item.user?.full_name?.split(' ')[0] || 'User',
         tasks: item.total_tasks_completed,
         hours: Math.round(item.total_screen_time / 60),
@@ -144,21 +137,18 @@ export default function Reports() {
       }));
     }
   };
-
   // Helper function to get start of day
   const getStartOfDay = (date) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     return d;
   };
-
   // Weekly Trend Data from tasks
   const getWeeklyTrendData = () => {
     const today = new Date();
     const diff = today.getDay() - 1; // Monday as 0
     const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (diff >= 0 ? diff : diff + 7));
     const startOfWeek = getStartOfDay(monday);
-
     const days = [];
     for (let i = 0; i < 7; i++) {
       const day = new Date(startOfWeek);
@@ -169,7 +159,6 @@ export default function Reports() {
         pending: 0,
       });
     }
-
     tasks.forEach((task) => {
       if (task.status === 'completed' && task.completed_at) {
         const compDate = getStartOfDay(new Date(task.completed_at));
@@ -186,10 +175,8 @@ export default function Reports() {
         }
       }
     });
-
     return days;
   };
-
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -206,10 +193,9 @@ export default function Reports() {
     }
     return null;
   };
-
   const handleDownloadReports = () => {
     const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
-    const csvData = reportData.map(item => [
+    const csvData = filteredReportData.map(item => [
       item.user?.full_name || 'Unknown',
       item.total_tasks_completed,
       item.total_screen_time
@@ -225,26 +211,34 @@ export default function Reports() {
     link.click();
     document.body.removeChild(link);
   };
-
   const handleExportPDF = () => {
     const doc = new jsPDF();
     doc.text('Efficiency Reports', 10, 10);
-
-    const tableData = reportData.map(item => [
+    const tableData = filteredReportData.map(item => [
       item.user?.full_name || 'Unknown',
       item.total_tasks_completed,
       item.total_screen_time
     ]);
-
     doc.autoTable({
       head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
       body: tableData,
       startY: 20,
     });
-
     doc.save('efficiency_reports.pdf');
   };
+  const filteredReportData = (() => {
+  if (!canViewAllReports && !canViewSelectedReports && !isAdmin) {
+    // Normal user → backend should already return only their data
+    return reportData;
+  }
 
+  if (selectedUserId === "all") {
+    return reportData;
+  }
+
+  return reportData.filter(r => r.user?._id === selectedUserId);
+})();
+  const uniqueUsers = Array.from(new Map(reportData.map(r => [r.user?._id, r.user])).values());
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -252,7 +246,6 @@ export default function Reports() {
       </div>
     );
   }
-
   if (!canViewReports) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -260,7 +253,6 @@ export default function Reports() {
       </div>
     );
   }
-
   return (
     <motion.div
       className="space-y-8"
@@ -275,7 +267,7 @@ export default function Reports() {
           <h1 className="text-4xl font-bold font-outfit tracking-tight" style={{ color: '#0D3B66' }}>Analytics & Reports</h1>
           <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
         </div>
-        {isAdmin && (
+        {(isAdmin || canDownloadReports) && (
           <div className="flex gap-2">
             <Button onClick={handleDownloadReports} variant="outline">
               Download CSV
@@ -286,7 +278,22 @@ export default function Reports() {
           </div>
         )}
       </motion.div>
-
+      {(isAdmin || canViewAllReports || canViewSelectedReports) && (
+  <div className="mb-4">
+    <select
+      value={selectedUserId}
+      onChange={(e) => setSelectedUserId(e.target.value)}
+      className="border rounded px-3 py-2"
+    >
+      <option value="all">All Employees</option>
+      {uniqueUsers.map((user) => (
+        <option key={user?._id} value={user?._id}>
+          {user?.full_name}
+        </option>
+      ))}
+    </select>
+  </div>
+)}
       {/* Summary Stats Grid */}
       <motion.div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
@@ -351,7 +358,6 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Charts Row 1 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -392,7 +398,6 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
-
         {/* Task Category Bar Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-category-chart">
           <CardHeader>
@@ -421,7 +426,6 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Charts Row 2 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -454,7 +458,6 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
-
         {/* Weekly Trend Area Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="weekly-trend-chart">
           <CardHeader>
@@ -499,7 +502,6 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Team Workload Table */}
       {isAdmin && dashboardStats?.team_workload && (
         <motion.div variants={itemVariants}>
