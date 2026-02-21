@@ -524,7 +524,7 @@ export default function Dashboard() {
           className={`border hover:shadow-lg transition-all duration-200 cursor-pointer group rounded-2xl h-full ${
             stats?.expiring_dsc_count > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-200'
           }`}
-          onClick={() => navigate('/dsc')}
+          onClick={() => navigate('/dsc?tab=expired')}
         >
           <CardContent className="p-4 sm:p-6 h-full flex flex-col">
             <div className="flex items-start justify-between flex-1">
@@ -842,7 +842,7 @@ export default function Dashboard() {
       )}
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-8">
-   
+  
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
