@@ -54,7 +54,6 @@ const STATUS_STYLES = {
   review: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Review' },
   overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
 };
-
 const STATUS_GRADIENTS = {
   overdue: 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)',
   pending: 'linear-gradient(135deg, #fef3c7 0%, #f59e0b 100%)',
@@ -115,7 +114,6 @@ export default function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
- 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -136,10 +134,14 @@ export default function Tasks() {
     recurrence_interval: 1,
   });
   useEffect(() => {
-    fetchTasks();
+  fetchTasks();
+  fetchClients();
+
+  // Only admin & manager can assign
+  if (user?.role === "admin" || user?.role === "manager") {
     fetchUsers();
-    fetchClients();
-  }, []);
+  }
+}, [user]);
   const fetchTasks = async () => {
     try {
       const response = await api.get('/tasks');
@@ -236,7 +238,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-     
+    
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
       fetchTasks();
@@ -324,7 +326,7 @@ export default function Tasks() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
           <p className="text-slate-600 mt-1">Manage and track all your compliance tasks</p>
         </div>
-       
+      
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) resetForm();
@@ -555,7 +557,7 @@ export default function Tasks() {
                     data-testid="task-recurring-switch"
                   />
                 </div>
-               
+              
                 {formData.is_recurring && (
                   <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                     <div className="space-y-2">
@@ -665,7 +667,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
-       
+      
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -749,7 +751,7 @@ export default function Tasks() {
               if (task.priority === 'critical') priorityGradient = 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)';
               const priorityClass = `px-2.5 py-1 rounded-full text-xs font-semibold ${isHighPriority ? 'text-white' : lightClass}`;
               const priorityBgStyle = isHighPriority ? { background: priorityGradient } : {};
-             
+            
               return (
                 <motion.div key={task.id} variants={itemVariants} className="h-full">
                   <Card
@@ -779,6 +781,11 @@ export default function Tasks() {
                             Recurring
                           </span>
                         )}
+{task.created_by === user?.id && (
+  <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+    Assigned By You
+  </span>
+)}
                       </div>
                       {/* Task Title - Fixed height */}
                       <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
@@ -812,6 +819,7 @@ export default function Tasks() {
                         )}
                       </div>
                       {/* Quick Status Change Buttons - Consistent pill shape */}
+{(user?.role === "admin" || task.assigned_to === user?.id || task.sub_assignees?.includes(user?.id)) && (
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-auto pt-3 border-t border-slate-200/50">
                         <button
                           onClick={() => handleQuickStatusChange(task, 'pending')}
@@ -844,6 +852,7 @@ export default function Tasks() {
                           <span>Done</span>
                         </button>
                       </div>
+)}
                       {/* Category & Actions */}
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
                         <Badge
@@ -853,6 +862,7 @@ export default function Tasks() {
                         >
                           {getCategoryLabel(task.category)}
                         </Badge>
+{(user?.role === "admin" || task.created_by === user?.id) && (
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
                             variant="ghost"
@@ -873,6 +883,7 @@ export default function Tasks() {
                             <Trash2 className="h-4 w-4 text-red-600" />
                           </Button>
                         </div>
+)}
                       </div>
                     </CardContent>
                   </Card>
