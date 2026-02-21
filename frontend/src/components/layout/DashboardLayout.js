@@ -126,7 +126,7 @@ const DashboardLayout = ({ children }) => {
         <img
           src="/logo.png"
           alt="Taskosphere"
-          className="h-20 lg:h-24 w-auto object-contain"
+          className="h-32 lg:h-36 w-auto object-contain"
         />
         {/* Close Button (Mobile Only) */}
         <Button
