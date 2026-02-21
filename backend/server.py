@@ -43,7 +43,7 @@ def sanitize_user_data(user_data, current_user):
             sanitized.append(u_dict)
         return sanitized
     # If single user
-    u_dict = user_data.dict() if hasattr(u_data, "dict") else dict(user_data)
+    u_dict = user_data.dict() if hasattr(user_data, "dict") else dict(user_data)
     return u_dict
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -103,6 +103,7 @@ async def create_indexes():
     await db.staff_activity.create_index("timestamp")
     await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
     await db.staff_activity.create_index("category")
+    await db.due_dates.create_index("department")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -257,11 +258,12 @@ class DueDateBase(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: datetime
-    reminder_days: int = 30 # Days before to remind
-    category: Optional[str] = None # e.g., "GST Filing", "Income Tax", "ROC"
+    reminder_days: int = 30
+    category: Optional[str] = None
+    department: str  # ✅ ADD THIS
     assigned_to: Optional[str] = None
     client_id: Optional[str] = None
-    status: str = "pending" # pending, completed
+    status: str = "pending"
 class DueDateCreate(DueDateBase):
     pass
 class DueDate(DueDateBase):
@@ -1414,38 +1416,64 @@ async def create_due_date(
     await db.due_dates.insert_one(doc)
     return due_date
 @api_router.get("/duedates", response_model=List[DueDate])
-async def get_due_dates(current_user: User = Depends(check_permission("can_view_all_duedates"))):
+async def get_due_dates(current_user: User = Depends(get_current_user)):
+
     query = {}
-    if current_user.role == "staff":
-        query["assigned_to"] = current_user.id
+
+    # Admin → see all
+    if current_user.role == "admin":
+        pass
+
+    # Manager → see departments assigned
+    elif current_user.role == "manager":
+        if current_user.departments:
+            query["department"] = {"$in": current_user.departments}
+
+    # Staff → see only their departments
+    else:
+        if current_user.departments:
+            query["department"] = {"$in": current_user.departments}
+        else:
+            # No department assigned → show nothing
+            return []
+
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
     for dd in due_dates:
         if isinstance(dd.get("created_at"), str):
             dd["created_at"] = datetime.fromisoformat(dd["created_at"])
         if isinstance(dd.get("due_date"), str):
             dd["due_date"] = datetime.fromisoformat(dd["due_date"])
+
     return [DueDate(**dd) for dd in due_dates]
 @api_router.get("/duedates/upcoming")
 async def get_upcoming_due_dates(
     days: int = 30,
     current_user: User = Depends(get_current_user)
 ):
-    """Get due dates in next N days"""
     now = datetime.now(timezone.utc)
     future_date = now + timedelta(days=days)
+
     query = {"status": "pending"}
-    if current_user.role == "staff":
-        query["assigned_to"] = current_user.id
+
+    if current_user.role != "admin":
+        if current_user.departments:
+            query["department"] = {"$in": current_user.departments}
+        else:
+            return []
+
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
     upcoming = []
+
     for dd in due_dates:
         dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
+
         if now <= dd_date <= future_date:
-            if isinstance(dd["created_at"], str):
-                dd["created_at"] = datetime.fromisoformat(dd["created_at"])
             dd["due_date"] = dd_date
             dd["days_remaining"] = (dd_date - now).days
             upcoming.append(dd)
+
     return sorted(upcoming, key=lambda x: x["days_remaining"])
 @api_router.put("/duedates/{due_date_id}", response_model=DueDate)
 async def update_due_date(
