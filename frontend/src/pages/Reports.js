@@ -19,17 +19,15 @@ import {
   Area,
   Legend,
 } from 'recharts';
-
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
 const CHART_COLORS = {
-  primary: '#0D3B66',    // Deep Blue
-  secondary: '#1F6FB2',  // Medium Blue
-  success: '#1FAF5A',    // Emerald Green
-  warning: '#5CCB5F',    // Light Green
-  accent: '#0A2D4D',     // Darker Blue
+  primary: '#0D3B66', // Deep Blue
+  secondary: '#1F6FB2', // Medium Blue
+  success: '#1FAF5A', // Emerald Green
+  warning: '#5CCB5F', // Light Green
+  accent: '#0A2D4D', // Darker Blue
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -38,23 +36,22 @@ const containerVariants = {
     transition: { staggerChildren: 0.1 }
   }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
-
 export default function Reports() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+
+  const canViewReports = hasPermission("can_view_reports");
+  const canViewTeamReports = hasPermission("can_view_team_reports");
   const [reportData, setReportData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     fetchAllData();
   }, []);
-
   const fetchAllData = async () => {
     try {
       const [reportsRes, statsRes, tasksRes] = await Promise.all([
@@ -71,23 +68,19 @@ export default function Reports() {
       setLoading(false);
     }
   };
-
   const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
-
   const getAverageScreenTime = () => {
     if (reportData.length === 0) return 0;
     const total = reportData.reduce((sum, item) => sum + item.total_screen_time, 0);
     return Math.round(total / reportData.length);
   };
-
   const getTotalTasksCompleted = () => {
     return reportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
   };
-
   // Task Status Distribution for Pie Chart
   const getTaskStatusData = () => {
     const pending = tasks.filter(t => t.status === 'pending').length;
@@ -99,7 +92,6 @@ export default function Reports() {
       { name: 'Completed', value: completed, color: CHART_COLORS.success },
     ].filter(item => item.value > 0);
   };
-
   // Task Category Distribution
   const getTaskCategoryData = () => {
     const categoryCount = {};
@@ -116,7 +108,6 @@ export default function Reports() {
       .sort((a, b) => b.tasks - a.tasks)
       .slice(0, 6);
   };
-
   // Employee Performance Data for Bar Chart
   const getEmployeePerformanceData = () => {
     return reportData.slice(0, 5).map((item, index) => ({
@@ -126,7 +117,6 @@ export default function Reports() {
       fill: COLORS[index % COLORS.length],
     }));
   };
-
   // Weekly Trend Data (Mock for demo - can be connected to real data)
   const getWeeklyTrendData = () => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -136,7 +126,6 @@ export default function Reports() {
       pending: Math.floor(Math.random() * 5) + 1,
     }));
   };
-
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -153,7 +142,6 @@ export default function Reports() {
     }
     return null;
   };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -161,10 +149,16 @@ export default function Reports() {
       </div>
     );
   }
-
+  if (!canViewReports) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-slate-500">You do not have permission to view reports.</p>
+      </div>
+    );
+  }
   return (
-    <motion.div 
-      className="space-y-8" 
+    <motion.div
+      className="space-y-8"
       data-testid="reports-page"
       variants={containerVariants}
       initial="hidden"
@@ -175,9 +169,8 @@ export default function Reports() {
         <h1 className="text-4xl font-bold font-outfit tracking-tight" style={{ color: '#0D3B66' }}>Analytics & Reports</h1>
         <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
       </motion.div>
-
       {/* Summary Stats Grid */}
-      <motion.div 
+      <motion.div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
         variants={itemVariants}
       >
@@ -195,7 +188,6 @@ export default function Reports() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1FAF5A 0%, #5CCB5F 100%)' }} data-testid="completed-tasks-stat">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -210,7 +202,6 @@ export default function Reports() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1F6FB2 0%, #0D3B66 100%)' }} data-testid="team-size-stat">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -225,7 +216,6 @@ export default function Reports() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #5CCB5F 0%, #1FAF5A 100%)' }} data-testid="pending-tasks-stat">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -241,9 +231,8 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Charts Row 1 */}
-      <motion.div 
+      <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
         variants={itemVariants}
       >
@@ -282,7 +271,6 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
-
         {/* Task Category Bar Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-category-chart">
           <CardHeader>
@@ -311,9 +299,8 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Charts Row 2 */}
-      <motion.div 
+      <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
         variants={itemVariants}
       >
@@ -344,7 +331,6 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
-
         {/* Weekly Trend Area Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="weekly-trend-chart">
           <CardHeader>
@@ -368,30 +354,29 @@ export default function Reports() {
                 <YAxis />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend />
-                <Area 
-                  type="monotone" 
-                  dataKey="completed" 
+                <Area
+                  type="monotone"
+                  dataKey="completed"
                   name="Completed"
-                  stroke={CHART_COLORS.success} 
-                  fillOpacity={1} 
-                  fill="url(#colorCompleted)" 
+                  stroke={CHART_COLORS.success}
+                  fillOpacity={1}
+                  fill="url(#colorCompleted)"
                 />
-                <Area 
-                  type="monotone" 
-                  dataKey="pending" 
+                <Area
+                  type="monotone"
+                  dataKey="pending"
                   name="Pending"
-                  stroke={CHART_COLORS.warning} 
-                  fillOpacity={1} 
-                  fill="url(#colorPending)" 
+                  stroke={CHART_COLORS.warning}
+                  fillOpacity={1}
+                  fill="url(#colorPending)"
                 />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Team Workload Table */}
-      {user?.role !== 'staff' && dashboardStats?.team_workload && (
+      {canViewTeamReports && dashboardStats?.team_workload && (
         <motion.div variants={itemVariants}>
           <Card className="border border-slate-200 shadow-sm" data-testid="team-workload-table">
             <CardHeader className="bg-slate-50 border-b border-slate-200">
@@ -414,8 +399,8 @@ export default function Reports() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {dashboardStats.team_workload.map((member, index) => {
-                      const progress = member.total_tasks > 0 
-                        ? Math.round((member.completed_tasks / member.total_tasks) * 100) 
+                      const progress = member.total_tasks > 0
+                        ? Math.round((member.completed_tasks / member.total_tasks) * 100)
                         : 0;
                       return (
                         <tr key={member.user_id} className="hover:bg-slate-50 transition-colors" data-testid={`workload-row-${index}`}>
@@ -441,7 +426,7 @@ export default function Reports() {
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="flex-1 bg-slate-200 rounded-full h-2 max-w-24">
-                                <div 
+                                <div
                                   className="bg-gradient-to-r from-orange-500 to-rose-500 h-2 rounded-full transition-all duration-500"
                                   style={{ width: `${progress}%` }}
                                 />
