@@ -44,18 +44,21 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 const PermissionRoute = ({ permission, children }) => {
-  const { user } = useAuth();
+  const { user, loading, hasPermission } = useAuth();
+
+  if (loading) {
+    return null;
+  }
+
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  // Admin override
-  if (user.role === "admin") {
-    return <DashboardLayout>{children}</DashboardLayout>;
-  }
-  // Permission check
-  if (!user.permissions?.[permission]) {
+
+  // If permission is defined, check it
+  if (permission && !hasPermission(permission)) {
     return <Navigate to="/dashboard" replace />;
   }
+
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 function AppRoutes() {
@@ -100,9 +103,9 @@ function AppRoutes() {
       <Route
         path="/tasks"
         element={
-          <PermissionRoute permission="can_view_all_tasks">
+          <ProtectedRoute>
             <Tasks />
-          </PermissionRoute>
+          </ProtectedRoute>
         }
       />
       <Route
@@ -124,31 +127,31 @@ function AppRoutes() {
       <Route
         path="/attendance"
         element={
-          <PermissionRoute permission="can_view_attendance">
+          <ProtectedRoute>
             <Attendance />
-          </PermissionRoute>
+          </ProtectedRoute>
         }
       />
       <Route
         path="/reports"
         element={
-          <PermissionRoute permission="can_view_reports">
+          <ProtectedRoute>
             <Reports />
-          </PermissionRoute>
+          </ProtectedRoute>
         }
       />
       <Route
         path="/clients"
         element={
-          <PermissionRoute permission="can_view_all_clients">
+          <ProtectedRoute>
             <Clients />
-          </PermissionRoute>
+          </ProtectedRoute>
         }
       />
       <Route
         path="/users"
         element={
-          <PermissionRoute permission="can_manage_users">
+          <PermissionRoute permission="can_view_user_page">
             <Users />
           </PermissionRoute>
         }
@@ -156,9 +159,9 @@ function AppRoutes() {
       <Route
         path="/duedates"
         element={
-          <PermissionRoute permission="can_view_all_duedates">
+          <ProtectedRoute>
             <DueDates />
-          </PermissionRoute>
+          </ProtectedRoute>
         }
       />
       <Route
