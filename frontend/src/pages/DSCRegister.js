@@ -12,7 +12,6 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, History, Search } from 'lucide-react';
 import { format } from 'date-fns';
-
 export default function DSCRegister() {
   const [dscList, setDscList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -23,7 +22,6 @@ export default function DSCRegister() {
   const [selectedDSC, setSelectedDSC] = useState(null);
   const [editingMovement, setEditingMovement] = useState(null);
   const [searchQuery, setSearchQuery] = useState(''); // Search state
-
   const [formData, setFormData] = useState({
     holder_name: '',
     dsc_type: '', // Not compulsory
@@ -34,23 +32,19 @@ export default function DSCRegister() {
     expiry_date: '',
     notes: '',
   });
-
   const [movementData, setMovementData] = useState({
     movement_type: 'IN',
     person_name: '',
     notes: '',
   });
-
   const [editMovementData, setEditMovementData] = useState({
     movement_type: 'IN',
     person_name: '',
     notes: '',
   });
-
   useEffect(() => {
     fetchDSC();
   }, []);
-
   const fetchDSC = async () => {
     try {
       const response = await api.get('/dsc');
@@ -59,18 +53,15 @@ export default function DSCRegister() {
       toast.error('Failed to fetch DSC');
     }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const dscData = {
         ...formData,
         issue_date: new Date(formData.issue_date).toISOString(),
         expiry_date: new Date(formData.expiry_date).toISOString(),
       };
-
       if (editingDSC) {
         await api.put(`/dsc/${editingDSC.id}`, dscData);
         toast.success('DSC updated successfully!');
@@ -78,7 +69,6 @@ export default function DSCRegister() {
         await api.post('/dsc', dscData);
         toast.success('DSC added successfully!');
       }
-
       setDialogOpen(false);
       resetForm();
       fetchDSC();
@@ -88,11 +78,9 @@ export default function DSCRegister() {
       setLoading(false);
     }
   };
-
   const handleMovement = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
       toast.success(`DSC marked as ${movementData.movement_type}!`);
@@ -105,30 +93,25 @@ export default function DSCRegister() {
       setLoading(false);
     }
   };
-
   const openMovementDialog = (dsc, type) => {
     setSelectedDSC(dsc);
     setMovementData({ ...movementData, movement_type: type });
     setMovementDialogOpen(true);
   };
-
   const openLogDialog = (dsc) => {
     setSelectedDSC(dsc);
     setLogDialogOpen(true);
   };
-
   // Helper to get DSC current IN/OUT status
   const getDSCInOutStatus = (dsc) => {
     if (!dsc) return 'OUT';
     if (dsc.current_status) return dsc.current_status;
     return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
   };
-
   // Handle movement from within the edit modal
   const handleMovementInModal = async () => {
     if (!editingDSC || !movementData.person_name) return;
     setLoading(true);
-
     try {
       const currentStatus = getDSCInOutStatus(editingDSC);
       const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
@@ -138,7 +121,7 @@ export default function DSCRegister() {
       });
       toast.success(`DSC marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-      
+     
       // Refresh the DSC data and update editingDSC
       const response = await api.get('/dsc');
       setDscList(response.data);
@@ -152,12 +135,10 @@ export default function DSCRegister() {
       setLoading(false);
     }
   };
-
   // Handle updating an existing movement log entry
   const handleUpdateMovement = async (movementId) => {
     if (!editingDSC || !editMovementData.person_name) return;
     setLoading(true);
-
     try {
       await api.put(`/dsc/${editingDSC.id}/movement/${movementId}`, {
         movement_id: movementId,
@@ -167,7 +148,7 @@ export default function DSCRegister() {
       });
       toast.success('Movement log updated successfully!');
       setEditingMovement(null);
-      
+     
       // Refresh the DSC data and update editingDSC
       const response = await api.get('/dsc');
       setDscList(response.data);
@@ -181,7 +162,6 @@ export default function DSCRegister() {
       setLoading(false);
     }
   };
-
   // Start editing a movement
   const startEditingMovement = (movement) => {
     setEditingMovement(movement.id || movement.timestamp); // Use id or timestamp as fallback
@@ -191,7 +171,6 @@ export default function DSCRegister() {
       notes: movement.notes || '',
     });
   };
-
   const handleEdit = (dsc) => {
     setEditingDSC(dsc);
     setFormData({
@@ -208,10 +187,8 @@ export default function DSCRegister() {
     setEditingMovement(null); // Reset editing movement
     setDialogOpen(true);
   };
-
   const handleDelete = async (dscId) => {
     if (!window.confirm('Are you sure you want to delete this DSC?')) return;
-
     try {
       await api.delete(`/dsc/${dscId}`);
       toast.success('DSC deleted successfully!');
@@ -220,7 +197,6 @@ export default function DSCRegister() {
       toast.error('Failed to delete DSC');
     }
   };
-
   const resetForm = () => {
     setFormData({
       holder_name: '',
@@ -234,12 +210,10 @@ export default function DSCRegister() {
     });
     setEditingDSC(null);
   };
-
   const getDSCStatus = (expiryDate) => {
     const now = new Date();
     const expiry = new Date(expiryDate);
     const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-
     if (daysLeft < 0) {
       return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
     } else if (daysLeft <= 7) {
@@ -249,7 +223,6 @@ export default function DSCRegister() {
     }
     return { color: 'bg-emerald-500', text: `${daysLeft} Days left`, textColor: 'text-emerald-700' };
   };
-
   // Filter by search query
   const filterBySearch = (dsc) => {
     if (!searchQuery.trim()) return true;
@@ -260,10 +233,20 @@ export default function DSCRegister() {
       dsc.associated_with?.toLowerCase().includes(query)
     );
   };
+  const inDSC = dscList.filter(dsc => {
+  const notExpired = new Date(dsc.expiry_date) >= new Date();
+  return notExpired && getDSCInOutStatus(dsc) === 'IN' && filterBySearch(dsc);
+});
 
-  const inDSC = dscList.filter(dsc => getDSCInOutStatus(dsc) === 'IN' && filterBySearch(dsc));
-  const outDSC = dscList.filter(dsc => getDSCInOutStatus(dsc) === 'OUT' && filterBySearch(dsc));
-
+const outDSC = dscList.filter(dsc => {
+  const notExpired = new Date(dsc.expiry_date) >= new Date();
+  return notExpired && getDSCInOutStatus(dsc) === 'OUT' && filterBySearch(dsc);
+});
+  const expiredDSC = dscList.filter(dsc => {
+  const now = new Date();
+  const expiry = new Date(dsc.expiry_date);
+  return expiry < now && filterBySearch(dsc);
+});
   return (
     <div className="space-y-6" data-testid="dsc-page">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -271,7 +254,6 @@ export default function DSCRegister() {
           <h1 className="text-3xl font-bold font-outfit text-slate-900">DSC Register</h1>
           <p className="text-slate-600 mt-1">Manage digital signature certificates with IN/OUT tracking</p>
         </div>
-
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) resetForm();
@@ -294,7 +276,7 @@ export default function DSCRegister() {
                 {editingDSC ? 'Update DSC details and track IN/OUT status.' : 'Fill in the details to add a new DSC certificate.'}
               </DialogDescription>
             </DialogHeader>
-            
+           
             {/* Show tabs only when editing */}
             {editingDSC ? (
               <Tabs defaultValue="details" className="w-full">
@@ -303,7 +285,7 @@ export default function DSCRegister() {
                   <TabsTrigger value="status">IN/OUT Status</TabsTrigger>
                   <TabsTrigger value="history">History</TabsTrigger>
                 </TabsList>
-                
+               
                 <TabsContent value="details" className="mt-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -428,7 +410,7 @@ export default function DSCRegister() {
                     </DialogFooter>
                   </form>
                 </TabsContent>
-                
+               
                 <TabsContent value="status" className="mt-4 space-y-4">
                   {/* Current Status Display */}
                   <Card className={`p-4 ${getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
@@ -451,7 +433,7 @@ export default function DSCRegister() {
                       </div>
                     </div>
                   </Card>
-                  
+                 
                   {/* Quick Movement Form */}
                   <Card className="p-4">
                     <h4 className="font-medium text-slate-900 mb-3">
@@ -502,14 +484,14 @@ export default function DSCRegister() {
                     </form>
                   </Card>
                 </TabsContent>
-                
+               
                 <TabsContent value="history" className="mt-4">
                   <div className="space-y-3 max-h-80 overflow-y-auto">
                     {editingDSC?.movement_log && editingDSC.movement_log.length > 0 ? (
                       editingDSC.movement_log.slice().reverse().map((movement, index) => {
                         const movementKey = movement.id || movement.timestamp;
                         const isEditing = editingMovement === movementKey;
-                        
+                       
                         return (
                           <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                             {isEditing ? (
@@ -645,7 +627,6 @@ export default function DSCRegister() {
                       data-testid="dsc-holder-name-input"
                     />
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="dsc_type">Type</Label>
                     <Input
@@ -657,7 +638,6 @@ export default function DSCRegister() {
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="dsc_password">Password</Label>
@@ -670,7 +650,6 @@ export default function DSCRegister() {
                       data-testid="dsc-password-input"
                     />
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
                     <Input
@@ -682,7 +661,6 @@ export default function DSCRegister() {
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="entity_type">Entity Type</Label>
@@ -699,7 +677,6 @@ export default function DSCRegister() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
                     <Input
@@ -712,7 +689,6 @@ export default function DSCRegister() {
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
@@ -727,7 +703,6 @@ export default function DSCRegister() {
                   </div>
                   <div></div>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Textarea
@@ -739,7 +714,6 @@ export default function DSCRegister() {
                     data-testid="dsc-notes-input"
                   />
                 </div>
-
                 <DialogFooter>
                   <Button
                     type="button"
@@ -766,7 +740,6 @@ export default function DSCRegister() {
           </DialogContent>
         </Dialog>
       </div>
-
       {/* Search Bar */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -779,10 +752,9 @@ export default function DSCRegister() {
           data-testid="dsc-search-input"
         />
       </div>
-
       {/* IN/OUT Tabs */}
       <Tabs defaultValue="in" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="in" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
             <ArrowDownCircle className="h-4 w-4 mr-2" />
             IN ({inDSC.length})
@@ -791,8 +763,14 @@ export default function DSCRegister() {
             <ArrowUpCircle className="h-4 w-4 mr-2" />
             OUT ({outDSC.length})
           </TabsTrigger>
+<TabsTrigger
+  value="expired"
+  className="data-[state=active]:bg-amber-700 data-[state=active]:text-white"
+>
+  <AlertCircle className="h-4 w-4 mr-2" />
+  EXPIRED ({expiredDSC.length})
+</TabsTrigger>
         </TabsList>
-
         <TabsContent value="in" className="mt-6">
           <Card className="border border-emerald-200 bg-emerald-50/30">
             <CardHeader className="bg-emerald-50 border-b border-emerald-200">
@@ -812,7 +790,6 @@ export default function DSCRegister() {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="out" className="mt-6">
           <Card className="border border-red-200 bg-red-50/30">
             <CardHeader className="bg-red-50 border-b border-red-200">
@@ -832,8 +809,35 @@ export default function DSCRegister() {
             </CardContent>
           </Card>
         </TabsContent>
-      </Tabs>
+<TabsContent value="expired" className="mt-6">
+  <Card className="border border-amber-300 bg-amber-50/40">
+    <CardHeader className="bg-amber-100 border-b border-amber-300">
+      <CardTitle className="text-sm font-medium text-amber-800 uppercase tracking-wider flex items-center gap-2">
+        <AlertCircle className="h-4 w-4" />
+        DSC EXPIRED ({expiredDSC.length})
+      </CardTitle>
+    </CardHeader>
 
+    <CardContent className="p-0">
+      {expiredDSC.length === 0 ? (
+        <div className="text-center py-12 text-slate-500">
+          <p>No expired DSC certificates</p>
+        </div>
+      ) : (
+        <DSCTable
+          dscList={expiredDSC}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onMovement={openMovementDialog}
+          onViewLog={openLogDialog}
+          getDSCStatus={getDSCStatus}
+          type="EXPIRED"
+        />
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
+      </Tabs>
       {/* Movement Dialog */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
@@ -842,8 +846,8 @@ export default function DSCRegister() {
               Mark DSC as {movementData.movement_type}
             </DialogTitle>
             <DialogDescription>
-              {movementData.movement_type === 'IN' 
-                ? 'Record when DSC is delivered/returned' 
+              {movementData.movement_type === 'IN'
+                ? 'Record when DSC is delivered/returned'
                 : 'Record when DSC is taken out'}
             </DialogDescription>
           </DialogHeader>
@@ -852,7 +856,6 @@ export default function DSCRegister() {
               <Label>DSC Certificate</Label>
               <p className="text-sm font-medium">{selectedDSC?.certificate_number} - {selectedDSC?.holder_name}</p>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="person_name">
                 {movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
@@ -865,7 +868,6 @@ export default function DSCRegister() {
                 required
               />
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="movement_notes">Notes</Label>
               <Textarea
@@ -876,7 +878,6 @@ export default function DSCRegister() {
                 rows={2}
               />
             </div>
-
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
                 Cancel
@@ -892,7 +893,6 @@ export default function DSCRegister() {
           </form>
         </DialogContent>
       </Dialog>
-
       {/* Movement Log Dialog */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
@@ -949,7 +949,6 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
-
       {/* DSC Expiry Alert */}
       {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color !== 'bg-emerald-500').length > 0 && (
         <Card className="border-2 border-orange-200 bg-orange-50">
@@ -970,7 +969,6 @@ export default function DSCRegister() {
     </div>
   );
 }
-
 // DSC Table Component
 function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type }) {
   return (
@@ -980,7 +978,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
           <tr>
             <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
               S.No
-            </th> 
+            </th>
             <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
               Holder Name
             </th>
@@ -1013,23 +1011,20 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                 <td className="px-4 py-3 text-sm text-slate-500">
                   {index + 1}
                 </td>
-                
+               
                 <td className="px-4 py-3 text-sm font-medium text-slate-900 break-words leading-tight">
                   {dsc.holder_name}
                 </td>
-
                 <td className="px-4 py-3 text-sm text-slate-600 truncate">
                   {dsc.dsc_type || '-'}
                 </td>
-
                 <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">
                   {dsc.associated_with || '-'}
                 </td>
-
                 <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                   {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
                 </td>
-                
+               
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
                     <div className={`w-1.5 h-1.5 rounded-full ${status.color}`}></div>
@@ -1038,7 +1033,6 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     </span>
                   </div>
                 </td>
-
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
                     <Button
