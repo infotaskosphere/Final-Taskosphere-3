@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2, AlertTriangle, Target } from 'lucide-react';
@@ -19,6 +20,7 @@ import {
   Area,
   Legend,
 } from 'recharts';
+
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
 const CHART_COLORS = {
@@ -28,6 +30,7 @@ const CHART_COLORS = {
   warning: '#5CCB5F', // Light Green
   accent: '#0A2D4D', // Darker Blue
 };
+
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -40,18 +43,21 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
+
 export default function Reports() {
   const { user, hasPermission } = useAuth();
-
   const canViewReports = hasPermission("can_view_reports");
   const canViewTeamReports = hasPermission("can_view_team_reports");
+  const isAdmin = canViewTeamReports; // Assuming can_view_team_reports indicates admin-level access
   const [reportData, setReportData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     fetchAllData();
   }, []);
+
   const fetchAllData = async () => {
     try {
       const [reportsRes, statsRes, tasksRes] = await Promise.all([
@@ -68,19 +74,23 @@ export default function Reports() {
       setLoading(false);
     }
   };
+
   const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
+
   const getAverageScreenTime = () => {
     if (reportData.length === 0) return 0;
     const total = reportData.reduce((sum, item) => sum + item.total_screen_time, 0);
     return Math.round(total / reportData.length);
   };
+
   const getTotalTasksCompleted = () => {
     return reportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
   };
+
   // Task Status Distribution for Pie Chart
   const getTaskStatusData = () => {
     const pending = tasks.filter(t => t.status === 'pending').length;
@@ -92,6 +102,7 @@ export default function Reports() {
       { name: 'Completed', value: completed, color: CHART_COLORS.success },
     ].filter(item => item.value > 0);
   };
+
   // Task Category Distribution
   const getTaskCategoryData = () => {
     const categoryCount = {};
@@ -108,24 +119,75 @@ export default function Reports() {
       .sort((a, b) => b.tasks - a.tasks)
       .slice(0, 6);
   };
+
   // Employee Performance Data for Bar Chart
   const getEmployeePerformanceData = () => {
-    return reportData.slice(0, 5).map((item, index) => ({
-      name: item.user?.full_name?.split(' ')[0] || 'User',
-      tasks: item.total_tasks_completed,
-      hours: Math.round(item.total_screen_time / 60),
-      fill: COLORS[index % COLORS.length],
-    }));
+    if (!isAdmin) {
+      if (reportData.length > 0) {
+        const item = reportData[0];
+        return [{
+          name: 'You',
+          tasks: item.total_tasks_completed,
+          hours: Math.round(item.total_screen_time / 60),
+          fill: COLORS[0],
+        }];
+      }
+      return [];
+    } else {
+      return reportData.slice(0, 5).map((item, index) => ({
+        name: item.user?.full_name?.split(' ')[0] || 'User',
+        tasks: item.total_tasks_completed,
+        hours: Math.round(item.total_screen_time / 60),
+        fill: COLORS[index % COLORS.length],
+      }));
+    }
   };
-  // Weekly Trend Data (Mock for demo - can be connected to real data)
+
+  // Helper function to get start of day
+  const getStartOfDay = (date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  // Weekly Trend Data from tasks
   const getWeeklyTrendData = () => {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days.map((day, i) => ({
-      name: day,
-      completed: Math.floor(Math.random() * 10) + 2,
-      pending: Math.floor(Math.random() * 5) + 1,
-    }));
+    const today = new Date();
+    const diff = today.getDay() - 1; // Monday as 0
+    const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (diff >= 0 ? diff : diff + 7));
+    const startOfWeek = getStartOfDay(monday);
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+      days.push({
+        name: day.toLocaleDateString('en-us', { weekday: 'short' }),
+        completed: 0,
+        pending: 0,
+      });
+    }
+
+    tasks.forEach((task) => {
+      if (task.status === 'completed' && task.completed_at) {
+        const compDate = getStartOfDay(new Date(task.completed_at));
+        const dayIndex = Math.floor((compDate - startOfWeek) / 86400000);
+        if (dayIndex >= 0 && dayIndex < 7) {
+          days[dayIndex].completed += 1;
+        }
+      }
+      if (task.status !== 'completed' && task.created_at) {
+        const createDate = getStartOfDay(new Date(task.created_at));
+        const dayIndex = Math.floor((createDate - startOfWeek) / 86400000);
+        if (dayIndex >= 0 && dayIndex < 7) {
+          days[dayIndex].pending += 1;
+        }
+      }
+    });
+
+    return days;
   };
+
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -142,6 +204,26 @@ export default function Reports() {
     }
     return null;
   };
+
+  const handleDownloadReports = () => {
+    const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
+    const csvData = reportData.map(item => [
+      item.user?.full_name || 'Unknown',
+      item.total_tasks_completed,
+      item.total_screen_time
+    ]);
+    const csvContent = [headers, ...csvData].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'efficiency_reports.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -149,6 +231,7 @@ export default function Reports() {
       </div>
     );
   }
+
   if (!canViewReports) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -156,6 +239,7 @@ export default function Reports() {
       </div>
     );
   }
+
   return (
     <motion.div
       className="space-y-8"
@@ -165,10 +249,18 @@ export default function Reports() {
       animate="visible"
     >
       {/* Header */}
-      <motion.div variants={itemVariants}>
-        <h1 className="text-4xl font-bold font-outfit tracking-tight" style={{ color: '#0D3B66' }}>Analytics & Reports</h1>
-        <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
+      <motion.div variants={itemVariants} className="flex justify-between items-start">
+        <div>
+          <h1 className="text-4xl font-bold font-outfit tracking-tight" style={{ color: '#0D3B66' }}>Analytics & Reports</h1>
+          <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
+        </div>
+        {isAdmin && (
+          <Button onClick={handleDownloadReports} variant="outline">
+            Download Reports
+          </Button>
+        )}
       </motion.div>
+
       {/* Summary Stats Grid */}
       <motion.div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
@@ -202,20 +294,22 @@ export default function Reports() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1F6FB2 0%, #0D3B66 100%)' }} data-testid="team-size-stat">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-100 text-sm font-medium">Team Members</p>
-                <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.team_workload?.length || 0}</p>
-                <p className="text-blue-100 text-xs mt-2">Active users</p>
+        {isAdmin && (
+          <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1F6FB2 0%, #0D3B66 100%)' }} data-testid="team-size-stat">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-blue-100 text-sm font-medium">Team Members</p>
+                  <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.team_workload?.length || 0}</p>
+                  <p className="text-blue-100 text-xs mt-2">Active users</p>
+                </div>
+                <div className="bg-white/20 p-4 rounded-2xl">
+                  <Users className="h-8 w-8 text-white" />
+                </div>
               </div>
-              <div className="bg-white/20 p-4 rounded-2xl">
-                <Users className="h-8 w-8 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
         <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #5CCB5F 0%, #1FAF5A 100%)' }} data-testid="pending-tasks-stat">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -231,6 +325,7 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Charts Row 1 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -271,6 +366,7 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
+
         {/* Task Category Bar Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-category-chart">
           <CardHeader>
@@ -299,6 +395,7 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Charts Row 2 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -307,8 +404,8 @@ export default function Reports() {
         {/* Employee Performance Bar Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="employee-performance-chart">
           <CardHeader>
-            <CardTitle className="text-xl font-outfit">Top Performers</CardTitle>
-            <CardDescription>Tasks completed by team members</CardDescription>
+            <CardTitle className="text-xl font-outfit">{isAdmin ? "Top Performers" : "Your Performance"}</CardTitle>
+            <CardDescription>{isAdmin ? "Tasks completed by team members" : "Your completed tasks"}</CardDescription>
           </CardHeader>
           <CardContent>
             {getEmployeePerformanceData().length > 0 ? (
@@ -331,6 +428,7 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
+
         {/* Weekly Trend Area Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="weekly-trend-chart">
           <CardHeader>
@@ -375,8 +473,9 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Team Workload Table */}
-      {canViewTeamReports && dashboardStats?.team_workload && (
+      {isAdmin && dashboardStats?.team_workload && (
         <motion.div variants={itemVariants}>
           <Card className="border border-slate-200 shadow-sm" data-testid="team-workload-table">
             <CardHeader className="bg-slate-50 border-b border-slate-200">
