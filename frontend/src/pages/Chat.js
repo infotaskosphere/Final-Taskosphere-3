@@ -56,6 +56,7 @@ export default function Chat() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const pollIntervalRef = useRef(null);
+  const lastMessageIdRef = useRef(null);
   const fetchGroups = async () => {
   try {
     const res = await api.get("/chat/groups");
@@ -65,22 +66,24 @@ export default function Chat() {
   }
 };
   useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+  useEffect(() => {
     fetchGroups();
     fetchUsers();
-   
+  
     // Poll for new messages every 3 seconds
     pollIntervalRef.current = setInterval(() => {
-      if (selectedGroup) {
+      fetchGroups();
+      if (selectedGroup?.id) {
         fetchMessages(selectedGroup.id, true);
       }
-      fetchGroups();
     }, 3000);
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
-  }, []);
+
+    return () => clearInterval(pollIntervalRef.current);
+  }, [selectedGroup?.id]);
   useEffect(() => {
     if (selectedGroup) {
       fetchMessages(selectedGroup.id);
@@ -89,7 +92,6 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
- 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -104,10 +106,41 @@ export default function Chat() {
   const fetchMessages = async (groupId, silent = false) => {
     try {
       const response = await api.get(`/chat/groups/${groupId}/messages`);
-      setMessages(response.data);
+      const newMessages = response.data;
+
+      if (newMessages.length > 0) {
+        const latest = newMessages[newMessages.length - 1];
+
+        // Only notify if:
+        // 1. Message is new
+        // 2. Not sent by current user
+        // 3. Page is not focused
+        if (
+          latest.id !== lastMessageIdRef.current &&
+          latest.sender_id !== user?.id &&
+          document.hidden &&
+          Notification.permission === "granted"
+        ) {
+          const notification = new Notification(`New message from ${latest.sender_name}`, {
+            body: latest.message_type === "text"
+              ? latest.content
+              : latest.message_type === "image"
+                ? "📷 Sent an image"
+                : "📎 Sent a file",
+            icon: "/logo192.png", // optional: add your app logo
+          });
+          notification.onclick = () => {
+            window.focus();
+          };
+        }
+
+        lastMessageIdRef.current = latest.id;
+      }
+
+      setMessages(newMessages);
     } catch (error) {
       if (!silent) {
-        toast.error('Failed to fetch messages');
+        toast.error("Failed to fetch messages");
       }
     }
   };
@@ -176,7 +209,7 @@ export default function Chat() {
       reader.onloadend = async () => {
         const base64 = reader.result;
         const isImage = file.type.startsWith('image/');
-       
+      
         await api.post(`/chat/groups/${selectedGroup.id}/messages`, {
           content: isImage ? 'Shared an image' : `Shared a file: ${file.name}`,
           message_type: isImage ? 'image' : 'file',
@@ -184,7 +217,7 @@ export default function Chat() {
           file_name: file.name,
           file_size: file.size
         });
-       
+      
         fetchMessages(selectedGroup.id);
         toast.success('File sent!');
       };
@@ -197,7 +230,7 @@ export default function Chat() {
   };
   const handleLeaveGroup = async () => {
     if (!selectedGroup) return;
-   
+  
     try {
       await api.delete(`/chat/groups/${selectedGroup.id}`);
       toast.success('Left group successfully');
@@ -210,12 +243,15 @@ export default function Chat() {
   };
   const formatMessageTime = (dateStr) => {
     const date = new Date(dateStr);
+
     if (isToday(date)) {
       return format(date, 'h:mm a');
     }
+
     if (isYesterday(date)) {
       return `Yesterday ${format(date, 'h:mm a')}`;
     }
+
     return format(date, 'MMM d, h:mm a');
   };
   const formatFileSize = (bytes) => {
@@ -260,7 +296,7 @@ export default function Chat() {
                     Start a direct message or create a group chat
                   </DialogDescription>
                 </DialogHeader>
-               
+              
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label>Group Name (optional for direct messages)</Label>
@@ -271,7 +307,7 @@ export default function Chat() {
                       data-testid="group-name-input"
                     />
                   </div>
-                 
+                
                   <div className="space-y-2">
                     <Label>Description (optional)</Label>
                     <Textarea
@@ -281,7 +317,7 @@ export default function Chat() {
                       rows={2}
                     />
                   </div>
-                 
+                
                   <div className="space-y-2">
                     <Label>Select Members</Label>
                     <div className="border rounded-lg max-h-48 overflow-y-auto">
@@ -335,7 +371,7 @@ export default function Chat() {
               </DialogContent>
             </Dialog>
           </div>
-         
+        
           {/* Search */}
           <div className="relative mt-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -347,7 +383,7 @@ export default function Chat() {
             />
           </div>
         </CardHeader>
-       
+      
         <ScrollArea className="flex-1">
           <div className="p-2">
             {filteredGroups.length === 0 ? (
@@ -423,7 +459,7 @@ export default function Chat() {
                   </p>
                 </div>
               </div>
-             
+            
               {!selectedGroup.is_direct && (
                 <Dialog open={groupSettingsOpen} onOpenChange={setGroupSettingsOpen}>
                   <DialogTrigger asChild>
@@ -487,7 +523,7 @@ export default function Chat() {
                   {messages.map((msg, index) => {
                     const isOwn = msg.sender_id === user?.id;
                     const showAvatar = index === 0 || messages[index - 1]?.sender_id !== msg.sender_id;
-                   
+                  
                     return (
                       <motion.div
                         key={msg.id}
