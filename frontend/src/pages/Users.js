@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import RoleGuard from "@/components/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,6 @@ const itemVariants = {
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
- 
   return (
     <span
       className={`inline-flex items-center font-semibold rounded-full ${
@@ -69,7 +69,6 @@ const DeptPill = ({ dept, size = 'sm' }) => {
 const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS, isAdmin }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
- 
   const getRoleIcon = (role) => {
     switch(role) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -77,7 +76,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
- 
   const getRoleStyle = (role) => {
     switch(role) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -85,7 +83,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
- 
   const roleStyle = getRoleStyle(userData.role);
   return (
     <motion.div
@@ -145,7 +142,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
           <div className="flex items-center gap-1.5 mt-1">
             <Badge className={`${roleStyle.bg} ${roleStyle.text} font-medium text-[10px] sm:text-xs capitalize flex items-center gap-1`}>
               {getRoleIcon(userData.role)}
-              {userData.role}
+              <RoleGuard>{userData.role}</RoleGuard>
             </Badge>
             <Badge className="bg-slate-100 text-slate-700 font-medium text-[10px] sm:text-xs">
               {userData.status || 'Active'}
@@ -498,9 +495,15 @@ export default function Users() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
           <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
             <TabsTrigger value="all">All ({users.length})</TabsTrigger>
-            <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
-            <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
-            <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
+            <RoleGuard>
+              <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
+            </RoleGuard>
+            <RoleGuard>
+              <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
+            </RoleGuard>
+            <RoleGuard>
+              <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
+            </RoleGuard>
           </TabsList>
         </Tabs>
       </div>
