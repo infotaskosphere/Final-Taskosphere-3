@@ -2072,23 +2072,28 @@ async def update_user_permissions(
     return {"message": "Permissions updated successfully"}
 
 # ��������� CHAT ROUTES ���������������������������
-# ============ CHAT & MESSAGING ENDPOINTS ============
-# Create a new chat group
+
 @api_router.post("/chat/groups", response_model=ChatGroup)
-async def create_chat_group(group_data: ChatGroupCreate, current_user: User = Depends(get_current_user)):
-    """Create a new chat group or direct message"""
-    # Ensure creator is in members
+async def create_chat_group(
+    group_data: ChatGroupCreate,
+    current_user: User = Depends(get_current_user)
+):
     members = list(set(group_data.members + [current_user.id]))
-    # For direct chats, check if one already exists
+
+    # Prevent duplicate direct chat
     if group_data.is_direct and len(members) == 2:
-        existing = await db.chat_groups.find_one({
-            "is_direct": True,
-            "members": {"$all": members, "$size": 2}
-        }, {"_id": 0})
+        existing = await db.chat_groups.find_one(
+            {
+                "is_direct": True,
+                "members": {"$all": members, "$size": 2}
+            },
+            {"_id": 0}
+        )
         if existing:
             if isinstance(existing["created_at"], str):
                 existing["created_at"] = datetime.fromisoformat(existing["created_at"])
             return ChatGroup(**existing)
+
     group = ChatGroup(
         name=group_data.name,
         description=group_data.description,
@@ -2096,144 +2101,140 @@ async def create_chat_group(group_data: ChatGroupCreate, current_user: User = De
         created_by=current_user.id,
         is_direct=group_data.is_direct
     )
+
     doc = group.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
+
     await db.chat_groups.insert_one(doc)
     return group
 
-# Get all chat groups for current user
-@api_router.get("/chat/groups")
+
+@api_router.get("/chat/groups", response_model=List[dict])
 async def get_chat_groups(current_user: User = Depends(get_current_user)):
-    """Get all chat groups the user is a member of"""
     groups = await db.chat_groups.find(
         {"members": current_user.id},
         {"_id": 0}
     ).sort("last_message_at", -1).to_list(100)
-    # Get user info for member names
+
+    if not groups:
+        return []
+
+    # Collect all member IDs
     user_ids = set()
     for group in groups:
         user_ids.update(group["members"])
-    users = await db.users.find({"id": {"$in": list(user_ids)}}, {"_id": 0, "password": 0}).to_list(100)
+
+    users = await db.users.find(
+        {"id": {"$in": list(user_ids)}},
+        {"_id": 0, "password": 0}
+    ).to_list(200)
+
     user_map = {u["id"]: u for u in users}
+
     result = []
+
     for group in groups:
-        if isinstance(group["created_at"], str):
+
+        # Convert datetime fields
+        if isinstance(group.get("created_at"), str):
             group["created_at"] = datetime.fromisoformat(group["created_at"])
-        if group.get("last_message_at") and isinstance(group["last_message_at"], str):
+
+        if isinstance(group.get("last_message_at"), str):
             group["last_message_at"] = datetime.fromisoformat(group["last_message_at"])
+
         # Add member details
         group["member_details"] = [
             {
                 "id": m,
                 "name": user_map.get(m, {}).get("full_name", "Unknown"),
-                "role": user_map.get(m, {}).get("role", "staff")
-            } for m in group["members"]
+                "role": user_map.get(m, {}).get("role", "staff"),
+            }
+            for m in group["members"]
         ]
-        # For direct chats, get the other person's name
+
+        # Direct chat display name
         if group["is_direct"]:
-            other_member = [m for m in group["members"] if m != current_user.id]
-            if other_member:
-                group["display_name"] = user_map.get(other_member[0], {}).get("full_name", "Unknown")
-            else:
-                group["display_name"] = group["name"]
+            other = [m for m in group["members"] if m != current_user.id]
+            group["display_name"] = (
+                user_map.get(other[0], {}).get("full_name", "Unknown")
+                if other else group["name"]
+            )
         else:
             group["display_name"] = group["name"]
-        # Get unread count
+
+        # Unread count
         unread = await db.chat_messages.count_documents({
             "group_id": group["id"],
             "sender_id": {"$ne": current_user.id},
             "read_by": {"$ne": current_user.id}
         })
+
         group["unread_count"] = unread
-        # Get last message
+
+        # Last message
         last_msg = await db.chat_messages.find_one(
             {"group_id": group["id"]},
             {"_id": 0},
             sort=[("created_at", -1)]
         )
+
+        if last_msg and isinstance(last_msg.get("created_at"), str):
+            last_msg["created_at"] = datetime.fromisoformat(last_msg["created_at"])
+
         group["last_message"] = last_msg
+
         result.append(group)
+
     return result
 
-# Get a specific chat group
-@api_router.get("/chat/groups/{group_id}")
-async def get_chat_group(group_id: str, current_user: User = Depends(get_current_user)):
-    """Get a specific chat group if user is a member"""
-    group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not a member of this group")
-    if isinstance(group["created_at"], str):
-        group["created_at"] = datetime.fromisoformat(group["created_at"])
-    return group
 
-# Update chat group (add/remove members, change name)
-@api_router.put("/chat/groups/{group_id}")
-async def update_chat_group(
+# ================================
+# SINGLE GROUP
+# ================================
+
+@api_router.get("/chat/groups/{group_id}")
+async def get_chat_group(
     group_id: str,
-    update_data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a chat group (only creator or admin can update)"""
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
+
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not a member of this group")
-    if group["created_by"] != current_user.id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only group creator or admin can update")
-    allowed_fields = ["name", "description", "members"]
-    update = {k: v for k, v in update_data.items() if k in allowed_fields}
-    # Ensure creator stays in members
-    if "members" in update:
-        update["members"] = list(set(update["members"] + [group["created_by"]]))
-    await db.chat_groups.update_one({"id": group_id}, {"$set": update})
-    return {"message": "Group updated successfully"}
 
-# Delete/Leave chat group
-@api_router.delete("/chat/groups/{group_id}")
-async def leave_chat_group(group_id: str, current_user: User = Depends(get_current_user)):
-    """Leave a chat group or delete if creator"""
-    group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
     if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not a member of this group")
-    # If creator, delete the group
-    if group["created_by"] == current_user.id:
-        await db.chat_groups.delete_one({"id": group_id})
-        await db.chat_messages.delete_many({"group_id": group_id})
-        return {"message": "Group deleted successfully"}
-    # Otherwise, just remove from members
-    await db.chat_groups.update_one(
-        {"id": group_id},
-        {"$pull": {"members": current_user.id}}
-    )
-    return {"message": "Left group successfully"}
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-# Get messages for a chat group
+    if isinstance(group.get("created_at"), str):
+        group["created_at"] = datetime.fromisoformat(group["created_at"])
+
+    return group
+
+
+# ================================
+# MESSAGES
+# ================================
+
 @api_router.get("/chat/groups/{group_id}/messages")
 async def get_chat_messages(
     group_id: str,
     limit: int = 50,
-    before: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """Get messages for a chat group"""
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
+
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
+
     if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not a member of this group")
-    query = {"group_id": group_id}
-    if before:
-        query["created_at"] = {"$lt": before}
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     messages = await db.chat_messages.find(
-        query,
+        {"group_id": group_id},
         {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
-    # Mark messages as read
+
+    # Mark as read
     await db.chat_messages.update_many(
         {
             "group_id": group_id,
@@ -2241,24 +2242,28 @@ async def get_chat_messages(
         },
         {"$addToSet": {"read_by": current_user.id}}
     )
+
     for msg in messages:
-        if isinstance(msg["created_at"], str):
+        if isinstance(msg.get("created_at"), str):
             msg["created_at"] = datetime.fromisoformat(msg["created_at"])
+
     return list(reversed(messages))
 
-# Send a message to a chat group
+
 @api_router.post("/chat/groups/{group_id}/messages")
 async def send_chat_message(
     group_id: str,
     message_data: ChatMessageCreate,
     current_user: User = Depends(get_current_user)
 ):
-    """Send a message to a chat group"""
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
+
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
+
     if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not a member of this group")
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     message = ChatMessage(
         group_id=group_id,
         sender_id=current_user.id,
@@ -2270,35 +2275,35 @@ async def send_chat_message(
         file_size=message_data.file_size,
         read_by=[current_user.id]
     )
+
     doc = message.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
+
     await db.chat_messages.insert_one(doc)
-    # Update group's last message time
+
     await db.chat_groups.update_one(
         {"id": group_id},
         {"$set": {"last_message_at": doc["created_at"]}}
     )
+
     return message
 
-# Upload file for chat
-@api_router.post("/chat/upload")
-async def upload_chat_file(current_user: User = Depends(get_current_user)):
-    """Upload a file for chat - returns upload URL info"""
-    # For now, we'll use base64 encoding for files
-    # In production, you'd use cloud storage like S3
-    return {"message": "Use base64 encoding in message content for file uploads"}
 
-# Get all users for starting new chats
+# ================================
+# USERS FOR CHAT
+# ================================
+
 @api_router.get("/chat/users")
 async def get_chat_users(current_user: User = Depends(get_current_user)):
-    """Get all users available for chat"""
     users = await db.users.find(
         {"id": {"$ne": current_user.id}},
         {"_id": 0, "password": 0}
-    ).to_list(100)
+    ).to_list(200)
+
     for user in users:
-        if isinstance(user["created_at"], str):
+        if isinstance(user.get("created_at"), str):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
+
     return sanitize_user_data(users, current_user)
 
 # ��������� REMINDER ROUTES ��������������������������
