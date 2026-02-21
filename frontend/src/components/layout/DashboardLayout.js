@@ -127,20 +127,27 @@ const DashboardLayout = ({ children }) => {
       >
         <div className="flex flex-col h-full">
           {/* Logo Header */}
-          <div className="p-4 lg:p-6 border-b border-blue-100/50">
-            <div className="flex items-center justify-between">
-              <img src="/logo.png" alt="Taskosphere" className="h-10 sm:h-12 lg:h-14" style={{ background: 'transparent' }} />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSidebarOpen(false)}
-                className="lg:hidden text-slate-600 hover:bg-blue-100"
-                data-testid="sidebar-close-btn"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-          </div>
+          <div className="p-6 border-b border-blue-100/50 flex items-center justify-center relative">
+  
+          {/* Logo */}
+        <img
+          src="/logo.png"
+          alt="Taskosphere"
+          className="h-20 lg:h-24 w-auto object-contain"
+        />
+
+        {/* Close Button (Mobile Only) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setSidebarOpen(false)}
+          className="lg:hidden absolute right-4 text-slate-600 hover:bg-blue-100"
+          data-testid="sidebar-close-btn"
+        >
+          <X className="h-5 w-5" />
+        </Button>
+      </div>
+                    
           {/* Navigation */}
           <div className="flex-1 overflow-y-auto py-4 px-3 lg:px-4">
             <nav className="space-y-1">
