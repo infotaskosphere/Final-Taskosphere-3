@@ -93,7 +93,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
       onMouseLeave={() => setShowActions(false)}
     >
       <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0 sm:opacity-0'}`}>
-        {userData.role !== 'admin' && (
+        {canManagePermissions && userData.role !== 'admin' && (
           <button
             onClick={() => onPermissions(userData)}
             className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors"
@@ -102,14 +102,16 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
             <Shield className="h-4 w-4" />
           </button>
         )}
-        <button
-          onClick={() => onEdit(userData)}
-          className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
-          title="Edit"
-        >
-          <Edit className="h-4 w-4" />
-        </button>
-        {userData.id !== currentUserId && (
+        {canEditUsers && (
+          <button
+            onClick={() => onEdit(userData)}
+            className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
+            title="Edit"
+          >
+            <Edit className="h-4 w-4" />
+          </button>
+        )}
+        {canEditUsers && userData.id !== currentUserId && (
           <button
             onClick={() => onDelete(userData.id)}
             className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
@@ -182,11 +184,10 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
   );
 };
 export default function Users() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const canManageUsers =
-  user?.role === "admin" ||
-  user?.permissions?.can_manage_users;
+  const { user, hasPermission } = useAuth();
+  const canViewUserPage = hasPermission("can_view_user_page");
+  const canEditUsers = hasPermission("can_edit_users");
+  const canManagePermissions = hasPermission("can_manage_users");
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -222,6 +223,14 @@ export default function Users() {
     can_view_attendance: false,
     can_use_chat: false,
     can_send_reminders: false,
+    can_edit_tasks: false,
+    can_edit_dsc: false,
+    can_edit_documents: false,
+    can_edit_due_dates: false,
+    can_edit_users: false,
+    can_view_user_page: false,
+    can_view_audit_logs: false,
+    can_delete_data: false,
   });
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
@@ -356,10 +365,10 @@ export default function Users() {
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
-  const filteredClients = clients.filter(client => 
+  const filteredClients = clients.filter(client =>
     client.company_name.toLowerCase().includes(clientSearchQuery.toLowerCase())
   );
-  if (!canManageUsers) {
+  if (!canViewUserPage) {
     return (
       <div className="flex items-center justify-center h-64">
         <Card className="p-8 text-center max-w-md">
@@ -368,19 +377,8 @@ export default function Users() {
             Access Restricted
           </h2>
           <p className="text-slate-500 mt-2">
-            You do not have permission to manage users.
+            You do not have permission to view this page.
           </p>
-        </Card>
-      </div>
-    );
-  }
-  if (!isAdmin) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Card className="p-8 text-center max-w-md">
-          <UsersIcon className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-700">Access Restricted</h2>
-          <p className="text-slate-500 mt-2">Only administrators can manage users.</p>
         </Card>
       </div>
     );
@@ -398,16 +396,18 @@ export default function Users() {
           <p className="text-slate-600 mt-1">Manage your team and their permissions</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button
-              className="rounded-xl font-medium text-white w-full md:w-auto"
-              style={{ background: COLORS.deepBlue }}
-              onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '', grace_time: '', punch_out_time: '' }); }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Team Member
-            </Button>
-          </DialogTrigger>
+          {canEditUsers && (
+            <DialogTrigger asChild>
+              <Button
+                className="rounded-xl font-medium text-white w-full md:w-auto"
+                style={{ background: COLORS.deepBlue }}
+                onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '', grace_time: '', punch_out_time: '' }); }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Team Member
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-xl sm:text-2xl" style={{ color: COLORS.deepBlue }}>
@@ -519,32 +519,34 @@ export default function Users() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
           <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
             <TabsTrigger value="all">All ({users.length})</TabsTrigger>
-            <RoleGuard>
               <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
-            </RoleGuard>
-            <RoleGuard>
               <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
-            </RoleGuard>
-            <RoleGuard>
               <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
-            </RoleGuard>
+            <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           </TabsList>
+          {hasPermission("can_view_audit_logs") && (
+            <TabsContent value="audit">
+              {/* Fetch and render /audit-logs */}
+            </TabsContent>
+          )}
         </Tabs>
       </div>
-      <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {filteredUsers.length === 0 ? (
-          <div className="col-span-full text-center py-16">
-            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
-              <UserIcon className="h-8 w-8 text-slate-400" />
+      {activeTab !== 'audit' && (
+        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filteredUsers.length === 0 ? (
+            <div className="col-span-full text-center py-16">
+              <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <UserIcon className="h-8 w-8 text-slate-400" />
+              </div>
+              <p className="text-slate-500 text-lg">No team members found</p>
             </div>
-            <p className="text-slate-500 text-lg">No team members found</p>
-          </div>
-        ) : (
-          filteredUsers.map((userData) => (
-            <UserCard key={userData.id} userData={userData} onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog} currentUserId={user.id} COLORS={COLORS} isAdmin={isAdmin} />
-          ))
-        )}
-      </motion.div>
+          ) : (
+            filteredUsers.map((userData) => (
+              <UserCard key={userData.id} userData={userData} onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog} currentUserId={user.id} COLORS={COLORS} isAdmin={isAdmin} />
+            ))
+          )}
+        </motion.div>
+      )}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -607,11 +609,11 @@ export default function Users() {
                   <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                      <Input 
-                        placeholder="Search clients..." 
-                        value={clientSearchQuery} 
-                        onChange={(e) => setClientSearchQuery(e.target.value)} 
-                        className="pl-9 rounded-xl" 
+                      <Input
+                        placeholder="Search clients..."
+                        value={clientSearchQuery}
+                        onChange={(e) => setClientSearchQuery(e.target.value)}
+                        className="pl-9 rounded-xl"
                       />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
@@ -627,6 +629,29 @@ export default function Users() {
                         );
                       })}
                     </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="edit-permissions">
+                <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Edit className="h-4 w-4" /> Editing Permissions</AccordionTrigger>
+                <AccordionContent>
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                    {[
+                      { key: 'can_edit_tasks', label: 'Edit Tasks', description: 'Allows editing tasks.' },
+                      { key: 'can_edit_dsc', label: 'Edit DSC', description: 'Allows editing digital signature certificates.' },
+                      { key: 'can_edit_documents', label: 'Edit Documents', description: 'Allows editing documents.' },
+                      { key: 'can_edit_due_dates', label: 'Edit Due Dates', description: 'Allows editing due dates.' },
+                      { key: 'can_edit_users', label: 'Edit Users', description: 'Allows editing user accounts.' },
+                      { key: 'can_delete_data', label: 'Delete Data', description: 'Allows deleting data.' },
+                    ].map((perm) => (
+                      <div key={perm.key} className="flex flex-col py-2 px-3 bg-white rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-700">{perm.label}</span>
+                          <Switch checked={permissions[perm.key]} onCheckedChange={(checked) => setPermissions({ ...permissions, [perm.key]: checked })} />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">{perm.description}</p>
+                      </div>
+                    ))}
                   </div>
                 </AccordionContent>
               </AccordionItem>
