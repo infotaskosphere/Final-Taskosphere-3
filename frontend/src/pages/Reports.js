@@ -20,6 +20,8 @@ import {
   Area,
   Legend,
 } from 'recharts';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
@@ -224,6 +226,25 @@ export default function Reports() {
     document.body.removeChild(link);
   };
 
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.text('Efficiency Reports', 10, 10);
+
+    const tableData = reportData.map(item => [
+      item.user?.full_name || 'Unknown',
+      item.total_tasks_completed,
+      item.total_screen_time
+    ]);
+
+    doc.autoTable({
+      head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
+      body: tableData,
+      startY: 20,
+    });
+
+    doc.save('efficiency_reports.pdf');
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -255,9 +276,14 @@ export default function Reports() {
           <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
         </div>
         {isAdmin && (
-          <Button onClick={handleDownloadReports} variant="outline">
-            Download Reports
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={handleDownloadReports} variant="outline">
+              Download CSV
+            </Button>
+            <Button onClick={handleExportPDF} variant="outline">
+              Export PDF
+            </Button>
+          </div>
         )}
       </motion.div>
 
