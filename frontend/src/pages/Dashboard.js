@@ -61,73 +61,94 @@ const getPriorityStripeClass = (priority) => {
   if (p === 'low') return 'border-l-8 border-l-blue-500';
   return 'border-l-8 border-l-slate-300';
 };
-function TaskStrip({ task, isToMe, assignedName, onUpdateStatus }) {
+function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
+
   return (
-    <div
-      className={`relative flex flex-col p-4 rounded-xl border bg-white hover:shadow-sm transition cursor-pointer hover:border-blue-400 ${getPriorityStripeClass(task.priority)} ${
-        isCompleted ? 'opacity-75 bg-green-50/40 border-green-200' : ''
-      }`}
-      onClick={() => window.location.href = `/tasks/${task.id || ''}`}
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 250, damping: 18 }}
+      className={`relative flex flex-col p-4 rounded-xl border bg-white transition-all cursor-pointer group
+        ${getPriorityStripeClass(task.priority)}
+        ${isCompleted ? 'opacity-80 bg-green-50/40 border-green-200' : 'hover:shadow-lg hover:border-blue-400'}
+      `}
+      onClick={() => navigate(`/tasks/${task.id || ''}`)}
     >
-      {/* Title row with status buttons on right (only for assigned to me) */}
+      {/* Title + Capsules */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className={`font-medium text-slate-900 truncate leading-tight ${isCompleted ? 'line-through text-slate-600' : ''}`}>
+          <p className={`font-medium truncate leading-tight transition ${
+            isCompleted ? 'line-through text-slate-500' : 'text-slate-900'
+          }`}>
             {task.title || 'Untitled Task'}
             {task.client_name ? ` – ${task.client_name}` : ''}
           </p>
         </div>
+
         {isToMe && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
+          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+
+            {/* IN PROGRESS */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onUpdateStatus?.(task.id, 'in_progress');
               }}
               disabled={isInProgress || isCompleted}
-              className={`min-w-[100px] px-4 py-1.5 text-xs font-medium rounded-full transition ${
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
                 isInProgress
-                  ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700'
-                  : 'bg-white border border-blue-400 text-blue-700 hover:bg-blue-50 disabled:opacity-50'
-              } disabled:cursor-not-allowed`}
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'bg-white border border-blue-400 text-blue-700 hover:bg-blue-50'
+              } disabled:opacity-50`}
             >
-              {isInProgress ? 'In Progress ✓' : 'Start'}
-            </button>
-            <button
+              {isInProgress ? '✓ In Progress' : 'Start'}
+            </motion.button>
+
+            {/* DONE */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onUpdateStatus?.(task.id, 'completed');
               }}
               disabled={isCompleted}
-              className={`min-w-[100px] px-4 py-1.5 text-xs font-medium rounded-full transition shadow-sm ${
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
                 isCompleted
-                  ? 'bg-green-600 text-white border-green-700'
+                  ? 'bg-green-600 text-white'
                   : 'bg-green-100 text-green-800 border border-green-300 hover:bg-green-200'
-              } disabled:opacity-60 cursor-default`}
+              }`}
             >
-              {isCompleted ? '✓ Done' : 'Mark Done'}
-            </button>
+              {isCompleted ? '✓ Done' : 'Done'}
+            </motion.button>
           </div>
         )}
       </div>
-      {/* Meta line - smaller font, aligned under title */}
+
+      {/* Meta */}
       <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
         <span>
           {isToMe ? 'Assigned by: ' : 'Assigned to: '}
-          <span className="font-medium text-slate-700">{assignedName || 'Unknown'}</span>
+          <span className="font-medium text-slate-700">
+            {assignedName || 'Unknown'}
+          </span>
         </span>
-        <span>• {format(new Date(task.created_at || Date.now()), 'MMM d, yyyy • hh:mm a')}</span>
+
+        <span>
+          • {format(new Date(task.created_at || Date.now()), 'MMM d, yyyy • hh:mm a')}
+        </span>
+
         {task.due_date && (
-          <span>• Due: {format(new Date(task.due_date), 'MMM d, yyyy')}</span>
+          <span>
+            • Due: {format(new Date(task.due_date), 'MMM d, yyyy')}
+          </span>
         )}
-        {isCompleted && <span className="text-green-600 font-medium">• Completed</span>}
       </div>
-    </div>
+    </motion.div>
   );
 }
 export default function Dashboard() {
@@ -752,7 +773,7 @@ export default function Dashboard() {
       </motion.div>
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 lg:gap-8">
-       
+      
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -983,7 +1004,8 @@ export default function Dashboard() {
                       task={task}
                       isToMe={true}
                       assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus} // ← passed here
+                      onUpdateStatus={updateAssignedTaskStatus}
+                      navigate={navigate}
                     />
                   ))}
                 </div>
@@ -1012,7 +1034,8 @@ export default function Dashboard() {
                       task={task}
                       isToMe={false}
                       assignedName={task.assigned_to_name || 'Unknown'}
-                      onUpdateStatus={updateAssignedTaskStatus} // ← passed here too (if needed)
+                      onUpdateStatus={updateAssignedTaskStatus}
+                      navigate={navigate}
                     />
                   ))}
                 </div>
