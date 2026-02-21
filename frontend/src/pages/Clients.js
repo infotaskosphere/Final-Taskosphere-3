@@ -12,16 +12,15 @@ import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from "react-router-dom";
-import { 
-  Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
-  FileText, Calendar, Search, Users, 
-  Briefcase, BarChart3, Archive, MessageCircle, Trash 
+import {
+  Plus, Edit, Trash2, Mail, Cake, X, UserPlus,
+  FileText, Calendar, Search, Users,
+  Briefcase, BarChart3, Archive, MessageCircle, Trash
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid } from 'react-window';
-
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -30,14 +29,15 @@ const CLIENT_TYPES = [
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
 ];
-
 const SERVICES = [
   'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
-
 export default function Clients() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canViewAllClients = hasPermission("can_view_all_clients");
+  const canDeleteData = hasPermission("can_delete_data");
+  const canAssignClients = hasPermission("can_assign_clients");
   const [clients, setClients] = useState([]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -47,14 +47,11 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-
   const fileInputRef = useRef(null);
-
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
@@ -68,17 +65,14 @@ export default function Clients() {
     notes: '',
     status: 'active',
   });
-
   useEffect(() => {
     fetchClients();
-    if (user?.role !== 'staff') fetchUsers();
-
+    if (canAssignClients) fetchUsers();
     const params = new URLSearchParams(location.search);
     if (params.get("openAddClient") === "true") {
       setDialogOpen(true);
     }
   }, [location]);
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -87,7 +81,6 @@ export default function Clients() {
       toast.error('Failed to fetch clients');
     }
   };
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -96,17 +89,13 @@ export default function Clients() {
       console.error('Failed to fetch users:', error);
     }
   };
-
   // ==================== UTILS ====================
-
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
-
   // ==================== MEMOIZED DATA ====================
-
   const stats = useMemo(() => {
     const totalClients = clients.length;
     const activeClients = clients.filter(c => (c?.status || 'active') === 'active').length;
@@ -121,7 +110,6 @@ export default function Clients() {
     });
     return { totalClients, activeClients, serviceCounts };
   }, [clients]);
-
   const todayReminders = useMemo(() => {
     const today = startOfDay(new Date());
     return clients.filter(c => {
@@ -136,27 +124,20 @@ export default function Clients() {
       }) ?? false;
     });
   }, [clients]);
-
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
-      const matchesSearch = 
+      const matchesSearch =
         (c?.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.phone || '').includes(searchTerm);
-
       const matchesService = serviceFilter === 'all' ||
                             (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
-
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
-
       return matchesSearch && matchesService && matchesStatus;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
-
   const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
-
   // ==================== HANDLERS ====================
-
   const downloadTemplate = () => {
     const headers = ['company_name', 'client_type', 'email', 'phone', 'birthday', 'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1', 'services', 'notes'];
     const csvContent = headers.join(',') + '\n' + '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15","Rahul Sharma","Director","rahul@abc.com","GST,Income Tax","Notes"';
@@ -169,7 +150,6 @@ export default function Clients() {
     link.click();
     document.body.removeChild(link);
   };
-
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -201,7 +181,6 @@ export default function Clients() {
       }
     });
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -211,19 +190,16 @@ export default function Clients() {
       if (otherService.trim() && formData.services.includes('Other')) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
-
-      const data = { 
+      const data = {
         ...formData,
         services: finalServices,
-        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to 
+        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to
       };
-
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, data);
       } else {
         await api.post('/clients', data);
       }
-
       setDialogOpen(false);
       resetForm();
       fetchClients();
@@ -234,14 +210,13 @@ export default function Clients() {
       setLoading(false);
     }
   };
-
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
       ...client,
-      contact_persons: client?.contact_persons?.map(cp => ({ 
-        ...cp, 
-        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '' 
+      contact_persons: client?.contact_persons?.map(cp => ({
+        ...cp,
+        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : ''
       })) || [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
       birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
       status: client?.status || 'active',
@@ -252,66 +227,56 @@ export default function Clients() {
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true);
   };
-
   const resetForm = () => {
-    setFormData({ 
-      company_name: '', 
-      client_type: 'proprietor', 
-      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }], 
-      email: '', 
-      phone: '', 
-      birthday: '', 
-      services: [], 
-      dsc_details: [], 
-      assigned_to: 'unassigned', 
-      notes: '', 
-      status: 'active' 
+    setFormData({
+      company_name: '',
+      client_type: 'proprietor',
+      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
+      email: '',
+      phone: '',
+      birthday: '',
+      services: [],
+      dsc_details: [],
+      assigned_to: 'unassigned',
+      notes: '',
+      status: 'active'
     });
     setOtherService('');
     setEditingClient(null);
   };
-
   // ==================== DYNAMIC FIELDS ====================
-
-  const updateContact = (idx, field, val) => setFormData(p => ({ 
-    ...p, 
-    contact_persons: p.contact_persons.map((c, i) => 
+  const updateContact = (idx, field, val) => setFormData(p => ({
+    ...p,
+    contact_persons: p.contact_persons.map((c, i) =>
       i === idx ? { ...c, [field]: val } : c
-    ) 
+    )
   }));
-
-  const addContact = () => setFormData(p => ({ 
-    ...p, 
-    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }] 
+  const addContact = () => setFormData(p => ({
+    ...p,
+    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }]
   }));
-
-  const removeContact = (idx) => setFormData(p => ({ 
-    ...p, 
-    contact_persons: p.contact_persons.filter((_, i) => i !== idx) 
+  const removeContact = (idx) => setFormData(p => ({
+    ...p,
+    contact_persons: p.contact_persons.filter((_, i) => i !== idx)
   }));
-
   const updateDSC = (idx, field, val) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
   }));
-
   const addDSC = () => setFormData(p => ({
     ...p,
     dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
   }));
-
   const removeDSC = (idx) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
-
   const toggleService = (s) => setFormData(p => {
-    const services = p.services.includes(s) 
-      ? p.services.filter(x => x !== s) 
+    const services = p.services.includes(s)
+      ? p.services.filter(x => x !== s)
       : [...p.services, s];
     return { ...p, services };
   });
-
   const addOtherService = () => {
     if (otherService.trim()) {
       setFormData(prev => ({
@@ -324,20 +289,16 @@ export default function Clients() {
       setOtherService('');
     }
   };
-
   // ────────────────────────────────────────────────
   // Virtualized Client Card Renderer
   // ────────────────────────────────────────────────
-
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
-
     if (index >= filteredClients.length || !client) return null;
-
     return (
       <div style={style} className="p-3 box-border">
-        <Card 
+        <Card
           className={`h-full overflow-hidden transition-all border-slate-200 flex flex-col ${
             client.status === 'inactive' ? 'opacity-60 grayscale-[0.2]' : 'hover:shadow-md'
           }`}
@@ -371,10 +332,10 @@ export default function Clients() {
                 <p className="flex items-center gap-2">
                   <Briefcase className="h-3 w-3 text-slate-400" /> {client.phone || '—'}
                 </p>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-full" 
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-full"
                   onClick={() => openWhatsApp(client.phone, client.company_name)}
                 >
                   <MessageCircle className="h-4 w-4" />
@@ -392,19 +353,19 @@ export default function Clients() {
               )}
             </div>
             <div className="flex gap-2 pt-3 border-t justify-end mt-auto">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-8 text-indigo-600 hover:bg-indigo-50 px-3" 
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-indigo-600 hover:bg-indigo-50 px-3"
                 onClick={() => handleEdit(client)}
               >
                 <Edit className="h-3.5 w-3.5 mr-1" /> Edit
               </Button>
-              {user?.role === 'admin' && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-8 text-red-500 hover:bg-red-50 px-3" 
+              {canDeleteData && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-red-500 hover:bg-red-50 px-3"
                   onClick={() => {
                     if (confirm("Delete client record?")) {
                       api.delete(`/clients/${client.id}`).then(() => fetchClients());
@@ -420,7 +381,6 @@ export default function Clients() {
       </div>
     );
   };
-
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -432,16 +392,16 @@ export default function Clients() {
           <Button variant="outline" onClick={downloadTemplate} className="border-indigo-600 text-indigo-600">
             <FileText className="mr-2 h-4 w-4" />CSV Format
           </Button>
-          <Button 
-            variant="secondary" 
-            onClick={() => fileInputRef.current?.click()} 
+          <Button
+            variant="secondary"
+            onClick={() => fileInputRef.current?.click()}
             disabled={importLoading}
           >
             {importLoading ? 'Importing...' : 'Add CSV'}
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={(open) => { 
-            setDialogOpen(open); 
-            if (!open) resetForm(); 
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
           }}>
             <DialogTrigger asChild>
               <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg transition-all">
@@ -457,24 +417,23 @@ export default function Clients() {
                   </div>
                   <div className="flex items-center gap-3 bg-slate-50 px-3 py-1.5 rounded-xl border">
                     <Label className="text-[10px] font-bold uppercase text-slate-400">Status: {formData.status}</Label>
-                    <Switch 
-                      checked={formData.status === 'active'} 
-                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})} 
+                    <Switch
+                      checked={formData.status === 'active'}
+                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
                     />
                   </div>
                 </DialogHeader>
-
                 <form onSubmit={handleSubmit} className="space-y-8">
                   <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
                     <h3 className="text-base font-bold text-slate-800">Basic Information</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Company Name *</Label>
-                        <Input 
-                          className="bg-white border-slate-200 h-11" 
-                          value={formData.company_name} 
-                          onChange={e => setFormData({...formData, company_name: e.target.value})} 
-                          required 
+                        <Input
+                          className="bg-white border-slate-200 h-11"
+                          value={formData.company_name}
+                          onChange={e => setFormData({...formData, company_name: e.target.value})}
+                          required
                         />
                       </div>
                       <div className="space-y-2">
@@ -490,46 +449,45 @@ export default function Clients() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Email *</Label>
-                        <Input 
-                          className="bg-white border-slate-200 h-11" 
-                          type="email" 
-                          value={formData.email} 
-                          onChange={e => setFormData({...formData, email: e.target.value})} 
-                          required 
+                        <Input
+                          className="bg-white border-slate-200 h-11"
+                          type="email"
+                          value={formData.email}
+                          onChange={e => setFormData({...formData, email: e.target.value})}
+                          required
                         />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Phone *</Label>
-                        <Input 
-                          className="bg-white border-slate-200 h-11" 
-                          value={formData.phone} 
-                          onChange={e => setFormData({...formData, phone: e.target.value})} 
-                          required 
+                        <Input
+                          className="bg-white border-slate-200 h-11"
+                          value={formData.phone}
+                          onChange={e => setFormData({...formData, phone: e.target.value})}
+                          required
                         />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Date of Incorporation / Birthday</Label>
-                        <Input 
-                          className="bg-white border-slate-200 h-11" 
-                          type="date" 
-                          value={formData.birthday} 
-                          onChange={e => setFormData({...formData, birthday: e.target.value})} 
+                        <Input
+                          className="bg-white border-slate-200 h-11"
+                          type="date"
+                          value={formData.birthday}
+                          onChange={e => setFormData({...formData, birthday: e.target.value})}
                         />
                       </div>
                     </div>
                   </div>
-
                   <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 space-y-6">
                     <div className="flex justify-between items-end">
                       <div>
                         <h3 className="text-base font-bold text-slate-800">Contact Persons</h3>
                         <p className="text-xs text-slate-400">Manage associated contacts</p>
                       </div>
-                      <Button 
-                        type="button" 
-                        size="sm" 
-                        onClick={addContact} 
-                        variant="outline" 
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={addContact}
+                        variant="outline"
                         className="h-9 bg-white border-slate-200 rounded-lg"
                       >
                         <Plus className="h-4 w-4 mr-1.5" /> Add Contact
@@ -537,17 +495,17 @@ export default function Clients() {
                     </div>
                     <div className="space-y-4">
                       {formData.contact_persons.map((cp, idx) => (
-                        <div 
+                        <div
                           key={idx}
                           className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm relative space-y-4"
                         >
                           <div className="flex justify-between items-center">
                             <span className="text-sm font-bold text-slate-700">Contact Person #{idx + 1}</span>
                             {formData.contact_persons.length > 1 && (
-                              <Button 
-                                type="button" 
-                                size="icon" 
-                                variant="ghost" 
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
                                 onClick={() => removeContact(idx)}
                                 className="h-8 w-8 text-slate-300 hover:text-red-500"
                               >
@@ -558,39 +516,39 @@ export default function Clients() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Name</Label>
-                              <Input 
-                                value={cp.name} 
-                                onChange={e => updateContact(idx, 'name', e.target.value)} 
+                              <Input
+                                value={cp.name}
+                                onChange={e => updateContact(idx, 'name', e.target.value)}
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Designation</Label>
-                              <Input 
-                                value={cp.designation} 
-                                onChange={e => updateContact(idx, 'designation', e.target.value)} 
+                              <Input
+                                value={cp.designation}
+                                onChange={e => updateContact(idx, 'designation', e.target.value)}
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Email</Label>
-                              <Input 
+                              <Input
                                 type="email"
-                                value={cp.email} 
-                                onChange={e => updateContact(idx, 'email', e.target.value)} 
+                                value={cp.email}
+                                onChange={e => updateContact(idx, 'email', e.target.value)}
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Phone</Label>
-                              <Input 
-                                value={cp.phone} 
-                                onChange={e => updateContact(idx, 'phone', e.target.value)} 
+                              <Input
+                                value={cp.phone}
+                                onChange={e => updateContact(idx, 'phone', e.target.value)}
                               />
                             </div>
                             <div className="col-span-2 space-y-2">
                               <Label className="text-xs text-slate-500">Birthday</Label>
-                              <Input 
-                                type="date" 
-                                value={cp.birthday || ''} 
-                                onChange={e => updateContact(idx, 'birthday', e.target.value)} 
+                              <Input
+                                type="date"
+                                value={cp.birthday || ''}
+                                onChange={e => updateContact(idx, 'birthday', e.target.value)}
                               />
                             </div>
                           </div>
@@ -598,17 +556,16 @@ export default function Clients() {
                       ))}
                     </div>
                   </div>
-
                   <div className="space-y-4">
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Services *</Label>
                     <div className="flex flex-wrap gap-2">
                       {SERVICES.map(s => (
-                        <Badge 
+                        <Badge
                           key={s}
                           variant={
-                            formData.services.includes(s) || 
-                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))) 
-                              ? "default" 
+                            formData.services.includes(s) ||
+                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:')))
+                              ? "default"
                               : "outline"
                           }
                           className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]"
@@ -622,15 +579,15 @@ export default function Clients() {
                       <div className="flex gap-2 items-end">
                         <div className="flex-1 space-y-1">
                           <Label className="text-xs text-slate-500">Specify other service</Label>
-                          <Input 
-                            placeholder="e.g. IEC Registration, FEMA Compliance..." 
-                            value={otherService} 
-                            onChange={e => setOtherService(e.target.value)} 
+                          <Input
+                            placeholder="e.g. IEC Registration, FEMA Compliance..."
+                            value={otherService}
+                            onChange={e => setOtherService(e.target.value)}
                           />
                         </div>
-                        <Button 
-                          type="button" 
-                          size="sm" 
+                        <Button
+                          type="button"
+                          size="sm"
                           onClick={addOtherService}
                         >
                           Add
@@ -638,22 +595,20 @@ export default function Clients() {
                       </div>
                     )}
                   </div>
-
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Notes</Label>
-                    <Textarea 
-                      className="bg-slate-50 border-slate-100 min-h-[120px] rounded-xl" 
-                      placeholder="Additional information, remarks, internal notes..." 
-                      value={formData.notes} 
-                      onChange={e => setFormData({...formData, notes: e.target.value})} 
+                    <Textarea
+                      className="bg-slate-50 border-slate-100 min-h-[120px] rounded-xl"
+                      placeholder="Additional information, remarks, internal notes..."
+                      value={formData.notes}
+                      onChange={e => setFormData({...formData, notes: e.target.value})}
                     />
                   </div>
-
-                  {(user?.role === 'admin' || user?.role === 'manager') && (
+                  {canAssignClients && (
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Assigned To</Label>
-                      <Select 
-                        value={formData.assigned_to} 
+                      <Select
+                        value={formData.assigned_to}
                         onValueChange={v => setFormData({...formData, assigned_to: v})}
                       >
                         <SelectTrigger className="bg-white border-slate-200 h-11">
@@ -670,7 +625,6 @@ export default function Clients() {
                       </Select>
                     </div>
                   )}
-
                   <DialogFooter className="sticky bottom-0 bg-white pt-6 pb-4 border-t flex flex-col sm:flex-row gap-3">
                     <div className="flex gap-2 w-full sm:w-auto">
                       <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>
@@ -681,16 +635,16 @@ export default function Clients() {
                       </Button>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                      <Button 
-                        type="button" 
-                        className="bg-indigo-600 text-white" 
+                      <Button
+                        type="button"
+                        className="bg-indigo-600 text-white"
                         onClick={() => fileInputRef.current?.click()}
                       >
                         Add CSV
                       </Button>
-                      <Button 
-                        type="submit" 
-                        disabled={loading} 
+                      <Button
+                        type="submit"
+                        disabled={loading}
                         className="bg-indigo-900 text-white px-10"
                       >
                         {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Create Client'}
@@ -703,8 +657,7 @@ export default function Clients() {
           </Dialog>
         </div>
       </div>
-
-      {(user?.role === 'admin' || user?.role === 'manager') && todayReminders.length > 0 && (
+      {canViewAllClients && todayReminders.length > 0 && (
         <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="p-2 bg-white rounded-full text-pink-500 shadow-sm">
@@ -723,8 +676,7 @@ export default function Clients() {
           </CardContent>
         </Card>
       )}
-
-      {user?.role === 'admin' && (
+      {canViewAllClients && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
             <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
@@ -766,15 +718,14 @@ export default function Clients() {
           </Card>
         </div>
       )}
-
       <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
-          <Input 
-            placeholder="Search company, email or phone..." 
-            className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500" 
-            value={searchTerm} 
-            onChange={e => setSearchTerm(e.target.value)} 
+          <Input
+            placeholder="Search company, email or phone..."
+            className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
         <div className="flex gap-2">
@@ -799,16 +750,14 @@ export default function Clients() {
           </Select>
         </div>
       </div>
-
       <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
           <AutoSizer>
             {({ height, width }) => {
               const columnCount = width < 640 ? 1 : width < 1024 ? 2 : width < 1400 ? 3 : 4;
               const columnWidth = width / columnCount;
-              const rowHeight = 460; 
+              const rowHeight = 460;
               const rowCount = Math.ceil(filteredClients.length / columnCount);
-
               return (
                 <Grid
                   columnCount={columnCount}
@@ -821,11 +770,11 @@ export default function Clients() {
                   overscanRowCount={3}
                 >
                   {({ columnIndex, rowIndex, style }) => (
-                    <ClientCard 
-                      columnIndex={columnIndex} 
-                      rowIndex={rowIndex} 
-                      style={style} 
-                      columnCount={columnCount} 
+                    <ClientCard
+                      columnIndex={columnIndex}
+                      rowIndex={rowIndex}
+                      style={style}
+                      columnCount={columnCount}
                     />
                   )}
                 </Grid>
@@ -839,13 +788,12 @@ export default function Clients() {
           </div>
         )}
       </div>
-
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        accept=".csv" 
-        onChange={handleImportCSV} 
-        className="hidden" 
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".csv"
+        onChange={handleImportCSV}
+        className="hidden"
       />
     </div>
   );
