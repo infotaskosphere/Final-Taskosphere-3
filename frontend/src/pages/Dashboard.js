@@ -842,7 +842,7 @@ export default function Dashboard() {
       )}
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-8">
-    
+   
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
@@ -905,7 +905,11 @@ export default function Dashboard() {
                           <p className={`text-sm sm:text-base font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
                             {member.name || 'Unknown User'}
                           </p>
-                          <p className="text-xs text-slate-500 capitalize">{member.role || 'Staff'}</p>
+                          <RoleGuard>
+                            <p className="text-xs text-slate-500 capitalize">
+                              {member.role || 'Staff'}
+                            </p>
+                          </RoleGuard>
                         </div>
                       </div>
                       <div className="text-right">
