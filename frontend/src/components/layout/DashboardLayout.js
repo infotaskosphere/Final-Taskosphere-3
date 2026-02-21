@@ -78,31 +78,25 @@ const DashboardLayout = ({ children }) => {
   };
   const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-
   // Always visible (own data allowed)
   { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
   { path: '/clients', icon: Building2, label: 'Clients' },
   { path: '/attendance', icon: Clock, label: 'Attendance' },
   { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
   { path: '/reports', icon: BarChart3, label: 'Reports' },
-
   // Permission-based modules
   ...(hasPermission('can_view_all_dsc')
     ? [{ path: '/dsc', icon: FileText, label: 'DSC Register' }]
     : []),
-
   ...(hasPermission('can_view_documents')
     ? [{ path: '/documents', icon: FileText, label: 'Documents Register' }]
     : []),
-
   ...(hasPermission('can_use_chat')
     ? [{ path: '/chat', icon: MessageCircle, label: 'Chat' }]
     : []),
-
   ...(hasPermission('can_view_user_page')
     ? [{ path: '/users', icon: Users, label: 'Users' }]
     : []),
-
   ...(hasPermission('can_view_staff_activity')
     ? [{ path: '/staff-activity', icon: Activity, label: 'Staff Activity' }]
     : []),
@@ -128,14 +122,12 @@ const DashboardLayout = ({ children }) => {
         <div className="flex flex-col h-full">
           {/* Logo Header */}
           <div className="p-6 border-b border-blue-100/50 flex items-center justify-center relative">
-  
           {/* Logo */}
         <img
           src="/logo.png"
           alt="Taskosphere"
           className="h-20 lg:h-24 w-auto object-contain"
         />
-
         {/* Close Button (Mobile Only) */}
         <Button
           variant="ghost"
@@ -147,7 +139,6 @@ const DashboardLayout = ({ children }) => {
           <X className="h-5 w-5" />
         </Button>
       </div>
-                    
           {/* Navigation */}
           <div className="flex-1 overflow-y-auto py-4 px-3 lg:px-4">
             <nav className="space-y-1">
