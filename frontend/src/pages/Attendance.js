@@ -39,7 +39,8 @@ const modalVariants = {
   visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.3 } }
 };
 export default function Attendance() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canViewRankings = hasPermission("can_view_staff_rankings");
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [mySummary, setMySummary] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState(null);
@@ -99,13 +100,11 @@ export default function Attendance() {
         api.get('/attendance/today'),
         api.get('/tasks')
       ];
-
-      if (user?.role === "admin" || user?.role === "manager") {
+      if (canViewRankings) {
         requests.push(api.get('/staff/rankings?period=monthly'));
       } else {
         requests.push(Promise.resolve({ data: { rankings: [] } }));
       }
-
       const [historyRes, summaryRes, todayRes, tasksRes, rankingRes] =
         await Promise.all(requests);
       setAttendanceHistory(historyRes.data || []);
@@ -428,7 +427,7 @@ export default function Attendance() {
           </CardContent>
         </Card>
         {/* Your Star Performance Rank */}
-        {(user?.role === "admin" || user?.role === "manager") && (
+        {canViewRankings && (
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
