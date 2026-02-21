@@ -2,22 +2,19 @@ from fastapi.middleware.gzip import GZipMiddleware
 import pytz
 import logging
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, date
 from bson import ObjectId
 from dateutil import parser
-from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import logging
 from pathlib import Path
 from typing import List, Optional, Dict
-from datetime import datetime, timezone, timedelta, date
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 import uuid
 from passlib.context import CryptContext
@@ -51,14 +48,12 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 security = HTTPBearer()
-
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -128,7 +123,8 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# ��������� ALL MODELS ����������������������������������������������
+# ALL MODELS
+
 class UserPermissions(BaseModel):
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
@@ -160,7 +156,7 @@ class UserBase(BaseModel):
     profile_picture: Optional[str] = None
     permissions: Optional[UserPermissions] = None # Custom permissions
     departments: List[str] = [] # Multiple departments: gst, income_tax, ...
-    # ������ Added office timing fields for late marking (optional, safe for existing users) ������
+    # Added office timing fields for late marking (optional, safe for existing users)
     expected_start_time: Optional[str] = None # "09:30" (24-hour format)
     expected_end_time: Optional[str] = None # "18:00"
     late_grace_minutes: int = 15 # Default grace period in minutes
@@ -223,15 +219,19 @@ class TaskBase(BaseModel):
     due_date: Optional[datetime] = None
     priority: str = "medium" # low, medium, high
     status: str = "pending" # pending, in_progress, completed
-    category: Optional[str] = None
+    category: str = "other"
+    client_id: Optional[str] = None
     is_recurring: bool = False
-    recurrence_pattern: Optional[str] = None # "daily", "weekly", "monthly", "yearly"
-    recurrence_interval: int = 1 # Every X days/weeks/months
+    recurrence_pattern: Optional[str] = "monthly" # "daily", "weekly", "monthly", "yearly"
+    recurrence_interval: Optional[int] = 1 # Every X days/weeks/months
     recurrence_end_date: Optional[datetime] = None
     type: Optional[str] = None
 
 class TaskCreate(TaskBase):
     pass
+
+class BulkTaskCreate(BaseModel):
+    tasks: List[TaskCreate]
 
 class Task(TaskBase):
     model_config = ConfigDict(extra="ignore")
@@ -432,7 +432,7 @@ class DashboardStats(BaseModel):
     compliance_status: dict
     expired_dsc_count: int = 0
 
-# ===================== DOCUMENT MODELS =====================
+# DOCUMENT MODELS
 class DocumentMovement(BaseModel):
     movement_type: str # "IN" or "OUT"
     person_name: str
@@ -483,10 +483,10 @@ class AuditLog(BaseModel):
     new_data: Optional[dict] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# ��������� ROUTER �����������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# ROUTER
 api_router = APIRouter(prefix="/api")
 
-# ��������� HELPERS ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# HELPERS
 # Email Service Functions
 def send_birthday_email(recipient_email: str, client_name: str):
     """Send birthday wish email to client"""
@@ -633,7 +633,7 @@ async def create_audit_log(
     doc["timestamp"] = doc["timestamp"].isoformat()
     await db.audit_logs.insert_one(doc)
 
-# ��������� AUTH ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# AUTH ROUTES
 # Auth routes
 @api_router.post("/auth/register", response_model=Token)
 async def register(
@@ -653,7 +653,7 @@ async def register(
         profile_picture=user_data.profile_picture,
         permissions=user_data.permissions,
         departments=user_data.departments,
-        # ������ Added office timing fields for late marking (optional, safe for existing users) ������
+        # Added office timing fields for late marking (optional, safe for existing users)
         expected_start_time=user_data.expected_start_time, # "09:30" (24-hour format)
         expected_end_time=user_data.expected_end_time, # "18:00"
         late_grace_minutes=user_data.late_grace_minutes # Default grace period in minutes
@@ -741,7 +741,7 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
                 expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
-      
+    
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
@@ -869,6 +869,58 @@ async def create_task(task_data: TaskCreate, current_user: User = Depends(get_cu
     await db.tasks.insert_one(doc)
     return task
 
+@api_router.post("/tasks/bulk")
+async def create_tasks_bulk(
+    payload: BulkTaskCreate,
+    current_user: User = Depends(get_current_user)
+):
+    created_tasks = []
+    for task_data in payload.tasks:
+        task_dict = task_data.dict()
+        # Add creator info
+        task_dict["id"] = str(uuid.uuid4())
+        task_dict["created_by"] = current_user.id
+        task_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+        task_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if task_dict.get("due_date"):
+            task_dict["due_date"] = task_dict["due_date"].isoformat()
+        await db.tasks.insert_one(task_dict)
+        created_tasks.append(task_dict)
+    return {
+        "message": "Tasks created successfully",
+        "count": len(created_tasks)
+    }
+
+@api_router.post("/tasks/import")
+async def import_tasks_from_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if file.content_type != 'text/csv':
+        raise HTTPException(400, "Invalid file type")
+    content = await file.read()
+    content_str = content.decode('utf-8')
+    csv_reader = csv.DictReader(StringIO(content_str))
+    tasks = []
+    for row in csv_reader:
+        task_data = TaskCreate(
+            title=row.get('title', ''),
+            description=row.get('description'),
+            assigned_to=row.get('assigned_to'),
+            sub_assignees=row.get('sub_assignees', '').split(',') if row.get('sub_assignees') else [],
+            due_date=parser.parse(row['due_date']) if row.get('due_date') else None,
+            priority=row.get('priority', 'medium'),
+            status=row.get('status', 'pending'),
+            category=row.get('category', 'other'),
+            client_id=row.get('client_id'),
+            is_recurring=bool(row.get('is_recurring', False)),
+            recurrence_pattern=row.get('recurrence_pattern', 'monthly'),
+            recurrence_interval=int(row.get('recurrence_interval', 1))
+        )
+        tasks.append(task_data)
+    payload = BulkTaskCreate(tasks=tasks)
+    return await create_tasks_bulk(payload, current_user)
+
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
     query = {}
@@ -889,9 +941,9 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
     user_ids = set()
     for task in tasks:
         if task.get("assigned_to"):
-            user_ids.add(task["assigned_to"])
+            user_ids.add(task.get("assigned_to"))
         if task.get("created_by"):
-            user_ids.add(task["created_by"])
+            user_ids.add(task.get("created_by"))
     users = await db.users.find(
         {"id": {"$in": list(user_ids)}},
         {"_id": 0, "password": 0}
@@ -1178,8 +1230,8 @@ async def update_dsc_movement(
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
 
-# ��������� DOCUMENT ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������
-# ================= DOCUMENT REGISTER ROUTES =================
+# DOCUMENT ROUTES
+# DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
     document = Document(**document_data.model_dump(), created_by=current_user.id)
@@ -1327,7 +1379,7 @@ async def update_document_movement(
     )
     return {"message": "Movement updated successfully"}
 
-# ��������� ATTENDANCE ROUTES ����������������������������������������
+# ATTENDANCE ROUTES
 # Attendance routes
 @api_router.get("/attendance/today", response_model=Optional[Attendance])
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
@@ -1493,8 +1545,7 @@ async def get_staff_attendance_report(
         "staff_report": result
     }
 
-# ��������� DUE DATE ROUTES ��������������������������������������������
-
+# DUE DATE ROUTES
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
     due_date_data: DueDateCreate,
@@ -1502,12 +1553,10 @@ async def create_due_date(
 ):
     if not due_date_data.department:
         raise HTTPException(status_code=400, detail="Department required")
-
     due_date = DueDate(
         **due_date_data.model_dump(),
         created_by=current_user.id
     )
-
     doc = due_date.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
     doc["due_date"] = doc["due_date"].isoformat()
@@ -1612,7 +1661,7 @@ async def delete_due_date(
         raise HTTPException(status_code=404, detail="Due date not found")
     return {"message": "Due date deleted successfully"}
 
-# ��������� REPORTS ROUTES ��������������������������������������
+# REPORTS ROUTES
 # Reports routes
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
@@ -1718,7 +1767,7 @@ async def export_reports(
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
 
-# ��������� CLIENT ROUTES ��������������������������������������
+# CLIENT ROUTES
 # Client Management routes
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
@@ -1799,7 +1848,7 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Client not found")
     return {"message": "Client deleted successfully"}
 
-# ��������� BIRTHDAY EMAIL ROUTES ���������������������������
+# BIRTHDAY EMAIL ROUTES
 # Birthday Email routes
 @api_router.post("/clients/{client_id}/send-birthday-email")
 async def send_client_birthday_email(
@@ -1831,14 +1880,13 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
             if this_year_bday < today:
                 # If birthday passed, check next year
                 this_year_bday = bday.replace(year=today.year + 1)
-  
             days_until = (this_year_bday - today).days
             if 0 <= days_until <= days:
                 client["days_until_birthday"] = days_until
                 upcoming.append(client)
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
-# ��������� DASHBOARD ROUTES ���������������������������������
+# DASHBOARD ROUTES
 # Enhanced Dashboard Stats
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
@@ -1948,7 +1996,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         compliance_status=compliance_status
     )
 
-# ��������� STAFF ACTIVITY ROUTES �����������������������������������
+# STAFF ACTIVITY ROUTES
 # Staff Activity Tracking Endpoints
 @api_router.post("/activity/log")
 async def log_staff_activity(activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)):
@@ -2042,7 +2090,7 @@ async def get_user_activity(
     ).sort("timestamp", -1).to_list(limit)
     return activities
 
-# ��������� USER PERMISSIONS �����������������������
+# USER PERMISSIONS
 # Update user permissions endpoint
 @api_router.put("/users/{user_id}/permissions")
 async def update_user_permissions(
@@ -2071,15 +2119,13 @@ async def update_user_permissions(
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Permissions updated successfully"}
 
-# ��������� CHAT ROUTES ���������������������������
-
+# CHAT ROUTES
 @api_router.post("/chat/groups", response_model=ChatGroup)
 async def create_chat_group(
     group_data: ChatGroupCreate,
     current_user: User = Depends(get_current_user)
 ):
     members = list(set(group_data.members + [current_user.id]))
-
     # Prevent duplicate direct chat
     if group_data.is_direct and len(members) == 2:
         existing = await db.chat_groups.find_one(
@@ -2093,7 +2139,6 @@ async def create_chat_group(
             if isinstance(existing["created_at"], str):
                 existing["created_at"] = datetime.fromisoformat(existing["created_at"])
             return ChatGroup(**existing)
-
     group = ChatGroup(
         name=group_data.name,
         description=group_data.description,
@@ -2101,13 +2146,10 @@ async def create_chat_group(
         created_by=current_user.id,
         is_direct=group_data.is_direct
     )
-
     doc = group.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
-
     await db.chat_groups.insert_one(doc)
     return group
-
 
 @api_router.get("/chat/groups", response_model=List[dict])
 async def get_chat_groups(current_user: User = Depends(get_current_user)):
@@ -2115,33 +2157,24 @@ async def get_chat_groups(current_user: User = Depends(get_current_user)):
         {"members": current_user.id},
         {"_id": 0}
     ).sort("last_message_at", -1).to_list(100)
-
     if not groups:
         return []
-
     # Collect all member IDs
     user_ids = set()
     for group in groups:
         user_ids.update(group["members"])
-
     users = await db.users.find(
         {"id": {"$in": list(user_ids)}},
         {"_id": 0, "password": 0}
     ).to_list(200)
-
     user_map = {u["id"]: u for u in users}
-
     result = []
-
     for group in groups:
-
         # Convert datetime fields
         if isinstance(group.get("created_at"), str):
             group["created_at"] = datetime.fromisoformat(group["created_at"])
-
         if isinstance(group.get("last_message_at"), str):
             group["last_message_at"] = datetime.fromisoformat(group["last_message_at"])
-
         # Add member details
         group["member_details"] = [
             {
@@ -2151,7 +2184,6 @@ async def get_chat_groups(current_user: User = Depends(get_current_user)):
             }
             for m in group["members"]
         ]
-
         # Direct chat display name
         if group["is_direct"]:
             other = [m for m in group["members"] if m != current_user.id]
@@ -2161,60 +2193,41 @@ async def get_chat_groups(current_user: User = Depends(get_current_user)):
             )
         else:
             group["display_name"] = group["name"]
-
         # Unread count
         unread = await db.chat_messages.count_documents({
             "group_id": group["id"],
             "sender_id": {"$ne": current_user.id},
             "read_by": {"$ne": current_user.id}
         })
-
         group["unread_count"] = unread
-
         # Last message
         last_msg = await db.chat_messages.find_one(
             {"group_id": group["id"]},
             {"_id": 0},
             sort=[("created_at", -1)]
         )
-
         if last_msg and isinstance(last_msg.get("created_at"), str):
             last_msg["created_at"] = datetime.fromisoformat(last_msg["created_at"])
-
         group["last_message"] = last_msg
-
         result.append(group)
-
     return result
 
-
-# ================================
 # SINGLE GROUP
-# ================================
-
 @api_router.get("/chat/groups/{group_id}")
 async def get_chat_group(
     group_id: str,
     current_user: User = Depends(get_current_user)
 ):
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
     if current_user.id not in group["members"]:
         raise HTTPException(status_code=403, detail="Not authorized")
-
     if isinstance(group.get("created_at"), str):
         group["created_at"] = datetime.fromisoformat(group["created_at"])
-
     return group
 
-
-# ================================
 # MESSAGES
-# ================================
-
 @api_router.get("/chat/groups/{group_id}/messages")
 async def get_chat_messages(
     group_id: str,
@@ -2222,18 +2235,14 @@ async def get_chat_messages(
     current_user: User = Depends(get_current_user)
 ):
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
     if current_user.id not in group["members"]:
         raise HTTPException(status_code=403, detail="Not authorized")
-
     messages = await db.chat_messages.find(
         {"group_id": group_id},
         {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
-
     # Mark as read
     await db.chat_messages.update_many(
         {
@@ -2242,13 +2251,10 @@ async def get_chat_messages(
         },
         {"$addToSet": {"read_by": current_user.id}}
     )
-
     for msg in messages:
         if isinstance(msg.get("created_at"), str):
             msg["created_at"] = datetime.fromisoformat(msg["created_at"])
-
     return list(reversed(messages))
-
 
 @api_router.post("/chat/groups/{group_id}/messages")
 async def send_chat_message(
@@ -2257,13 +2263,10 @@ async def send_chat_message(
     current_user: User = Depends(get_current_user)
 ):
     group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
     if current_user.id not in group["members"]:
         raise HTTPException(status_code=403, detail="Not authorized")
-
     message = ChatMessage(
         group_id=group_id,
         sender_id=current_user.id,
@@ -2275,39 +2278,29 @@ async def send_chat_message(
         file_size=message_data.file_size,
         read_by=[current_user.id]
     )
-
     doc = message.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
-
     await db.chat_messages.insert_one(doc)
-
     await db.chat_groups.update_one(
         {"id": group_id},
         {"$set": {"last_message_at": doc["created_at"]}}
     )
-
     return message
 
-
-# ================================
 # USERS FOR CHAT
-# ================================
-
 @api_router.get("/chat/users")
 async def get_chat_users(current_user: User = Depends(get_current_user)):
     users = await db.users.find(
         {"id": {"$ne": current_user.id}},
         {"_id": 0, "password": 0}
     ).to_list(200)
-
     for user in users:
         if isinstance(user.get("created_at"), str):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
-
     return sanitize_user_data(users, current_user)
 
-# ��������� REMINDER ROUTES ��������������������������
-# ================= MANUAL FULL REMINDER =================
+# REMINDER ROUTES
+# MANUAL FULL REMINDER
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
@@ -2339,7 +2332,6 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
             for t in task_list:
                 body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
             body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
-  
             sent = send_email(
                 email,
                 "Pending Task Reminder - TaskoSphere",
@@ -2359,7 +2351,7 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_failed": failed_emails
     }
 
-# ================= INTERNAL FUNCTION FOR AUTO REMINDER =================
+# INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
     tasks = await db.tasks.find(
         {"status": {"$ne": "completed"}},
@@ -2382,7 +2374,6 @@ async def send_pending_task_reminders_internal():
             for t in task_list:
                 body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
             body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
-  
             send_email(
                 email,
                 "Daily Pending Task Reminder - TaskoSphere",
@@ -2391,7 +2382,7 @@ async def send_pending_task_reminders_internal():
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
 
-# ================= AUTO DAILY REMINDER (ONLY ONE) =================
+# AUTO DAILY REMINDER (ONLY ONE)
 @app.middleware("http")
 async def auto_daily_reminder(request, call_next):
     try:
@@ -2416,17 +2407,17 @@ async def auto_daily_reminder(request, call_next):
     response = await call_next(request)
     return response
 
-# ================= NOTIFICATIONS =================
+# NOTIFICATIONS
 @api_router.get("/notifications")
 async def get_notifications(current_user: User = Depends(get_current_user)):
     return []
 
-# ================= SHUTDOWN =================
+# SHUTDOWN
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
 
-# ================= INDIVIDUAL STAFF REMINDER =================
+# INDIVIDUAL STAFF REMINDER
 @api_router.post("/send-reminder/{user_id}")
 async def send_reminder_to_user(
     user_id: str,
@@ -2461,7 +2452,7 @@ async def send_reminder_to_user(
         "task_count": len(tasks)
     }
 
-# ================= STAFF RANKING ROUTE =================
+# STAFF RANKING ROUTE
 @api_router.get("/staff/rankings")
 async def get_staff_rankings(
     period: str = "all",
@@ -2487,7 +2478,7 @@ async def get_staff_rankings(
         if not uid:
             continue
         total_minutes = 0
-        # ================= ATTENDANCE =================
+        # ATTENDANCE
         attendance_cursor = await db.attendance.find(
             {"user_id": uid},
             {"_id": 0, "date": 1, "duration_minutes": 1}
@@ -2496,7 +2487,6 @@ async def get_staff_rankings(
             date_str = record.get("date")
             if not date_str:
                 continue
-  
             try:
                 record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
             except:
@@ -2504,14 +2494,12 @@ async def get_staff_rankings(
                     record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
                 except:
                     continue
-  
             if start_date and record_date < start_date:
                 continue
-  
             total_minutes += record.get("duration_minutes") or 0
         # 160 hour baseline
         work_score = min(total_minutes / (60 * 160), 1.0) * 100
-        # ================= TASKS =================
+        # TASKS
         tasks = await db.tasks.find(
             {"assigned_to": uid},
             {"_id": 0}
@@ -2536,7 +2524,7 @@ async def get_staff_rankings(
         completion_percent = (
             (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
         )
-        # ================= OVERDUE LOGIC =================
+        # OVERDUE LOGIC
         overdue_with_reason = 0
         overdue_without_reason = 0
         for task in filtered_tasks:
@@ -2555,7 +2543,7 @@ async def get_staff_rankings(
                     overdue_with_reason += 1
                 else:
                     overdue_without_reason += 1
-        # ================= SPEED =================
+        # SPEED
         completion_times = []
         for task in filtered_tasks:
             if task.get("status") == "completed":
@@ -2577,7 +2565,7 @@ async def get_staff_rankings(
         if completion_times:
             avg_seconds = sum(completion_times) / len(completion_times)
             speed_score = max(0, 100 - (avg_seconds / 86400) * 10)
-        # ================= OVERDUE PENALTY =================
+        # OVERDUE PENALTY
         penalty_without_reason = (
             (overdue_without_reason / total_tasks * 100) if total_tasks > 0 else 0
         )
@@ -2588,11 +2576,11 @@ async def get_staff_rankings(
             penalty_without_reason * 0.20 + penalty_with_reason * 0.05
         )
         adjusted_completion = max(0, completion_percent - overdue_penalty_score)
-        # ================= FINAL SCORE =================
+        # FINAL SCORE
         efficiency = (
             0.35 * work_score + 0.40 * adjusted_completion + 0.25 * speed_score
         )
-        # ================= STAFF ACTIVITY =================
+        # STAFF ACTIVITY
         activities = await db.staff_activity.find(
             {"user_id": uid, "timestamp": {"$gte": start_date.isoformat() if start_date else "1970-01-01"}},
             {"_id": 0}
