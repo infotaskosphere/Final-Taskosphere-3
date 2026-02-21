@@ -125,6 +125,7 @@ export default function Tasks() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterAssignee, setFilterAssignee] = useState('all');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -147,6 +148,7 @@ export default function Tasks() {
   if (canAssignTasks) {
     fetchUsers();
   }
+  fetchUsers();
 }, [user]);
   const fetchTasks = async () => {
     try {
@@ -309,7 +311,8 @@ export default function Tasks() {
     const matchesStatus = filterStatus === 'all' || getDisplayStatus(task) === filterStatus;
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category === filterCategory;
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory;
+    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
   // Stats
   const stats = {
@@ -551,18 +554,13 @@ export default function Tasks() {
                             onClick={() => setFormData({ ...formData, category: dept.value })}
                             className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2
                               ${isSelected
-                                ? 'text-white shadow-md'
+                                ? 'text-slate-700 border border-blue-600 bg-white'
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                               }`}
-                            style={isSelected ? { background: COLORS.mediumBlue } : {}}
                             data-testid={`dept-${dept.value}`}
                           >
                             {isSelected && (
-                              <Switch
-                                checked={true}
-                                className="h-4 w-7 pointer-events-none"
-                                style={{ background: 'rgba(255,255,255,0.3)' }}
-                              />
+                              <div className="h-4 w-4 rounded-full bg-blue-600" />
                             )}
                             {dept.label}
                           </button>
@@ -676,7 +674,7 @@ export default function Tasks() {
                       type="submit"
                       disabled={loading}
                       className="text-white px-6"
-                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
+                      style={{ backgroundColor: COLORS.mediumBlue }}
                     >
                       {loading ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}
                     </Button>
@@ -770,6 +768,17 @@ export default function Tasks() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+            <SelectTrigger className="w-36 bg-white">
+              <SelectValue placeholder="Assigned To" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Assignees</SelectItem>
+              {users.map(u => (
+                <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div className="flex border rounded-lg overflow-hidden">
             <Button
               variant="ghost"
@@ -800,6 +809,10 @@ export default function Tasks() {
                     <th className="p-4 text-left">Client</th>
                     <th className="p-4 text-left">Priority</th>
                     <th className="p-4 text-left">Status</th>
+                    <th className="p-4 text-left">Task Update</th>
+                    <th className="p-4 text-left">Assigned To</th>
+                    <th className="p-4 text-left">Assigned By</th>
+                    <th className="p-4 text-left">DOA</th>
                     <th className="p-4 text-left">Due Date</th>
                     <th className="p-4 text-left">Actions</th>
                   </tr>
@@ -811,7 +824,7 @@ export default function Tasks() {
                     const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                     const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                     return (
-                      <tr key={task.id} className="border-t border-slate-100 hover:bg-slate-50 transition">
+                      <tr key={task.id} className={`border-t border-slate-100 hover:bg-slate-50 transition ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
                         <td className="p-4">{task.title}</td>
                         <td className="p-4">{getClientName(task.client_id)}</td>
                         <td className="p-4">
@@ -820,6 +833,21 @@ export default function Tasks() {
                         <td className="p-4">
                           <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
                         </td>
+                        <td className="p-4">
+                          <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
+                            <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="pending">To Do</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="completed">Done</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="p-4">{getUserName(task.assigned_to)}</td>
+                        <td className="p-4">{getUserName(task.created_by)}</td>
+                        <td className="p-4">{task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}</td>
                         <td className="p-4">{task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</td>
                         <td className="p-4 flex gap-2">
                           {canEditTasks && task.created_by === user?.id && (
@@ -856,14 +884,25 @@ export default function Tasks() {
                 const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                 const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                 return (
-                  <Card key={task.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+                  <Card key={task.id} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
                     <div className="space-y-2">
                       <h3 className="font-semibold text-base">{task.title}</h3>
+                      <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}`}</div>
                       <p className="text-sm text-slate-600 line-clamp-2">{task.description || 'No description'}</p>
                       <div className="flex gap-2">
                         <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
                         <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
                       </div>
+                      <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
+                        <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pending">To Do</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="completed">Done</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <div className="text-xs text-slate-500">Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</div>
                       <div className="text-xs text-slate-500">Client: {getClientName(task.client_id)}</div>
                       <div className="flex gap-2 pt-2 border-t border-slate-200">
@@ -922,7 +961,7 @@ export default function Tasks() {
                     return (
                       <motion.div key={task.id} variants={itemVariants} className="h-full">
                         <Card
-                          className={`bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden group h-full rounded-2xl`}
+                          className={`bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden group h-full rounded-2xl ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}
                           data-testid={`task-card-${task.id}`}
                         >
                           <CardContent className="p-4 flex flex-col h-full">
@@ -954,6 +993,7 @@ export default function Tasks() {
                             <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
                               {task.title}
                             </h3>
+                            <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd, yyyy') : 'N/A'}`}</div>
                             {/* Description - Fixed height for equal cards */}
                             <div className="h-[40px] mb-3">
                               {task.description ? (
