@@ -21,7 +21,6 @@ import {
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -31,7 +30,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 const DashboardLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -39,10 +37,8 @@ const DashboardLayout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-
   // Enable activity tracking for all users
   useActivityTracker(true);
-
   // Handle responsive behavior
   useEffect(() => {
     const handleResize = () => {
@@ -59,35 +55,31 @@ const DashboardLayout = ({ children }) => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
   const handleNavClick = () => {
     if (isMobile) {
       setSidebarOpen(false);
     }
   };
-
   // Fixed & working logout
   const handleLogout = () => {
-    // Clear token & auth state
-    localStorage.removeItem('token');
-    // Optional: clear more if you store other auth data
-    // localStorage.removeItem('user');
+    try {
+      // Clear all stored auth data
+      localStorage.clear();
+      sessionStorage.clear();
 
-    // Call context logout if it exists (safe even if not)
-    if (logout) {
-      logout();
+      if (logout) {
+        logout();
+      }
+
+      toast.success("Logged out successfully");
+
+      // Force full reload to reset React state
+      window.location.href = "/login";
+
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
-
-    // Show toast (optional but nice UX)
-    toast.success("Logged out successfully");
-
-    // Redirect to login - using navigate with replace
-    navigate('/login', { replace: true });
-    
-    // Fallback: force reload to ensure clean state
-    // window.location.href = '/login';
   };
-
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
@@ -99,12 +91,10 @@ const DashboardLayout = ({ children }) => {
     { path: '/chat', icon: MessageCircle, label: 'Chat' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
   ];
-
   if (user?.role === 'admin') {
     navItems.push({ path: '/users', icon: Users, label: 'Users' });
     navItems.push({ path: '/staff-activity', icon: Activity, label: 'Staff Activity' });
   }
-
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Mobile Overlay */}
@@ -114,7 +104,6 @@ const DashboardLayout = ({ children }) => {
           onClick={() => setSidebarOpen(false)}
         />
       )}
-
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-full border-r border-blue-200 shadow-lg transition-all duration-300 z-50
@@ -140,7 +129,6 @@ const DashboardLayout = ({ children }) => {
               </Button>
             </div>
           </div>
-
           {/* Navigation */}
           <div className="flex-1 overflow-y-auto py-4 px-3 lg:px-4">
             <nav className="space-y-1">
@@ -169,14 +157,12 @@ const DashboardLayout = ({ children }) => {
               })}
             </nav>
           </div>
-
           {/* Footer */}
           <div className="p-3 lg:p-4 border-t border-blue-100/50 bg-gradient-to-t from-blue-50/80 to-transparent">
             <p className="text-xs text-slate-500 text-center">© 2026 TaskoSphere</p>
           </div>
         </div>
       </aside>
-
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${sidebarOpen && !isMobile ? 'lg:ml-64' : 'ml-0'}`}>
         {/* Header */}
@@ -201,11 +187,9 @@ const DashboardLayout = ({ children }) => {
                 </h2>
               </div>
             </div>
-
             {/* Right Side: Notification + User Profile */}
             <div className="flex items-center space-x-1 sm:space-x-3">
               <NotificationBell />
-
               {/* User Profile Button + Dropdown */}
               <div className="relative">
                 <button
@@ -231,7 +215,6 @@ const DashboardLayout = ({ children }) => {
                   </div>
                   <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform hidden sm:block ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-
                 {/* Dropdown Menu */}
                 {userMenuOpen && (
                   <div
@@ -244,7 +227,6 @@ const DashboardLayout = ({ children }) => {
                         <p className="text-xs text-purple-700 mt-1.5 font-medium">Admin</p>
                       )}
                     </div>
-
                     {/* Logout button */}
                     <button
                       onClick={handleLogout}
@@ -260,13 +242,11 @@ const DashboardLayout = ({ children }) => {
             </div>
           </div>
         </header>
-
         {/* Page Content */}
         <main className="p-3 sm:p-4 md:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto w-full">{children}</div>
         </main>
       </div>
-
       {/* Click outside to close user menu */}
       {userMenuOpen && (
         <div
@@ -277,5 +257,4 @@ const DashboardLayout = ({ children }) => {
     </div>
   );
 };
-
 export default DashboardLayout;
