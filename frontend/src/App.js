@@ -17,11 +17,9 @@ import DueDates from '@/pages/DueDates';
 import StaffActivity from '@/pages/StaffActivity';
 import Chat from '@/pages/Chat';
 import '@/App.css';
-
 // Protected Route (requires login)
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -32,25 +30,38 @@ const ProtectedRoute = ({ children }) => {
       </div>
     );
   }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return <DashboardLayout>{children}</DashboardLayout>;
+};
+// Public Route (redirects to dashboard if already logged in)
+const PublicRoute = ({ children }) => {
+  const { user } = useAuth();
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+};
+const PermissionRoute = ({ permission, children }) => {
+  const { user } = useAuth();
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  return <DashboardLayout>{children}</DashboardLayout>;
-};
+  // Admin override
+  if (user.role === "admin") {
+    return <DashboardLayout>{children}</DashboardLayout>;
+  }
 
-// Public Route (redirects to dashboard if already logged in)
-const PublicRoute = ({ children }) => {
-  const { user } = useAuth();
-
-  if (user) {
+  // Permission check
+  if (!user.permissions?.[permission]) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  return children;
+  return <DashboardLayout>{children}</DashboardLayout>;
 };
-
 function AppRoutes() {
   return (
     <Routes>
@@ -63,7 +74,6 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
-
       {/* Login */}
       <Route
         path="/login"
@@ -73,7 +83,6 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
-
       {/* Register */}
       <Route
         path="/register"
@@ -83,7 +92,6 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
-
       {/* Protected Routes */}
       <Route
         path="/dashboard"
@@ -173,13 +181,11 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-
       {/* Catch-all: redirect unknown routes to login */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }
-
 function App() {
   return (
     <AuthProvider>
@@ -190,5 +196,4 @@ function App() {
     </AuthProvider>
   );
 }
-
 export default App;
