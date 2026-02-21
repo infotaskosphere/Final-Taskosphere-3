@@ -45,21 +45,17 @@ const PublicRoute = ({ children }) => {
 };
 const PermissionRoute = ({ permission, children }) => {
   const { user } = useAuth();
-
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-
   // Admin override
   if (user.role === "admin") {
     return <DashboardLayout>{children}</DashboardLayout>;
   }
-
   // Permission check
   if (!user.permissions?.[permission]) {
     return <Navigate to="/dashboard" replace />;
   }
-
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 function AppRoutes() {
@@ -104,81 +100,81 @@ function AppRoutes() {
       <Route
         path="/tasks"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_all_tasks">
             <Tasks />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/dsc"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_all_dsc">
             <DSCRegister />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/documents"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_documents">
             <DocumentsRegister />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/attendance"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_attendance">
             <Attendance />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/reports"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_reports">
             <Reports />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/clients"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_all_clients">
             <Clients />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/users"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_manage_users">
             <Users />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/duedates"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_all_duedates">
             <DueDates />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/staff-activity"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_view_staff_activity">
             <StaffActivity />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       <Route
         path="/chat"
         element={
-          <ProtectedRoute>
+          <PermissionRoute permission="can_use_chat">
             <Chat />
-          </ProtectedRoute>
+          </PermissionRoute>
         }
       />
       {/* Catch-all: redirect unknown routes to login */}
