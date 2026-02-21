@@ -67,7 +67,17 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
-const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, COLORS, isAdmin }) => {
+const UserCard = ({
+  userData,
+  onEdit,
+  onDelete,
+  onPermissions,
+  currentUserId,
+  COLORS,
+  isAdmin,
+  canEditUsers,              // ✅ ADD
+  canManagePermissions       // ✅ ADD
+}) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
   const getRoleIcon = (role) => {
@@ -185,6 +195,9 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, currentUserId, CO
 };
 export default function Users() {
   const { user, hasPermission } = useAuth();
+
+  const isAdmin = user?.role === "admin"; // ✅ ADD THIS
+
   const canViewUserPage = hasPermission("can_view_user_page");
   const canEditUsers = hasPermission("can_edit_users");
   const canManagePermissions = hasPermission("can_manage_users");
@@ -542,7 +555,18 @@ export default function Users() {
             </div>
           ) : (
             filteredUsers.map((userData) => (
-              <UserCard key={userData.id} userData={userData} onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog} currentUserId={user.id} COLORS={COLORS} isAdmin={isAdmin} />
+              <UserCard
+  key={userData.id}
+  userData={userData}
+  onEdit={handleEdit}
+  onDelete={handleDelete}
+  onPermissions={openPermissionsDialog}
+  currentUserId={user.id}
+  COLORS={COLORS}
+  isAdmin={isAdmin}
+  canEditUsers={canEditUsers}                 // ✅ ADD
+  canManagePermissions={canManagePermissions} // ✅ ADD
+/>
             ))
           )}
         </motion.div>
