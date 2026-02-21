@@ -1327,7 +1327,7 @@ async def update_document_movement(
     )
     return {"message": "Movement updated successfully"}
 
-# ��������� ATTENDANCE ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������
+# ��������� ATTENDANCE ROUTES ����������������������������������������
 # Attendance routes
 @api_router.get("/attendance/today", response_model=Optional[Attendance])
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
@@ -1493,7 +1493,7 @@ async def get_staff_attendance_report(
         "staff_report": result
     }
 
-# ��������� DUE DATE ROUTES �����������������������������������������������������
+# ��������� DUE DATE ROUTES ��������������������������������������������
 
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
@@ -1507,7 +1507,7 @@ async def create_due_date(
         **due_date_data.model_dump(),
         created_by=current_user.id
     )
-    )
+
     doc = due_date.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
     doc["due_date"] = doc["due_date"].isoformat()
