@@ -50,6 +50,7 @@ mccabe==0.7.0
 mdurl==0.1.2
 motor==3.3.1
 multidict==6.7.1
+fpdf==1.7.2
 mypy==1.19.1
 mypy_extensions==1.1.0
 numpy==2.4.2
