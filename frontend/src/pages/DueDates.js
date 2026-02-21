@@ -13,7 +13,6 @@ import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Search, Calendar, Building2, User, AlertCircle, CheckCircle, Clock, Filter } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { motion } from 'framer-motion';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -21,10 +20,8 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Categories
 const CATEGORIES = ['GST', 'Income Tax', 'TDS', 'ROC', 'Audit', 'Trademark', 'RERA', 'FEMA', 'Other'];
-
 // Status styles
 const STATUS_STYLES = {
   pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Pending' },
@@ -32,18 +29,15 @@ const STATUS_STYLES = {
   overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
   upcoming: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Upcoming' },
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 export default function DueDates() {
   const { user } = useAuth();
   const [dueDates, setDueDates] = useState([]);
@@ -52,13 +46,12 @@ export default function DueDates() {
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(null);
-  
+ 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterMonth, setFilterMonth] = useState('all');
-
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -69,13 +62,14 @@ export default function DueDates() {
     client_id: 'no_client',
     status: 'pending',
   });
-
   useEffect(() => {
-    fetchDueDates();
-    fetchClients();
-    fetchUsers();
-  }, []);
+  fetchDueDates();
+  fetchClients();
 
+  if (user?.role === "admin" || user?.role === "manager") {
+    fetchUsers();
+  }
+}, [user]);
   const fetchDueDates = async () => {
     try {
       const response = await api.get('/duedates');
@@ -84,7 +78,6 @@ export default function DueDates() {
       toast.error('Failed to fetch due dates');
     }
   };
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -93,7 +86,6 @@ export default function DueDates() {
       console.error('Failed to fetch clients');
     }
   };
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -102,11 +94,9 @@ export default function DueDates() {
       console.error('Failed to fetch users');
     }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const dueDateData = {
         ...formData,
@@ -114,7 +104,6 @@ export default function DueDates() {
         client_id: formData.client_id === 'no_client' ? null : (formData.client_id || null),
         due_date: new Date(formData.due_date).toISOString(),
       };
-
       if (editingDueDate) {
         await api.put(`/duedates/${editingDueDate.id}`, dueDateData);
         toast.success('Due date updated successfully!');
@@ -122,7 +111,6 @@ export default function DueDates() {
         await api.post('/duedates', dueDateData);
         toast.success('Due date created successfully!');
       }
-
       setDialogOpen(false);
       resetForm();
       fetchDueDates();
@@ -132,7 +120,6 @@ export default function DueDates() {
       setLoading(false);
     }
   };
-
   const handleEdit = (dueDate) => {
     setEditingDueDate(dueDate);
     setFormData({
@@ -147,10 +134,8 @@ export default function DueDates() {
     });
     setDialogOpen(true);
   };
-
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this due date?')) return;
-
     try {
       await api.delete(`/duedates/${id}`);
       toast.success('Due date deleted successfully!');
@@ -159,7 +144,6 @@ export default function DueDates() {
       toast.error('Failed to delete due date');
     }
   };
-
   const resetForm = () => {
     setFormData({
       title: '',
@@ -173,17 +157,14 @@ export default function DueDates() {
     });
     setEditingDueDate(null);
   };
-
   const getUserName = (userId) => {
     const foundUser = users.find(u => u.id === userId);
     return foundUser?.full_name || 'Unassigned';
   };
-
   const getClientName = (clientId) => {
     const client = clients.find(c => c.id === clientId);
     return client?.company_name || '-';
   };
-
   // Get display status based on date
   const getDisplayStatus = (dueDate) => {
     if (dueDate.status === 'completed') return 'completed';
@@ -192,23 +173,21 @@ export default function DueDates() {
     if (daysLeft <= 7) return 'upcoming';
     return 'pending';
   };
-
   // Filter due dates
   const filteredDueDates = dueDates.filter(dd => {
     const matchesSearch = dd.title.toLowerCase().includes(searchQuery.toLowerCase());
     const displayStatus = getDisplayStatus(dd);
     const matchesStatus = filterStatus === 'all' || displayStatus === filterStatus;
     const matchesCategory = filterCategory === 'all' || dd.category === filterCategory;
-    
+   
     let matchesMonth = true;
     if (filterMonth !== 'all') {
       const dueMonth = new Date(dd.due_date).getMonth();
       matchesMonth = dueMonth === parseInt(filterMonth);
     }
-    
+   
     return matchesSearch && matchesStatus && matchesCategory && matchesMonth;
   });
-
   // Stats
   const stats = {
     total: dueDates.length,
@@ -226,7 +205,6 @@ export default function DueDates() {
     }).length,
     completed: dueDates.filter(dd => dd.status === 'completed').length,
   };
-
   const months = [
     { value: '0', label: 'January' },
     { value: '1', label: 'February' },
@@ -241,9 +219,16 @@ export default function DueDates() {
     { value: '10', label: 'November' },
     { value: '11', label: 'December' },
   ];
-
+  const addToCalendar = (dueDate) => {
+    const title = encodeURIComponent(dueDate.title);
+    const description = encodeURIComponent(dueDate.description || '');
+    const startDate = format(new Date(dueDate.due_date), 'yyyyMMdd');
+    const endDate = format(new Date(new Date(dueDate.due_date).getTime() + 86400000), 'yyyyMMdd');
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${description}&dates=${startDate}/${endDate}`;
+    window.open(url, '_blank');
+  };
   return (
-    <motion.div 
+    <motion.div
       className="space-y-6"
       variants={containerVariants}
       initial="hidden"
@@ -255,7 +240,7 @@ export default function DueDates() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Compliance Calendar</h1>
           <p className="text-slate-600 mt-1">Track and manage all compliance due dates</p>
         </div>
-        
+       
         <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
             <Button
@@ -287,7 +272,6 @@ export default function DueDates() {
                   required
                 />
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="category">Category *</Label>
@@ -305,7 +289,6 @@ export default function DueDates() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="due_date">Due Date *</Label>
                   <Input
@@ -317,7 +300,6 @@ export default function DueDates() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Client</Label>
@@ -336,26 +318,26 @@ export default function DueDates() {
                     </SelectContent>
                   </Select>
                 </div>
-
-                <div className="space-y-2">
-                  <Label>Assign To</Label>
-                  <Select
-                    value={formData.assigned_to}
-                    onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select user" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {(user?.role === "admin" || user?.role === "manager") && (
+  <div className="space-y-2">
+    <Label>Assign To</Label>
+    <Select
+      value={formData.assigned_to}
+      onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="Select user" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="unassigned">Unassigned</SelectItem>
+        {users.map((u) => (
+          <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+)}
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="reminder_days">Remind Before (days)</Label>
@@ -367,7 +349,6 @@ export default function DueDates() {
                     onChange={(e) => setFormData({ ...formData, reminder_days: parseInt(e.target.value) || 30 })}
                   />
                 </div>
-
                 <div className="space-y-2">
                   <Label>Status</Label>
                   <Select
@@ -384,7 +365,6 @@ export default function DueDates() {
                   </Select>
                 </div>
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
@@ -395,7 +375,6 @@ export default function DueDates() {
                   rows={2}
                 />
               </div>
-
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
                   Cancel
@@ -408,7 +387,6 @@ export default function DueDates() {
           </DialogContent>
         </Dialog>
       </motion.div>
-
       {/* Stats Bar */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => setFilterStatus('all')}>
@@ -442,7 +420,6 @@ export default function DueDates() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Search and Filters */}
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4 items-center">
         <div className="relative flex-1 max-w-md">
@@ -454,7 +431,7 @@ export default function DueDates() {
             className="pl-10 bg-white"
           />
         </div>
-        
+       
         <div className="flex items-center gap-3 flex-wrap">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -469,7 +446,6 @@ export default function DueDates() {
               <SelectItem value="completed">Completed</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Category" />
@@ -481,7 +457,6 @@ export default function DueDates() {
               ))}
             </SelectContent>
           </Select>
-
           <Select value={filterMonth} onValueChange={setFilterMonth}>
             <SelectTrigger className="w-36 bg-white">
               <Calendar className="h-4 w-4 mr-2" />
@@ -496,7 +471,6 @@ export default function DueDates() {
           </Select>
         </div>
       </motion.div>
-
       {/* Due Dates Table */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm overflow-hidden">
@@ -526,7 +500,7 @@ export default function DueDates() {
                     const displayStatus = getDisplayStatus(dueDate);
                     const statusStyle = STATUS_STYLES[displayStatus];
                     const daysLeft = differenceInDays(new Date(dueDate.due_date), new Date());
-                    
+                   
                     return (
                       <tr key={dueDate.id} className="hover:bg-slate-50 transition-colors group">
                         <td className="px-6 py-4">
@@ -538,7 +512,14 @@ export default function DueDates() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="font-medium" style={{ color: COLORS.deepBlue }}>{dueDate.title}</p>
+                          <p className="font-medium flex items-center" style={{ color: COLORS.deepBlue }}>
+                            {dueDate.title}
+                            {dueDate.assigned_to === user?.id && (
+                              <Badge className="ml-2 bg-blue-100 text-blue-700">
+                                Assigned To You
+                              </Badge>
+                            )}
+                          </p>
                           {dueDate.description && (
                             <p className="text-xs text-slate-500 mt-1 line-clamp-1">{dueDate.description}</p>
                           )}
@@ -575,7 +556,8 @@ export default function DueDates() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {(user?.role === "admin" || dueDate.assigned_to === user?.id) && (
+  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -592,7 +574,16 @@ export default function DueDates() {
                             >
                               <Trash2 className="h-4 w-4 text-red-600" />
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 hover:bg-emerald-50"
+                              onClick={() => addToCalendar(dueDate)}
+                            >
+                              <Calendar className="h-4 w-4 text-emerald-600" />
+                            </Button>
                           </div>
+)}
                         </td>
                       </tr>
                     );
