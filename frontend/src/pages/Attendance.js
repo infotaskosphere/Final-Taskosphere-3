@@ -19,7 +19,6 @@ import {
   TrendingUp,
   Timer
 } from 'lucide-react';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -27,22 +26,18 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 const modalVariants = {
   hidden: { opacity: 0, scale: 0.95, y: 20 },
   visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 export default function Attendance() {
   const { user } = useAuth();
   const [attendanceHistory, setAttendanceHistory] = useState([]);
@@ -59,25 +54,20 @@ export default function Attendance() {
   const [tasksCompleted, setTasksCompleted] = useState(0);
   const [isEarlyLeaveToday, setIsEarlyLeaveToday] = useState(false);
   const [earlyByMinutesToday, setEarlyByMinutesToday] = useState(0);
-
   useEffect(() => {
     fetchData();
   }, []);
-
   useEffect(() => {
     const fetchYesterdayTodos = async () => {
       try {
         const res = await api.get('/tasks');
         const yesterday = subDays(new Date(), 1);
         const yesterdayStr = yesterday.toDateString();
-
         const unfinished = res.data.filter(task =>
           task.type === 'todo' &&
-          task.created_by === user?.id &&
           new Date(task.created_at).toDateString() === yesterdayStr &&
           task.status !== 'completed'
         );
-
         setYesterdayUnfinishedTodos(unfinished);
       } catch (err) {
         console.error('Failed to load yesterday todos', err);
@@ -85,13 +75,11 @@ export default function Attendance() {
     };
     fetchYesterdayTodos();
   }, [user?.id]);
-
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
       setShowPunchInModal(true);
     }
   }, [todayAttendance]);
-
   useEffect(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (todayAttendance?.date !== todayStr) {
@@ -101,35 +89,39 @@ export default function Attendance() {
       setEarlyByMinutesToday(0);
     }
   }, [todayAttendance]);
-
   const fetchData = async () => {
     setLoading(true);
     try {
       // --- EXPANDED PROMISE.ALL TO INCLUDE RANKINGS AND TASKS (NO DELETIONS) ---
-      const [historyRes, summaryRes, todayRes, rankingRes, tasksRes] = await Promise.all([
+      const requests = [
         api.get('/attendance/history'),
         api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
-        api.get('/staff/rankings?period=monthly'),
         api.get('/tasks')
-      ]);
+      ];
+
+      if (user?.role === "admin" || user?.role === "manager") {
+        requests.push(api.get('/staff/rankings?period=monthly'));
+      } else {
+        requests.push(Promise.resolve({ data: { rankings: [] } }));
+      }
+
+      const [historyRes, summaryRes, todayRes, tasksRes, rankingRes] =
+        await Promise.all(requests);
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
-
       // --- LOGIC FOR DYNAMIC RANKING ---
       const rankingList = rankingRes.data.rankings || [];
       const myEntry = rankingList.find(r => r.user_id === user?.id);
       if (myEntry) {
         setMyRank(`#${myEntry.rank}`);
       }
-
       // --- LOGIC FOR REAL COMPLETED TASKS COUNT ---
       const completedCount = tasksRes.data.filter(
-        task => task.assigned_to === user?.id && task.status === 'completed'
+        task => task.status === 'completed'
       ).length;
       setTasksCompleted(completedCount);
-
     } catch (error) {
       toast.error('Failed to fetch attendance data');
       console.error(error);
@@ -137,7 +129,6 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -155,36 +146,29 @@ export default function Attendance() {
           console.warn("Location not available");
         }
       }
-
       const res = await api.post('/attendance', {
         action,
         location: locationData
       });
-
       let isLate = false;
       let lateByMinutes = 0;
       let isEarlyLeave = false;
       let earlyByMinutes = 0;
-
       if (action === 'punch_in' && user?.punch_in_time) {
         try {
           const [expH, expM] = user.punch_in_time.split(':').map(Number);
           const expected = new Date();
           expected.setHours(expH, expM, 0, 0);
-
           const actual = new Date();
-
           if (actual > expected) {
             const diffMs = actual.getTime() - expected.getTime();
             lateByMinutes = Math.floor(diffMs / 60000);
             const [graceH, graceM] = user.grace_time ? user.grace_time.split(':').map(Number) : [0, 15];
             const grace = graceH * 60 + graceM;
-
             if (lateByMinutes > grace) {
               isLate = true;
               setIsLateToday(true);
               setLateByMinutesToday(lateByMinutes);
-
               toast.warning(
                 `Late by ${lateByMinutes} minutes (your grace: ${grace} min)`,
                 { duration: 6000 }
@@ -199,16 +183,13 @@ export default function Attendance() {
           const [expH, expM] = user.punch_out_time.split(':').map(Number);
           const expectedOut = new Date();
           expectedOut.setHours(expH, expM, 0, 0);
-
           const actualOut = new Date();
-
           if (actualOut < expectedOut) {
             const diffMs = expectedOut.getTime() - actualOut.getTime();
             earlyByMinutes = Math.floor(diffMs / 60000);
             isEarlyLeave = true;
             setIsEarlyLeaveToday(true);
             setEarlyByMinutesToday(earlyByMinutes);
-
             toast.warning(
               `Early leave by ${earlyByMinutes} minutes (expected out: ${user.punch_out_time})`,
               { duration: 6000 }
@@ -218,29 +199,24 @@ export default function Attendance() {
           console.warn("Cannot calculate early leave status:", err);
         }
       }
-
       toast.success(
         action === 'punch_in'
           ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
           : (isEarlyLeave ? 'Punched out (early leave)' : 'Punched out successfully!')
       );
-
       fetchData();
-
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
     } finally {
       setLoading(false);
     }
   };
-
   const formatDuration = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
-
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) {
@@ -252,7 +228,6 @@ export default function Attendance() {
     const minutes = Math.floor((diffMs % 3600000) / 60000);
     return `${hours}h ${minutes}m`;
   };
-
   const getMonthAttendance = () => {
     const start = startOfMonth(selectedDate);
     const end = endOfMonth(selectedDate);
@@ -261,32 +236,25 @@ export default function Attendance() {
       return date >= start && date <= end;
     });
   };
-
   const monthAttendance = getMonthAttendance();
   const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
   const monthDaysPresent = monthAttendance.length;
-
   // Total days late this month
   const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late === true).length;
-
   // Placeholder for tasks completed this month (can be replaced with real API later)
   const tasksCompletedThisMonth = 0;
-
   // Calendar highlighting
   const attendanceDates = attendanceHistory.map(a => parseISO(a.date));
-
   const lateDates = isLateToday && todayAttendance?.date
     ? [parseISO(todayAttendance.date)]
     : attendanceHistory
         .filter(a => a.is_late === true)
         .map(a => parseISO(a.date));
-
   const modifiers = {
     present: attendanceDates,
     late: lateDates,
     today: [new Date()]
   };
-
   const modifiersStyles = {
     present: {
       backgroundColor: `${COLORS.emeraldGreen}20`,
@@ -303,14 +271,11 @@ export default function Attendance() {
       color: COLORS.deepBlue
     }
   };
-
   const getSelectedDayAttendance = () => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     return attendanceHistory.find(a => a.date === dateStr);
   };
-
   const selectedDayAttendance = getSelectedDayAttendance();
-
   return (
     <motion.div
       className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
@@ -325,7 +290,6 @@ export default function Attendance() {
           <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
         </div>
       </motion.div>
-
       {/* Today's Punch Widget */}
       <motion.div variants={itemVariants}>
         <Card
@@ -371,7 +335,6 @@ export default function Attendance() {
                   )}
                 </div>
               </div>
-
               <div className="flex gap-3">
                 {!todayAttendance?.punch_in ? (
                   <Button
@@ -410,7 +373,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Stats Cards Row – 4 cards including new "Your Star Performance Rank" */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
         {/* This Month */}
@@ -430,7 +392,6 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Tasks Completed For the Month */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
@@ -449,7 +410,6 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Total Days Late */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
@@ -467,8 +427,8 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Your Star Performance Rank */}
+        {(user?.role === "admin" || user?.role === "manager") && (
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
@@ -486,8 +446,8 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
+        )}
       </motion.div>
-
       {/* Live Total Hours Today Card */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm">
@@ -504,7 +464,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Unfinished Todos from Yesterday */}
       <motion.div variants={itemVariants}>
         <Card className="border border-red-200 bg-red-50/30 shadow-sm">
@@ -549,7 +508,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Calendar and History Section */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         {/* Calendar */}
@@ -592,7 +550,6 @@ export default function Attendance() {
             )}
           </CardContent>
         </Card>
-
         {/* Recent Attendance History */}
         <Card className="border border-slate-200 shadow-sm lg:col-span-2">
           <CardHeader>
@@ -624,7 +581,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Monthly Summary */}
       {mySummary?.monthly_summary && mySummary.monthly_summary.length > 0 && (
         <motion.div variants={itemVariants}>
@@ -642,7 +598,6 @@ export default function Attendance() {
           </Card>
         </motion.div>
       )}
-
       {/* Auto Punch-In Popup */}
       {showPunchInModal && (
         <motion.div
