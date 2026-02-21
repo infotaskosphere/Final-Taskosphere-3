@@ -24,6 +24,10 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+import csv
+from io import StringIO, BytesIO
+from fastapi.responses import StreamingResponse
+from fpdf import FPDF
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -39,7 +43,7 @@ def sanitize_user_data(user_data, current_user):
             sanitized.append(u_dict)
         return sanitized
     # If single user
-    u_dict = user_data.dict() if hasattr(user_data, "dict") else dict(user_data)
+    u_dict = user_data.dict() if hasattr(u_data, "dict") else dict(user_data)
     return u_dict
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -130,12 +134,13 @@ class UserPermissions(BaseModel):
     assigned_clients: List[str] = [] # List of client IDs user can access
     can_view_user_page: bool = False
     can_view_audit_logs: bool = False
-
     can_edit_tasks: bool = False
     can_edit_dsc: bool = False
     can_edit_documents: bool = False
     can_edit_due_dates: bool = False
     can_edit_users: bool = False
+    can_download_reports: bool = False
+    can_view_selected_users_reports: bool = False
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
@@ -559,10 +564,8 @@ async def create_audit_log(
         old_data=old_data,
         new_data=new_data
     )
-
     doc = log.model_dump()
     doc["timestamp"] = doc["timestamp"].isoformat()
-
     await db.audit_logs.insert_one(doc)
 # ��������� AUTH ROUTES ������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
 # Auth routes
@@ -609,7 +612,9 @@ async def register(
     "can_edit_dsc": False,
     "can_edit_documents": False,
     "can_edit_due_dates": False,
-    "can_edit_users": False
+    "can_edit_users": False,
+    "can_download_reports": False,
+    "can_view_selected_users_reports": False
 }
     doc = user.model_dump()
     doc["password"] = hashed_password
@@ -667,7 +672,7 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
                 expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
-        
+       
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
@@ -1493,11 +1498,27 @@ async def delete_due_date(
 # ��������� REPORTS ROUTES ��������������������������������������
 # Reports routes
 @api_router.get("/reports/efficiency")
-async def get_efficiency_report(current_user: User = Depends(check_permission("can_view_reports"))):
-    if current_user.role == "staff":
-        query = {"user_id": current_user.id}
+async def get_efficiency_report(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role == "admin":
+        # Admin can view anyone
+        query = {"user_id": user_id} if user_id else {}
     else:
-        query = {}
+        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if user_id is None:
+            if permissions.get("can_view_reports", False):
+                query = {}
+            else:
+                raise HTTPException(status_code=403, detail="Not authorized to view all reports")
+        elif user_id == current_user.id:
+            query = {"user_id": current_user.id}
+        else:
+            if permissions.get("can_view_selected_users_reports", False):
+                query = {"user_id": user_id}
+            else:
+                raise HTTPException(status_code=403, detail="Not authorized to view this report")
     # Get activity logs
     logs = await db.activity_logs.find(query, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
     # Get user data
@@ -1519,6 +1540,65 @@ async def get_efficiency_report(current_user: User = Depends(check_permission("c
         report_data[user_id]["total_tasks_completed"] += log.get("tasks_completed", 0)
         report_data[user_id]["days_logged"] += 1
     return list(report_data.values())
+@api_router.get("/reports/export")
+async def export_reports(
+    format: str = "csv",
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "admin":
+        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if not permissions.get("can_download_reports", False):
+            raise HTTPException(status_code=403, detail="Download not allowed")
+    # Fetch all reports
+    reports = await get_efficiency_report(None, current_user)
+    if format == "csv":
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=["user_id", "user_name", "total_screen_time", "total_tasks_completed", "days_logged"])
+        writer.writeheader()
+        for report in reports:
+            writer.writerow({
+                "user_id": report["user"].get("id"),
+                "user_name": report["user"].get("full_name"),
+                "total_screen_time": report["total_screen_time"],
+                "total_tasks_completed": report["total_tasks_completed"],
+                "days_logged": report["days_logged"]
+            })
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=efficiency_report.csv"}
+        )
+    elif format == "pdf":
+        # Use FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="Efficiency Report", ln=1, align="C")
+        # Headers
+        pdf.cell(40, 10, "User ID", 1)
+        pdf.cell(50, 10, "User Name", 1)
+        pdf.cell(40, 10, "Screen Time", 1)
+        pdf.cell(40, 10, "Tasks Completed", 1)
+        pdf.cell(30, 10, "Days Logged", 1)
+        pdf.ln()
+        for report in reports:
+            pdf.cell(40, 10, str(report["user"].get("id")), 1)
+            pdf.cell(50, 10, str(report["user"].get("full_name")), 1)
+            pdf.cell(40, 10, str(report["total_screen_time"]), 1)
+            pdf.cell(40, 10, str(report["total_tasks_completed"]), 1)
+            pdf.cell(30, 10, str(report["days_logged"]), 1)
+            pdf.ln()
+        pdf_output = BytesIO()
+        pdf_output.write(pdf.output(dest='S').encode('latin1'))
+        pdf_output.seek(0)
+        return StreamingResponse(
+            pdf_output,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=efficiency_report.pdf"}
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid format")
 # ��������� CLIENT ROUTES ��������������������������������������
 # Client Management routes
 @api_router.post("/clients", response_model=Client)
@@ -1626,7 +1706,7 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
             if this_year_bday < today:
                 # If birthday passed, check next year
                 this_year_bday = bday.replace(year=today.year + 1)
-    
+   
             days_until = (this_year_bday - today).days
             if 0 <= days_until <= days:
                 client["days_until_birthday"] = days_until
@@ -2114,7 +2194,7 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
             for t in task_list:
                 body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
             body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
-    
+   
             sent = send_email(
                 email,
                 "Pending Task Reminder - TaskoSphere",
@@ -2156,7 +2236,7 @@ async def send_pending_task_reminders_internal():
             for t in task_list:
                 body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
             body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
-    
+   
             send_email(
                 email,
                 "Daily Pending Task Reminder - TaskoSphere",
@@ -2265,7 +2345,7 @@ async def get_staff_rankings(
             date_str = record.get("date")
             if not date_str:
                 continue
-    
+   
             try:
                 record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
             except:
@@ -2273,10 +2353,10 @@ async def get_staff_rankings(
                     record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
                 except:
                     continue
-    
+   
             if start_date and record_date < start_date:
                 continue
-    
+   
             total_minutes += record.get("duration_minutes") or 0
         # 160 hour baseline
         work_score = min(total_minutes / (60 * 160), 1.0) * 100
