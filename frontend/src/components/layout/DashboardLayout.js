@@ -121,7 +121,7 @@ const DashboardLayout = ({ children }) => {
       >
         <div className="flex flex-col h-full">
           {/* Logo Header */}
-          <div className="p-6 border-b border-blue-100/50 flex items-center justify-center relative">
+          <div className="py-3 px-4 border-b border-blue-100/50 flex items-center justify-center relative">
           {/* Logo */}
         <img
           src="/logo.png"
