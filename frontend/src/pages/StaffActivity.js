@@ -39,10 +39,8 @@ import {
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-
 // Register the datalabels plugin globally
 Chart.register(ChartDataLabels);
-
 // Brand Colors
 const COLORS = {
  lightBlue: '#0D3B66',
@@ -78,7 +76,14 @@ const itemVariants = {
  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 export default function StaffActivity() {
- const { user } = useAuth();
+ const { user, hasPermission } = useAuth();
+
+const canViewPage = hasPermission("can_view_staff_activity");
+const canViewAttendanceReport = hasPermission("can_view_attendance_report");
+const canViewActivitySummary = hasPermission("can_view_activity_summary");
+const canViewAllTodos = hasPermission("can_view_all_todos");
+const canSendReminders = hasPermission("can_send_reminders");
+const canViewTaskAnalytics = hasPermission("can_view_task_analytics");
  const [activeTab, setActiveTab] = useState('activity');
  const [activityData, setActivityData] = useState([]);
  const [attendanceReport, setAttendanceReport] = useState(null);
@@ -100,7 +105,7 @@ export default function StaffActivity() {
  // ADDED: Polling intervals (45s refresh when tab active)
  // ────────────────────────────────────────────────
  useEffect(() => {
- if (user?.role !== 'admin') return;
+ if (!canViewPage) return;
  let intervalId;
  const refreshActiveTab = () => {
  if (activeTab === 'activity') {
@@ -120,7 +125,7 @@ export default function StaffActivity() {
  };
  }, [activeTab, selectedUser, selectedMonth, user]);
  useEffect(() => {
- if (user?.role === 'admin') {
+ if (canViewPage) {
  fetchUsers();
  fetchActivityData();
  fetchAttendanceReport();
@@ -128,13 +133,13 @@ export default function StaffActivity() {
  }
  }, [user]);
  useEffect(() => {
- if (user?.role === 'admin') {
+ if (canViewPage) {
  fetchAttendanceReport();
  fetchTaskAnalytics();
  }
  }, [selectedMonth, selectedUser]);
  useEffect(() => {
- if (user?.role === 'admin' && selectedUser !== 'all') {
+ if (canViewPage && selectedUser !== 'all') {
  fetchUserTodos();
  } else {
  setSelectedUserTodos([]);
@@ -219,19 +224,15 @@ export default function StaffActivity() {
  const tasksRes = await api.get('/tasks');
  const tasks = tasksRes.data;
  const filteredTasks = selectedUser === 'all' ? (tasks || []) : (tasks || []).filter(t => t.assigned_to === selectedUser);
- 
  const statusCounts = (filteredTasks || []).reduce((acc, task) => {
  acc[task.status] = (acc[task.status] || 0) + 1;
  return acc;
  }, {});
- 
  const priorityCounts = (filteredTasks || []).reduce((acc, task) => {
  acc[task.priority] = (acc[task.priority] || 0) + 1;
  return acc;
  }, {});
- 
  const overdue = (filteredTasks || []).filter(t => new Date(t.due_date) < new Date() && t.status !== 'completed').length;
- 
  setTaskAnalytics({
  total: filteredTasks.length,
  completed: statusCounts.completed || 0,
@@ -324,16 +325,13 @@ const colors = [
 // Chart configuration
 const chartRef = useRef(null);
 const chartInstanceRef = useRef(null); // To store the chart instance for cleanup
-
 useEffect(() => {
  if (chartRef.current) {
  const ctx = chartRef.current.getContext('2d');
-
  // Destroy existing chart instance if it exists (to prevent duplicates on re-render)
  if (chartInstanceRef.current) {
  chartInstanceRef.current.destroy();
  }
-
  // Create new chart instance
  chartInstanceRef.current = new Chart(ctx, {
  type: 'bubble',
@@ -389,7 +387,6 @@ useEffect(() => {
  }
  });
  }
-
  // Cleanup on unmount or data change
  return () => {
  if (chartInstanceRef.current) {
@@ -406,7 +403,7 @@ useEffect(() => {
  // Calculate total attendance hours for selected month
  const totalAttendanceMinutes = attendanceReport?.staff_report?.reduce((sum, s) => sum + (s.total_minutes || 0), 0) || 0;
  const onlineEmployees = attendanceReport?.staff_report?.filter(s => s.days_present > 0).length || 0;
- if (user?.role !== 'admin') {
+ if (!canViewPage) {
  return (
  <div className="flex items-center justify-center h-64">
  <Card className="p-8 text-center max-w-md">
@@ -437,7 +434,6 @@ useEffect(() => {
  <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.lightBlue }}>Time Tracking</h1>
  <p className="text-slate-600 mt-1">Monitor employee screen active time and productivity</p>
  </div>
- 
  <div className="flex gap-3">
  <Select value={selectedMonth} onValueChange={setSelectedMonth}>
  <SelectTrigger className="w-44 bg-white">
@@ -450,7 +446,6 @@ useEffect(() => {
  ))}
  </SelectContent>
  </Select>
- 
  <Select value={selectedUser} onValueChange={setSelectedUser}>
  <SelectTrigger className="w-44 bg-white">
  <User className="h-4 w-4 mr-2" />
@@ -538,9 +533,13 @@ useEffect(() => {
  <TabsList className="bg-white p-1 rounded-xl border border-slate-200 inline-flex">
  <TabsTrigger value="activity" className="rounded-lg">Activity</TabsTrigger>
  <TabsTrigger value="attendance" className="rounded-lg">Attendance</TabsTrigger>
- <TabsTrigger value="reminder" className="rounded-lg">Reminders</TabsTrigger>
+{canSendReminders && (
+   <TabsTrigger value="reminder">Reminders</TabsTrigger>
+)}
  <TabsTrigger value="todos" className="rounded-lg">To-Do Lists</TabsTrigger>
- <TabsTrigger value="tasks" className="rounded-lg">Task Analytics</TabsTrigger>
+{canViewTaskAnalytics && (
+   <TabsTrigger value="tasks">Task Analytics</TabsTrigger>
+)}
  </TabsList>
  </motion.div>
  <TabsContent value="activity" className="mt-6">
@@ -671,7 +670,8 @@ useEffect(() => {
  </Card>
  </div>
  </TabsContent>
- <TabsContent value="attendance" className="mt-6">
+{canViewAttendanceReport && (
+   <TabsContent value="attendance">
  {/* Attendance Stats */}
  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
  <Card className="border border-slate-200 shadow-sm">
@@ -811,8 +811,10 @@ useEffect(() => {
  </CardContent>
  </Card>
  </TabsContent>
+)}
  {/* Reminder Tab */}
- <TabsContent value="reminder" className="mt-6">
+{canSendReminders && (
+   <TabsContent value="reminder">
  <Card className="border border-slate-200 shadow-sm p-6">
  <Button
  className="w-full bg-blue-600 hover:bg-blue-700 mb-6"
@@ -847,6 +849,7 @@ useEffect(() => {
  </div>
  </Card>
  </TabsContent>
+)}
  {/* To-Do Lists Tab */}
  <TabsContent value="todos" className="mt-6">
  <Card className="border border-slate-200 shadow-sm p-4">
@@ -859,6 +862,9 @@ useEffect(() => {
  No items found
  </div>
  ) : (
+if (!canViewAllTodos && selectedUser !== user.id) {
+   return <Access denied />
+}
  <div className="space-y-3">
  {(selectedUserTodos || []).map((todo) => (
  <div
@@ -876,7 +882,8 @@ useEffect(() => {
  </Card>
  </TabsContent>
  {/* Task Analytics Tab */}
- <TabsContent value="tasks" className="mt-6">
+{canViewTaskAnalytics && (
+   <TabsContent value="tasks">
  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
  <Card className="p-6 border border-slate-200">
  <CardTitle className="text-lg mb-4">Status Distribution</CardTitle>
@@ -909,6 +916,7 @@ useEffect(() => {
  </Card>
  </div>
  </TabsContent>
+)}
  </Tabs>
  </motion.div>
  );
