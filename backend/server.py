@@ -1494,15 +1494,19 @@ async def get_staff_attendance_report(
     }
 
 # ��������� DUE DATE ROUTES �����������������������������������������������������
-# ================= DUE DATE ROUTES =================
+
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
     due_date_data: DueDateCreate,
     current_user: User = Depends(get_current_user)
 ):
+    if not due_date_data.department:
+        raise HTTPException(status_code=400, detail="Department required")
+
     due_date = DueDate(
         **due_date_data.model_dump(),
         created_by=current_user.id
+    )
     )
     doc = due_date.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
