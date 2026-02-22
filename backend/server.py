@@ -28,11 +28,10 @@ from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 import requests
 ALLOWED_TELEGRAM_IDS = []
-
 allowed_id = os.getenv("ALLOWED_TELEGRAM_ID")
 if allowed_id:
     ALLOWED_TELEGRAM_IDS.append(int(allowed_id))
-    
+   
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -682,7 +681,7 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
                 expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
-  
+ 
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
@@ -985,29 +984,23 @@ async def export_task_log_pdf(
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
     logs = await db.audit_logs.find(
         {"module": "task", "record_id": task_id},
         {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
-
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-
     pdf.cell(200, 10, txt="Task Lifecycle Report", ln=True, align="C")
     pdf.ln(5)
-
     pdf.multi_cell(0, 8, f"Title: {task.get('title')}")
     pdf.multi_cell(0, 8, f"Description: {task.get('description')}")
     pdf.multi_cell(0, 8, f"Assigned To: {task.get('assigned_to')}")
     pdf.multi_cell(0, 8, f"Created By: {task.get('created_by')}")
     pdf.multi_cell(0, 8, f"Created At: {task.get('created_at')}")
     pdf.ln(5)
-
     pdf.cell(200, 10, txt="Timeline:", ln=True)
     pdf.ln(5)
-
     for log in logs:
         pdf.multi_cell(
             0,
@@ -1017,11 +1010,9 @@ async def export_task_log_pdf(
         if log.get("old_data"):
             pdf.multi_cell(0, 8, f"Details: {log.get('old_data')}")
         pdf.ln(3)
-
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
-
     return StreamingResponse(
         output,
         media_type="application/pdf",
@@ -1518,14 +1509,11 @@ async def export_attendance_pdf(
         {"user_id": user_id},
         {"_id": 0}
     ).sort("date", 1).to_list(1000)
-
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-
     pdf.cell(200, 10, txt="Attendance Report", ln=True, align="C")
     pdf.ln(5)
-
     for rec in records:
         pdf.multi_cell(
             0,
@@ -1534,11 +1522,9 @@ async def export_attendance_pdf(
             f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
         )
         pdf.ln(2)
-
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
-
     return StreamingResponse(
         output,
         media_type="application/pdf",
@@ -2378,7 +2364,6 @@ async def auto_daily_reminder(request, call_next):
         now = datetime.now(timezone.utc)
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
         forty_five_days_ago = (now - timedelta(days=45)).isoformat()
-
         # 1️⃣ Delete completed tasks after 30 days
         await db.tasks.delete_many({
             "status": "completed",
@@ -2388,7 +2373,6 @@ async def auto_daily_reminder(request, call_next):
         old_messages = await db.chat_messages.find({
             "created_at": {"$lte": thirty_days_ago}
         }).to_list(5000)
-
         # Delete files if stored locally
         for msg in old_messages:
             if msg.get("file_url"):
@@ -2397,12 +2381,10 @@ async def auto_daily_reminder(request, call_next):
                         os.remove(msg["file_url"])
                 except:
                     pass
-
         await db.chat_messages.delete_many({
             "created_at": {"$lte": thirty_days_ago}
         })
         groups = await db.chat_groups.find({}, {"_id": 0}).to_list(1000)
-
         for group in groups:
             count = await db.chat_messages.count_documents({"group_id": group["id"]})
             if count == 0:
@@ -2668,7 +2650,7 @@ async def complete_todo(todo_id: str, current_user: User = Depends(get_current_u
 async def get_audit_logs(
     current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
-    logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(5000)
+    logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(1000).to_list(1000)
     return logs
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 def send_message(chat_id, text):
@@ -2743,35 +2725,29 @@ async def telegram_webhook(request: Request):
             )
             send_message(chat_id, reply)
     return {"ok": True}
-    
+   
 async def create_task_from_session(data, telegram_user_id, chat_id):
     try:
         due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
     except ValueError:
         send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
         return
-
     names = [n.strip() for n in data["assign"].split(",")]
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
-
     # 🔍 Case-insensitive primary user search
     primary_user = await db.users.find_one(
         {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
     )
-
     if not primary_user:
         send_message(chat_id, f"❌ Assignee '{primary_name}' not found. Task cancelled.")
         return
-
     # 🔍 Case-insensitive co-user search
     co_users = await db.users.find({
         "full_name": {"$in": co_names}
     }).to_list(None)
-
     # 🔍 Find creator from telegram_id
     creator = await db.users.find_one({"telegram_id": telegram_user_id})
-
     task = {
         "id": str(uuid.uuid4()),
         "title": data["title"],
@@ -2787,7 +2763,5 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "source": "telegram"
     }
-
     await db.tasks.insert_one(task)
-
     send_message(chat_id, "✅ Task Created Successfully!")
