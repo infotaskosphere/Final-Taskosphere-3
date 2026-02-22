@@ -2232,6 +2232,31 @@ async def get_chat_messages(
             msg["created_at"] = datetime.fromisoformat(msg["created_at"])
     return list(reversed(messages))
 @api_router.post("/chat/groups/{group_id}/messages")
+class BulkDeleteChatRequest(BaseModel):
+    message_ids: List[str]
+
+
+@api_router.post("/chat/messages/bulk-delete")
+async def bulk_delete_chat_messages(
+    payload: BulkDeleteChatRequest,
+    current_user: User = Depends(get_current_user)
+):
+    # Convert string IDs to ObjectId
+    object_ids = []
+    for msg_id in payload.message_ids:
+        try:
+            object_ids.append(ObjectId(msg_id))
+        except:
+            continue
+
+    result = await db.chat_messages.delete_many(
+        {"_id": {"$in": object_ids}}
+    )
+
+    return {
+        "message": "Messages deleted successfully",
+        "deleted_count": result.deleted_count
+    }
 async def send_chat_message(
     group_id: str,
     message_data: ChatMessageCreate,
