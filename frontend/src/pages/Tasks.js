@@ -76,7 +76,6 @@ const itemVariants = {
 const getStripeBg = (task, isOverdue) => {
  const p = (task.priority || '').toLowerCase().trim();
  const s = (task.status || '').toLowerCase().trim();
-
  if (isOverdue) return 'bg-red-600';
  if (s === 'completed') return 'bg-blue-700';
  if (s === 'in_progress') return 'bg-purple-500';
@@ -84,7 +83,6 @@ const getStripeBg = (task, isOverdue) => {
  if (p === 'high') return 'bg-orange-500';
  if (p === 'medium') return 'bg-yellow-400';
  if (p === 'low') return 'bg-green-500';
-
  return 'bg-slate-300';
 };
 const DashboardStripCard = ({
@@ -247,7 +245,6 @@ export default function Tasks() {
  recurrence_pattern: task.recurrence_pattern || 'monthly',
  recurrence_interval: task.recurrence_interval || 1,
  };
- 
  await api.put(`/tasks/${task.id}`, taskData);
  toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
  fetchTasks();
@@ -386,12 +383,22 @@ export default function Tasks() {
  >
  {/* Header */}
  <Card className="border border-slate-200 shadow-sm rounded-2xl">
+ <div className="h-1 w-full bg-gradient-to-r from-blue-600 via-purple-500 to-emerald-500" />
  <CardContent className="p-4 sm:p-6 flex justify-between items-center">
- <h1 className="text-xl sm:text-2xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
+ <h1 className="text-lg sm:text-xl font-semibold tracking-tight font-outfit" style={{ color: COLORS.deepBlue }}>Task Management</h1>
  <div className="flex gap-4">
- <Button variant="outline" size="default" className="rounded-xl shadow-sm hover:shadow-md" onClick={handleCsvUploadClick}>Upload CSV</Button>
- <Button variant="outline" size="default" className="rounded-xl shadow-sm hover:shadow-md" onClick={handleExportCsv}>Export CSV</Button>
- <Button variant="outline" size="default" className="rounded-xl shadow-sm hover:shadow-md" onClick={handleExportPdf}>Export PDF</Button>
+ <Button variant="outline" size="sm" className="h-9 px-4 text-sm font-medium rounded-xl shadow-sm hover:shadow-md" onClick={handleCsvUploadClick}>Upload CSV</Button>
+ <Button variant="outline" size="sm" className="h-9 px-4 text-sm font-medium rounded-xl shadow-sm hover:shadow-md" onClick={handleExportCsv}>Export CSV</Button>
+ <Button variant="outline" size="sm" className="h-9 px-4 text-sm font-medium rounded-xl shadow-sm hover:shadow-md" onClick={handleExportPdf}>Export PDF</Button>
+ {(user?.role === "admin" || hasPermission("can_view_audit_logs")) && (
+ <Button
+ size="sm"
+ className="h-9 px-4 text-sm font-medium rounded-xl shadow-sm hover:shadow-md bg-blue-600 hover:bg-blue-700 text-white"
+ onClick={() => navigate('/tasks/audit-log')}
+ >
+ Task Audit Log
+ </Button>
+ )}
  <Dialog open={dialogOpen} onOpenChange={(open) => {
  setDialogOpen(open);
  if (!open) resetForm();
@@ -399,7 +406,8 @@ export default function Tasks() {
  {canEditTasks && (
  <DialogTrigger asChild>
  <Button
- className="rounded-xl shadow-sm hover:shadow-md"
+ size="sm"
+ className="h-9 px-4 text-sm font-medium rounded-xl shadow-sm hover:shadow-md bg-blue-600 hover:bg-blue-700 text-white"
  data-testid="create-task-btn"
  >
  <Plus className="mr-2 h-5 w-5" />
@@ -618,7 +626,6 @@ export default function Tasks() {
  data-testid="task-recurring-switch"
  />
  </div>
- 
  {formData.is_recurring && (
  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
  <div className="space-y-2">
@@ -729,7 +736,6 @@ export default function Tasks() {
  data-testid="task-search-input"
  />
  </div>
- 
  <div className="flex items-center gap-3">
  <Select value={filterStatus} onValueChange={setFilterStatus}>
  <SelectTrigger className="w-36 bg-white rounded-xl shadow-sm">
