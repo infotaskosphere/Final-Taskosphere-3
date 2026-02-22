@@ -439,6 +439,20 @@ const fetchChatPreview = async () => {
     console.error("Failed to fetch chat preview");
   }
 };
+const handleSendQuickReply = async () => {
+  if (!chatInput.trim() || !defaultGroup) return;
+
+  try {
+    await api.post(`/chat/groups/${defaultGroup.id}/messages`, {
+      content: chatInput.trim()
+    });
+
+    setChatInput('');
+    fetchChatPreview();
+  } catch (error) {
+    console.error("Failed to send message");
+  }
+};
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
