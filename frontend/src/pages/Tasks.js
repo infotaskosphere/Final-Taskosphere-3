@@ -20,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -97,7 +98,6 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 const DashboardStripCard = ({
   stripeColor,
   children,
@@ -106,22 +106,22 @@ const DashboardStripCard = ({
   return (
     <div
       className={`relative rounded-xl border border-slate-200 bg-white
-                  hover:shadow-md transition-all duration-200
-                  overflow-hidden ${className}`}
+                  hover:shadow-md hover:-translate-y-[1px]
+                  transition-all duration-200
+                  overflow-hidden group ${className}`}
     >
-      {/* Stripe */}
+      {/* Independent Stripe */}
       <div
-        className={`absolute left-0 top-0 h-full w-2 rounded-l-xl ${stripeColor}`}
+        className={`absolute left-0 top-0 h-full w-[6px] rounded-l-xl ${stripeColor}`}
       />
 
       {/* Content */}
-      <div className="pl-6 pr-4 py-4">
+      <div className="pl-6 pr-6 py-4">
         {children}
       </div>
     </div>
   );
 };
-
 export default function Tasks() {
   const { user, hasPermission } = useAuth();
   const canAssignTasks = hasPermission("can_assign_tasks");
@@ -389,6 +389,22 @@ export default function Tasks() {
     });
     doc.save('tasks.pdf');
   };
+  const onDragEnd = async (result) => {
+    const { source, destination, draggableId } = result;
+    if (!destination) return;
+    if (source.droppableId === destination.droppableId) {
+      return;
+    }
+    const newStatus = destination.droppableId;
+    const task = tasks.find(t => t.id === parseInt(draggableId));
+    if (!task) return;
+    await handleQuickStatusChange(task, newStatus);
+  };
+  const columns = [
+    { status: 'pending', title: 'To Do', count: stats.todo },
+    { status: 'in_progress', title: 'In Progress', count: stats.inProgress },
+    { status: 'completed', title: 'Completed', count: stats.completed },
+  ];
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
@@ -631,7 +647,7 @@ export default function Tasks() {
                         data-testid="task-recurring-switch"
                       />
                     </div>
-            
+           
                     {formData.is_recurring && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                         <div className="space-y-2">
@@ -812,152 +828,160 @@ export default function Tasks() {
       {/* Task Cards Grid - Responsive with consistent card sizing */}
       <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
         {viewMode === 'list' ? (
-          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
-            <div className="hidden sm:block space-y-3 p-4">
-  {filteredTasks.map((task) => {
-    const taskIsOverdue = isOverdue(task);
+  <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
 
-    return (
-      <DashboardStripCard
-        key={task.id}
-        stripeColor={getStripeBg(task, taskIsOverdue)}
-      >
-        <div className="grid grid-cols-10 items-center gap-4 text-sm">
+    <div className="p-6 space-y-4">
 
-          <div className="col-span-2 font-semibold">
-            {task.title}
-          </div>
+      {/* Header Row */}
+      <div className="grid grid-cols-7 gap-4 text-xs uppercase tracking-wider text-slate-500 font-semibold border-b border-slate-200 pb-3">
+        <div>Task</div>
+        <div>Client</div>
+        <div>Priority</div>
+        <div>Status</div>
+        <div>Assigned</div>
+        <div>DOA</div>
+        <div>Due Date</div>
+      </div>
 
-          <div className="col-span-1 text-slate-600">
-            {getClientName(task.client_id)}
-          </div>
+      {/* Rows */}
+      <div className="space-y-3">
+        {filteredTasks.map((task) => {
+          const taskIsOverdue = isOverdue(task);
 
-          <div className="col-span-1">
-            {task.priority?.toUpperCase()}
-          </div>
+          return (
+            <DashboardStripCard
+              key={task.id}
+              stripeColor={getStripeBg(task, taskIsOverdue)}
+            >
+              <div className="grid grid-cols-7 gap-4 items-center text-sm">
 
-          <div className="col-span-1">
-            {task.status === 'pending'
-              ? 'To Do'
-              : task.status === 'in_progress'
-              ? 'In Progress'
-              : 'Completed'}
-          </div>
+                <div className="font-medium">
+                  {task.title}
+                </div>
 
-          <div className="col-span-2 text-slate-600">
-            {getUserName(task.assigned_to)}
-          </div>
+                <div className="text-slate-600">
+                  {getClientName(task.client_id)}
+                </div>
 
-          <div className="col-span-1 text-slate-500">
-            {task.created_at
-              ? format(new Date(task.created_at), 'MMM dd')
-              : '-'}
-          </div>
+                <div className="text-slate-700 font-medium">
+                  {task.priority?.toUpperCase()}
+                </div>
 
-          <div className="col-span-1 text-slate-500">
-            {task.due_date
-              ? format(new Date(task.due_date), 'MMM dd')
-              : '-'}
-          </div>
+                {/* Status Dropdown */}
+                <div>
+                  <Select
+                    value={task.status}
+                    onValueChange={(value) =>
+                      handleQuickStatusChange(task, value)
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">To Do</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          <div className="col-span-1 flex justify-end gap-2">
-            {canEditTasks && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleEdit(task)}
-              >
-                <Edit className="h-4 w-4 text-blue-600" />
-              </Button>
-            )}
-            {canDeleteTasks && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleDelete(task.id)}
-              >
-                <Trash2 className="h-4 w-4 text-red-600" />
-              </Button>
-            )}
-          </div>
+                <div className="text-slate-600">
+                  {getUserName(task.assigned_to)}
+                </div>
 
-        </div>
-      </DashboardStripCard>
-    );
-  })}
-</div>
-            <div className="block sm:hidden space-y-3 p-4">
-              {filteredTasks.map((task) => {
-                const taskIsOverdue = isOverdue(task);
-                return (
-<DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
-  <div className="space-y-2">
-    <h3 className="font-semibold text-base">{task.title}</h3>
-    <p className="text-sm text-slate-600 line-clamp-2">
-      {task.description || 'No description'}
-    </p>
-    <div className="text-xs text-slate-500">
-      Due: {task.due_date
-        ? format(new Date(task.due_date), 'MMM dd')
-        : '-'}
-    </div>
-  </div>
-</DashboardStripCard>
-                );
-              })}
-            </div>
-            {filteredTasks.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-slate-500 text-lg">No tasks found</p>
-                <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
+                <div className="text-slate-500">
+                  {task.created_at
+                    ? format(new Date(task.created_at), 'MMM dd')
+                    : '-'}
+                </div>
+
+                <div className="text-slate-500">
+                  {task.due_date
+                    ? format(new Date(task.due_date), 'MMM dd')
+                    : '-'}
+                </div>
+
               </div>
-            )}
-          </Card>
-        ) : (
+            </DashboardStripCard>
+          );
+        })}
+      </div>
+
+      {filteredTasks.length === 0 && (
+        <div className="text-center py-12">
+          <p className="text-slate-500 text-lg">No tasks found</p>
+          <p className="text-slate-400 text-sm mt-1">
+            Try adjusting your filters or create a new task
+          </p>
+        </div>
+      )}
+
+    </div>
+  </Card>
+) : (
           <motion.div
             className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6"
             variants={containerVariants}
           >
-            {[
-              { status: 'pending', title: 'To Do', count: stats.todo },
-              { status: 'in_progress', title: 'In Progress', count: stats.inProgress },
-              { status: 'completed', title: 'Completed', count: stats.completed },
-            ].map((col) => (
-              <motion.div key={col.status} variants={itemVariants} className="space-y-4">
-                <h2 className="text-lg sm:text-xl font-semibold text-slate-800 flex items-center gap-2">
-                  {col.title}
-                  <Badge className="bg-slate-200 text-slate-600">{col.count}</Badge>
-                </h2>
-                <div className="space-y-4 min-h-[200px]">
-                  {filteredTasks.filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t))).map((task) => {
-                    const taskIsOverdue = isOverdue(task);
-                    return (
-<motion.div key={task.id} variants={itemVariants}>
-  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
-    <div className="flex flex-col h-full">
+            <DragDropContext onDragEnd={onDragEnd}>
+              {columns.map((col) => (
+                <motion.div key={col.status} variants={itemVariants} className="space-y-4">
+                  <h2 className="text-lg sm:text-xl font-semibold text-slate-800 flex items-center gap-2">
+                    {col.title}
+                    <Badge className="bg-slate-200 text-slate-600">{col.count}</Badge>
+                  </h2>
+                  <Droppable droppableId={col.status}>
+                    {(provided) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className="space-y-4 min-h-[200px]"
+                      >
+                        {filteredTasks.filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t))).map((task, index) => {
+                          const taskIsOverdue = isOverdue(task);
+                          return (
+                            <Draggable key={task.id} draggableId={task.id.toString()} index={index}>
+                              {(provided) => (
+                                <motion.div
+                                  ref={provided.innerRef}
+                                  {...provided.draggableProps}
+                                  {...provided.dragHandleProps}
+                                  variants={itemVariants}
+                                >
+                                  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
 
-      <h3 className="font-semibold text-sm line-clamp-2 mb-2">
-        {task.title}
-      </h3>
+                                    <div className="flex flex-col h-full">
 
-      <p className="text-xs text-slate-600 line-clamp-2 mb-3">
-        {task.description || 'No description'}
-      </p>
+                                      <h3 className="font-semibold text-sm mb-2 line-clamp-2">
+                                        {task.title}
+                                      </h3>
 
-      <div className="text-xs text-slate-500 mt-auto">
-        Due: {task.due_date
-          ? format(new Date(task.due_date), 'MMM dd, yyyy')
-          : '-'}
-      </div>
+                                      <p className="text-xs text-slate-600 line-clamp-2 mb-3">
+                                        {task.description || 'No description'}
+                                      </p>
 
-    </div>
-  </DashboardStripCard>
-</motion.div>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            ))}
+                                      <div className="text-xs text-slate-500 mt-auto">
+                                        Due: {task.due_date
+                                          ? format(new Date(task.due_date), 'MMM dd, yyyy')
+                                          : '-'}
+                                      </div>
+
+                                    </div>
+
+                                  </DashboardStripCard>
+                                </motion.div>
+                              )}
+                            </Draggable>
+                          );
+                        })}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </motion.div>
+              ))}
+            </DragDropContext>
             {filteredTasks.length === 0 && (
               <motion.div variants={itemVariants} className="col-span-full text-center py-12">
                 <p className="text-slate-500 text-lg">No tasks found</p>
