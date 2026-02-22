@@ -34,10 +34,6 @@ ALLOWED_RADIUS_METERS = 100
 
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
-ALLOWED_TELEGRAM_IDS = []
-allowed_id = os.getenv("ALLOWED_TELEGRAM_ID")
-if allowed_id:
-    ALLOWED_TELEGRAM_IDS.append(int(allowed_id))
    
 def sanitize_user_data(user_data, current_user):
     """
