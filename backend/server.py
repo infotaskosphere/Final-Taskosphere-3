@@ -2624,60 +2624,6 @@ async def telegram_webhook(request: Request):
             send_message(chat_id, reply)
     return {"ok": True}
 
-# If user is in active session
-if session:
-    step = session["step"]
-    data_store = session["data"]
-
-    if step == "title":
-        data_store["title"] = message
-        next_step = "description"
-        reply = "📄 Enter Description:"
-
-    elif step == "description":
-        data_store["description"] = message
-        next_step = "due_date"
-        reply = "📅 Enter Due Date (dd-mm-yyyy):"
-
-    elif step == "due_date":
-        data_store["due_date"] = message
-        next_step = "assign"
-        reply = "👤 Enter Assignee Name (comma separated):"
-
-    elif step == "assign":
-        data_store["assign"] = message
-        next_step = "department"
-        reply = "🏢 Enter Department:"
-
-    elif step == "department":
-        data_store["department"] = message
-        next_step = "priority"
-        reply = "⚡ Enter Priority (Low/Medium/High):"
-
-    elif step == "priority":
-        data_store["priority"] = message
-
-        # 🔥 CREATE TASK HERE
-        await create_task_from_session(data_store)
-
-        await db.telegram_sessions.delete_one(
-            {"telegram_id": telegram_user_id}
-        )
-
-        send_message(chat_id, "✅ Task Created Successfully!")
-        return {"ok": True}
-
-        await db.telegram_sessions.update_one(
-            {"telegram_id": telegram_user_id},
-            {"$set": {"step": next_step, "data": data_store}}
-        )
-
-    send_message(chat_id, reply)
-
-return {"ok": True}
-
-from datetime import datetime
-
 async def create_task_from_session(data):
     # Convert date
     due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
