@@ -26,6 +26,13 @@ import csv
 from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
+from math import radians, sin, cos, sqrt, atan2
+
+OFFICE_LAT = 21.188057
+OFFICE_LON = 72.813826
+ALLOWED_RADIUS_METERS = 100
+
+india_tz = pytz.timezone("Asia/Kolkata")
 import requests
 ALLOWED_TELEGRAM_IDS = []
 allowed_id = os.getenv("ALLOWED_TELEGRAM_ID")
@@ -108,6 +115,10 @@ async def create_indexes():
     await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
     await db.staff_activity.create_index("category")
     await db.due_dates.create_index("department")
+    await db.attendance.create_index(
+    [("user_id", 1), ("date", 1)],
+    unique=True
+)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -157,12 +168,15 @@ class UserBase(BaseModel):
     expected_start_time: Optional[str] = None # "09:30" (24-hour format)
     expected_end_time: Optional[str] = None # "18:00"
     late_grace_minutes: int = 15 # Default grace period in minutes
+    telegram_id: Optional[int] = None
 class UserCreate(UserBase):
     password: str
 class User(UserBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(india_tz)
+    )
     is_active: bool = True
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -664,31 +678,76 @@ async def get_me(current_user: User = Depends(get_current_user)):
     }, current_user)
 # ATTENDANCE ROUTE
 @api_router.post("/attendance")
-async def record_attendance(data: dict, current_user: User = Depends(get_current_user)):
+async def record_attendance(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    india_tz = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(india_tz)
+    today_str = now.date().isoformat()
+
+    # =========================
+    # 🔹 PUNCH IN
+    # =========================
     if data["action"] == "punch_in":
-        now = datetime.now(timezone.utc)
-        today_str = now.date().isoformat()
-        existing = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
+
+        existing = await db.attendance.find_one(
+            {"user_id": current_user.id, "date": today_str},
+            {"_id": 0}
+        )
         if existing:
             raise HTTPException(status_code=400, detail="Already punched in today")
+
+        # ✅ GEO-FENCING (ONLY PUNCH IN)
+        location = data.get("location")
+        if not location:
+            raise HTTPException(status_code=400, detail="Location required")
+
+        user_lat = location.get("latitude")
+        user_lon = location.get("longitude")
+
+        if user_lat is None or user_lon is None:
+            raise HTTPException(status_code=400, detail="Invalid location data")
+
+        distance = calculate_distance(
+            float(user_lat),
+            float(user_lon),
+            OFFICE_LAT,
+            OFFICE_LON
+        )
+
+        if distance > ALLOWED_RADIUS_METERS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Punch-in allowed only from office. You are {int(distance)} meters away."
+            )
+
+        # ⏰ Late Calculation
         is_late = False
         late_by_minutes = 0
-        expected_str = current_user.expected_start_time # "09:30" or similar or None
+        expected_str = current_user.expected_start_time
         grace = current_user.late_grace_minutes or 15
+
         if expected_str:
             try:
                 from datetime import time
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
-                expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
- 
+
+                expected_datetime = datetime.combine(
+                    now.date(),
+                    expected_time,
+                    tzinfo=india_tz
+                )
+
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
                     if late_by_minutes > grace:
                         is_late = True
-            except (ValueError, AttributeError):
+            except:
                 pass
+
         doc = {
             "id": str(uuid.uuid4()),
             "user_id": current_user.id,
@@ -698,41 +757,79 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
             "duration_minutes": None,
             "is_late": is_late,
             "late_by_minutes": late_by_minutes if is_late else 0,
-            "location": data.get("location")
+            "location": location,
+            "distance_from_office_meters": int(distance)
         }
+
         await db.attendance.insert_one(doc)
-        attendance = Attendance(**doc)
-        attendance.punch_in = now
-        return attendance
+        return Attendance(**doc)
+
+    # =========================
+    # 🔹 PUNCH OUT
+    # =========================
     elif data["action"] == "punch_out":
-        now = datetime.now(timezone.utc)
-        today_str = now.date().isoformat()
-        existing = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
+
+        existing = await db.attendance.find_one(
+            {"user_id": current_user.id, "date": today_str},
+            {"_id": 0}
+        )
+
         if not existing:
             raise HTTPException(status_code=400, detail="No punch in record found")
+
         if existing.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out today")
-        punch_in_time = datetime.fromisoformat(existing["punch_in"]) if isinstance(existing["punch_in"], str) else existing["punch_in"]
+
+        punch_in_time = datetime.fromisoformat(existing["punch_in"])
         duration = int((now - punch_in_time).total_seconds() / 60)
+
         is_early_leave = False
         early_minutes = 0
+
         if current_user.expected_end_time:
-            expected_out = parser.parse(current_user.expected_end_time).time()
-            expected_dt = now.replace(hour=expected_out.hour, minute=expected_out.minute, second=0, microsecond=0)
-            if now < expected_dt:
-                diff = expected_dt - now
-                early_minutes = int(diff.total_seconds() / 60)
-                is_early_leave = True
+            try:
+                from datetime import time
+                h, m = map(int, current_user.expected_end_time.split(":"))
+                expected_out_time = time(h, m)
+
+                expected_dt = datetime.combine(
+                    now.date(),
+                    expected_out_time,
+                    tzinfo=india_tz
+                )
+
+                if now < expected_dt:
+                    diff = expected_dt - now
+                    early_minutes = int(diff.total_seconds() / 60)
+                    is_early_leave = True
+            except:
+                pass
+
+        # 🔎 Location tracking only (no geo restriction)
+        punch_out_location = data.get("location")
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
-            {"$set": {"punch_out": now.isoformat(), "duration_minutes": duration, "is_early_leave": is_early_leave, "early_minutes": early_minutes}}
+            {
+                "$set": {
+                    "punch_out": now.isoformat(),
+                    "duration_minutes": duration,
+                    "is_early_leave": is_early_leave,
+                    "early_minutes": early_minutes,
+                    "punch_out_location": punch_out_location
+                }
+            }
         )
-        updated = await db.attendance.find_one({"user_id": current_user.id, "date": today_str}, {"_id": 0})
-        if isinstance(updated["punch_in"], str):
-            updated["punch_in"] = datetime.fromisoformat(updated["punch_in"])
-        if isinstance(updated["punch_out"], str):
-            updated["punch_out"] = datetime.fromisoformat(updated["punch_out"])
+
+        updated = await db.attendance.find_one(
+            {"user_id": current_user.id, "date": today_str},
+            {"_id": 0}
+        )
+
         return Attendance(**updated)
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
@@ -1342,7 +1439,7 @@ async def update_document_movement(
 # Attendance routes
 @api_router.get("/attendance/today", response_model=Optional[Attendance])
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(india_tz).strftime("%Y-%m-%d")
     attendance = await db.attendance.find_one({"user_id": current_user.id, "date": today}, {"_id": 0})
     if not attendance:
         return None
@@ -2633,6 +2730,16 @@ async def get_staff_rankings(
         "period": period,
         "rankings": rankings[:50]
     }, current_user)
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371000  # Earth radius in meters
+
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+
+    return R * c
 def calculate_expected_hours(punch_in, punch_out):
     if not punch_in or not punch_out:
         return 8.0
@@ -2748,11 +2855,14 @@ async def telegram_webhook(request: Request):
         elif step == "priority":
             data_store["priority"] = message
             # 🔥 CREATE TASK HERE
-            await create_task_from_session(data_store)
+            await create_task_from_session(
+                data_store,
+                telegram_user_id,
+                chat_id
+            )
             await db.telegram_sessions.delete_one(
                 {"telegram_id": telegram_user_id}
             )
-            send_message(chat_id, "✅ Task Created Successfully!")
             return {"ok": True}
         # This runs only for non-"priority" steps (after setting next_step/reply)
         if next_step and reply:
@@ -2795,10 +2905,11 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         "priority": data["priority"].lower(),
         "status": "pending",
         "category": data.get("department", "other"),
-        "created_by": creator["id"] if creator else primary_user["id"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "telegram"
+        "created_by": creator.get("id") if creator else primary_user["id"],
+        "created_at": datetime.now(india_tz).isoformat(),
+        "updated_at": datetime.now(india_tz).isoformat(),
+
+
     }
     await db.tasks.insert_one(task)
     send_message(chat_id, "✅ Task Created Successfully!")
