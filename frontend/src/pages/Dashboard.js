@@ -185,6 +185,7 @@ export default function Dashboard() {
     fetchTodayAttendance();
     // fetchMyTodos(); ← removed → prevents crash (implement properly later)
     fetchMyAssignedTasks();
+    fetchMyTodos();
   }, [rankingPeriod]);
   const addTodo = async () => {
     if (!newTodo.trim()) return;
@@ -270,6 +271,19 @@ export default function Dashboard() {
       toast.success('Todo deleted successfully!');
     } catch (error) {
       toast.error('Failed to delete todo');
+    }
+  };
+  const fetchMyTodos = async () => {
+    try {
+      const res = await api.get('/tasks');
+      const myTodos = res.data.filter(task => task.created_by === user?.id && task.assigned_to === user?.id);
+      setTodos(myTodos.map(task => ({
+        ...task,
+        completed: task.status === 'completed'
+      })));
+    } catch (error) {
+      console.error("Failed to fetch my todos", error);
+      setTodos([]);
     }
   };
   const fetchDashboardData = async () => {
@@ -842,7 +856,7 @@ export default function Dashboard() {
       )}
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-8">
-  
+ 
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
