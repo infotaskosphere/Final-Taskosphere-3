@@ -2797,28 +2797,59 @@ async def get_audit_logs(
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(1000).to_list(1000)
     return logs
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ==============================
+# TELEGRAM BOT CONFIGURATION
+# ==============================
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+ALLOWED_TELEGRAM_IDS = []
+allowed_ids = os.getenv("ALLOWED_TELEGRAM_IDS")
+
+if allowed_ids:
+    ALLOWED_TELEGRAM_IDS = [int(x.strip()) for x in allowed_ids.split(",")]
+
+
 def send_message(chat_id, text):
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
         requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
+            "chat_id": chat_id,
+            "text": text
+        })
+    except Exception as e:
+        logger.error(f"Telegram send error: {str(e)}")
+
+
+# ==============================
+# TELEGRAM WEBHOOK
+# ==============================
+
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
+
     if "message" not in data:
         return {"ok": True}
+
     telegram_user_id = data["message"]["from"]["id"]
+
     # 🔐 Allow only specific Telegram users
     if telegram_user_id not in ALLOWED_TELEGRAM_IDS:
         return {"ok": True}
-    message = data["message"]["text"]
+
+    message = data["message"].get("text", "").strip()
     chat_id = data["message"]["chat"]["id"]
+
     session = await db.telegram_sessions.find_one(
         {"telegram_id": telegram_user_id}
     )
-    # Start new task
-    if message.strip().lower() == "/task":
+
+    # ==============================
+    # START NEW TASK
+    # ==============================
+
+    if message.lower() == "/task":
         await db.telegram_sessions.update_one(
             {"telegram_id": telegram_user_id},
             {"$set": {"step": "title", "data": {}}},
@@ -2826,69 +2857,97 @@ async def telegram_webhook(request: Request):
         )
         send_message(chat_id, "📝 Enter Task Title:")
         return {"ok": True}
-    # If user is in active session
+
+    # ==============================
+    # HANDLE ACTIVE SESSION
+    # ==============================
+
     if session:
-        step = session["step"]
-        data_store = session["data"]
+        step = session.get("step")
+        data_store = session.get("data", {})
         next_step = None
         reply = None
+
         if step == "title":
             data_store["title"] = message
             next_step = "description"
             reply = "📄 Enter Description:"
+
         elif step == "description":
             data_store["description"] = message
             next_step = "due_date"
-            reply = "📅 Enter Due Date (dd-mm-yyyy):"
+            reply = "📅 Enter Due Date (DD-MM-YYYY):"
+
         elif step == "due_date":
             data_store["due_date"] = message
             next_step = "assign"
             reply = "👤 Enter Assignee Name (comma separated):"
+
         elif step == "assign":
             data_store["assign"] = message
             next_step = "department"
             reply = "🏢 Enter Department:"
+
         elif step == "department":
             data_store["department"] = message
             next_step = "priority"
             reply = "⚡ Enter Priority (Low/Medium/High):"
+
         elif step == "priority":
             data_store["priority"] = message
-            # 🔥 CREATE TASK HERE
-            await create_task_from_session(
+
+            success = await create_task_from_session(
                 data_store,
                 telegram_user_id,
                 chat_id
             )
-            await db.telegram_sessions.delete_one(
-                {"telegram_id": telegram_user_id}
-            )
+
+            if success:
+                await db.telegram_sessions.delete_one(
+                    {"telegram_id": telegram_user_id}
+                )
+
             return {"ok": True}
-        # This runs only for non-"priority" steps (after setting next_step/reply)
+
+        # Update session if not final step
         if next_step and reply:
             await db.telegram_sessions.update_one(
                 {"telegram_id": telegram_user_id},
                 {"$set": {"step": next_step, "data": data_store}}
             )
             send_message(chat_id, reply)
+
     return {"ok": True}
-   
+
+
+# ==============================
+# CREATE TASK FROM TELEGRAM DATA
+# ==============================
+
 async def create_task_from_session(data, telegram_user_id, chat_id):
     try:
         due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
     except ValueError:
         send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
-        return
-    names = [n.strip() for n in data["assign"].split(",")]
+        return False
+
+    names = [n.strip() for n in data["assign"].split(",") if n.strip()]
+    if not names:
+        send_message(chat_id, "❌ Assignee required.")
+        return False
+
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
+
     # 🔍 Case-insensitive primary user search
     primary_user = await db.users.find_one(
         {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
     )
+
     if not primary_user:
-        send_message(chat_id, f"❌ Assignee '{primary_name}' not found. Task cancelled.")
-        return
+        send_message(chat_id, f"❌ Assignee '{primary_name}' not found.")
+        return False
+
     # 🔍 Case-insensitive co-user search
     co_users = []
     for name in co_names:
@@ -2897,8 +2956,22 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         )
         if user:
             co_users.append(user)
+
     # 🔍 Find creator from telegram_id
     creator = await db.users.find_one({"telegram_id": telegram_user_id})
+
+    if not creator:
+        send_message(chat_id, "❌ Your Telegram is not linked to any user.")
+        return False
+
+    priority_map = {
+        "low": "low",
+        "medium": "medium",
+        "high": "high"
+    }
+
+    priority = priority_map.get(data["priority"].lower(), "medium")
+
     task = {
         "id": str(uuid.uuid4()),
         "title": data["title"],
@@ -2906,14 +2979,16 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         "assigned_to": primary_user["id"],
         "sub_assignees": [u["id"] for u in co_users],
         "due_date": due_date.isoformat(),
-        "priority": data["priority"].lower(),
+        "priority": priority,
         "status": "pending",
         "category": data.get("department", "other"),
-        "created_by": creator.get("id") if creator else primary_user["id"],
+        "created_by": creator["id"],
         "created_at": datetime.now(india_tz).isoformat(),
         "updated_at": datetime.now(india_tz).isoformat(),
-
-
     }
+
     await db.tasks.insert_one(task)
+
     send_message(chat_id, "✅ Task Created Successfully!")
+
+    return True
