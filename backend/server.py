@@ -2086,6 +2086,19 @@ async def update_user_permissions(
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Permissions updated successfully"}
 # CHAT ROUTES
+from fastapi import APIRouter, HTTPException
+from bson import ObjectId
+
+router = APIRouter()
+
+@router.delete("/chat/message/{message_id}")
+async def delete_message(message_id: str):
+    result = await db.messages.delete_one({"_id": ObjectId(message_id)})
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return {"success": True}
 @api_router.post("/chat/groups", response_model=ChatGroup)
 async def create_chat_group(
     group_data: ChatGroupCreate,
