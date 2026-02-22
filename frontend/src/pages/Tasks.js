@@ -51,45 +51,37 @@ const RECURRENCE_PATTERNS = [
 ];
 // Status colors with gradients for cards
 const STATUS_STYLES = {
-  pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'To Do' },
-  in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Progress' },
-  completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Completed' },
+  pending: { bg: 'bg-slate-100', text: 'text-slate-700', label: 'To Do' },
+  in_progress: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'In Progress' },
+  completed: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Completed' },
   review: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Review' },
   overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
 };
-const STATUS_GRADIENTS = {
-  overdue: 'linear-gradient(135deg, #fecaca 0%, #f87171 100%)',
-  pending: 'linear-gradient(135deg, #fef3c7 0%, #f59e0b 100%)',
-  in_progress: 'linear-gradient(135deg, #dbeafe 0%, #3b82f6 100%)',
-  completed: 'linear-gradient(135deg, #d1fae5 0%, #10b981 100%)',
-  review: 'linear-gradient(135deg, #e9d5ff 0%, #a855f7 100%)',
-};
 // Priority colors
 const PRIORITY_STYLES = {
-  low: { bg: 'bg-green-100', text: 'text-green-600', label: 'LOW' },
-  medium: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'MEDIUM' },
-  high: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'HIGH' },
-  critical: { bg: 'bg-red-100', text: 'text-red-700', label: 'CRITICAL' },
+  low: { bg: 'bg-green-50', text: 'text-green-600', label: 'LOW' },
+  medium: { bg: 'bg-yellow-50', text: 'text-yellow-700', label: 'MEDIUM' },
+  high: { bg: 'bg-orange-50', text: 'text-orange-700', label: 'HIGH' },
+  critical: { bg: 'bg-red-50', text: 'text-red-700', label: 'CRITICAL' },
 };
-// Card gradient styles based on status/priority
-const getCardGradient = (task, isOverdue) => {
-  if (isOverdue) {
-    return 'linear-gradient(135deg, rgba(254, 202, 202, 0.6) 0%, rgba(252, 165, 165, 0.4) 50%, rgba(248, 113, 113, 0.2) 100%)';
-  }
-  if (task.status === 'completed') {
-    return 'linear-gradient(135deg, rgba(167, 243, 208, 0.6) 0%, rgba(134, 239, 172, 0.4) 50%, rgba(110, 231, 148, 0.2) 100%)';
-  }
-  if (task.status === 'in_progress') {
-    return 'linear-gradient(135deg, rgba(191, 219, 254, 0.6) 0%, rgba(147, 197, 253, 0.4) 50%, rgba(96, 165, 250, 0.2) 100%)';
-  }
-  if (task.status === 'pending') {
-    if (task.priority === 'high' || task.priority === 'critical') {
-      return 'linear-gradient(135deg, rgba(254, 215, 170, 0.6) 0%, rgba(253, 186, 116, 0.4) 50%, rgba(251, 146, 60, 0.2) 100%)';
-    } else {
-      return 'linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, rgba(253, 230, 138, 0.4) 50%, rgba(252, 211, 77, 0.2) 100%)';
-    }
-  }
-  return 'none';
+const getStripeClass = (task, isOverdue) => {
+  const p = (task.priority || '').toLowerCase();
+  const s = (task.status || '').toLowerCase();
+
+  // Overdue always red
+  if (isOverdue) return 'border-l-4 border-red-600';
+
+  // Status overrides
+  if (s === 'completed') return 'border-l-4 border-blue-700';
+  if (s === 'in_progress') return 'border-l-4 border-purple-500';
+
+  // Priority
+  if (p === 'critical') return 'border-l-4 border-red-600';
+  if (p === 'high') return 'border-l-4 border-orange-500';
+  if (p === 'medium') return 'border-l-4 border-yellow-400';
+  if (p === 'low') return 'border-l-4 border-green-500';
+
+  return 'border-l-4 border-slate-300';
 };
 const getPriorityLightBg = (displayStatus) => {
   if (displayStatus === 'overdue') return 'bg-red-100 text-red-700';
@@ -246,7 +238,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-  
+ 
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
       fetchTasks();
@@ -618,7 +610,7 @@ export default function Tasks() {
                         data-testid="task-recurring-switch"
                       />
                     </div>
-                
+               
                     {formData.is_recurring && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                         <div className="space-y-2">
@@ -730,7 +722,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
-    
+   
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -824,7 +816,12 @@ export default function Tasks() {
                     const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                     const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                     return (
-                      <tr key={task.id} className={`border-t border-slate-100 hover:bg-slate-50 transition ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
+                      <tr
+  key={task.id}
+  className={`border-t border-slate-100 hover:bg-slate-50 transition
+    ${getStripeClass(task, taskIsOverdue)}
+  `}
+>
                         <td className="p-4">{task.title}</td>
                         <td className="p-4">{getClientName(task.client_id)}</td>
                         <td className="p-4">
@@ -884,7 +881,13 @@ export default function Tasks() {
                 const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                 const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                 return (
-                  <Card key={task.id} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
+                  <Card
+  key={task.id}
+  className={`rounded-2xl border border-slate-100 shadow-sm
+    bg-white
+    ${getStripeClass(task, taskIsOverdue)}
+  `}
+>
                     <div className="space-y-2">
                       <h3 className="font-semibold text-base">{task.title}</h3>
                       <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}`}</div>
@@ -961,7 +964,11 @@ export default function Tasks() {
                     return (
                       <motion.div key={task.id} variants={itemVariants} className="h-full">
                         <Card
-                          className={`bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden group h-full rounded-2xl ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}
+  className={`bg-white border border-slate-100 shadow-sm
+    hover:shadow-md transition-all duration-200
+    overflow-hidden group h-full rounded-2xl
+    ${getStripeClass(task, taskIsOverdue)}
+  `}
                           data-testid={`task-card-${task.id}`}
                         >
                           <CardContent className="p-4 flex flex-col h-full">
@@ -1041,7 +1048,7 @@ export default function Tasks() {
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'in_progress')}
                                   className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                                    ${task.status === 'in_progress' ? 'bg-blue-100 text-blue-700 shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700'}`}
+                                    ${task.status === 'in_progress' ? 'bg-purple-100 text-purple-700 shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-purple-100 hover:text-purple-700'}`}
                                   title="Mark as In Progress"
                                   data-testid={`status-progress-${task.id}`}
                                 >
