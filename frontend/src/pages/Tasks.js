@@ -65,30 +65,20 @@ const PRIORITY_STYLES = {
   critical: { bg: 'bg-red-50', text: 'text-red-700', label: 'CRITICAL' },
 };
 const getStripeClass = (task, isOverdue) => {
-  const p = (task.priority || '').toLowerCase();
-  const s = (task.status || '').toLowerCase();
+  const p = (task.priority || '').toLowerCase().trim();
+  const s = (task.status || '').toLowerCase().trim();
 
-  // Overdue always red
-  if (isOverdue) return 'border-l-4 border-red-600';
+  if (isOverdue) return 'border-l-8 border-l-red-600';
 
-  // Status overrides
-  if (s === 'completed') return 'border-l-4 border-blue-700';
-  if (s === 'in_progress') return 'border-l-4 border-purple-500';
+  if (s === 'completed') return 'border-l-8 border-l-blue-700';
+  if (s === 'in_progress') return 'border-l-8 border-l-purple-500';
 
-  // Priority
-  if (p === 'critical') return 'border-l-4 border-red-600';
-  if (p === 'high') return 'border-l-4 border-orange-500';
-  if (p === 'medium') return 'border-l-4 border-yellow-400';
-  if (p === 'low') return 'border-l-4 border-green-500';
+  if (p === 'critical') return 'border-l-8 border-l-red-600';
+  if (p === 'high') return 'border-l-8 border-l-orange-500';
+  if (p === 'medium') return 'border-l-8 border-l-yellow-400';
+  if (p === 'low') return 'border-l-8 border-l-green-500';
 
-  return 'border-l-4 border-slate-300';
-};
-const getPriorityLightBg = (displayStatus) => {
-  if (displayStatus === 'overdue') return 'bg-red-100 text-red-700';
-  if (displayStatus === 'pending') return 'bg-amber-100 text-amber-700';
-  if (displayStatus === 'in_progress') return 'bg-blue-100 text-blue-700';
-  if (displayStatus === 'completed') return 'bg-emerald-100 text-emerald-700';
-  return 'bg-slate-100 text-slate-600';
+  return 'border-l-8 border-l-slate-300';
 };
 // Animation variants
 const containerVariants = {
@@ -140,7 +130,6 @@ export default function Tasks() {
   if (canAssignTasks) {
     fetchUsers();
   }
-  fetchUsers();
 }, [user]);
   const fetchTasks = async () => {
     try {
@@ -238,7 +227,6 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
- 
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
       fetchTasks();
@@ -610,7 +598,7 @@ export default function Tasks() {
                         data-testid="task-recurring-switch"
                       />
                     </div>
-               
+              
                     {formData.is_recurring && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                         <div className="space-y-2">
@@ -722,7 +710,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
-   
+  
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -818,9 +806,10 @@ export default function Tasks() {
                     return (
                       <tr
   key={task.id}
-  className={`border-t border-slate-100 hover:bg-slate-50 transition
-    ${getStripeClass(task, taskIsOverdue)}
-  `}
+  className={`relative border border-slate-200 bg-white transition-all
+  hover:shadow-lg hover:border-blue-400
+  ${getStripeClass(task, taskIsOverdue)}
+`}
 >
                         <td className="p-4">{task.title}</td>
                         <td className="p-4">{getClientName(task.client_id)}</td>
@@ -832,7 +821,7 @@ export default function Tasks() {
                         </td>
                         <td className="p-4">
                           <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
-                            <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            <SelectTrigger className="w-32 bg-white border-slate-300">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -883,10 +872,10 @@ export default function Tasks() {
                 return (
                   <Card
   key={task.id}
-  className={`rounded-2xl border border-slate-100 shadow-sm
-    bg-white
-    ${getStripeClass(task, taskIsOverdue)}
-  `}
+  className={`relative flex flex-col p-4 rounded-xl border bg-white transition-all group
+  hover:shadow-lg hover:border-blue-400
+  ${getStripeClass(task, taskIsOverdue)}
+`}
 >
                     <div className="space-y-2">
                       <h3 className="font-semibold text-base">{task.title}</h3>
@@ -897,7 +886,7 @@ export default function Tasks() {
                         <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
                       </div>
                       <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
-                        <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        <SelectTrigger className="w-32 bg-white border-slate-300">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -964,11 +953,10 @@ export default function Tasks() {
                     return (
                       <motion.div key={task.id} variants={itemVariants} className="h-full">
                         <Card
-  className={`bg-white border border-slate-100 shadow-sm
-    hover:shadow-md transition-all duration-200
-    overflow-hidden group h-full rounded-2xl
-    ${getStripeClass(task, taskIsOverdue)}
-  `}
+  className={`relative flex flex-col rounded-xl border bg-white transition-all group
+  hover:shadow-lg hover:border-blue-400
+  ${getStripeClass(task, taskIsOverdue)}
+`}
                           data-testid={`task-card-${task.id}`}
                         >
                           <CardContent className="p-4 flex flex-col h-full">
