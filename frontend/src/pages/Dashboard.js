@@ -187,6 +187,7 @@ export default function Dashboard() {
     // fetchMyTodos(); ← removed → prevents crash (implement properly later)
     fetchMyAssignedTasks();
     fetchMyTodos();
+    fetchChatPreview();
   }, [rankingPeriod]);
   const addTodo = async () => {
     if (!newTodo.trim()) return;
@@ -265,6 +266,21 @@ export default function Dashboard() {
       toast.error('Failed to update todo');
     }
   };
+  const handleSendQuickReply = async () => {
+  if (!chatInput.trim()) return;
+
+  try {
+    const res = await api.post('/notifications', {
+      message: chatInput,
+      created_at: new Date().toISOString()
+    });
+
+    setChatMessages([...chatMessages, res.data]);
+    setChatInput('');
+  } catch (error) {
+    toast.error("Failed to send message");
+  }
+};
   const handleDeleteTodo = async (id) => {
     try {
       await api.delete(`/tasks/${id}`);
@@ -403,19 +419,24 @@ export default function Dashboard() {
     : null;
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-  const handleSendQuickReply = async () => {
-  if (!chatInput.trim()) return;
+  const [defaultGroup, setDefaultGroup] = useState(null);
 
+const fetchChatPreview = async () => {
   try {
-    const res = await api.post('/notifications', {
-      message: chatInput,
-      created_at: new Date().toISOString()
-    });
+    const groupsRes = await api.get("/chat/groups");
 
-    setChatMessages([...chatMessages, res.data]);
-    setChatInput('');
+    if (groupsRes.data.length > 0) {
+      const firstGroup = groupsRes.data[0];
+      setDefaultGroup(firstGroup);
+
+      const messagesRes = await api.get(
+        `/chat/groups/${firstGroup.id}/messages`
+      );
+
+      setChatMessages(messagesRes.data || []);
+    }
   } catch (error) {
-    toast.error("Failed to send message");
+    console.error("Failed to fetch chat preview");
   }
 };
   return (
@@ -812,9 +833,9 @@ export default function Dashboard() {
           className="text-xs bg-white p-2 rounded-md shadow-sm"
         >
           <span className="font-semibold text-slate-700">
-            {msg.sender || 'User'}:
+            {msg.sender_name || 'User'
           </span>{" "}
-          {msg.message}
+          {msg.content}
         </div>
       ))
     )}
