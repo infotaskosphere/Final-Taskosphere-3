@@ -266,6 +266,24 @@ export default function Dashboard() {
       toast.error('Failed to update todo');
     }
   };
+  const handleSendQuickReply = async () => {
+  if (!chatInput.trim() || !defaultGroup) return;
+
+  try {
+    await api.post(
+      `/chat/groups/${defaultGroup.id}/messages`,
+      {
+        content: chatInput,
+        message_type: "text"
+      }
+    );
+
+    setChatInput('');
+    fetchChatPreview(); // refresh messages
+  } catch (error) {
+    toast.error("Failed to send message");
+  }
+};
   const handleSendQuickReplyPreview = async () => {
   if (!chatInput.trim()) return;
 
@@ -323,10 +341,7 @@ export default function Dashboard() {
         console.warn("Rankings endpoint failed:", rankErr);
         setRankings([]); // fallback → no crash
       }
-      const chatRes = await api.get('/notifications');
-      if (chatRes.data?.length > chatMessages.length) {
-        notificationAudio.current.play().catch(() => {});
-      }
+      
       setChatMessages(chatRes.data || []);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
@@ -439,20 +454,7 @@ const fetchChatPreview = async () => {
     console.error("Failed to fetch chat preview");
   }
 };
-const handleSendQuickReplyPreview = async () => {
-  if (!chatInput.trim() || !defaultGroup) return;
 
-  try {
-    await api.post(`/chat/groups/${defaultGroup.id}/messages`, {
-      content: chatInput.trim()
-    });
-
-    setChatInput('');
-    fetchChatPreview();
-  } catch (error) {
-    console.error("Failed to send message");
-  }
-};
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
@@ -851,8 +853,7 @@ const handleSendQuickReplyPreview = async () => {
           </span>{" "}
           {msg.content}
         </div>
-      ))
-    )}
+      )))}
   </div>
   <div className="flex gap-2">
     <input
