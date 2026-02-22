@@ -2547,7 +2547,7 @@ async def get_audit_logs(
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(5000)
     return logs
 
-BOT_TOKEN = os.getenv("8470592910:AAHlbJhn_BJUIxPVqQAQ5OUdQ7FE0hqVA4k")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{8470592910:AAHlbJhn_BJUIxPVqQAQ5OUdQ7FE0hqVA4k}/sendMessage"
