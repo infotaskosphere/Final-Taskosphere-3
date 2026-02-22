@@ -30,16 +30,16 @@ const COLORS = {
 };
 // Department categories with colors
 const DEPARTMENTS = [
-  { value: 'gst', label: 'GST', color: '#EF4444' },
-  { value: 'income_tax', label: 'IT', color: '#F59E0B' },
-  { value: 'accounts', label: 'ACC', color: '#10B981' },
-  { value: 'tds', label: 'TDS', color: '#3B82F6' },
-  { value: 'roc', label: 'ROC', color: '#8B5CF6' },
-  { value: 'trademark', label: 'TM', color: '#EC4899' },
-  { value: 'msme_smadhan', label: 'MSME', color: '#06B6D4' },
-  { value: 'fema', label: 'FEMA', color: '#F97316' },
-  { value: 'dsc', label: 'DSC', color: '#14B8A6' },
-  { value: 'other', label: 'OTHER', color: '#6B7280' },
+  { value: 'GST', label: 'GST', color: '#1E3A8A' },     // Deep Navy
+  { value: 'IT', label: 'IT', color: '#374151' },       // Charcoal Gray
+  { value: 'ACC', label: 'ACC', color: '#065F46' },     // Dark Emerald
+  { value: 'TDS', label: 'TDS', color: '#1F2937' },     // Slate Black
+  { value: 'ROC', label: 'ROC', color: '#7C2D12' },     // Burgundy Brown
+  { value: 'TM', label: 'TM', color: '#0F766E' },       // Teal
+  { value: 'MSME', label: 'MSME', color: '#92400E' },   // Dark Amber
+  { value: 'FEMA', label: 'FEMA', color: '#334155' },   // Blue Gray
+  { value: 'DSC', label: 'DSC', color: '#3F3F46' },     // Neutral Graphite
+  { value: 'OTHER', label: 'OTHER', color: '#475569' }, // Professional Slate
 ];
 const containerVariants = {
   hidden: { opacity: 0 },
