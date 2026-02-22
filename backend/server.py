@@ -2630,10 +2630,10 @@ if session:
         send_message(chat_id, "✅ Task Created Successfully!")
         return {"ok": True}
 
-    await db.telegram_sessions.update_one(
-        {"telegram_id": telegram_user_id},
-        {"$set": {"step": next_step, "data": data_store}}
-    )
+        await db.telegram_sessions.update_one(
+            {"telegram_id": telegram_user_id},
+            {"$set": {"step": next_step, "data": data_store}}
+        )
 
     send_message(chat_id, reply)
 
