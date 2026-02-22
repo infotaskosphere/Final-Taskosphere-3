@@ -682,7 +682,7 @@ async def record_attendance(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
-   
+    india_tz = pytz.timezone("Asia/Kolkata")
     now = datetime.now(india_tz)
     today_str = now.date().isoformat()
 
@@ -911,8 +911,8 @@ async def create_tasks_bulk(
         # Add creator info
         task_dict["id"] = str(uuid.uuid4())
         task_dict["created_by"] = current_user.id
-        task_dict["created_at"] = datetime.now(india_tz).isoformat(),
-        task_dict["updated_at"] = datetime.now(india_tz).isoformat(),
+        task_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+        task_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
         if task_dict.get("due_date"):
             task_dict["due_date"] = task_dict["due_date"].isoformat()
         await db.tasks.insert_one(task_dict)
@@ -1016,7 +1016,7 @@ async def patch_task(
         raise HTTPException(status_code=404, detail="Task not found")
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(timezone.utc).isoformat()
-        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.tasks.update_one(
         {"id": task_id},
         {"$set": updates}
@@ -2876,7 +2876,6 @@ async def telegram_webhook(request: Request):
 async def create_task_from_session(data, telegram_user_id, chat_id):
     try:
         due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
-        due_date = india_tz.localize(due_date)
     except ValueError:
         send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
         return
