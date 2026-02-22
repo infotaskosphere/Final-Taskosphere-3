@@ -2089,11 +2089,10 @@ async def update_user_permissions(
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
 
-router = APIRouter()
 
-@router.delete("/chat/message/{message_id}")
+@api_router.delete("/chat/message/{message_id}")
 async def delete_message(message_id: str):
-    result = await db.messages.delete_one({"_id": ObjectId(message_id)})
+    result = await db.chat_messages.delete_one({"_id": ObjectId(message_id)})
 
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
