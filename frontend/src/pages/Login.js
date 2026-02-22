@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from "@/contexts/AuthContext";
 import api from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -23,6 +24,7 @@ export default function Login() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -36,8 +38,8 @@ export default function Login() {
       const response = await api.post('/auth/login', { email, password });
       const { access_token, user } = response.data;
       
-      localStorage.setItem('token', access_token);
-      localStorage.setItem('user', JSON.stringify(user));
+      login(response.data, true);
+      
       
       toast.success('Welcome back!');
       navigate('/dashboard');
