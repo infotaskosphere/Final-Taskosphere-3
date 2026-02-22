@@ -266,7 +266,7 @@ export default function Dashboard() {
       toast.error('Failed to update todo');
     }
   };
-  const handleSendQuickReply = async () => {
+  const handleSendQuickReplyPreview = async () => {
   if (!chatInput.trim()) return;
 
   try {
@@ -439,7 +439,7 @@ const fetchChatPreview = async () => {
     console.error("Failed to fetch chat preview");
   }
 };
-const handleSendQuickReply = async () => {
+const handleSendQuickReplyPreview = async () => {
   if (!chatInput.trim() || !defaultGroup) return;
 
   try {
@@ -865,7 +865,7 @@ const handleSendQuickReply = async () => {
         if (e.key === 'Enter') handleSendQuickReply();
       }}
     />
-    <Button size="sm" onClick={handleSendQuickReply}>
+    <Button size="sm" onClick={handleSendQuickReplyPreview}
       Send
     </Button>
   </div>
