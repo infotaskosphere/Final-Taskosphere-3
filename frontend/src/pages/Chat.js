@@ -53,6 +53,7 @@ export default function Chat() {
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [selectedMessages, setSelectedMessages] = useState([]);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const pollIntervalRef = useRef(null);
@@ -73,7 +74,7 @@ export default function Chat() {
   useEffect(() => {
     fetchGroups();
     fetchUsers();
-  
+ 
     // Poll for new messages every 3 seconds
     pollIntervalRef.current = setInterval(() => {
       fetchGroups();
@@ -81,7 +82,6 @@ export default function Chat() {
         fetchMessages(selectedGroup.id, true);
       }
     }, 3000);
-
     return () => clearInterval(pollIntervalRef.current);
   }, [selectedGroup?.id]);
   useEffect(() => {
@@ -107,10 +107,8 @@ export default function Chat() {
     try {
       const response = await api.get(`/chat/groups/${groupId}/messages`);
       const newMessages = response.data;
-
       if (newMessages.length > 0) {
         const latest = newMessages[newMessages.length - 1];
-
         // Only notify if:
         // 1. Message is new
         // 2. Not sent by current user
@@ -133,10 +131,8 @@ export default function Chat() {
             window.focus();
           };
         }
-
         lastMessageIdRef.current = latest.id;
       }
-
       setMessages(newMessages);
     } catch (error) {
       if (!silent) {
@@ -209,7 +205,7 @@ export default function Chat() {
       reader.onloadend = async () => {
         const base64 = reader.result;
         const isImage = file.type.startsWith('image/');
-      
+     
         await api.post(`/chat/groups/${selectedGroup.id}/messages`, {
           content: isImage ? 'Shared an image' : `Shared a file: ${file.name}`,
           message_type: isImage ? 'image' : 'file',
@@ -217,7 +213,7 @@ export default function Chat() {
           file_name: file.name,
           file_size: file.size
         });
-      
+     
         fetchMessages(selectedGroup.id);
         toast.success('File sent!');
       };
@@ -230,7 +226,7 @@ export default function Chat() {
   };
   const handleLeaveGroup = async () => {
     if (!selectedGroup) return;
-  
+ 
     try {
       await api.delete(`/chat/groups/${selectedGroup.id}`);
       toast.success('Left group successfully');
@@ -241,17 +237,30 @@ export default function Chat() {
       toast.error('Failed to leave group');
     }
   };
+  const handleBulkDelete = async () => {
+    if (selectedMessages.length === 0) {
+      toast.error('No messages selected');
+      return;
+    }
+    if (window.confirm('Are you sure you want to delete these messages?')) {
+      try {
+        await api.post('/chat/delete-multiple', { message_ids: selectedMessages });
+        setMessages(messages.filter(msg => !selectedMessages.includes(msg.id)));
+        setSelectedMessages([]);
+        toast.success('Messages deleted');
+      } catch (error) {
+        toast.error('Failed to delete messages');
+      }
+    }
+  };
   const formatMessageTime = (dateStr) => {
     const date = new Date(dateStr);
-
     if (isToday(date)) {
       return format(date, 'h:mm a');
     }
-
     if (isYesterday(date)) {
       return `Yesterday ${format(date, 'h:mm a')}`;
     }
-
     return format(date, 'MMM d, h:mm a');
   };
   const formatFileSize = (bytes) => {
@@ -296,7 +305,7 @@ export default function Chat() {
                     Start a direct message or create a group chat
                   </DialogDescription>
                 </DialogHeader>
-              
+             
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label>Group Name (optional for direct messages)</Label>
@@ -307,7 +316,7 @@ export default function Chat() {
                       data-testid="group-name-input"
                     />
                   </div>
-                
+               
                   <div className="space-y-2">
                     <Label>Description (optional)</Label>
                     <Textarea
@@ -317,7 +326,7 @@ export default function Chat() {
                       rows={2}
                     />
                   </div>
-                
+               
                   <div className="space-y-2">
                     <Label>Select Members</Label>
                     <div className="border rounded-lg max-h-48 overflow-y-auto">
@@ -371,7 +380,7 @@ export default function Chat() {
               </DialogContent>
             </Dialog>
           </div>
-        
+       
           {/* Search */}
           <div className="relative mt-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -383,7 +392,7 @@ export default function Chat() {
             />
           </div>
         </CardHeader>
-      
+     
         <ScrollArea className="flex-1">
           <div className="p-2">
             {filteredGroups.length === 0 ? (
@@ -459,7 +468,7 @@ export default function Chat() {
                   </p>
                 </div>
               </div>
-            
+           
               {!selectedGroup.is_direct && (
                 <Dialog open={groupSettingsOpen} onOpenChange={setGroupSettingsOpen}>
                   <DialogTrigger asChild>
@@ -519,11 +528,14 @@ export default function Chat() {
             {/* Messages Area */}
             <ScrollArea className="flex-1 p-4 bg-slate-50">
               <div className="space-y-4">
+                {selectedMessages.length > 0 && (
+                  <Button onClick={handleBulkDelete} variant="destructive">Delete Selected</Button>
+                )}
                 <AnimatePresence>
                   {messages.map((msg, index) => {
                     const isOwn = msg.sender_id === user?.id;
                     const showAvatar = index === 0 || messages[index - 1]?.sender_id !== msg.sender_id;
-                  
+                 
                     return (
                       <motion.div
                         key={msg.id}
@@ -532,6 +544,16 @@ export default function Chat() {
                         className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
                       >
                         <div className={`flex gap-2 max-w-[70%] ${isOwn ? 'flex-row-reverse' : ''}`}>
+                          <Checkbox
+                            checked={selectedMessages.includes(msg.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedMessages([...selectedMessages, msg.id]);
+                              } else {
+                                setSelectedMessages(selectedMessages.filter(id => id !== msg.id));
+                              }
+                            }}
+                          />
                           {showAvatar && !isOwn && (
                             <div
                               className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0"
