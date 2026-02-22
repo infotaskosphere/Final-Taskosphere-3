@@ -2818,7 +2818,7 @@ async def telegram_webhook(request: Request):
         {"telegram_id": telegram_user_id}
     )
     # Start new task
-    if message == "/task":
+    if message.strip().lower() == "/task":
         await db.telegram_sessions.update_one(
             {"telegram_id": telegram_user_id},
             {"$set": {"step": "title", "data": {}}},
@@ -2890,9 +2890,13 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         send_message(chat_id, f"❌ Assignee '{primary_name}' not found. Task cancelled.")
         return
     # 🔍 Case-insensitive co-user search
-    co_users = await db.users.find({
-        "full_name": {"$in": co_names}
-    }).to_list(None)
+    co_users = []
+    for name in co_names:
+        user = await db.users.find_one(
+            {"full_name": {"$regex": f"^{name}$", "$options": "i"}}
+        )
+        if user:
+            co_users.append(user)
     # 🔍 Find creator from telegram_id
     creator = await db.users.find_one({"telegram_id": telegram_user_id})
     task = {
