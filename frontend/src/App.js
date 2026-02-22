@@ -37,10 +37,16 @@ const ProtectedRoute = ({ children }) => {
 };
 // Public Route (redirects to dashboard if already logged in)
 const PublicRoute = ({ children }) => {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return null;
+  }
+
   if (user) {
     return <Navigate to="/dashboard" replace />;
   }
+
   return children;
 };
 const PermissionRoute = ({ permission, children }) => {
