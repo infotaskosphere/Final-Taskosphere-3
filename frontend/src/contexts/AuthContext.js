@@ -56,16 +56,17 @@ setUser(parsedUser);
 setUser(newUser);
   };
   const logout = () => {
+    // Clear storage
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
+
+    // Clear axios header
+    delete api.defaults.headers.common["Authorization"];
+
+    // Clear user state
     setUser(null);
-    // Clear axios default headers
-    if (api.defaults?.headers?.common?.Authorization) {
-      delete api.defaults.headers.common["Authorization"];
-    }
-    window.location.href = "/login";
   };
   const hasPermission = (permission) => {
   if (!user) return false;
