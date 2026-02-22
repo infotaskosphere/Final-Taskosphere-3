@@ -883,7 +883,7 @@ export default function Tasks() {
                 const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                 const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                 return (
-                  <Card key={task.id} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
+                  <Card key={task.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                     <div className="space-y-2">
                       <h3 className="font-semibold text-base">{task.title}</h3>
                       <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}`}</div>
@@ -1027,10 +1027,10 @@ export default function Tasks() {
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'pending')}
                                   className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                                    ${task.status === 'pending'
-                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
-                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
+  ${task.status === 'pending'
+    ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+  }`}
                                   title="Mark as To Do"
                                   data-testid={`status-todo-${task.id}`}
                                 >
@@ -1040,10 +1040,10 @@ export default function Tasks() {
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'in_progress')}
                                   className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                                    ${task.status === 'in_progress'
-                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
-                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
+  ${task.status === 'in_progress'
+    ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+  }`}
                                   title="Mark as In Progress"
                                   data-testid={`status-progress-${task.id}`}
                                 >
@@ -1053,10 +1053,10 @@ export default function Tasks() {
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'completed')}
                                   className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
-                                    ${task.status === 'completed'
-                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
-                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
+  ${task.status === 'completed'
+    ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+  }`}
                                   title="Mark as Completed"
                                   data-testid={`status-done-${task.id}`}
                                 >
