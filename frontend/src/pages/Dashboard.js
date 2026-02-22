@@ -100,7 +100,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
                 onUpdateStatus?.(task.id, 'in_progress');
               }}
               disabled={isInProgress || isCompleted}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+              className={`w-28 text-center py-1 text-xs font-medium rounded-full transition ${
                 isInProgress
                   ? 'bg-blue-600 text-white shadow'
                   : 'bg-white border border-blue-400 text-blue-700 hover:bg-blue-50'
@@ -117,7 +117,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
                 onUpdateStatus?.(task.id, 'completed');
               }}
               disabled={isCompleted}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+              className={`w-28 text-center py-1 text-xs font-medium rounded-full transition ${
                 isCompleted
                   ? 'bg-green-600 text-white'
                   : 'bg-green-100 text-green-800 border border-green-300 hover:bg-green-200'
@@ -168,6 +168,7 @@ export default function Dashboard() {
   // ── New state for due date picker ──────────────────────────────────────────
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
+  const [chatInput, setChatInput] = useState('');
   // ────────────────────────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
@@ -402,6 +403,21 @@ export default function Dashboard() {
     : null;
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
+  const handleSendQuickReply = async () => {
+  if (!chatInput.trim()) return;
+
+  try {
+    const res = await api.post('/notifications', {
+      message: chatInput,
+      created_at: new Date().toISOString()
+    });
+
+    setChatMessages([...chatMessages, res.data]);
+    setChatInput('');
+  } catch (error) {
+    toast.error("Failed to send message");
+  }
+};
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
@@ -621,14 +637,14 @@ export default function Dashboard() {
                 No recent tasks
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {recentTasks.map((task) => {
                   const statusStyle = getStatusStyle(task.status);
                   const priorityStyle = getPriorityStyle(task.priority);
                   return (
                     <div
                       key={task.id}
-                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
+                      className={`py-2 px-3 rounded-lg border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
                       onClick={() => navigate('/tasks')} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
@@ -637,7 +653,7 @@ export default function Dashboard() {
                         </p>
                         <Badge
                           variant="secondary"
-                          className={`${statusStyle.bg} ${statusStyle.text} text-xs font-medium`}
+                          className={`${statusStyle.bg} ${statusStyle.text} text-xs font-medium w-28 justify-center`}
                         >
                           {task.status?.replace('_', ' ')?.toUpperCase() || 'PENDING'}
                         </Badge>
@@ -682,20 +698,20 @@ export default function Dashboard() {
                 No Upcoming Deadlines
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {upcomingDueDates.map((due) => {
                   const color = getDeadlineColor(due.days_remaining || 0);
                   return (
                     <div
                       key={due.id}
-                      className={`p-3 rounded-xl border cursor-pointer hover:shadow-md hover:border-orange-300 transition ${color.bg}`}
+                      className={`py-2 px-3 rounded-lg border cursor-pointer hover:shadow-md hover:border-orange-300 transition ${color.bg}`}
                       onClick={() => navigate('/duedates')} // ← made clickable
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
                           {due.title || 'Untitled Due Date'}
                         </p>
-                        <Badge className={`${color.badge} text-xs font-medium`}>
+                        <Badge className={`${color.badge} text-xs font-medium w-24 justify-center`}>
                           {due.days_remaining > 0 ? `${due.days_remaining}d left` : 'Overdue'}
                         </Badge>
                       </div>
@@ -780,6 +796,45 @@ export default function Dashboard() {
                 </Button>
               )}
             </div>
+{/* Chat Widget */}
+<div className="mt-5 border-t pt-4">
+  <p className="text-sm font-semibold mb-2">Team Chat</p>
+
+  <div className="h-40 overflow-y-auto space-y-2 bg-slate-50 p-2 rounded-lg mb-3">
+    {chatMessages.length === 0 ? (
+      <p className="text-xs text-slate-400 text-center">
+        No messages yet
+      </p>
+    ) : (
+      chatMessages.slice(-5).map((msg) => (
+        <div
+          key={msg.id}
+          className="text-xs bg-white p-2 rounded-md shadow-sm"
+        >
+          <span className="font-semibold text-slate-700">
+            {msg.sender || 'User'}:
+          </span>{" "}
+          {msg.message}
+        </div>
+      ))
+    )}
+  </div>
+
+  <div className="flex gap-2">
+    <input
+      value={chatInput}
+      onChange={(e) => setChatInput(e.target.value)}
+      placeholder="Quick reply..."
+      className="flex-1 p-2 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') handleSendQuickReply();
+      }}
+    />
+    <Button size="sm" onClick={handleSendQuickReply}>
+      Send
+    </Button>
+  </div>
+</div>
           </CardContent>
         </Card>
       </motion.div>
@@ -856,7 +911,6 @@ export default function Dashboard() {
       )}
       {/* Star Performers + My To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-8">
- 
         <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden" data-testid="staff-ranking-card">
           <CardHeader className="pb-3 sm:pb-4 border-b border-slate-100 px-4 sm:px-6">
             <div className="flex items-center justify-between">
