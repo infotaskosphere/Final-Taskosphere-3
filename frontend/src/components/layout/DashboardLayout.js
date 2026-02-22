@@ -62,19 +62,9 @@ const DashboardLayout = ({ children }) => {
   };
   // Fixed & working logout
   const handleLogout = () => {
-    try {
-      // Clear all stored auth data
-      localStorage.clear();
-      sessionStorage.clear();
-      if (logout) {
-        logout();
-      }
-      toast.success("Logged out successfully");
-      // Force full reload to reset React state
-      window.location.href = "/login";
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
+    logout();   // only call context logout
+    toast.success("Logged out successfully");
+    navigate("/login", { replace: true });
   };
   const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
