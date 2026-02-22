@@ -20,7 +20,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -65,30 +64,6 @@ const PRIORITY_STYLES = {
   high: { bg: 'bg-orange-50', text: 'text-orange-700', label: 'HIGH' },
   critical: { bg: 'bg-red-50', text: 'text-red-700', label: 'CRITICAL' },
 };
-const getStripeClass = (task, isOverdue) => {
-  const p = (task.priority || '').toLowerCase().trim();
-  const s = (task.status || '').toLowerCase().trim();
-  if (isOverdue) return 'border-l-8 border-l-red-600';
-  if (s === 'completed') return 'border-l-8 border-l-blue-700';
-  if (s === 'in_progress') return 'border-l-8 border-l-purple-500';
-  if (p === 'critical') return 'border-l-8 border-l-red-600';
-  if (p === 'high') return 'border-l-8 border-l-orange-500';
-  if (p === 'medium') return 'border-l-8 border-l-yellow-400';
-  if (p === 'low') return 'border-l-8 border-l-green-500';
-  return 'border-l-8 border-l-slate-300';
-};
-const getStripeBg = (task, isOverdue) => {
-  const p = (task.priority || '').toLowerCase().trim();
-  const s = (task.status || '').toLowerCase().trim();
-  if (isOverdue) return 'bg-red-600';
-  if (s === 'completed') return 'bg-blue-700';
-  if (s === 'in_progress') return 'bg-purple-500';
-  if (p === 'critical') return 'bg-red-600';
-  if (p === 'high') return 'bg-orange-500';
-  if (p === 'medium') return 'bg-yellow-400';
-  if (p === 'low') return 'bg-green-500';
-  return 'bg-slate-300';
-};
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -97,6 +72,20 @@ const containerVariants = {
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
+};
+const getStripeBg = (task, isOverdue) => {
+  const p = (task.priority || '').toLowerCase().trim();
+  const s = (task.status || '').toLowerCase().trim();
+
+  if (isOverdue) return 'bg-red-600';
+  if (s === 'completed') return 'bg-blue-700';
+  if (s === 'in_progress') return 'bg-purple-500';
+  if (p === 'critical') return 'bg-red-600';
+  if (p === 'high') return 'bg-orange-500';
+  if (p === 'medium') return 'bg-yellow-400';
+  if (p === 'low') return 'bg-green-500';
+
+  return 'bg-slate-300';
 };
 const DashboardStripCard = ({
   stripeColor,
@@ -110,12 +99,9 @@ const DashboardStripCard = ({
                   transition-all duration-200
                   overflow-hidden group ${className}`}
     >
-      {/* Independent Stripe */}
       <div
         className={`absolute left-0 top-0 h-full w-[6px] rounded-l-xl ${stripeColor}`}
       />
-
-      {/* Content */}
       <div className="pl-6 pr-6 py-4">
         {children}
       </div>
@@ -163,6 +149,7 @@ export default function Tasks() {
   if (canAssignTasks) {
     fetchUsers();
   }
+  fetchUsers();
 }, [user]);
   const fetchTasks = async () => {
     try {
@@ -260,6 +247,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
+ 
       await api.put(`/tasks/${task.id}`, taskData);
       toast.success(`Task marked as ${newStatus === 'pending' ? 'To Do' : newStatus === 'in_progress' ? 'In Progress' : 'Completed'}!`);
       fetchTasks();
@@ -389,22 +377,6 @@ export default function Tasks() {
     });
     doc.save('tasks.pdf');
   };
-  const onDragEnd = async (result) => {
-    const { source, destination, draggableId } = result;
-    if (!destination) return;
-    if (source.droppableId === destination.droppableId) {
-      return;
-    }
-    const newStatus = destination.droppableId;
-    const task = tasks.find(t => t.id === parseInt(draggableId));
-    if (!task) return;
-    await handleQuickStatusChange(task, newStatus);
-  };
-  const columns = [
-    { status: 'pending', title: 'To Do', count: stats.todo },
-    { status: 'in_progress', title: 'In Progress', count: stats.inProgress },
-    { status: 'completed', title: 'Completed', count: stats.completed },
-  ];
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
@@ -427,8 +399,7 @@ export default function Tasks() {
               {canEditTasks && (
               <DialogTrigger asChild>
                 <Button
-                  className="text-white rounded-lg px-6"
-                  style={{ backgroundColor: COLORS.mediumBlue }}
+                  className="bg-blue-700 hover:bg-blue-800 text-white rounded-lg px-6"
                   data-testid="create-task-btn"
                 >
                   <Plus className="mr-2 h-5 w-5" />
@@ -647,7 +618,7 @@ export default function Tasks() {
                         data-testid="task-recurring-switch"
                       />
                     </div>
-           
+               
                     {formData.is_recurring && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                         <div className="space-y-2">
@@ -702,8 +673,7 @@ export default function Tasks() {
                     <Button
                       type="submit"
                       disabled={loading}
-                      className="text-white px-6"
-                      style={{ backgroundColor: COLORS.mediumBlue }}
+                      className="bg-blue-700 hover:bg-blue-800 text-white px-6"
                     >
                       {loading ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}
                     </Button>
@@ -759,6 +729,7 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
+   
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -828,160 +799,314 @@ export default function Tasks() {
       {/* Task Cards Grid - Responsive with consistent card sizing */}
       <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
         {viewMode === 'list' ? (
-  <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
-
-    <div className="p-6 space-y-4">
-
-      {/* Header Row */}
-      <div className="grid grid-cols-7 gap-4 text-xs uppercase tracking-wider text-slate-500 font-semibold border-b border-slate-200 pb-3">
-        <div>Task</div>
-        <div>Client</div>
-        <div>Priority</div>
-        <div>Status</div>
-        <div>Assigned</div>
-        <div>DOA</div>
-        <div>Due Date</div>
-      </div>
-
-      {/* Rows */}
-      <div className="space-y-3">
-        {filteredTasks.map((task) => {
-          const taskIsOverdue = isOverdue(task);
-
-          return (
-            <DashboardStripCard
-              key={task.id}
-              stripeColor={getStripeBg(task, taskIsOverdue)}
-            >
-              <div className="grid grid-cols-7 gap-4 items-center text-sm">
-
-                <div className="font-medium">
-                  {task.title}
-                </div>
-
-                <div className="text-slate-600">
-                  {getClientName(task.client_id)}
-                </div>
-
-                <div className="text-slate-700 font-medium">
-                  {task.priority?.toUpperCase()}
-                </div>
-
-                {/* Status Dropdown */}
-                <div>
-                  <Select
-                    value={task.status}
-                    onValueChange={(value) =>
-                      handleQuickStatusChange(task, value)
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-xs bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">To Do</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="text-slate-600">
-                  {getUserName(task.assigned_to)}
-                </div>
-
-                <div className="text-slate-500">
-                  {task.created_at
-                    ? format(new Date(task.created_at), 'MMM dd')
-                    : '-'}
-                </div>
-
-                <div className="text-slate-500">
-                  {task.due_date
-                    ? format(new Date(task.due_date), 'MMM dd')
-                    : '-'}
-                </div>
-
+          <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                  <tr>
+                    <th className="p-4 text-left">Task</th>
+                    <th className="p-4 text-left">Client</th>
+                    <th className="p-4 text-left">Priority</th>
+                    <th className="p-4 text-left">Status</th>
+                    <th className="p-4 text-left">Task Update</th>
+                    <th className="p-4 text-left">Assigned To</th>
+                    <th className="p-4 text-left">Assigned By</th>
+                    <th className="p-4 text-left">DOA</th>
+                    <th className="p-4 text-left">Due Date</th>
+                    <th className="p-4 text-left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTasks.map((task) => {
+                    const taskIsOverdue = isOverdue(task);
+                    const displayStatus = getDisplayStatus(task);
+                    const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+                    const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+                    return (
+                      <tr key={task.id} className="border-t border-slate-100 hover:bg-slate-50 transition">
+                        <td className="p-4">{task.title}</td>
+                        <td className="p-4">{getClientName(task.client_id)}</td>
+                        <td className="p-4">
+                          <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
+                        </td>
+                        <td className="p-4">
+                          <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
+                        </td>
+                        <td className="p-4">
+                          <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
+                            <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="pending">To Do</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="completed">Done</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="p-4">{getUserName(task.assigned_to)}</td>
+                        <td className="p-4">{getUserName(task.created_by)}</td>
+                        <td className="p-4">{task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}</td>
+                        <td className="p-4">{task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</td>
+                        <td className="p-4 flex gap-2">
+                          {canEditTasks && task.created_by === user?.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEdit(task)}
+                              data-testid={`edit-task-${task.id}`}
+                            >
+                              <Edit className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {canDeleteTasks && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(task.id)}
+                              data-testid={`delete-task-${task.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="block sm:hidden space-y-3 p-4">
+              {filteredTasks.map((task) => {
+                const taskIsOverdue = isOverdue(task);
+                const displayStatus = getDisplayStatus(task);
+                const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+                const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+                return (
+                  <Card key={task.id} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${taskIsOverdue ? 'bg-red-50' : task.status === 'completed' ? 'bg-green-50' : task.status === 'in_progress' ? 'bg-blue-50' : ''}`}>
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-base">{task.title}</h3>
+                      <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}`}</div>
+                      <p className="text-sm text-slate-600 line-clamp-2">{task.description || 'No description'}</p>
+                      <div className="flex gap-2">
+                        <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
+                        <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
+                      </div>
+                      <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
+                        <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pending">To Do</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="completed">Done</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <div className="text-xs text-slate-500">Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</div>
+                      <div className="text-xs text-slate-500">Client: {getClientName(task.client_id)}</div>
+                      <div className="flex gap-2 pt-2 border-t border-slate-200">
+                        {canEditTasks && task.created_by === user?.id && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(task)}
+                          >
+                            <Edit className="h-4 w-4 text-blue-600" />
+                          </Button>
+                        )}
+                        {canDeleteTasks && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(task.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+            {filteredTasks.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-slate-500 text-lg">No tasks found</p>
+                <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
               </div>
-            </DashboardStripCard>
-          );
-        })}
-      </div>
-
-      {filteredTasks.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-slate-500 text-lg">No tasks found</p>
-          <p className="text-slate-400 text-sm mt-1">
-            Try adjusting your filters or create a new task
-          </p>
-        </div>
-      )}
-
-    </div>
-  </Card>
-) : (
+            )}
+          </Card>
+        ) : (
           <motion.div
             className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6"
             variants={containerVariants}
           >
-            <DragDropContext onDragEnd={onDragEnd}>
-              {columns.map((col) => (
-                <motion.div key={col.status} variants={itemVariants} className="space-y-4">
-                  <h2 className="text-lg sm:text-xl font-semibold text-slate-800 flex items-center gap-2">
-                    {col.title}
-                    <Badge className="bg-slate-200 text-slate-600">{col.count}</Badge>
-                  </h2>
-                  <Droppable droppableId={col.status}>
-                    {(provided) => (
-                      <div
-                        ref={provided.innerRef}
-                        {...provided.droppableProps}
-                        className="space-y-4 min-h-[200px]"
-                      >
-                        {filteredTasks.filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t))).map((task, index) => {
-                          const taskIsOverdue = isOverdue(task);
-                          return (
-                            <Draggable key={task.id} draggableId={task.id.toString()} index={index}>
-                              {(provided) => (
-                                <motion.div
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  {...provided.dragHandleProps}
-                                  variants={itemVariants}
-                                >
-                                  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
-
-                                    <div className="flex flex-col h-full">
-
-                                      <h3 className="font-semibold text-sm mb-2 line-clamp-2">
-                                        {task.title}
-                                      </h3>
-
-                                      <p className="text-xs text-slate-600 line-clamp-2 mb-3">
-                                        {task.description || 'No description'}
-                                      </p>
-
-                                      <div className="text-xs text-slate-500 mt-auto">
-                                        Due: {task.due_date
-                                          ? format(new Date(task.due_date), 'MMM dd, yyyy')
-                                          : '-'}
-                                      </div>
-
-                                    </div>
-
-                                  </DashboardStripCard>
-                                </motion.div>
+            {[
+              { status: 'pending', title: 'To Do', count: stats.todo },
+              { status: 'in_progress', title: 'In Progress', count: stats.inProgress },
+              { status: 'completed', title: 'Completed', count: stats.completed },
+            ].map((col) => (
+              <motion.div key={col.status} variants={itemVariants} className="space-y-4">
+                <h2 className="text-lg sm:text-xl font-semibold text-slate-800 flex items-center gap-2">
+                  {col.title}
+                  <Badge className="bg-slate-200 text-slate-600">{col.count}</Badge>
+                </h2>
+                <div className="space-y-4 min-h-[200px]">
+                  {filteredTasks.filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t))).map((task) => {
+                    const taskIsOverdue = isOverdue(task);
+                    const displayStatus = getDisplayStatus(task);
+                    const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+                    const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+                    return (
+                      <motion.div key={task.id} variants={itemVariants} className="h-full">
+                        <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+                          <div className="flex flex-col h-full">
+                            {/* Status & Priority Tags */}
+                            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                              <Badge
+                                className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700"
+                              >
+                                {statusStyle.label}
+                              </Badge>
+                              <Badge
+                                className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700"
+                              >
+                                {priorityStyle.label}
+                              </Badge>
+                              {task.is_recurring && (
+                                <Badge className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                                  <Repeat className="h-3 w-3 inline mr-1" />
+                                  Recurring
+                                </Badge>
                               )}
-                            </Draggable>
-                          );
-                        })}
-                        {provided.placeholder}
-                      </div>
-                    )}
-                  </Droppable>
-                </motion.div>
-              ))}
-            </DragDropContext>
+                              {task.created_by === user?.id && (
+                                <Badge className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                                  Assigned By You
+                                </Badge>
+                              )}
+                            </div>
+                            {/* Task Title - Fixed height */}
+                            <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
+                              {task.title}
+                            </h3>
+                            <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd, yyyy') : 'N/A'}`}</div>
+                            {/* Description - Fixed height for equal cards */}
+                            <div className="h-[40px] mb-3">
+                              {task.description ? (
+                                <p className="text-xs text-slate-600 line-clamp-2">{task.description}</p>
+                              ) : (
+                                <p className="text-xs text-slate-400 italic">No description</p>
+                              )}
+                            </div>
+                            {/* Meta Info - flex-1 to push footer down */}
+                            <div className="space-y-1.5 text-xs text-slate-500 flex-1 min-h-[50px]">
+                              {task.client_id && (
+                                <div className="flex items-center gap-2">
+                                  <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
+                                  <span className="truncate">{getClientName(task.client_id)}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <User className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="truncate">{getUserName(task.assigned_to)}</span>
+                              </div>
+                              {task.due_date && (
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+                                  <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
+                                </div>
+                              )}
+                            </div>
+                            {/* Quick Status Change Buttons - Consistent pill shape */}
+                            {(canEditTasks && (
+                              task.assigned_to === user?.id ||
+                              task.sub_assignees?.includes(user?.id) ||
+                              task.created_by === user?.id
+                            )) && (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-auto pt-3 border-t border-slate-200/50">
+                                <button
+                                  onClick={() => handleQuickStatusChange(task, 'pending')}
+                                  className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                                    ${task.status === 'pending'
+                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                                  title="Mark as To Do"
+                                  data-testid={`status-todo-${task.id}`}
+                                >
+                                  <Circle className="h-3.5 w-3.5" />
+                                  <span>To Do</span>
+                                </button>
+                                <button
+                                  onClick={() => handleQuickStatusChange(task, 'in_progress')}
+                                  className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                                    ${task.status === 'in_progress'
+                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                                  title="Mark as In Progress"
+                                  data-testid={`status-progress-${task.id}`}
+                                >
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                  <span>Progress</span>
+                                </button>
+                                <button
+                                  onClick={() => handleQuickStatusChange(task, 'completed')}
+                                  className={`flex items-center justify-center gap-1.5 h-8 rounded-full text-xs font-semibold transition-all
+                                    ${task.status === 'completed'
+                                      ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                                  title="Mark as Completed"
+                                  data-testid={`status-done-${task.id}`}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  <span>Done</span>
+                                </button>
+                              </div>
+                            )}
+                            {/* Category & Actions */}
+                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
+                              <Badge
+                                variant="outline"
+                                className="text-xs rounded-lg px-2.5 py-1"
+                                style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
+                              >
+                                {getCategoryLabel(task.category)}
+                              </Badge>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {canEditTasks && task.created_by === user?.id && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg hover:bg-blue-50"
+                                  onClick={() => handleEdit(task)}
+                                  data-testid={`edit-task-${task.id}`}
+                                >
+                                  <Edit className="h-4 w-4 text-blue-600" />
+                                </Button>
+                                )}
+                                {canDeleteTasks && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg hover:bg-red-50"
+                                  onClick={() => handleDelete(task.id)}
+                                  data-testid={`delete-task-${task.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </DashboardStripCard>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            ))}
             {filteredTasks.length === 0 && (
               <motion.div variants={itemVariants} className="col-span-full text-center py-12">
                 <p className="text-slate-500 text-lg">No tasks found</p>
