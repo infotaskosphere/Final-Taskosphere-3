@@ -321,32 +321,40 @@ export default function Dashboard() {
       setTodos([]);
     }
   };
-  const fetchDashboardData = async () => {
+const fetchDashboardData = async () => {
+  try {
+    const [
+      statsRes,
+      tasksRes,
+      dueDatesRes,
+      chatRes
+    ] = await Promise.all([
+      api.get('/dashboard/stats'),
+      api.get('/tasks'),
+      api.get('/duedates/upcoming?days=30'),
+      api.get('/chat/groups')   // 👈 ADD THIS
+    ]);
+
+    setStats(statsRes.data);
+    setRecentTasks(tasksRes.data?.slice(0, 5) || []);
+    setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
+    setChatMessages(chatRes.data || []);
+
+    // Rankings wrapped safely
     try {
-      const [statsRes, tasksRes, dueDatesRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-        api.get('/duedates/upcoming?days=30'),
-      ]);
-      setStats(statsRes.data);
-      setRecentTasks(tasksRes.data?.slice(0, 5) || []);
-      setUpcomingDueDates(dueDatesRes.data?.slice(0, 5) || []);
-      // Rankings wrapped in try-catch to handle 500/CORS gracefully
-      try {
-        const rankingRes = await api.get(
-          `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
-        );
-        setRankings(rankingRes.data?.rankings || []);
-      } catch (rankErr) {
-        console.warn("Rankings endpoint failed:", rankErr);
-        setRankings([]); // fallback → no crash
-      }
-      
-      setChatMessages(chatRes.data || []);
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      const rankingRes = await api.get(
+        `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
+      );
+      setRankings(rankingRes.data?.rankings || []);
+    } catch (rankErr) {
+      console.warn("Rankings endpoint failed:", rankErr);
+      setRankings([]);
     }
-  };
+
+  } catch (error) {
+    console.error('Failed to fetch dashboard data:', error);
+  }
+};
   const fetchTodayAttendance = async () => {
     try {
       const res = await api.get('/attendance/today');
