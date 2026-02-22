@@ -847,7 +847,7 @@ const handleSendQuickReply = async () => {
           className="text-xs bg-white p-2 rounded-md shadow-sm"
         >
           <span className="font-semibold text-slate-700">
-            {msg.sender_name || 'User'
+            {msg.sender_name || 'User'}
           </span>{" "}
           {msg.content}
         </div>
