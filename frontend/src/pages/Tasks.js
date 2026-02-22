@@ -79,17 +79,13 @@ const getStripeClass = (task, isOverdue) => {
 const getStripeBg = (task, isOverdue) => {
   const p = (task.priority || '').toLowerCase().trim();
   const s = (task.status || '').toLowerCase().trim();
-
   if (isOverdue) return 'bg-red-600';
-
   if (s === 'completed') return 'bg-blue-700';
   if (s === 'in_progress') return 'bg-purple-500';
-
   if (p === 'critical') return 'bg-red-600';
   if (p === 'high') return 'bg-orange-500';
   if (p === 'medium') return 'bg-yellow-400';
   if (p === 'low') return 'bg-green-500';
-
   return 'bg-slate-300';
 };
 // Animation variants
@@ -101,6 +97,31 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+
+const DashboardStripCard = ({
+  stripeColor,
+  children,
+  className = "",
+}) => {
+  return (
+    <div
+      className={`relative rounded-xl border border-slate-200 bg-white
+                  hover:shadow-md transition-all duration-200
+                  overflow-hidden ${className}`}
+    >
+      {/* Stripe */}
+      <div
+        className={`absolute left-0 top-0 h-full w-2 rounded-l-xl ${stripeColor}`}
+      />
+
+      {/* Content */}
+      <div className="pl-6 pr-4 py-4">
+        {children}
+      </div>
+    </div>
+  );
+};
+
 export default function Tasks() {
   const { user, hasPermission } = useAuth();
   const canAssignTasks = hasPermission("can_assign_tasks");
@@ -610,7 +631,7 @@ export default function Tasks() {
                         data-testid="task-recurring-switch"
                       />
                     </div>
-             
+            
                     {formData.is_recurring && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
                         <div className="space-y-2">
@@ -722,7 +743,6 @@ export default function Tasks() {
             data-testid="task-search-input"
           />
         </div>
- 
         <div className="flex items-center gap-3">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-36 bg-white">
@@ -793,138 +813,96 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
         {viewMode === 'list' ? (
           <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                  <tr>
-                    <th className="p-4 text-left">Task</th>
-                    <th className="p-4 text-left">Client</th>
-                    <th className="p-4 text-left">Priority</th>
-                    <th className="p-4 text-left">Status</th>
-                    <th className="p-4 text-left">Task Update</th>
-                    <th className="p-4 text-left">Assigned To</th>
-                    <th className="p-4 text-left">Assigned By</th>
-                    <th className="p-4 text-left">DOA</th>
-                    <th className="p-4 text-left">Due Date</th>
-                    <th className="p-4 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTasks.map((task) => {
-                    const taskIsOverdue = isOverdue(task);
-                    const displayStatus = getDisplayStatus(task);
-                    const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-                    const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-                    return (
-                      <tr
-  key={task.id}
-  className={`relative border border-slate-200 bg-white transition-all
-  hover:shadow-lg hover:border-blue-400
-  ${getStripeClass(task, taskIsOverdue)}
-`}
->
-                        <td className="p-4">{task.title}</td>
-                        <td className="p-4">{getClientName(task.client_id)}</td>
-                        <td className="p-4">
-                          <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
-                        </td>
-                        <td className="p-4">
-                          <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
-                        </td>
-                        <td className="p-4">
-                          <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
-                            <SelectTrigger className="w-32 bg-white border-slate-300">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending">To Do</SelectItem>
-                              <SelectItem value="in_progress">In Progress</SelectItem>
-                              <SelectItem value="completed">Done</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="p-4">{getUserName(task.assigned_to)}</td>
-                        <td className="p-4">{getUserName(task.created_by)}</td>
-                        <td className="p-4">{task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}</td>
-                        <td className="p-4">{task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</td>
-                        <td className="p-4 flex gap-2">
-                          {canEditTasks && task.created_by === user?.id && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(task)}
-                              data-testid={`edit-task-${task.id}`}
-                            >
-                              <Edit className="h-4 w-4 text-blue-600" />
-                            </Button>
-                          )}
-                          {canDeleteTasks && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(task.id)}
-                              data-testid={`delete-task-${task.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-600" />
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <div className="hidden sm:block space-y-3 p-4">
+  {filteredTasks.map((task) => {
+    const taskIsOverdue = isOverdue(task);
+
+    return (
+      <DashboardStripCard
+        key={task.id}
+        stripeColor={getStripeBg(task, taskIsOverdue)}
+      >
+        <div className="grid grid-cols-10 items-center gap-4 text-sm">
+
+          <div className="col-span-2 font-semibold">
+            {task.title}
+          </div>
+
+          <div className="col-span-1 text-slate-600">
+            {getClientName(task.client_id)}
+          </div>
+
+          <div className="col-span-1">
+            {task.priority?.toUpperCase()}
+          </div>
+
+          <div className="col-span-1">
+            {task.status === 'pending'
+              ? 'To Do'
+              : task.status === 'in_progress'
+              ? 'In Progress'
+              : 'Completed'}
+          </div>
+
+          <div className="col-span-2 text-slate-600">
+            {getUserName(task.assigned_to)}
+          </div>
+
+          <div className="col-span-1 text-slate-500">
+            {task.created_at
+              ? format(new Date(task.created_at), 'MMM dd')
+              : '-'}
+          </div>
+
+          <div className="col-span-1 text-slate-500">
+            {task.due_date
+              ? format(new Date(task.due_date), 'MMM dd')
+              : '-'}
+          </div>
+
+          <div className="col-span-1 flex justify-end gap-2">
+            {canEditTasks && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleEdit(task)}
+              >
+                <Edit className="h-4 w-4 text-blue-600" />
+              </Button>
+            )}
+            {canDeleteTasks && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleDelete(task.id)}
+              >
+                <Trash2 className="h-4 w-4 text-red-600" />
+              </Button>
+            )}
+          </div>
+
+        </div>
+      </DashboardStripCard>
+    );
+  })}
+</div>
             <div className="block sm:hidden space-y-3 p-4">
               {filteredTasks.map((task) => {
                 const taskIsOverdue = isOverdue(task);
-                const displayStatus = getDisplayStatus(task);
-                const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-                const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                 return (
-<div
-  key={task.id}
-  className="relative rounded-xl border border-slate-200 bg-white
-             hover:shadow-lg hover:border-blue-400
-             transition-all overflow-hidden"
->
-  {/* LEFT STRIPE */}
-  <div
-    className={`absolute left-0 top-0 h-full w-2 rounded-l-xl
-      ${getStripeBg(task, taskIsOverdue)}`}
-  />
-
-  {/* CONTENT */}
-  <div className="pl-6 pr-4 py-4 space-y-2">
+<DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+  <div className="space-y-2">
     <h3 className="font-semibold text-base">{task.title}</h3>
-
-    <div className="text-xs font-bold">
-      Assigned to: {getUserName(task.assigned_to)}
-    </div>
-
     <p className="text-sm text-slate-600 line-clamp-2">
       {task.description || 'No description'}
     </p>
-
-    <div className="flex gap-2">
-      <Badge className="bg-slate-100 text-slate-700">
-        {task.priority?.toUpperCase()}
-      </Badge>
-
-      <Badge className="bg-slate-100 text-slate-700">
-        {task.status === 'pending'
-          ? 'To Do'
-          : task.status === 'in_progress'
-          ? 'In Progress'
-          : 'Completed'}
-      </Badge>
-    </div>
-
     <div className="text-xs text-slate-500">
-      Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}
+      Due: {task.due_date
+        ? format(new Date(task.due_date), 'MMM dd')
+        : '-'}
     </div>
   </div>
-</div>
+</DashboardStripCard>
                 );
               })}
             </div>
@@ -953,92 +931,27 @@ export default function Tasks() {
                 <div className="space-y-4 min-h-[200px]">
                   {filteredTasks.filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t))).map((task) => {
                     const taskIsOverdue = isOverdue(task);
-                    const displayStatus = getDisplayStatus(task);
-                    const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-                    const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                     return (
-<motion.div key={task.id} variants={itemVariants} className="h-full">
-  <div
-    className="relative rounded-xl border border-slate-200 bg-white
-               hover:shadow-lg hover:border-blue-400
-               transition-all overflow-hidden group"
-    data-testid={`task-card-${task.id}`}
-  >
-    {/* LEFT STRIPE */}
-    <div
-      className={`absolute left-0 top-0 h-full w-2 rounded-l-xl
-        ${getStripeBg(task, taskIsOverdue)}`}
-    />
+<motion.div key={task.id} variants={itemVariants}>
+  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+    <div className="flex flex-col h-full">
 
-    {/* CONTENT */}
-    <div className="pl-6 pr-4 py-4 flex flex-col h-full">
-      
-      {/* STATUS & PRIORITY */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <Badge className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
-          {task.status === 'pending'
-            ? 'To Do'
-            : task.status === 'in_progress'
-            ? 'In Progress'
-            : 'Completed'}
-        </Badge>
-
-        <Badge className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
-          {task.priority?.toUpperCase()}
-        </Badge>
-      </div>
-
-      {/* TITLE */}
-      <h3 className="font-semibold text-sm mb-2 line-clamp-2 min-h-[40px]">
+      <h3 className="font-semibold text-sm line-clamp-2 mb-2">
         {task.title}
       </h3>
 
-      {/* META */}
-      <div className="text-xs font-bold mb-2">
-        Assigned to: {getUserName(task.assigned_to)} |
-        DOA: {task.created_at ? format(new Date(task.created_at), 'MMM dd, yyyy') : 'N/A'}
+      <p className="text-xs text-slate-600 line-clamp-2 mb-3">
+        {task.description || 'No description'}
+      </p>
+
+      <div className="text-xs text-slate-500 mt-auto">
+        Due: {task.due_date
+          ? format(new Date(task.due_date), 'MMM dd, yyyy')
+          : '-'}
       </div>
 
-      {/* DESCRIPTION */}
-      <div className="h-[40px] mb-3">
-        {task.description ? (
-          <p className="text-xs text-slate-600 line-clamp-2">
-            {task.description}
-          </p>
-        ) : (
-          <p className="text-xs text-slate-400 italic">No description</p>
-        )}
-      </div>
-
-      {/* FOOTER */}
-      <div className="mt-auto pt-3 border-t border-slate-200 flex justify-between items-center">
-        <span className="text-xs text-slate-500">
-          Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd, yyyy') : '-'}
-        </span>
-
-        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          {canEditTasks && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleEdit(task)}
-            >
-              <Edit className="h-4 w-4 text-blue-600" />
-            </Button>
-          )}
-          {canDeleteTasks && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleDelete(task.id)}
-            >
-              <Trash2 className="h-4 w-4 text-red-600" />
-            </Button>
-          )}
-        </div>
-      </div>
     </div>
-  </div>
+  </DashboardStripCard>
 </motion.div>
                     );
                   })}
