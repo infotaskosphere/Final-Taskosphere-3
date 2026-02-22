@@ -854,7 +854,6 @@ const handleSendQuickReplyPreview = async () => {
       ))
     )}
   </div>
-
   <div className="flex gap-2">
     <input
       value={chatInput}
@@ -862,12 +861,15 @@ const handleSendQuickReplyPreview = async () => {
       placeholder="Quick reply..."
       className="flex-1 p-2 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
       onKeyDown={(e) => {
-        if (e.key === 'Enter') handleSendQuickReply();
+        if (e.key === 'Enter') handleSendQuickReplyPreview();
       }}
-    />
-    <Button size="sm" onClick={handleSendQuickReplyPreview}
-      Send
-    </Button>
+      />
+        
+      <Button
+        size="sm" onClick={handleSendQuickReplyPreview}
+      >
+        Send
+      </Button>
   </div>
 </div>
           </CardContent>
