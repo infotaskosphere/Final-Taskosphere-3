@@ -27,11 +27,12 @@ from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 import requests
+ALLOWED_TELEGRAM_IDS = []
 
-ALLOWED_TELEGRAM_IDS = [
-    int(os.getenv("980269473"))
-]
-
+allowed_id = os.getenv("ALLOWED_TELEGRAM_ID")
+if allowed_id:
+    ALLOWED_TELEGRAM_IDS.append(int(allowed_id))
+    
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -681,7 +682,7 @@ async def record_attendance(data: dict, current_user: User = Depends(get_current
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
                 expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
-   
+  
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
@@ -917,6 +918,8 @@ async def patch_task(
     existing_task = await db.tasks.find_one({"id": task_id})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if updates.get("status") == "completed":
+        updates["completed_at"] = datetime.now(timezone.utc).isoformat()
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.tasks.update_one(
         {"id": task_id},
@@ -974,6 +977,56 @@ async def delete_task(task_id: str, current_user: User = Depends(check_permissio
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task deleted successfully"}
+@api_router.get("/tasks/{task_id}/export-log-pdf")
+async def export_task_log_pdf(
+    task_id: str,
+    current_user: User = Depends(check_permission("can_view_audit_logs"))
+):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    logs = await db.audit_logs.find(
+        {"module": "task", "record_id": task_id},
+        {"_id": 0}
+    ).sort("timestamp", 1).to_list(1000)
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    pdf.cell(200, 10, txt="Task Lifecycle Report", ln=True, align="C")
+    pdf.ln(5)
+
+    pdf.multi_cell(0, 8, f"Title: {task.get('title')}")
+    pdf.multi_cell(0, 8, f"Description: {task.get('description')}")
+    pdf.multi_cell(0, 8, f"Assigned To: {task.get('assigned_to')}")
+    pdf.multi_cell(0, 8, f"Created By: {task.get('created_by')}")
+    pdf.multi_cell(0, 8, f"Created At: {task.get('created_at')}")
+    pdf.ln(5)
+
+    pdf.cell(200, 10, txt="Timeline:", ln=True)
+    pdf.ln(5)
+
+    for log in logs:
+        pdf.multi_cell(
+            0,
+            8,
+            f"{log.get('timestamp')} - {log.get('action')} by {log.get('user_name')}"
+        )
+        if log.get("old_data"):
+            pdf.multi_cell(0, 8, f"Details: {log.get('old_data')}")
+        pdf.ln(3)
+
+    output = BytesIO()
+    output.write(pdf.output(dest="S").encode("latin1"))
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
+    )
 # Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
@@ -1456,6 +1509,41 @@ async def get_staff_attendance_report(
         "total_staff": len(result),
         "staff_report": result
     }
+@api_router.get("/attendance/export-pdf")
+async def export_attendance_pdf(
+    user_id: str,
+    current_user: User = Depends(check_permission("can_view_attendance"))
+):
+    records = await db.attendance.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("date", 1).to_list(1000)
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    pdf.cell(200, 10, txt="Attendance Report", ln=True, align="C")
+    pdf.ln(5)
+
+    for rec in records:
+        pdf.multi_cell(
+            0,
+            8,
+            f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
+            f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
+        )
+        pdf.ln(2)
+
+    output = BytesIO()
+    output.write(pdf.output(dest="S").encode("latin1"))
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
+    )
 # DUE DATE ROUTES
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
@@ -2286,6 +2374,42 @@ async def auto_daily_reminder(request, call_next):
         await db.staff_activity.delete_many({
             "timestamp": {"$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()}
         })
+        # Calculate retention dates
+        now = datetime.now(timezone.utc)
+        thirty_days_ago = (now - timedelta(days=30)).isoformat()
+        forty_five_days_ago = (now - timedelta(days=45)).isoformat()
+
+        # 1️⃣ Delete completed tasks after 30 days
+        await db.tasks.delete_many({
+            "status": "completed",
+            "completed_at": {"$lte": thirty_days_ago}
+        })
+        # 2️⃣ Delete chat messages older than 30 days
+        old_messages = await db.chat_messages.find({
+            "created_at": {"$lte": thirty_days_ago}
+        }).to_list(5000)
+
+        # Delete files if stored locally
+        for msg in old_messages:
+            if msg.get("file_url"):
+                try:
+                    if os.path.exists(msg["file_url"]):
+                        os.remove(msg["file_url"])
+                except:
+                    pass
+
+        await db.chat_messages.delete_many({
+            "created_at": {"$lte": thirty_days_ago}
+        })
+        groups = await db.chat_groups.find({}, {"_id": 0}).to_list(1000)
+
+        for group in groups:
+            count = await db.chat_messages.count_documents({"group_id": group["id"]})
+            if count == 0:
+                await db.chat_groups.delete_one({"id": group["id"]})
+        await db.attendance.delete_many({
+            "date": {"$lte": (now - timedelta(days=45)).date().isoformat()}
+        })
     except Exception as e:
         logger.error(f"Auto reminder middleware error: {str(e)}")
     response = await call_next(request)
@@ -2546,16 +2670,13 @@ async def get_audit_logs(
 ):
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(5000)
     return logs
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{8470592910:AAHlbJhn_BJUIxPVqQAQ5OUdQ7FE0hqVA4k}/sendMessage"
-    requests.post(url, json={
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, json={
         "chat_id": chat_id,
         "text": text
     })
-
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -2614,7 +2735,6 @@ async def telegram_webhook(request: Request):
             )
             send_message(chat_id, "✅ Task Created Successfully!")
             return {"ok": True}
-
         # This runs only for non-"priority" steps (after setting next_step/reply)
         if next_step and reply:
             await db.telegram_sessions.update_one(
@@ -2623,32 +2743,51 @@ async def telegram_webhook(request: Request):
             )
             send_message(chat_id, reply)
     return {"ok": True}
+    
+async def create_task_from_session(data, telegram_user_id, chat_id):
+    try:
+        due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
+    except ValueError:
+        send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
+        return
 
-async def create_task_from_session(data):
-    # Convert date
-    due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
-
-    # Split assignees
     names = [n.strip() for n in data["assign"].split(",")]
-
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
 
-    # Find users in DB
-    primary_user = await db.users.find_one({"name": primary_name})
-    co_users = await db.users.find({"name": {"$in": co_names}}).to_list(None)
+    # 🔍 Case-insensitive primary user search
+    primary_user = await db.users.find_one(
+        {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
+    )
+
+    if not primary_user:
+        send_message(chat_id, f"❌ Assignee '{primary_name}' not found. Task cancelled.")
+        return
+
+    # 🔍 Case-insensitive co-user search
+    co_users = await db.users.find({
+        "full_name": {"$in": co_names}
+    }).to_list(None)
+
+    # 🔍 Find creator from telegram_id
+    creator = await db.users.find_one({"telegram_id": telegram_user_id})
 
     task = {
+        "id": str(uuid.uuid4()),
         "title": data["title"],
         "description": data["description"],
-        "due_date": due_date,
-        "assignee": primary_user["_id"] if primary_user else None,
-        "co_assignees": [u["_id"] for u in co_users],
-        "department": data["department"],
-        "priority": data["priority"],
-        "status": "To Do",
-        "source": "telegram",
-        "created_at": datetime.utcnow()
+        "assigned_to": primary_user["id"],
+        "sub_assignees": [u["id"] for u in co_users],
+        "due_date": due_date.isoformat(),
+        "priority": data["priority"].lower(),
+        "status": "pending",
+        "category": data.get("department", "other"),
+        "created_by": creator["id"] if creator else primary_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "telegram"
     }
 
     await db.tasks.insert_one(task)
+
+    send_message(chat_id, "✅ Task Created Successfully!")
