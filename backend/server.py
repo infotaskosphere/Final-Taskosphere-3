@@ -1955,8 +1955,47 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
                 client["days_until_birthday"] = days_until
                 upcoming.append(client)
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
-# DASHBOARD ROUTES
-# Enhanced Dashboard Stats
+@api_router.post("/clients/import")
+async def import_clients_from_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    content = await file.read()
+    content_str = content.decode("utf-8")
+    csv_reader = csv.DictReader(StringIO(content_str))
+
+    created_count = 0
+
+    for row in csv_reader:
+        try:
+            client = Client(
+                company_name=row.get("company_name"),
+                client_type=row.get("client_type"),
+                email=row.get("email"),
+                phone=row.get("phone"),
+                services=row.get("services", "").split(",") if row.get("services") else [],
+                assigned_to=row.get("assigned_to"),
+                created_by=current_user.id
+            )
+
+            doc = client.model_dump()
+            doc["created_at"] = doc["created_at"].isoformat()
+
+            await db.clients.insert_one(doc)
+            created_count += 1
+
+        except Exception as e:
+            print("Row error:", row, str(e))
+            continue
+
+    return {
+        "message": "Clients imported successfully",
+        "created_count": created_count
+    }
+--------------------------------# DASHBOARD ROUTES -----------------------------------  # Enhanced Dashboard Stats
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     """Get comprehensive dashboard statistics"""
