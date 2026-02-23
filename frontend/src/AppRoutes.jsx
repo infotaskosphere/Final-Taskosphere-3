@@ -5,6 +5,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 
 /* Lazy Pages */
 const Login = lazy(() => import("@/pages/Login"));
+const TaskAudit = lazy(() => import("@/pages/TaskAudit"));
 const Register = lazy(() => import("@/pages/Register"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
@@ -20,21 +21,21 @@ const Chat = lazy(() => import("@/pages/Chat"));
 
 /* Route Guards */
 
-const ProtectedRoute = ({ children }) => {
+const Protected = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-const PublicRoute = ({ children }) => {
+const Public = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (user) return <Navigate to="/dashboard" replace />;
   return children;
 };
 
-const PermissionRoute = ({ permission, children }) => {
+const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -43,31 +44,31 @@ const PermissionRoute = ({ permission, children }) => {
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-/* Routes */
+/* s */
 
-function AppRoutes() {
+function Apps() {
   return (
     <Suspense fallback={<div className="p-10">Loading...</div>}>
-      <Routes>
+      <s>
 
-        <Route path="/" element={
-          <PublicRoute><Login /></PublicRoute>
+        < path="/" element={
+          <Public><Login /></Public>
         } />
 
-        <Route path="/login" element={
-          <PublicRoute><Login /></PublicRoute>
+        < path="/login" element={
+          <Public><Login /></Public>
         } />
 
-        <Route path="/register" element={
-          <PublicRoute><Register /></PublicRoute>
+        < path="/register" element={
+          <Public><Register /></Public>
         } />
 
-        <Route path="/dashboard" element={
-          <ProtectedRoute><Dashboard /></ProtectedRoute>
+        < path="/dashboard" element={
+          <Protected><Dashboard /></Protected>
         } />
 
-        <Route path="/tasks" element={
-          <ProtectedRoute><Tasks /></ProtectedRoute>
+        < path="/tasks" element={
+          <Protected><Tasks /></Protected>
         } />
 
         <Route path="/dsc" element={
@@ -121,6 +122,12 @@ function AppRoutes() {
             <Dashboard />
          </PermissionRoute>
         } />
+        
+        <Route path="/task-audit" element={
+          <PermissionRoute permission="can_view_audit_logs">
+            <TaskAudit />
+        </PermissionRoute>
+        }/>
         
         <Route path="*" element={<Navigate to="/login" replace />} />
 
