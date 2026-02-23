@@ -138,35 +138,21 @@ export default function Clients() {
   }, [clients, searchTerm, serviceFilter, statusFilter]);
   const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
   // ==================== HANDLERS ====================
-const handleImportCSV = (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  setImportLoading(true);
-
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: async (results) => {
-      let count = 0;
-
-      for (let row of results.data) {
-        if (!row.company_name || !row.email || !row.phone) {
-          console.warn("Skipping invalid row:", row);
-          continue;
-        }
-
-        count++;
-      }
-
-      setImportLoading(false);
-    },
-    error: (err) => {
-      console.error(err);
-      setImportLoading(false);
-    }
-  });
-};
+  const handleImportCSV = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setImportLoading(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        let count = 0;
+        for (let row of results.data) {
+          if (!row.company_name || !row.email || !row.phone) {
+            console.warn("Skipping invalid row:", row);
+            continue;
+          }
+          count++;
           try {
             await api.post('/clients', {
               company_name: row.company_name,
@@ -182,8 +168,13 @@ const handleImportCSV = (event) => {
           } catch (e) { console.error("Import error:", e.response?.data || e); }
         }
         setImportLoading(false);
+        setImportLoading(false);
         if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
         if (fileInputRef.current) fileInputRef.current.value = '';
+      },
+      error: (err) => {
+        console.error(err);
+        setImportLoading(false);
       }
     });
   };
