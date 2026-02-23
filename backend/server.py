@@ -2800,20 +2800,22 @@ async def get_audit_logs(
 # ==============================
 # TELEGRAM BOT CONFIGURATION
 # ==============================
+import httpx
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 ALLOWED_TELEGRAM_IDS = []
 allowed_ids = os.getenv("ALLOWED_TELEGRAM_IDS")
 if allowed_ids:
     ALLOWED_TELEGRAM_IDS = [int(x.strip()) for x in allowed_ids.split(",")]
-def send_message(chat_id, text):
+
+async def send_message(chat_id: int, text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={
+    async with httpx.AsyncClient() as client:
+        await client.post(url, json={
             "chat_id": chat_id,
             "text": text
         })
-    except Exception as e:
-        logger.error(f"Telegram send error: {str(e)}")
 # ==============================
 # TELEGRAM WEBHOOK
 # ==============================
@@ -2825,9 +2827,15 @@ async def telegram_webhook(request: Request):
     if "message" not in data:
         return {"ok": True}
 
+    telegram_user_id = data["message"]["from"]["id"]
     chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text", "")
+    text = data["message"].get("text", "").strip()
 
+    # 🔐 Allowed users check
+    if ALLOWED_TELEGRAM_IDS and telegram_user_id not in ALLOWED_TELEGRAM_IDS:
+        return {"ok": True}
+
+    # Simple test response
     await send_message(chat_id, f"Echo: {text}")
 
     return {"ok": True}
