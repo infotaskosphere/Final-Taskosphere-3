@@ -51,16 +51,25 @@ export default function DSCRegister() {
  useEffect(() => {
  fetchDSC();
  }, []);
-
  const fetchDSC = async () => {
- try {
- const response = await api.get('/dsc');
- setDscList(Array.isArray(response.data) ? response.data : []);
- } catch (error) {
- toast.error('Failed to fetch DSC');
- }
- };
+  try {
+    const response = await api.get('/dsc');
 
+    console.log("DSC API Response:", response.data);
+
+    const normalized =
+      Array.isArray(response.data)
+        ? response.data
+        : response.data?.data ||
+          response.data?.items ||
+          response.data?.results ||
+          [];
+
+    setDscList(normalized);
+  } catch (error) {
+    toast.error('Failed to fetch DSC');
+  }
+ };
  const handleSubmit = async (e) => {
  e.preventDefault();
  setLoading(true);
