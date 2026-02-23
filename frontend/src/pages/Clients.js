@@ -138,32 +138,35 @@ export default function Clients() {
   }, [clients, searchTerm, serviceFilter, statusFilter]);
   const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
   // ==================== HANDLERS ====================
-  const downloadTemplate = () => {
-    const headers = ['company_name', 'client_type', 'email', 'phone', 'birthday', 'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1', 'services', 'notes'];
-    const csvContent = headers.join(',') + '\n' + '"ABC Enterprises","proprietor","company@example.com","+919876543210","2025-04-15","Rahul Sharma","Director","rahul@abc.com","GST,Income Tax","Notes"';
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'clients-import-template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-  const handleImportCSV = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;tch (e) { console.error(e); }
-    setImportLoading(true);
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        let count = 0;
-        for (let row of results.data) {
-          if (!row.company_name || !row.email || !row.phone) {
-             console.warn("Skipping invalid row:", row);
-             continue;
-          }
+const handleImportCSV = (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  setImportLoading(true);
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (results) => {
+      let count = 0;
+
+      for (let row of results.data) {
+        if (!row.company_name || !row.email || !row.phone) {
+          console.warn("Skipping invalid row:", row);
+          continue;
+        }
+
+        count++;
+      }
+
+      setImportLoading(false);
+    },
+    error: (err) => {
+      console.error(err);
+      setImportLoading(false);
+    }
+  });
+};
           try {
             await api.post('/clients', {
               company_name: row.company_name,
