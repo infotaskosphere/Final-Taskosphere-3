@@ -100,6 +100,11 @@ def check_permission(permission_name: str):
         return current_user
     return dependency
 app = FastAPI()
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 @app.on_event("startup")
 async def create_indexes():
     await db.tasks.create_index("assigned_to")
