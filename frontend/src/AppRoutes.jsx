@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 /* Lazy Pages */
+const TaskAudit = lazy(() => import("@/pages/TaskAudit"));
 const Login = lazy(() => import("@/pages/Login"));
 const Register = lazy(() => import("@/pages/Register"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -115,6 +116,15 @@ function AppRoutes() {
             <Chat />
           </PermissionRoute>
         } />
+
+        <Route
+          path="/task-audit"
+          element={
+            <PermissionRoute permission="can_view_task_audit">
+              <TaskAudit />
+            </PermissionRoute>
+          }
+        />
 
         <Route path="*" element={<Navigate to="/login" replace />} />
 
