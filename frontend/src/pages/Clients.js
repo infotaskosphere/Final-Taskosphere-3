@@ -17,8 +17,9 @@ import {
   FileText, Calendar, Search, Users,
   Briefcase, BarChart3, Archive, MessageCircle, Trash
 } from 'lucide-react';
-import { format, startOfDay } from 'date-fns';
+import { format, startOfDay, parse } from 'date-fns';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid } from 'react-window';
 const CLIENT_TYPES = [
@@ -52,10 +53,11 @@ export default function Clients() {
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const fileInputRef = useRef(null);
+  const excelInputRef = useRef(null);
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
-    contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
+    contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
     email: '',
     phone: '',
     birthday: '',
@@ -154,6 +156,20 @@ export default function Clients() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+  const excelDateToJSDate = (serial) => {
+    const utc_days = Math.floor(serial - 25569);
+    const utc_value = utc_days * 86400;
+    const date_info = new Date(utc_value * 1000);
+    const fractional_day = serial - Math.floor(serial) + 0.0000001;
+    let total_seconds = Math.floor(86400 * fractional_day);
+    const seconds = total_seconds % 60;
+    total_seconds -= seconds;
+    const hours = Math.floor(total_seconds / 3600);
+    const minutes = Math.floor(total_seconds / 60) % 60;
+    return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hours, minutes, seconds);
+  };
+  const validateEmail = (email) => /^[\w-]+(\.[\w-]+)*@([\w-]+\.)+[a-zA-Z]{2,7}$/.test(email);
+  const validatePhone = (phone) => /^\d{10,}$/.test(phone);
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -176,7 +192,7 @@ export default function Clients() {
               phone: row.phone,
               birthday: row.birthday || '',
               services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-              contact_persons: [{ name: row.contact_name_1 || '', designation: row.contact_designation_1 || '', email: row.contact_email_1 || '', phone: row.contact_phone_1 || '', birthday: '' }],
+              contact_persons: [{ name: row.contact_name_1 || '', designation: row.contact_designation_1 || '', email: row.contact_email_1 || '', phone: row.contact_phone_1 || '', birthday: '', din: '' }],
               status: 'active'
             });
             count++;
@@ -191,6 +207,133 @@ export default function Clients() {
         setImportLoading(false);
       }
     });
+  };
+  const handleImportExcel = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setImportLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = e.target.result;
+        const workbook = XLSX.read(data, {type: 'binary'});
+        let count = 0;
+        for (let sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(sheet, {header: true, defval: ''});
+          let currentClient = null;
+          for (let row of rows) {
+            if (Object.values(row).every(v => v === '')) continue;
+            if (row.company_name) {
+              if (currentClient) {
+                if (currentClient.contact_persons.length === 0) {
+                  console.warn('Skipping client with no contacts:', currentClient.company_name);
+                } else if (!validateEmail(currentClient.email)) {
+                  console.warn('Invalid email for client:', currentClient.company_name);
+                } else if (!validatePhone(currentClient.phone)) {
+                  console.warn('Invalid phone for client:', currentClient.company_name);
+                } else {
+                  await api.post('/clients', currentClient);
+                  count++;
+                }
+              }
+              row.phone = '' + row.phone;
+              if (!row.company_name || !row.email || !validateEmail(row.email) || !row.phone || !validatePhone(row.phone)) {
+                console.warn('Skipping invalid new client row:', row);
+                continue;
+              }
+              let companyBirthday = row.birthday || '';
+              if (typeof companyBirthday === 'number') {
+                companyBirthday = format(excelDateToJSDate(companyBirthday), 'yyyy-MM-dd');
+              } else if (typeof companyBirthday === 'string' && companyBirthday.includes('/')) {
+                try {
+                  companyBirthday = format(parse(companyBirthday, 'dd/MM/yyyy', new Date()), 'yyyy-MM-dd');
+                } catch (e) {
+                  console.warn('Invalid company birthday:', companyBirthday);
+                  companyBirthday = '';
+                }
+              }
+              let services = row.services ? row.services.split(',').map(s => s.trim()) : [];
+              currentClient = {
+                company_name: row.company_name,
+                client_type: (row.client_type || 'proprietor').toLowerCase(),
+                email: row.email,
+                phone: row.phone,
+                birthday: companyBirthday,
+                services,
+                notes: row.notes || '',
+                assigned_to: null,
+                status: 'active',
+                contact_persons: [],
+                dsc_details: []
+              };
+            }
+            let contactBirthday = '';
+            let contactPhone = '';
+            if (!row.company_name) {
+              contactBirthday = row.birthday || '';
+              if (typeof contactBirthday === 'number') {
+                contactBirthday = format(excelDateToJSDate(contactBirthday), 'yyyy-MM-dd');
+              } else if (typeof contactBirthday === 'string' && contactBirthday.includes('/')) {
+                try {
+                  contactBirthday = format(parse(contactBirthday, 'dd/MM/yyyy', new Date()), 'yyyy-MM-dd');
+                } catch (e) {
+                  console.warn('Invalid contact birthday:', contactBirthday);
+                  contactBirthday = '';
+                }
+              }
+              contactPhone = '' + (row.phone || row.contact_phone_1 || '');
+            }
+            if (row.contact_name_1) {
+              let contactEmail = row.contact_email_1 || '';
+              if (contactEmail && !validateEmail(contactEmail)) {
+                console.warn('Invalid contact email:', contactEmail);
+                contactEmail = '';
+              }
+              if (contactPhone && !validatePhone(contactPhone)) {
+                console.warn('Invalid contact phone:', contactPhone);
+                contactPhone = '';
+              }
+              if (!row.contact_name_1) {
+                console.warn('Skipping contact without name');
+                continue;
+              }
+              currentClient.contact_persons.push({
+                name: row.contact_name_1,
+                designation: row.contact_designation_1,
+                email: contactEmail,
+                phone: contactPhone,
+                birthday: contactBirthday,
+                din: ''
+              });
+            }
+          }
+          if (currentClient) {
+            if (currentClient.contact_persons.length === 0) {
+              console.warn('Skipping client with no contacts:', currentClient.company_name);
+            } else if (!validateEmail(currentClient.email)) {
+              console.warn('Invalid email for client:', currentClient.company_name);
+            } else if (!validatePhone(currentClient.phone)) {
+              console.warn('Invalid phone for client:', currentClient.company_name);
+            } else {
+              await api.post('/clients', currentClient);
+              count++;
+            }
+          }
+        }
+        setImportLoading(false);
+        if (count > 0) {
+          toast.success(`${count} clients imported!`);
+          fetchClients();
+        }
+        if (excelInputRef.current) excelInputRef.current.value = '';
+      } catch (err) {
+        console.error(err);
+        setImportLoading(false);
+        toast.error('Failed to import excel');
+      }
+    };
+    reader.readAsBinaryString(file);
   };
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -227,8 +370,9 @@ export default function Clients() {
       ...client,
       contact_persons: client?.contact_persons?.map(cp => ({
         ...cp,
-        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : ''
-      })) || [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
+        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '',
+        din: cp?.din || ''
+      })) || [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
       status: client?.status || 'active',
       assigned_to: client?.assigned_to || 'unassigned',
@@ -242,7 +386,7 @@ export default function Clients() {
     setFormData({
       company_name: '',
       client_type: 'proprietor',
-      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '' }],
+      contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       email: '',
       phone: '',
       birthday: '',
@@ -264,7 +408,7 @@ export default function Clients() {
   }));
   const addContact = () => setFormData(p => ({
     ...p,
-    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '' }]
+    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }]
   }));
   const removeContact = (idx) => setFormData(p => ({
     ...p,
@@ -554,12 +698,19 @@ export default function Clients() {
                                 onChange={e => updateContact(idx, 'phone', e.target.value)}
                               />
                             </div>
-                            <div className="col-span-2 space-y-2">
+                            <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Birthday</Label>
                               <Input
                                 type="date"
                                 value={cp.birthday || ''}
                                 onChange={e => updateContact(idx, 'birthday', e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">DIN</Label>
+                              <Input
+                                value={cp.din || ''}
+                                onChange={e => updateContact(idx, 'din', e.target.value)}
                               />
                             </div>
                           </div>
@@ -652,6 +803,14 @@ export default function Clients() {
                         onClick={() => fileInputRef.current?.click()}
                       >
                         Add CSV
+                      </Button>
+                      <Button
+                        type="button"
+                        className="bg-indigo-600 text-white"
+                        disabled={importLoading}
+                        onClick={() => excelInputRef.current?.click()}
+                      >
+                        Add Master Data
                       </Button>
                       <Button
                         type="submit"
@@ -804,6 +963,13 @@ export default function Clients() {
         ref={fileInputRef}
         accept=".csv"
         onChange={handleImportCSV}
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={excelInputRef}
+        accept=".xlsx"
+        onChange={handleImportExcel}
         className="hidden"
       />
     </div>
