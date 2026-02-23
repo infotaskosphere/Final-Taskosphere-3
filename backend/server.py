@@ -2,6 +2,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import pytz
 import logging
 import smtplib
+import pandas as pd
 from datetime import datetime, timedelta, timezone, date
 from bson import ObjectId
 from fastapi import Request
@@ -34,7 +35,6 @@ OFFICE_LON = 72.7799
 ALLOWED_RADIUS_METERS = 200
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
- 
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -50,7 +50,7 @@ def sanitize_user_data(user_data, current_user):
             sanitized.append(u_dict)
         return sanitized
     # If single user
-    u_dict = user_data.dict() if hasattr(user_data, "dict") else dict(user_data)
+    u_dict = user_data.dict() if hasattr(u, "dict") else dict(user_data)
     return u_dict
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -1967,27 +1967,62 @@ async def import_clients_from_csv(
     content_str = content.decode("utf-8")
     csv_reader = csv.DictReader(StringIO(content_str))
     created_count = 0
+    errors = []
     for row in csv_reader:
         try:
-            client = Client(
-                company_name=row.get("company_name"),
-                client_type=row.get("client_type"),
-                email=row.get("email"),
-                phone=row.get("phone"),
-                services=row.get("services", "").split(",") if row.get("services") else [],
-                assigned_to=row.get("assigned_to"),
-                created_by=current_user.id
-            )
-            doc = client.model_dump()
-            doc["created_at"] = doc["created_at"].isoformat()
-            await db.clients.insert_one(doc)
+            company_name = row.get("company_name", "").strip()
+            client_type = row.get("client_type", "proprietor").lower()
+            email = row.get("email", "").strip()
+            phone = row.get("phone", "").strip()
+            birthday = row.get("birthday", "")
+            if birthday:
+                try:
+                    birthday = parser.parse(str(birthday)).date()
+                except:
+                    birthday = None
+            services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
+            notes = row.get("notes", "").strip()
+            contact_name = row.get("contact_name_1", "").strip()
+            contact_designation = row.get("contact_designation_1", "").strip()
+            contact_email = row.get("contact_email_1", "").strip()
+            contact_phone = row.get("contact_phone_1", "").strip()
+            # Validation
+            if not company_name or not email or not valid_email(email) or not phone or not valid_phone(phone):
+                errors.append("Invalid row: missing/invalid company/email/phone")
+                continue
+            # Contacts
+            contacts = []
+            if contact_name:
+                contacts.append({
+                    "name": contact_name,
+                    "designation": contact_designation,
+                    "email": contact_email if valid_email(contact_email) else None,
+                    "phone": contact_phone if valid_phone(contact_phone) else None,
+                    "birthday": None,
+                    "din": ""
+                })
+            client = {
+                "id": str(uuid.uuid4()),
+                "company_name": company_name,
+                "client_type": client_type,
+                "email": email,
+                "phone": phone,
+                "birthday": birthday,
+                "services": services,
+                "notes": notes,
+                "assigned_to": None,
+                "contact_persons": contacts,
+                "dsc_details": [],
+                "created_by": current_user.id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.clients.insert_one(client)
             created_count += 1
         except Exception as e:
-            print("Row error:", row, str(e))
-            continue
+            errors.append(str(e))
     return {
-        "message": "Clients imported successfully",
-        "created_count": created_count
+        "message": f"Imported {created_count} clients",
+        "errors": errors
     }
 # DASHBOARD ROUTES
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
@@ -2951,6 +2986,16 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
     send_message(chat_id, "✅ Task Created Successfully!")
     return True
 # ====================== UPDATED EXCEL IMPORT ENDPOINT ======================
+def valid_email(e):
+    if not e: return True
+    import re
+    return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", str(e).strip()))
+
+def valid_phone(p):
+    if not p: return True
+    s = str(p).strip().replace("+", "").replace(" ", "").replace("-", "")
+    return len(s) >= 10 and s.isdigit()
+
 @api_router.post("/clients/import-excel")
 async def import_clients_from_excel(
     file: UploadFile = File(...),
@@ -2960,56 +3005,152 @@ async def import_clients_from_excel(
         raise HTTPException(status_code=400, detail="Only .xlsx files allowed")
     content = await file.read()
     wb = load_workbook(BytesIO(content), read_only=True, data_only=True)
-    count = 0
+    created_count = 0
     errors = []
-    def excel_to_date(val):
-        if isinstance(val, (int, float)):
-            return (datetime(1899, 12, 30) + timedelta(days=val)).strftime("%Y-%m-%d")
-        if isinstance(val, datetime):
-            return val.strftime("%Y-%m-%d")
-        if isinstance(val, str) and "/" in val:
-            try:
-                dt = parser.parse(val, dayfirst=True)
-                return dt.strftime("%Y-%m-%d")
-            except:
-                return ""
-        return str(val) if val else ""
-    def valid_email(e):
-        if not e: return True
-        import re
-        return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", str(e).strip()))
-    def valid_phone(p):
-        if not p: return True
-        s = str(p).strip().replace("+", "").replace(" ", "").replace("-", "")
-        return len(s) >= 10 and s.isdigit()
-    # Assuming one company per file, parse "MasterData" and "Director Details"
-    master_sheet = wb.get_sheet_by_name("MasterData") if "MasterData" in wb.sheetnames else None
-    director_sheet = wb.get_sheet_by_name("Director Details") if "Director Details" in wb.sheetnames else None
-    if not master_sheet:
-        raise HTTPException(400, detail="Missing 'MasterData' sheet")
-    # Parse MasterData key-value
-    company_data = {}
-    for row in master_sheet.iter_rows(min_row=2, max_col=3, values_only=True):
-        if row[0]:
-            key = str(row[0]).strip().replace(" ", "_").lower()
-            val = row[1]
-            company_data[key] = val
-    # Extract fields
-    company_name = company_data.get("llp_name", "").strip()
-    client_type = "llp"
-    email = str(company_data.get("email_id", "")).replace("[dot]", ".").replace("[at]", "@").strip()
-    phone = "" # Not present in example
-    birthday = excel_to_date(company_data.get("date_of_incorporation"))
-    services = ["LLP"] # Default from example
-    notes = f"LLPIN: {company_data.get('llpin', '')}\nROC: {company_data.get('roc_name', '')}\nAddress: {company_data.get('registered_address', '')}\nContribution: {company_data.get('total_obligation_of_contribution', '')}\nStatus: {company_data.get('llp_status', '')}"
-    # Validation
-    if not company_name or not email or not valid_email(email):
-        errors.append("Invalid company name or email")
-    else:
-        # Parse directors if sheet exists
-        contacts = []
-        if director_sheet:
-            for row in director_sheet.iter_rows(min_row=3, values_only=True):
+    last_client_id = None
+    for sheet_name in wb.sheetnames:
+        sheet = wb[sheet_name]
+        # Check if tabular or key-value
+        first_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True))
+        headers = [str(h).strip().lower() if h else '' for h in first_row if h]
+        if 'company_name' in headers or 'llp_name' in headers:
+            # Tabular client sheet
+            row_num = 2
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if not any(row):
+                    continue
+                row_dict = dict(zip(headers, row))
+                company_name = row_dict.get("company_name", row_dict.get("llp_name", "")).strip()
+                client_type = row_dict.get("client_type", "proprietor").lower()
+                email = str(row_dict.get("email", "")).replace("[dot]", ".").replace("[at]", "@").strip()
+                phone = str(row_dict.get("phone", "")).strip()
+                birthday_raw = row_dict.get("birthday", row_dict.get("date_of_incorporation", ""))
+                birthday = None
+                if birthday_raw:
+                    if isinstance(birthday_raw, (int, float)):
+                        birthday = (datetime(1899, 12, 30) + timedelta(days=birthday_raw)).date()
+                    elif isinstance(birthday_raw, datetime):
+                        birthday = birthday_raw.date()
+                    else:
+                        try:
+                            birthday = parser.parse(str(birthday_raw)).date()
+                        except:
+                            birthday = None
+                services_str = row_dict.get("services", "")
+                services = [s.strip() for s in services_str.split(",") if s.strip()] if services_str else []
+                notes = row_dict.get("notes", "").strip()
+                # Validation
+                if not company_name or not email or not valid_email(email):
+                    errors.append(f"Sheet: {sheet_name} - Row {row_num}: Invalid company name or email")
+                    row_num += 1
+                    continue
+                # Contacts (assume contact_name_1 etc if present)
+                contacts = []
+                contact_name = row_dict.get("contact_name_1", "").strip()
+                if contact_name:
+                    contacts.append({
+                        "name": contact_name,
+                        "designation": row_dict.get("contact_designation_1", "").strip(),
+                        "email": row_dict.get("contact_email_1", None) if valid_email(row_dict.get("contact_email_1", "")) else None,
+                        "phone": row_dict.get("contact_phone_1", None) if valid_phone(row_dict.get("contact_phone_1", "")) else None,
+                        "birthday": None,
+                        "din": row_dict.get("contact_din_1", "").strip()
+                    })
+                try:
+                    client_obj = Client(
+                        company_name=company_name,
+                        client_type=client_type,
+                        contact_persons=contacts,
+                        email=email,
+                        phone=phone,
+                        birthday=birthday,
+                        services=services,
+                        dsc_details=[],
+                        assigned_to=None,
+                        notes=notes,
+                        created_by=current_user.id
+                    )
+                    doc = client_obj.model_dump()
+                    doc["created_at"] = doc["created_at"].isoformat()
+                    if doc.get("birthday"):
+                        doc["birthday"] = doc["birthday"].isoformat()
+                    await db.clients.insert_one(doc)
+                    created_count += 1
+                    last_client_id = client_obj.id
+                except Exception as e:
+                    errors.append(f"Sheet: {sheet_name} - Row {row_num}: {str(e)}")
+                row_num += 1
+        else:
+            # Try key-value
+            company_data = {}
+            is_key_value = True
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if len(row) > 2 and row[2] is not None:
+                    is_key_value = False
+                    break
+                if row[0]:
+                    key = str(row[0]).strip().replace(" ", "_").lower()
+                    val = row[1]
+                    company_data[key] = val
+            if is_key_value and ('llp_name' in company_data or 'company_name' in company_data):
+                # Key-value client sheet
+                company_name = company_data.get("llp_name", company_data.get("company_name", "")).strip()
+                client_type = "llp" if 'llp_name' in company_data else "proprietor"
+                email = str(company_data.get("email_id", "")).replace("[dot]", ".").replace("[at]", "@").strip()
+                phone = ""  # Not present in example
+                raw_birthday = company_data.get("date_of_incorporation")
+                birthday = None
+                if raw_birthday:
+                    if isinstance(raw_birthday, (int, float)):
+                        birthday = (datetime(1899, 12, 30) + timedelta(days=raw_birthday)).date()
+                    elif isinstance(raw_birthday, datetime):
+                        birthday = raw_birthday.date()
+                    else:
+                        try:
+                            birthday = parser.parse(str(raw_birthday)).date()
+                        except:
+                            birthday = None
+                services = ["LLP"] if 'llp_name' in company_data else []
+                notes = f"LLPIN: {company_data.get('llpin', '')}\nROC: {company_data.get('roc_name', '')}\nAddress: {company_data.get('registered_address', '')}\nContribution: {company_data.get('total_obligation_of_contribution', '')}\nStatus: {company_data.get('llp_status', '')}"
+                # Validation
+                if not company_name or not email or not valid_email(email):
+                    errors.append(f"Sheet: {sheet_name} - Invalid company name or email")
+                    continue
+                # Contacts (will be added if Director sheet processed later)
+                contacts = []
+                try:
+                    client_obj = Client(
+                        company_name=company_name,
+                        client_type=client_type,
+                        contact_persons=contacts,
+                        email=email,
+                        phone=phone,
+                        birthday=birthday,
+                        services=services,
+                        dsc_details=[],
+                        assigned_to=None,
+                        notes=notes,
+                        created_by=current_user.id
+                    )
+                    doc = client_obj.model_dump()
+                    doc["created_at"] = doc["created_at"].isoformat()
+                    if doc.get("birthday"):
+                        doc["birthday"] = doc["birthday"].isoformat()
+                    await db.clients.insert_one(doc)
+                    created_count += 1
+                    last_client_id = client_obj.id
+                except Exception as e:
+                    errors.append(f"Sheet: {sheet_name} - {str(e)}")
+                continue
+        # Check if director sheet
+        if 'sr. no.' in headers or 'din/pan' in headers:
+            if not last_client_id:
+                errors.append(f"Sheet: {sheet_name} - Director sheet found but no prior client to attach to")
+                continue
+            # Parse directors
+            contacts = []
+            row_num = 3  # assuming header in row 1-2
+            for row in sheet.iter_rows(min_row=3, values_only=True):
                 if not row[0]: break
                 din = str(row[1] or "").strip()
                 name = str(row[2] or "").strip()
@@ -3018,37 +3159,21 @@ async def import_clients_from_excel(
                     contacts.append({
                         "name": name,
                         "designation": designation,
-                        "din": din if len(din) == 8 and din.isdigit() else "", # Assume 8-digit DIN
+                        "din": din if len(din) == 8 and din.isdigit() else "",
                         "email": None,
                         "phone": None,
-                        "birthday": ""
+                        "birthday": None
                     })
-        # Create client
-        current_client = {
-            "id": str(uuid.uuid4()),
-            "company_name": company_name,
-            "client_type": client_type,
-            "email": email,
-            "phone": phone,
-            "birthday": birthday,
-            "services": services,
-            "notes": notes,
-            "assigned_to": None,
-            "status": "active",
-            "contact_persons": contacts,
-            "dsc_details": [],
-            "created_by": current_user.id,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        try:
-            await db.clients.insert_one(current_client)
-            count += 1
-        except Exception as e:
-            errors.append(str(e))
-    if count > 0:
-        return {"message": f"✅ Imported {count} clients successfully", "errors": errors}
+            if contacts:
+                await db.clients.update_one(
+                    {"id": last_client_id},
+                    {"$set": {"contact_persons": contacts}}
+                )
+    if created_count > 0:
+        return {"message": f"Imported {created_count} clients successfully", "errors": errors}
     else:
         raise HTTPException(400, detail=f"No valid clients imported. Errors: {errors}")
+
 @api_router.post("/clients/import-csv")
 async def import_clients_from_csv(
     file: UploadFile = File(...),
@@ -3063,12 +3188,16 @@ async def import_clients_from_csv(
     errors = []
     for row in csv_reader:
         try:
-            # Parse fields
             company_name = row.get("company_name", "").strip()
             client_type = row.get("client_type", "proprietor").lower()
             email = row.get("email", "").strip()
             phone = row.get("phone", "").strip()
             birthday = row.get("birthday", "")
+            if birthday:
+                try:
+                    birthday = parser.parse(str(birthday)).date()
+                except:
+                    birthday = None
             services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
             notes = row.get("notes", "").strip()
             contact_name = row.get("contact_name_1", "").strip()
@@ -3079,9 +3208,6 @@ async def import_clients_from_csv(
             if not company_name or not email or not valid_email(email) or not phone or not valid_phone(phone):
                 errors.append("Invalid row: missing/invalid company/email/phone")
                 continue
-            # Birthday format
-            if birthday:
-                birthday = excel_to_date(birthday) # Reuse date handler
             # Contacts
             contacts = []
             if contact_name:
@@ -3090,7 +3216,7 @@ async def import_clients_from_csv(
                     "designation": contact_designation,
                     "email": contact_email if valid_email(contact_email) else None,
                     "phone": contact_phone if valid_phone(contact_phone) else None,
-                    "birthday": "",
+                    "birthday": None,
                     "din": ""
                 })
             client = {
@@ -3103,7 +3229,6 @@ async def import_clients_from_csv(
                 "services": services,
                 "notes": notes,
                 "assigned_to": None,
-                "status": "active",
                 "contact_persons": contacts,
                 "dsc_details": [],
                 "created_by": current_user.id,
