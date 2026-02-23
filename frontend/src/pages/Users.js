@@ -269,14 +269,44 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
-  const fetchPermissions = async (userId) => {
-    try {
-      const response = await api.get(`/users/${userId}/permissions`);
-      setPermissions(response.data);
-    } catch (error) {
-      console.error('Failed to fetch permissions');
-    }
-  };
+const fetchPermissions = async (userId) => {
+  try {
+    const response = await api.get(`/users/${userId}/permissions`);
+
+    setPermissions(prev => ({
+      ...prev,
+      ...(response.data || {})
+    }));
+
+  } catch (error) {
+    console.error('Failed to fetch permissions');
+
+    // fallback to default permissions instead of null
+    setPermissions({
+      can_view_all_tasks: false,
+      can_view_all_clients: false,
+      can_view_all_dsc: false,
+      can_view_documents: false,
+      can_view_all_duedates: false,
+      can_view_reports: false,
+      can_manage_users: false,
+      can_assign_tasks: false,
+      assigned_clients: [],
+      can_view_staff_activity: false,
+      can_view_attendance: false,
+      can_use_chat: false,
+      can_send_reminders: false,
+      can_edit_tasks: false,
+      can_edit_dsc: false,
+      can_edit_documents: false,
+      can_edit_due_dates: false,
+      can_edit_users: false,
+      can_view_user_page: false,
+      can_view_audit_logs: false,
+      can_delete_data: false,
+    });
+  }
+};
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
