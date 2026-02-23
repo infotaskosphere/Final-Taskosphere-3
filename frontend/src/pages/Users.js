@@ -617,6 +617,7 @@ const fetchPermissions = async (userId) => {
                   <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
                     {[
                       { key: 'can_view_all_tasks', label: 'View All Tasks', description: 'Allows viewing all tasks in the system.' },
+                      { key: 'can_view_audit_logs', label: 'View Task Audit Logs', description: 'Allows viewing system task audit logs and activity history.' },
                       { key: 'can_view_all_clients', label: 'View All Clients', description: 'Allows viewing all client information.' },
                       { key: 'can_view_all_dsc', label: 'View All DSC', description: 'Allows viewing all digital signature certificates.' },
                       { key: 'can_view_documents', label: 'View Documents', description: 'Allows viewing all documents.' },
