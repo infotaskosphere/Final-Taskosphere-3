@@ -138,6 +138,22 @@ export default function Clients() {
   }, [clients, searchTerm, serviceFilter, statusFilter]);
   const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
   // ==================== HANDLERS ====================
+  const downloadTemplate = () => {
+    const headers = [
+      'company_name', 'client_type', 'email', 'phone', 'birthday', 'services',
+      'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1'
+    ];
+    const csvContent = headers.join(',') + '\n';
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'client_import_template.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -152,7 +168,6 @@ export default function Clients() {
             console.warn("Skipping invalid row:", row);
             continue;
           }
-          count++;
           try {
             await api.post('/clients', {
               company_name: row.company_name,
@@ -167,7 +182,6 @@ export default function Clients() {
             count++;
           } catch (e) { console.error("Import error:", e.response?.data || e); }
         }
-        setImportLoading(false);
         setImportLoading(false);
         if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
         if (fileInputRef.current) fileInputRef.current.value = '';
