@@ -73,6 +73,39 @@ const itemVariants = {
  hidden: { opacity: 0, y: 20 },
  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+const getStripeBg = (task, isOverdue) => {
+ const p = (task.priority || '').toLowerCase().trim();
+ const s = (task.status || '').toLowerCase().trim();
+ if (isOverdue) return 'bg-red-600';
+ if (s === 'completed') return 'bg-blue-700';
+ if (s === 'in_progress') return 'bg-purple-500';
+ if (p === 'critical') return 'bg-red-600';
+ if (p === 'high') return 'bg-orange-500';
+ if (p === 'medium') return 'bg-yellow-400';
+ if (p === 'low') return 'bg-green-500';
+ return 'bg-slate-300';
+};
+const DashboardStripCard = ({
+ stripeColor,
+ children,
+ className = "",
+}) => {
+ return (
+ <div
+ className={`relative rounded-xl border border-slate-200 bg-white
+ hover:shadow-md hover:-translate-y-[1px]
+ transition-all duration-200
+ overflow-hidden group ${className}`}
+ >
+ <div
+ className={`absolute left-0 top-0 h-full w-[6px] rounded-l-xl ${stripeColor}`}
+ />
+ <div className="pl-6 pr-6 py-4">
+ {children}
+ </div>
+ </div>
+ );
+};
 export default function Tasks() {
  const { user, hasPermission } = useAuth();
  const canAssignTasks = hasPermission("can_assign_tasks");
@@ -527,7 +560,7 @@ export default function Tasks() {
  key={dept.value}
  type="button"
  onClick={() => setFormData({ ...formData, category: dept.value })}
- className={`h-9 px-4 rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow-md
+ className={`h-9 px-4 rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow-md flex items-center justify-center
   ${isSelected
     ? 'bg-blue-600 text-white'
     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -941,33 +974,128 @@ export default function Tasks() {
  const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
  const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
  return (
- <Card key={task.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
- <div className="space-y-2">
- <div className="text-sm">{task.title}</div>
- <div className="text-xs text-slate-500">{getClientName(task.client_id)}</div>
- <div className="flex gap-2">
- <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
- <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
+ <motion.div key={task.id} variants={itemVariants} className="h-full">
+ <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+ <div className="flex flex-col h-full">
+ {/* Status & Priority Tags */}
+ <div className="flex items-center gap-2 mb-3 flex-wrap">
+ <Badge
+ className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700"
+ >
+ {statusStyle.label}
+ </Badge>
+ <Badge
+ className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700"
+ >
+ {priorityStyle.label}
+ </Badge>
+ {task.is_recurring && (
+ <Badge className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+ <Repeat className="h-3 w-3 inline mr-1" />
+ Recurring
+ </Badge>
+ )}
+ {task.created_by === user?.id && (
+ <Badge className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+ Assigned By You
+ </Badge>
+ )}
  </div>
- <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
- <SelectTrigger className={`w-32 rounded-xl shadow-sm ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
- <SelectValue />
- </SelectTrigger>
- <SelectContent>
- <SelectItem value="pending">To Do</SelectItem>
- <SelectItem value="in_progress">In Progress</SelectItem>
- <SelectItem value="completed">Done</SelectItem>
- </SelectContent>
- </Select>
- <div className="text-xs text-slate-500">{getUserName(task.assigned_to)}</div>
- <div className="text-xs text-slate-500">{getUserName(task.created_by)}</div>
- <div className="text-xs text-slate-500">{task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}</div>
- <div className="text-xs text-slate-500">{task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</div>
- <div className="flex gap-2">
+ {/* Task Title - Fixed height */}
+ <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 min-h-[40px] text-sm" style={{ color: COLORS.deepBlue }}>
+ {task.title}
+ </h3>
+ <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd, yyyy') : 'N/A'}`}</div>
+ {/* Description - Fixed height for equal cards */}
+ <div className="h-[40px] mb-3">
+ {task.description ? (
+ <p className="text-xs text-slate-600 line-clamp-2">{task.description}</p>
+ ) : (
+ <p className="text-xs text-slate-400 italic">No description</p>
+ )}
+ </div>
+ {/* Meta Info - flex-1 to push footer down */}
+ <div className="space-y-1.5 text-xs text-slate-500 flex-1 min-h-[50px]">
+ {task.client_id && (
+ <div className="flex items-center gap-2">
+ <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
+ <span className="truncate">{getClientName(task.client_id)}</span>
+ </div>
+ )}
+ <div className="flex items-center gap-2">
+ <User className="h-3.5 w-3.5 flex-shrink-0" />
+ <span className="truncate">{getUserName(task.assigned_to)}</span>
+ </div>
+ {task.due_date && (
+ <div className="flex items-center gap-2">
+ <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+ <span>{format(new Date(task.due_date), 'MMM dd, yyyy')}</span>
+ </div>
+ )}
+ </div>
+ {/* Quick Status Change Buttons - Consistent pill shape */}
+ {(canEditTasks && (
+ task.assigned_to === user?.id ||
+ task.sub_assignees?.includes(user?.id) ||
+ task.created_by === user?.id
+ )) && (
+ <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-auto pt-3 border-t border-slate-200/50">
+ <button
+ onClick={() => handleQuickStatusChange(task, 'pending')}
+ className={`flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+ ${task.status === 'pending'
+ ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+ : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+ }`}
+ title="Mark as To Do"
+ data-testid={`status-todo-${task.id}`}
+ >
+ <Circle className="h-3.5 w-3.5" />
+ <span>To Do</span>
+ </button>
+ <button
+ onClick={() => handleQuickStatusChange(task, 'in_progress')}
+ className={`flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+ ${task.status === 'in_progress'
+ ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+ : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+ }`}
+ title="Mark as In Progress"
+ data-testid={`status-progress-${task.id}`}
+ >
+ <ArrowRight className="h-3.5 w-3.5" />
+ <span>Progress</span>
+ </button>
+ <button
+ onClick={() => handleQuickStatusChange(task, 'completed')}
+ className={`flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+ ${task.status === 'completed'
+ ? 'bg-white border border-slate-300 shadow-sm text-slate-800'
+ : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+ }`}
+ title="Mark as Completed"
+ data-testid={`status-done-${task.id}`}
+ >
+ <Check className="h-3.5 w-3.5" />
+ <span>Done</span>
+ </button>
+ </div>
+ )}
+ {/* Category & Actions */}
+ <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200/50">
+ <Badge
+ variant="outline"
+ className="text-xs rounded-lg px-2.5 py-1"
+ style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
+ >
+ {getCategoryLabel(task.category)}
+ </Badge>
+ <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
  {canEditTasks && task.created_by === user?.id && (
  <Button
  variant="ghost"
  size="icon"
+ className="h-8 w-8 rounded-xl shadow-sm hover:shadow-md hover:bg-blue-50"
  onClick={() => handleEdit(task)}
  data-testid={`edit-task-${task.id}`}
  >
@@ -978,6 +1106,7 @@ export default function Tasks() {
  <Button
  variant="ghost"
  size="icon"
+ className="h-8 w-8 rounded-xl shadow-sm hover:shadow-md hover:bg-red-50"
  onClick={() => handleDelete(task.id)}
  data-testid={`delete-task-${task.id}`}
  >
@@ -986,7 +1115,9 @@ export default function Tasks() {
  )}
  </div>
  </div>
- </Card>
+ </div>
+ </DashboardStripCard>
+ </motion.div>
  );
  })}
  </div>
