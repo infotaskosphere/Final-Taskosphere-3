@@ -152,7 +152,7 @@ export default function Clients() {
   };
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) return;tch (e) { console.error(e); }
     setImportLoading(true);
     Papa.parse(file, {
       header: true,
@@ -160,7 +160,10 @@ export default function Clients() {
       complete: async (results) => {
         let count = 0;
         for (let row of results.data) {
-          if (!row.company_name) continue;
+          if (!row.company_name || !row.email || !row.phone) {
+             console.warn("Skipping invalid row:", row);
+             continue;
+          }
           try {
             await api.post('/clients', {
               company_name: row.company_name,
@@ -173,7 +176,7 @@ export default function Clients() {
               status: 'active'
             });
             count++;
-          } catch (e) { console.error(e); }
+          } catch (e) { console.error("Import error:", e.response?.data || e); }
         }
         setImportLoading(false);
         if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
