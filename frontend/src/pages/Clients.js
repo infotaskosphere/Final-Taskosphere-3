@@ -22,6 +22,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid } from 'react-window';
+
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -30,10 +31,12 @@ const CLIENT_TYPES = [
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
 ];
+
 const SERVICES = [
   'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
+
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
@@ -48,6 +51,12 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
+  
+  // NEW PREVIEW STATES (added exactly as instructed)
+  const [previewData, setPreviewData] = useState([]);
+  const [previewHeaders, setPreviewHeaders] = useState([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
@@ -67,6 +76,7 @@ export default function Clients() {
     notes: '',
     status: 'active',
   });
+
   useEffect(() => {
     fetchClients();
     if (canAssignClients) fetchUsers();
@@ -75,6 +85,7 @@ export default function Clients() {
       setDialogOpen(true);
     }
   }, [location]);
+
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -83,6 +94,7 @@ export default function Clients() {
       toast.error('Failed to fetch clients');
     }
   };
+
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -91,12 +103,14 @@ export default function Clients() {
       console.error('Failed to fetch users:', error);
     }
   };
+
   // ==================== UTILS ====================
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
+
   // ==================== MEMOIZED DATA ====================
   const stats = useMemo(() => {
     const totalClients = clients.length;
@@ -112,6 +126,7 @@ export default function Clients() {
     });
     return { totalClients, activeClients, serviceCounts };
   }, [clients]);
+
   const todayReminders = useMemo(() => {
     const today = startOfDay(new Date());
     return clients.filter(c => {
@@ -126,6 +141,7 @@ export default function Clients() {
       }) ?? false;
     });
   }, [clients]);
+
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -133,12 +149,14 @@ export default function Clients() {
         (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.phone || '').includes(searchTerm);
       const matchesService = serviceFilter === 'all' ||
-                            (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
+        (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
       return matchesSearch && matchesService && matchesStatus;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
+
   const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
+
   // ==================== HANDLERS ====================
   const downloadTemplate = () => {
     const headers = [
@@ -156,6 +174,7 @@ export default function Clients() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
   const excelDateToJSDate = (serial) => {
     const utc_days = Math.floor(serial - 25569);
     const utc_value = utc_days * 86400;
@@ -168,8 +187,55 @@ export default function Clients() {
     const minutes = Math.floor(total_seconds / 60) % 60;
     return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hours, minutes, seconds);
   };
+
   const validateEmail = (email) => /^[\w-]+(\.[\w-]+)*@([\w-]+\.)+[a-zA-Z]{2,7}$/.test(email);
   const validatePhone = (phone) => /^\d{10,}$/.test(phone);
+
+  // NEW: CLIENT TYPE DETECTION (added exactly as instructed)
+  const detectClientTypeFromName = (name = '') => {
+    const lower = name.toLowerCase().trim();
+    const normalized = lower.replace(/\s+/g, ' ');
+
+    if (
+      normalized.includes('private limited') ||
+      normalized.includes('pvt ltd') ||
+      normalized.includes('pvt. ltd') ||
+      normalized.includes('pvt limited')
+    ) {
+      return 'pvt_ltd';
+    }
+
+    if (
+      normalized.includes('limited liability partnership') ||
+      normalized.includes('llp')
+    ) {
+      return 'llp';
+    }
+
+    if (
+      normalized.endsWith(' ltd') ||
+      normalized.endsWith(' limited') ||
+      normalized.includes(' ltd ') ||
+      normalized.includes(' limited ')
+    ) {
+      return 'pvt_ltd';
+    }
+
+    if (normalized.includes('partnership')) {
+      return 'partnership';
+    }
+
+    if (normalized.includes('huf')) {
+      return 'huf';
+    }
+
+    if (normalized.includes('trust')) {
+      return 'trust';
+    }
+
+    return 'proprietor';
+  };
+
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -208,133 +274,85 @@ export default function Clients() {
       }
     });
   };
+
+  // REPLACED handleImportExcel WITH PREVIEW VERSION (exactly as instructed)
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    setImportLoading(true);
+
     const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const data = e.target.result;
-        const workbook = XLSX.read(data, {type: 'binary'});
-        let count = 0;
-        for (let sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const rows = XLSX.utils.sheet_to_json(sheet, {header: true, defval: ''});
-          let currentClient = null;
-          for (let row of rows) {
-            if (Object.values(row).every(v => v === '')) continue;
-            if (row.company_name) {
-              if (currentClient) {
-                if (currentClient.contact_persons.length === 0) {
-                  console.warn('Skipping client with no contacts:', currentClient.company_name);
-                } else if (!validateEmail(currentClient.email)) {
-                  console.warn('Invalid email for client:', currentClient.company_name);
-                } else if (!validatePhone(currentClient.phone)) {
-                  console.warn('Invalid phone for client:', currentClient.company_name);
-                } else {
-                  await api.post('/clients', currentClient);
-                  count++;
-                }
-              }
-              row.phone = '' + row.phone;
-              if (!row.company_name || !row.email || !validateEmail(row.email) || !row.phone || !validatePhone(row.phone)) {
-                console.warn('Skipping invalid new client row:', row);
-                continue;
-              }
-              let companyBirthday = row.birthday || '';
-              if (typeof companyBirthday === 'number') {
-                companyBirthday = format(excelDateToJSDate(companyBirthday), 'yyyy-MM-dd');
-              } else if (typeof companyBirthday === 'string' && companyBirthday.includes('/')) {
-                try {
-                  companyBirthday = format(parse(companyBirthday, 'dd/MM/yyyy', new Date()), 'yyyy-MM-dd');
-                } catch (e) {
-                  console.warn('Invalid company birthday:', companyBirthday);
-                  companyBirthday = '';
-                }
-              }
-              let services = row.services ? row.services.split(',').map(s => s.trim()) : [];
-              currentClient = {
-                company_name: row.company_name,
-                client_type: (row.client_type || 'proprietor').toLowerCase(),
-                email: row.email,
-                phone: row.phone,
-                birthday: companyBirthday,
-                services,
-                notes: row.notes || '',
-                assigned_to: null,
-                status: 'active',
-                contact_persons: [],
-                dsc_details: []
-              };
-            }
-            let contactBirthday = '';
-            let contactPhone = '';
-            if (!row.company_name) {
-              contactBirthday = row.birthday || '';
-              if (typeof contactBirthday === 'number') {
-                contactBirthday = format(excelDateToJSDate(contactBirthday), 'yyyy-MM-dd');
-              } else if (typeof contactBirthday === 'string' && contactBirthday.includes('/')) {
-                try {
-                  contactBirthday = format(parse(contactBirthday, 'dd/MM/yyyy', new Date()), 'yyyy-MM-dd');
-                } catch (e) {
-                  console.warn('Invalid contact birthday:', contactBirthday);
-                  contactBirthday = '';
-                }
-              }
-              contactPhone = '' + (row.phone || row.contact_phone_1 || '');
-            }
-            if (row.contact_name_1) {
-              let contactEmail = row.contact_email_1 || '';
-              if (contactEmail && !validateEmail(contactEmail)) {
-                console.warn('Invalid contact email:', contactEmail);
-                contactEmail = '';
-              }
-              if (contactPhone && !validatePhone(contactPhone)) {
-                console.warn('Invalid contact phone:', contactPhone);
-                contactPhone = '';
-              }
-              if (!row.contact_name_1) {
-                console.warn('Skipping contact without name');
-                continue;
-              }
-              currentClient.contact_persons.push({
-                name: row.contact_name_1,
-                designation: row.contact_designation_1,
-                email: contactEmail,
-                phone: contactPhone,
-                birthday: contactBirthday,
-                din: ''
-              });
-            }
-          }
-          if (currentClient) {
-            if (currentClient.contact_persons.length === 0) {
-              console.warn('Skipping client with no contacts:', currentClient.company_name);
-            } else if (!validateEmail(currentClient.email)) {
-              console.warn('Invalid email for client:', currentClient.company_name);
-            } else if (!validatePhone(currentClient.phone)) {
-              console.warn('Invalid phone for client:', currentClient.company_name);
-            } else {
-              await api.post('/clients', currentClient);
-              count++;
-            }
-          }
+
+    reader.onload = (e) => {
+      const workbook = XLSX.read(e.target.result, { type: 'binary' });
+
+      const normalizeHeader = (header) => {
+        if (!header) return '';
+        return header.toString().toLowerCase().replace(/\s+/g, '_');
+      };
+
+      let combinedRows = [];
+
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: ''
+        });
+
+        if (rawRows.length < 2) return;
+
+        const headers = rawRows[0].map(normalizeHeader);
+
+        for (let i = 1; i < rawRows.length; i++) {
+          const rowArray = rawRows[i];
+          if (rowArray.every(cell => cell === '')) continue;
+
+          let row = {};
+          headers.forEach((h, idx) => {
+            row[h] = rowArray[idx];
+          });
+
+          const companyName =
+            row.company_name ||
+            row.companyname ||
+            row['company name'] ||
+            '';
+
+          if (!companyName) continue;
+
+          const detectedType = detectClientTypeFromName(companyName);
+
+          combinedRows.push({
+            sheet: sheetName,
+            company_name: companyName,
+            client_type: row.client_type || detectedType,
+            email: row.email || '',
+            phone: row.phone || '',
+            birthday: row.birthday || '',
+            services: row.services || '',
+            notes: row.notes || ''
+          });
         }
-        setImportLoading(false);
-        if (count > 0) {
-          toast.success(`${count} clients imported!`);
-          fetchClients();
-        }
-        if (excelInputRef.current) excelInputRef.current.value = '';
-      } catch (err) {
-        console.error(err);
-        setImportLoading(false);
-        toast.error('Failed to import excel');
-      }
+      });
+
+      setPreviewHeaders([
+        'sheet',
+        'company_name',
+        'client_type',
+        'email',
+        'phone',
+        'birthday',
+        'services',
+        'notes'
+      ]);
+
+      setPreviewData(combinedRows);
+      setPreviewOpen(true);
     };
+
     reader.readAsBinaryString(file);
   };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -364,6 +382,7 @@ export default function Clients() {
       setLoading(false);
     }
   };
+
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
@@ -382,6 +401,7 @@ export default function Clients() {
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true);
   };
+
   const resetForm = () => {
     setFormData({
       company_name: '',
@@ -399,6 +419,7 @@ export default function Clients() {
     setOtherService('');
     setEditingClient(null);
   };
+
   // ==================== DYNAMIC FIELDS ====================
   const updateContact = (idx, field, val) => setFormData(p => ({
     ...p,
@@ -406,32 +427,39 @@ export default function Clients() {
       i === idx ? { ...c, [field]: val } : c
     )
   }));
+
   const addContact = () => setFormData(p => ({
     ...p,
     contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }]
   }));
+
   const removeContact = (idx) => setFormData(p => ({
     ...p,
     contact_persons: p.contact_persons.filter((_, i) => i !== idx)
   }));
+
   const updateDSC = (idx, field, val) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
   }));
+
   const addDSC = () => setFormData(p => ({
     ...p,
     dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
   }));
+
   const removeDSC = (idx) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
+
   const toggleService = (s) => setFormData(p => {
     const services = p.services.includes(s)
       ? p.services.filter(x => x !== s)
       : [...p.services, s];
     return { ...p, services };
   });
+
   const addOtherService = () => {
     if (otherService.trim()) {
       setFormData(prev => ({
@@ -444,6 +472,7 @@ export default function Clients() {
       setOtherService('');
     }
   };
+
   // ────────────────────────────────────────────────
   // Virtualized Client Card Renderer
   // ────────────────────────────────────────────────
@@ -536,6 +565,7 @@ export default function Clients() {
       </div>
     );
   };
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -827,6 +857,7 @@ export default function Clients() {
           </Dialog>
         </div>
       </div>
+
       {canViewAllClients && todayReminders.length > 0 && (
         <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
@@ -846,6 +877,7 @@ export default function Clients() {
           </CardContent>
         </Card>
       )}
+
       {canViewAllClients && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
@@ -888,6 +920,7 @@ export default function Clients() {
           </Card>
         </div>
       )}
+
       <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
@@ -920,6 +953,7 @@ export default function Clients() {
           </Select>
         </div>
       </div>
+
       <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
           <AutoSizer>
@@ -958,6 +992,7 @@ export default function Clients() {
           </div>
         )}
       </div>
+
       <input
         type="file"
         ref={fileInputRef}
@@ -972,6 +1007,102 @@ export default function Clients() {
         onChange={handleImportExcel}
         className="hidden"
       />
+
+      {/* NEW EXCEL PREVIEW DIALOG (added exactly as instructed, before closing main div) */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Excel Preview Before Import</DialogTitle>
+            <DialogDescription>
+              Review and edit data before importing.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-100 sticky top-0">
+                <tr>
+                  {previewHeaders.map(h => (
+                    <th key={h} className="p-2 border text-left uppercase">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {previewData.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    {previewHeaders.map(header => (
+                      <td key={header} className="border p-1">
+                        <Input
+                          value={row[header] || ''}
+                          onChange={e => {
+                            const updated = [...previewData];
+                            updated[rowIndex][header] = e.target.value;
+                            setPreviewData(updated);
+                          }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewOpen(false)}>
+              Cancel
+            </Button>
+
+            <Button
+              className="bg-indigo-600 text-white"
+              onClick={async () => {
+                setImportLoading(true);
+                let success = 0;
+
+                for (let row of previewData) {
+                  try {
+                    await api.post('/clients', {
+                      company_name: row.company_name,
+                      client_type: row.client_type,
+                      email: row.email,
+                      phone: row.phone,
+                      birthday: row.birthday,
+                      services: row.services
+                        ? row.services.split(',').map(s => s.trim())
+                        : [],
+                      notes: row.notes,
+                      assigned_to: null,
+                      contact_persons: [{
+                        name: '',
+                        email: '',
+                        phone: '',
+                        designation: '',
+                        birthday: '',
+                        din: ''
+                      }],
+                      dsc_details: [],
+                      status: 'active'
+                    });
+
+                    success++;
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }
+
+                toast.success(`${success} clients imported`);
+                fetchClients();
+                setPreviewOpen(false);
+                setImportLoading(false);
+              }}
+            >
+              Confirm Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
