@@ -1995,7 +1995,7 @@ async def import_clients_from_csv(
         "message": "Clients imported successfully",
         "created_count": created_count
     }
---------------------------------# DASHBOARD ROUTES -----------------------------------  # Enhanced Dashboard Stats
+# DASHBOARD ROUTES
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     """Get comprehensive dashboard statistics"""
