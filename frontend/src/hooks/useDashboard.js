@@ -1,31 +1,34 @@
-import { useQuery } from '@tanstack/react-query';
-import api from '@/lib/api';
+import { useQuery } from "@tanstack/react-query";
+import api from "@/lib/api";
 
+/* Dashboard Stats */
 export const useDashboardStats = () => {
   return useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ["dashboardStats"],
     queryFn: async () => {
-      const res = await api.get('/dashboard/stats');
+      const res = await api.get("/dashboard/stats");
       return res.data;
     },
   });
 };
 
+/* Upcoming Due Dates */
 export const useUpcomingDueDates = () => {
   return useQuery({
-    queryKey: ['due-dates'],
+    queryKey: ["upcomingDueDates"],
     queryFn: async () => {
-      const res = await api.get('/duedates/upcoming?days=30');
+      const res = await api.get("/duedates/upcoming?days=30");
       return res.data || [];
     },
   });
 };
 
+/* Today Attendance */
 export const useTodayAttendance = () => {
   return useQuery({
-    queryKey: ['today-attendance'],
+    queryKey: ["todayAttendance"],
     queryFn: async () => {
-      const res = await api.get('/attendance/today');
+      const res = await api.get("/attendance/today");
       return res.data;
     },
   });
