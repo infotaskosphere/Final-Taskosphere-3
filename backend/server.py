@@ -1109,26 +1109,33 @@ async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_curre
     doc["expiry_date"] = doc["expiry_date"].isoformat()
     await db.dsc_register.insert_one(doc)
     return dsc
-@api_router.get("/dsc", response_model=DSCListResponse)
+@api_router.get("/dsc")
 async def get_dsc_list(
-    page: int = Query(1, ge=1),
-    limit: int = Query(15, ge=1, le=100),
     sort_by: str = Query("holder_name"),
     order: str = Query("asc", pattern="^(asc|desc)$", ignore_case=True),
     search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     current_user: User = Depends(check_permission("can_view_all_dsc"))
 ):
     query = {}
+    # 🔎 Universal search (works across all tabs)
     if search:
+        search_regex = {"$regex": search, "$options": "i"}
         query["$or"] = [
-            {"holder_name": {"$regex": search, "$options": "i"}},
-            {"dsc_type": {"$regex": search, "$options": "i"}},
-            {"associated_with": {"$regex": search, "$options": "i"}}
+            {"holder_name": search_regex},
+            {"dsc_type": search_regex},
+            {"associated_with": search_regex},
+            {"current_status": search_regex} # ✅ NEW: Search by IN / OUT / EXPIRED
         ]
     sort_dir = 1 if order.lower() == "asc" else -1
-    cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip((page - 1) * limit).limit(limit)
-    dsc_list = await cursor.to_list(limit)
+    skip = (page - 1) * limit
     total = await db.dsc_register.count_documents(query)
+    cursor = db.dsc_register.find(
+        query,
+        {"_id": 0}
+    ).sort(sort_by, sort_dir).skip(skip).limit(limit)
+    dsc_list = await cursor.to_list(length=limit)
     now = datetime.now(timezone.utc)
     for dsc in dsc_list:
         if isinstance(dsc.get("created_at"), str):
@@ -1137,33 +1144,34 @@ async def get_dsc_list(
             dsc["issue_date"] = datetime.fromisoformat(dsc["issue_date"])
         if isinstance(dsc.get("expiry_date"), str):
             dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
-        expiry_date = dsc["expiry_date"]
-        if expiry_date < now:
+        expiry_date = dsc.get("expiry_date")
+        if expiry_date and expiry_date < now:
             movement_log = dsc.get("movement_log", [])
             updated = False
             if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
-                new_log = {
+                movement_log.append({
                     "id": str(uuid.uuid4()),
                     "movement_type": "EXPIRED",
                     "person_name": "System Auto",
                     "notes": "Auto marked as expired",
                     "timestamp": now.isoformat(),
                     "recorded_by": "System"
-                }
-                movement_log.append(new_log)
-                dsc["movement_log"] = movement_log
+                })
                 updated = True
             if dsc.get("current_status") != "EXPIRED":
-                dsc["current_status"] = "EXPIRED"
                 updated = True
             if updated:
                 await db.dsc_register.update_one(
                     {"id": dsc["id"]},
-                    {"$set": {
-                        "current_status": "EXPIRED",
-                        "movement_log": movement_log
-                    }}
+                    {
+                        "$set": {
+                            "current_status": "EXPIRED",
+                            "movement_log": movement_log
+                        }
+                    }
                 )
+                dsc["current_status"] = "EXPIRED"
+                dsc["movement_log"] = movement_log
     return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
 @api_router.put("/dsc/{dsc_id}", response_model=DSC)
 async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depends(check_permission("can_edit_dsc"))):
@@ -1961,62 +1969,48 @@ async def import_clients_from_csv(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    if file.content_type != "text/csv":
-        raise HTTPException(status_code=400, detail="Invalid file type")
+    if file.content_type != 'text/csv':
+        raise HTTPException(400, "Invalid file type")
     content = await file.read()
-    content_str = content.decode("utf-8")
+    content_str = content.decode('utf-8')
     csv_reader = csv.DictReader(StringIO(content_str))
     created_count = 0
     errors = []
     for row in csv_reader:
         try:
-            company_name = row.get("company_name", "").strip()
-            client_type = row.get("client_type", "proprietor").lower()
-            email = row.get("email", "").strip()
-            phone = row.get("phone", "").strip()
-            birthday = row.get("birthday", "")
+            company_name = row.get('company_name', '')
+            client_type = row.get('client_type', 'proprietor')
+            email = row.get('email', '')
+            phone = row.get('phone', '')
+            birthday = row.get('birthday', None)
             if birthday:
-                try:
-                    birthday = parser.parse(str(birthday)).date()
-                except:
-                    birthday = None
-            services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
-            notes = row.get("notes", "").strip()
-            contact_name = row.get("contact_name_1", "").strip()
-            contact_designation = row.get("contact_designation_1", "").strip()
-            contact_email = row.get("contact_email_1", "").strip()
-            contact_phone = row.get("contact_phone_1", "").strip()
-            # Validation
-            if not company_name or not email or not valid_email(email) or not phone or not valid_phone(phone):
-                errors.append("Invalid row: missing/invalid company/email/phone")
-                continue
+                birthday = parser.parse(birthday).date() if birthday else None
+            services = [s.strip() for s in row.get('services', '').split(',')]
+            notes = row.get('notes', '')
             # Contacts
             contacts = []
-            if contact_name:
-                contacts.append({
-                    "name": contact_name,
-                    "designation": contact_designation,
-                    "email": contact_email if valid_email(contact_email) else None,
-                    "phone": contact_phone if valid_phone(contact_phone) else None,
-                    "birthday": None,
-                    "din": ""
-                })
-            client = {
-                "id": str(uuid.uuid4()),
-                "company_name": company_name,
-                "client_type": client_type,
-                "email": email,
-                "phone": phone,
-                "birthday": birthday,
-                "services": services,
-                "notes": notes,
-                "assigned_to": None,
-                "contact_persons": contacts,
-                "dsc_details": [],
-                "created_by": current_user.id,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            await db.clients.insert_one(client)
+            for i in range(1, 6):  # Assuming up to 5 contacts
+                name = row.get(f'contact_name_{i}', '')
+                if name:
+                    contacts.append(ContactPerson(
+                        name=name,
+                        email=row.get(f'contact_email_{i}', None),
+                        phone=row.get(f'contact_phone_{i}', None),
+                        designation=row.get(f'contact_designation_{i}', None),
+                        birthday=None,
+                        din=row.get(f'contact_din_{i}', None)
+                    ))
+            client_data = ClientCreate(
+                company_name=company_name,
+                client_type=client_type,
+                contact_persons=contacts,
+                email=email,
+                phone=phone,
+                birthday=birthday,
+                services=services,
+                notes=notes
+            )
+            await create_client(client_data, current_user)
             created_count += 1
         except Exception as e:
             errors.append(str(e))
@@ -2867,48 +2861,48 @@ async def telegram_webhook(request: Request):
         return {"ok": True}
     # Simple test response
     await send_message(chat_id, f"Echo: {text}")
-    return {"ok": True}
     # ==============================
     # START NEW TASK
     # ==============================
-    if message.lower() == "/task":
+    if text.lower() == "/task":
         await db.telegram_sessions.update_one(
             {"telegram_id": telegram_user_id},
             {"$set": {"step": "title", "data": {}}},
             upsert=True
         )
-        send_message(chat_id, "📝 Enter Task Title:")
+        await send_message(chat_id, "📝 Enter Task Title:")
         return {"ok": True}
     # ==============================
     # HANDLE ACTIVE SESSION
     # ==============================
+    session = await db.telegram_sessions.find_one({"telegram_id": telegram_user_id})
     if session:
         step = session.get("step")
         data_store = session.get("data", {})
         next_step = None
         reply = None
         if step == "title":
-            data_store["title"] = message
+            data_store["title"] = text
             next_step = "description"
             reply = "📄 Enter Description:"
         elif step == "description":
-            data_store["description"] = message
+            data_store["description"] = text
             next_step = "due_date"
             reply = "📅 Enter Due Date (DD-MM-YYYY):"
         elif step == "due_date":
-            data_store["due_date"] = message
+            data_store["due_date"] = text
             next_step = "assign"
             reply = "👤 Enter Assignee Name (comma separated):"
         elif step == "assign":
-            data_store["assign"] = message
+            data_store["assign"] = text
             next_step = "department"
             reply = "🏢 Enter Department:"
         elif step == "department":
-            data_store["department"] = message
+            data_store["department"] = text
             next_step = "priority"
             reply = "⚡ Enter Priority (Low/Medium/High):"
         elif step == "priority":
-            data_store["priority"] = message
+            data_store["priority"] = text
             success = await create_task_from_session(
                 data_store,
                 telegram_user_id,
@@ -2925,7 +2919,7 @@ async def telegram_webhook(request: Request):
                 {"telegram_id": telegram_user_id},
                 {"$set": {"step": next_step, "data": data_store}}
             )
-            send_message(chat_id, reply)
+            await send_message(chat_id, reply)
     return {"ok": True}
 # ==============================
 # CREATE TASK FROM TELEGRAM DATA
@@ -2934,20 +2928,20 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
     try:
         due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
     except ValueError:
-        send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
+        await send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
         return False
     names = [n.strip() for n in data["assign"].split(",") if n.strip()]
     if not names:
-        send_message(chat_id, "❌ Assignee required.")
+        await send_message(chat_id, "❌ Assignee required.")
         return False
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
     # 🔍 Case-insensitive primary user search
-    primary_primary_user = await db.users.find_one(
+    primary_user = await db.users.find_one(
         {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
     )
     if not primary_user:
-        send_message(chat_id, f"❌ Assignee '{primary_name}' not found.")
+        await send_message(chat_id, f"❌ Assignee '{primary_name}' not found.")
         return False
     # 🔍 Case-insensitive co-user search
     co_users = []
@@ -2960,7 +2954,7 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
     # 🔍 Find creator from telegram_id
     creator = await db.users.find_one({"telegram_id": telegram_user_id})
     if not creator:
-        send_message(chat_id, "❌ Your Telegram is not linked to any user.")
+        await send_message(chat_id, "❌ Your Telegram is not linked to any user.")
         return False
     priority_map = {
         "low": "low",
@@ -2983,19 +2977,17 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         "updated_at": datetime.now(india_tz).isoformat(),
     }
     await db.tasks.insert_one(task)
-    send_message(chat_id, "✅ Task Created Successfully!")
+    await send_message(chat_id, "✅ Task Created Successfully!")
     return True
 # ====================== UPDATED EXCEL IMPORT ENDPOINT ======================
 def valid_email(e):
     if not e: return True
     import re
     return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", str(e).strip()))
-
 def valid_phone(p):
     if not p: return True
     s = str(p).strip().replace("+", "").replace(" ", "").replace("-", "")
     return len(s) >= 10 and s.isdigit()
-
 @api_router.post("/clients/import-excel")
 async def import_clients_from_excel(
     file: UploadFile = File(...),
@@ -3097,7 +3089,7 @@ async def import_clients_from_excel(
                 company_name = company_data.get("llp_name", company_data.get("company_name", "")).strip()
                 client_type = "llp" if 'llp_name' in company_data else "proprietor"
                 email = str(company_data.get("email_id", "")).replace("[dot]", ".").replace("[at]", "@").strip()
-                phone = ""  # Not present in example
+                phone = "" # Not present in example
                 raw_birthday = company_data.get("date_of_incorporation")
                 birthday = None
                 if raw_birthday:
@@ -3149,7 +3141,7 @@ async def import_clients_from_excel(
                 continue
             # Parse directors
             contacts = []
-            row_num = 3  # assuming header in row 1-2
+            row_num = 3 # assuming header in row 1-2
             for row in sheet.iter_rows(min_row=3, values_only=True):
                 if not row[0]: break
                 din = str(row[1] or "").strip()
@@ -3173,7 +3165,6 @@ async def import_clients_from_excel(
         return {"message": f"Imported {created_count} clients successfully", "errors": errors}
     else:
         raise HTTPException(400, detail=f"No valid clients imported. Errors: {errors}")
-
 @api_router.post("/clients/import-csv")
 async def import_clients_from_csv(
     file: UploadFile = File(...),
@@ -3200,16 +3191,12 @@ async def import_clients_from_csv(
                     birthday = None
             services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
             notes = row.get("notes", "").strip()
+            # Contacts
+            contacts = []
             contact_name = row.get("contact_name_1", "").strip()
             contact_designation = row.get("contact_designation_1", "").strip()
             contact_email = row.get("contact_email_1", "").strip()
             contact_phone = row.get("contact_phone_1", "").strip()
-            # Validation
-            if not company_name or not email or not valid_email(email) or not phone or not valid_phone(phone):
-                errors.append("Invalid row: missing/invalid company/email/phone")
-                continue
-            # Contacts
-            contacts = []
             if contact_name:
                 contacts.append({
                     "name": contact_name,
