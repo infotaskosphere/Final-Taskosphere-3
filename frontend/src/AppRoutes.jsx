@@ -39,96 +39,154 @@ const Permission = ({ permission, children }) => {
   const { user, loading, hasPermission } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
-  if (permission && !hasPermission(permission))
+  if (permission && !hasPermission(permission)) {
     return <Navigate to="/dashboard" replace />;
+  }
   return <DashboardLayout>{children}</DashboardLayout>;
 };
 
-/* s */
+/* Main Routes */
 
-function Apps() {
+function AppRoutes() {
   return (
     <Suspense fallback={<div className="p-10">Loading...</div>}>
-      <s>
+      <Routes>
 
-        < path="/" element={
-          <Public><Login /></Public>
-        } />
+        <Route
+          path="/"
+          element={
+            <Public>
+              <Login />
+            </Public>
+          }
+        />
 
-        < path="/login" element={
-          <Public><Login /></Public>
-        } />
+        <Route
+          path="/login"
+          element={
+            <Public>
+              <Login />
+            </Public>
+          }
+        />
 
-        < path="/register" element={
-          <Public><Register /></Public>
-        } />
+        <Route
+          path="/register"
+          element={
+            <Public>
+              <Register />
+            </Public>
+          }
+        />
 
-        < path="/dashboard" element={
-          <Protected><Dashboard /></Protected>
-        } />
+        <Route
+          path="/dashboard"
+          element={
+            <Protected>
+              <Dashboard />
+            </Protected>
+          }
+        />
 
-        < path="/tasks" element={
-          <Protected><Tasks /></Protected>
-        } />
+        <Route
+          path="/tasks"
+          element={
+            <Protected>
+              <Tasks />
+            </Protected>
+          }
+        />
 
-        <Route path="/dsc" element={
-          <PermissionRoute permission="can_view_all_dsc">
-            <DSCRegister />
-          </PermissionRoute>
-        } />
+        <Route
+          path="/dsc"
+          element={
+            <Permission permission="can_view_all_dsc">
+              <DSCRegister />
+            </Permission>
+          }
+        />
 
-        <Route path="/documents" element={
-          <PermissionRoute permission="can_view_documents">
-            <DocumentsRegister />
-          </PermissionRoute>
-        } />
+        <Route
+          path="/documents"
+          element={
+            <Permission permission="can_view_documents">
+              <DocumentsRegister />
+            </Permission>
+          }
+        />
 
-        <Route path="/attendance" element={
-          <ProtectedRoute><Attendance /></ProtectedRoute>
-        } />
+        <Route
+          path="/attendance"
+          element={
+            <Protected>
+              <Attendance />
+            </Protected>
+          }
+        />
 
-        <Route path="/reports" element={
-          <ProtectedRoute><Reports /></ProtectedRoute>
-        } />
+        <Route
+          path="/reports"
+          element={
+            <Protected>
+              <Reports />
+            </Protected>
+          }
+        />
 
-        <Route path="/clients" element={
-          <ProtectedRoute><Clients /></ProtectedRoute>
-        } />
+        <Route
+          path="/clients"
+          element={
+            <Protected>
+              <Clients />
+            </Protected>
+          }
+        />
 
-        <Route path="/users" element={
-          <PermissionRoute permission="can_view_user_page">
-            <Users />
-          </PermissionRoute>
-        } />
+        <Route
+          path="/users"
+          element={
+            <Permission permission="can_view_user_page">
+              <Users />
+            </Permission>
+          }
+        />
 
-        <Route path="/duedates" element={
-          <ProtectedRoute><DueDates /></ProtectedRoute>
-        } />
+        <Route
+          path="/duedates"
+          element={
+            <Protected>
+              <DueDates />
+            </Protected>
+          }
+        />
 
-        <Route path="/staff-activity" element={
-          <PermissionRoute permission="can_view_staff_activity">
-            <StaffActivity />
-          </PermissionRoute>
-        } />
+        <Route
+          path="/staff-activity"
+          element={
+            <Permission permission="can_view_staff_activity">
+              <StaffActivity />
+            </Permission>
+          }
+        />
 
-        <Route path="/chat" element={
-          <PermissionRoute permission="can_use_chat">
-            <Chat />
-          </PermissionRoute>
-        } />
+        <Route
+          path="/chat"
+          element={
+            <Permission permission="can_use_chat">
+              <Chat />
+            </Permission>
+          }
+        />
 
-        <Route path="/task-audit" element={
-          <PermissionRoute permission="can_view_audit_logs">
-            <Dashboard />
-         </PermissionRoute>
-        } />
-        
-        <Route path="/task-audit" element={
-          <PermissionRoute permission="can_view_audit_logs">
-            <TaskAudit />
-        </PermissionRoute>
-        }/>
-        
+        <Route
+          path="/task-audit"
+          element={
+            <Permission permission="can_view_audit_logs">
+              <TaskAudit />
+            </Permission>
+          }
+        />
+
         <Route path="*" element={<Navigate to="/login" replace />} />
 
       </Routes>
