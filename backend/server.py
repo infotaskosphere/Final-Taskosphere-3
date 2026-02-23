@@ -2328,7 +2328,7 @@ async def get_chat_messages(
         if isinstance(msg.get("created_at"), str):
             msg["created_at"] = datetime.fromisoformat(msg["created_at"])
     return list(reversed(messages))
-@api_router.post("/chat/groups/{group_id}/messages")
+
 class BulkDeleteChatRequest(BaseModel):
     message_ids: List[str]
 
