@@ -32,7 +32,7 @@
     "@radix-ui/react-toggle-group": "^1.1.7",
     "@radix-ui/react-tooltip": "^1.2.4",
     "@hello-pangea/dnd": "^16.2.0",
-    "@tanstack/react-query": "^5.x.x"
+    "@tanstack/react-query": "^5.0.0",
     "axios": "^1.8.4",
     "chart.js": "^4.4.1",
     "chartjs-plugin-datalabels": "^2.2.0",
@@ -73,16 +73,8 @@
     "test": "craco test"
   },
   "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
