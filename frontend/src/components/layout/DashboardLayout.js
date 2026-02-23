@@ -34,7 +34,7 @@ const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-
+  
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -80,6 +80,9 @@ const DashboardLayout = ({ children }) => {
       : []),
     ...(hasPermission('can_view_staff_activity')
       ? [{ path: '/staff-activity', icon: Activity, label: 'Staff Activity' }]
+      : []),
+    ...(hasPermission('can_view_audit_logs')
+      ? [{ path: '/task-audit', icon: Activity, label: 'Task Audit Log' }]
       : []),
   ];
 
