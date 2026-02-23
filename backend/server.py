@@ -27,14 +27,15 @@ from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
+import openpyxl
+from openpyxl import load_workbook
 
 OFFICE_LAT = 21.1652
 OFFICE_LON = 72.7799
 ALLOWED_RADIUS_METERS = 200
-
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
-   
+  
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -100,11 +101,9 @@ def check_permission(permission_name: str):
         return current_user
     return dependency
 app = FastAPI()
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
 @app.on_event("startup")
 async def create_indexes():
     await db.tasks.create_index("assigned_to")
@@ -114,7 +113,6 @@ async def create_indexes():
     await db.staff_activity.create_index("user_id")
     await db.staff_activity.create_index("timestamp")
     await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
-    await db.staff_activity.create_index("category")
     await db.due_dates.create_index("department")
     await db.attendance.create_index(
     [("user_id", 1), ("date", 1)],
@@ -324,6 +322,8 @@ class ContactPerson(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     designation: Optional[str] = None
+    birthday: Optional[date] = None
+    din: Optional[str] = None
 class ClientDSC(BaseModel):
     certificate_number: str
     holder_name: str
@@ -611,7 +611,8 @@ async def register(
         profile_picture=user_data.profile_picture,
         permissions=user_data.permissions,
         departments=user_data.departments,
-        # Added office timing fields for late marking (optional, safe for existing users)
+        # ───────────────────────────────────────────────────────────────
+        # These are the two fields you need for per-user late calculation
         expected_start_time=user_data.expected_start_time, # "09:30" (24-hour format)
         expected_end_time=user_data.expected_end_time, # "18:00"
         late_grace_minutes=user_data.late_grace_minutes # Default grace period in minutes
@@ -686,61 +687,50 @@ async def record_attendance(
     india_tz = pytz.timezone("Asia/Kolkata")
     now = datetime.now(india_tz)
     today_str = now.date().isoformat()
-
     # =========================
     # 🔹 PUNCH IN
     # =========================
     if data["action"] == "punch_in":
-
         existing = await db.attendance.find_one(
             {"user_id": current_user.id, "date": today_str},
             {"_id": 0}
         )
         if existing:
             raise HTTPException(status_code=400, detail="Already punched in today")
-
         # ✅ GEO-FENCING (ONLY PUNCH IN)
         location = data.get("location")
         if not location:
             raise HTTPException(status_code=400, detail="Location required")
-
         user_lat = location.get("latitude")
         user_lon = location.get("longitude")
-
         if user_lat is None or user_lon is None:
             raise HTTPException(status_code=400, detail="Invalid location data")
-
         distance = calculate_distance(
             float(user_lat),
             float(user_lon),
             OFFICE_LAT,
             OFFICE_LON
         )
-
         if distance > ALLOWED_RADIUS_METERS:
             raise HTTPException(
                 status_code=403,
                 detail=f"Punch-in allowed only from office. You are {int(distance)} meters away."
             )
-
         # ⏰ Late Calculation
         is_late = False
         late_by_minutes = 0
         expected_str = current_user.expected_start_time
         grace = current_user.late_grace_minutes or 15
-
         if expected_str:
             try:
                 from datetime import time
                 h, m = map(int, expected_str.split(":"))
                 expected_time = time(h, m)
-
                 expected_datetime = datetime.combine(
                     now.date(),
                     expected_time,
                     tzinfo=india_tz
                 )
-
                 if now > expected_datetime:
                     diff = now - expected_datetime
                     late_by_minutes = int(diff.total_seconds() / 60)
@@ -748,7 +738,6 @@ async def record_attendance(
                         is_late = True
             except:
                 pass
-
         doc = {
             "id": str(uuid.uuid4()),
             "user_id": current_user.id,
@@ -761,54 +750,42 @@ async def record_attendance(
             "location": location,
             "distance_from_office_meters": int(distance)
         }
-
         await db.attendance.insert_one(doc)
         return Attendance(**doc)
-
     # =========================
     # 🔹 PUNCH OUT
     # =========================
     elif data["action"] == "punch_out":
-
         existing = await db.attendance.find_one(
             {"user_id": current_user.id, "date": today_str},
             {"_id": 0}
         )
-
         if not existing:
             raise HTTPException(status_code=400, detail="No punch in record found")
-
         if existing.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out today")
-
         punch_in_time = datetime.fromisoformat(existing["punch_in"])
         duration = int((now - punch_in_time).total_seconds() / 60)
-
         is_early_leave = False
         early_minutes = 0
-
         if current_user.expected_end_time:
             try:
                 from datetime import time
                 h, m = map(int, current_user.expected_end_time.split(":"))
                 expected_out_time = time(h, m)
-
                 expected_dt = datetime.combine(
                     now.date(),
                     expected_out_time,
                     tzinfo=india_tz
                 )
-
                 if now < expected_dt:
                     diff = expected_dt - now
                     early_minutes = int(diff.total_seconds() / 60)
                     is_early_leave = True
             except:
                 pass
-
         # 🔎 Location tracking only (no geo restriction)
         punch_out_location = data.get("location")
-
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
@@ -821,14 +798,11 @@ async def record_attendance(
                 }
             }
         )
-
         updated = await db.attendance.find_one(
             {"user_id": current_user.id, "date": today_str},
             {"_id": 0}
         )
-
         return Attendance(**updated)
-
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
 # User routes
@@ -1086,6 +1060,8 @@ async def export_task_log_pdf(
         {"module": "task", "record_id": task_id},
         {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
+    if not logs:
+        raise HTTPException(status_code=404, detail="No audit logs found for this task")
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -1100,10 +1076,13 @@ async def export_task_log_pdf(
     pdf.cell(200, 10, txt="Timeline:", ln=True)
     pdf.ln(5)
     for log in logs:
+        timestamp = log.get('timestamp')
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.isoformat()
         pdf.multi_cell(
             0,
             8,
-            f"{log.get('timestamp')} - {log.get('action')} by {log.get('user_name')}"
+            f"{timestamp} - {log.get('action')} by {log.get('user_name')}"
         )
         if log.get("old_data"):
             pdf.multi_cell(0, 8, f"Details: {log.get('old_data')}")
@@ -1962,13 +1941,10 @@ async def import_clients_from_csv(
 ):
     if file.content_type != "text/csv":
         raise HTTPException(status_code=400, detail="Invalid file type")
-
     content = await file.read()
     content_str = content.decode("utf-8")
     csv_reader = csv.DictReader(StringIO(content_str))
-
     created_count = 0
-
     for row in csv_reader:
         try:
             client = Client(
@@ -1980,17 +1956,13 @@ async def import_clients_from_csv(
                 assigned_to=row.get("assigned_to"),
                 created_by=current_user.id
             )
-
             doc = client.model_dump()
             doc["created_at"] = doc["created_at"].isoformat()
-
             await db.clients.insert_one(doc)
             created_count += 1
-
         except Exception as e:
             print("Row error:", row, str(e))
             continue
-
     return {
         "message": "Clients imported successfully",
         "created_count": created_count
@@ -2225,15 +2197,11 @@ async def update_user_permissions(
 # CHAT ROUTES
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
-
-
 @api_router.delete("/chat/message/{message_id}")
 async def delete_message(message_id: str):
     result = await db.chat_messages.delete_one({"_id": ObjectId(message_id)})
-
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
-
     return {"success": True}
 @api_router.post("/chat/groups", response_model=ChatGroup)
 async def create_chat_group(
@@ -2367,11 +2335,8 @@ async def get_chat_messages(
         if isinstance(msg.get("created_at"), str):
             msg["created_at"] = datetime.fromisoformat(msg["created_at"])
     return list(reversed(messages))
-
 class BulkDeleteChatRequest(BaseModel):
     message_ids: List[str]
-
-
 @api_router.post("/chat/messages/bulk-delete")
 async def bulk_delete_chat_messages(
     payload: BulkDeleteChatRequest,
@@ -2384,11 +2349,9 @@ async def bulk_delete_chat_messages(
             object_ids.append(ObjectId(msg_id))
         except:
             continue
-
     result = await db.chat_messages.delete_many(
         {"_id": {"$in": object_ids}}
     )
-
     return {
         "message": "Messages deleted successfully",
         "deleted_count": result.deleted_count
@@ -2771,14 +2734,11 @@ async def get_staff_rankings(
         "rankings": rankings[:50]
     }, current_user)
 def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000  # Earth radius in meters
-
+    R = 6371000 # Earth radius in meters
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
-
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
-
     return R * c
 def calculate_expected_hours(punch_in, punch_out):
     if not punch_in or not punch_out:
@@ -2836,20 +2796,15 @@ async def get_audit_logs(
 ):
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(1000).to_list(1000)
     return logs
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 # ==============================
 # TELEGRAM BOT CONFIGURATION
 # ==============================
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 ALLOWED_TELEGRAM_IDS = []
 allowed_ids = os.getenv("ALLOWED_TELEGRAM_IDS")
-
 if allowed_ids:
     ALLOWED_TELEGRAM_IDS = [int(x.strip()) for x in allowed_ids.split(",")]
-
-
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -2859,36 +2814,26 @@ def send_message(chat_id, text):
         })
     except Exception as e:
         logger.error(f"Telegram send error: {str(e)}")
-
-
 # ==============================
 # TELEGRAM WEBHOOK
 # ==============================
-
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    print("Webhook received:", data)
 
     if "message" not in data:
         return {"ok": True}
 
-    telegram_user_id = data["message"]["from"]["id"]
-
-    # 🔐 Allow only specific Telegram users
-    if telegram_user_id not in ALLOWED_TELEGRAM_IDS:
-        return {"ok": True}
-
-    message = data["message"].get("text", "").strip()
     chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text", "")
 
-    session = await db.telegram_sessions.find_one(
-        {"telegram_id": telegram_user_id}
-    )
+    await send_message(chat_id, f"Echo: {text}")
 
+    return {"ok": True}
     # ==============================
     # START NEW TASK
     # ==============================
-
     if message.lower() == "/task":
         await db.telegram_sessions.update_one(
             {"telegram_id": telegram_user_id},
@@ -2897,58 +2842,46 @@ async def telegram_webhook(request: Request):
         )
         send_message(chat_id, "📝 Enter Task Title:")
         return {"ok": True}
-
     # ==============================
     # HANDLE ACTIVE SESSION
     # ==============================
-
     if session:
         step = session.get("step")
         data_store = session.get("data", {})
         next_step = None
         reply = None
-
         if step == "title":
             data_store["title"] = message
             next_step = "description"
             reply = "📄 Enter Description:"
-
         elif step == "description":
             data_store["description"] = message
             next_step = "due_date"
             reply = "📅 Enter Due Date (DD-MM-YYYY):"
-
         elif step == "due_date":
             data_store["due_date"] = message
             next_step = "assign"
             reply = "👤 Enter Assignee Name (comma separated):"
-
         elif step == "assign":
             data_store["assign"] = message
             next_step = "department"
             reply = "🏢 Enter Department:"
-
         elif step == "department":
             data_store["department"] = message
             next_step = "priority"
             reply = "⚡ Enter Priority (Low/Medium/High):"
-
         elif step == "priority":
             data_store["priority"] = message
-
             success = await create_task_from_session(
                 data_store,
                 telegram_user_id,
                 chat_id
             )
-
             if success:
                 await db.telegram_sessions.delete_one(
                     {"telegram_id": telegram_user_id}
                 )
-
             return {"ok": True}
-
         # Update session if not final step
         if next_step and reply:
             await db.telegram_sessions.update_one(
@@ -2956,38 +2889,29 @@ async def telegram_webhook(request: Request):
                 {"$set": {"step": next_step, "data": data_store}}
             )
             send_message(chat_id, reply)
-
     return {"ok": True}
-
-
 # ==============================
 # CREATE TASK FROM TELEGRAM DATA
 # ==============================
-
 async def create_task_from_session(data, telegram_user_id, chat_id):
     try:
         due_date = datetime.strptime(data["due_date"], "%d-%m-%Y")
     except ValueError:
         send_message(chat_id, "❌ Invalid date format. Use DD-MM-YYYY.")
         return False
-
     names = [n.strip() for n in data["assign"].split(",") if n.strip()]
     if not names:
         send_message(chat_id, "❌ Assignee required.")
         return False
-
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
-
     # 🔍 Case-insensitive primary user search
     primary_user = await db.users.find_one(
         {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
     )
-
     if not primary_user:
         send_message(chat_id, f"❌ Assignee '{primary_name}' not found.")
         return False
-
     # 🔍 Case-insensitive co-user search
     co_users = []
     for name in co_names:
@@ -2996,22 +2920,17 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         )
         if user:
             co_users.append(user)
-
     # 🔍 Find creator from telegram_id
     creator = await db.users.find_one({"telegram_id": telegram_user_id})
-
     if not creator:
         send_message(chat_id, "❌ Your Telegram is not linked to any user.")
         return False
-
     priority_map = {
         "low": "low",
         "medium": "medium",
         "high": "high"
     }
-
     priority = priority_map.get(data["priority"].lower(), "medium")
-
     task = {
         "id": str(uuid.uuid4()),
         "title": data["title"],
@@ -3026,9 +2945,188 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
         "created_at": datetime.now(india_tz).isoformat(),
         "updated_at": datetime.now(india_tz).isoformat(),
     }
-
     await db.tasks.insert_one(task)
-
     send_message(chat_id, "✅ Task Created Successfully!")
-
     return True
+
+# ====================== UPDATED EXCEL IMPORT ENDPOINT ======================
+@api_router.post("/clients/import-excel")
+async def import_clients_from_excel(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files allowed")
+
+    content = await file.read()
+    wb = load_workbook(BytesIO(content), read_only=True, data_only=True)
+
+    count = 0
+    errors = []
+
+    def excel_to_date(val):
+        if isinstance(val, (int, float)):
+            return (datetime(1899, 12, 30) + timedelta(days=val)).strftime("%Y-%m-%d")
+        if isinstance(val, datetime):
+            return val.strftime("%Y-%m-%d")
+        if isinstance(val, str) and "/" in val:
+            try:
+                dt = parser.parse(val, dayfirst=True)
+                return dt.strftime("%Y-%m-%d")
+            except:
+                return ""
+        return str(val) if val else ""
+
+    def valid_email(e):
+        if not e: return True
+        import re
+        return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", str(e).strip()))
+
+    def valid_phone(p):
+        if not p: return True
+        s = str(p).strip().replace("+", "").replace(" ", "").replace("-", "")
+        return len(s) >= 10 and s.isdigit()
+
+    # Assuming one company per file, parse "MasterData" and "Director Details"
+    master_sheet = wb.get_sheet_by_name("MasterData") if "MasterData" in wb.sheetnames else None
+    director_sheet = wb.get_sheet_by_name("Director Details") if "Director Details" in wb.sheetnames else None
+
+    if not master_sheet:
+        raise HTTPException(400, detail="Missing 'MasterData' sheet")
+
+    # Parse MasterData key-value
+    company_data = {}
+    for row in master_sheet.iter_rows(min_row=2, max_col=3, values_only=True):
+        if row[0]:
+            key = str(row[0]).strip().replace(" ", "_").lower()
+            val = row[1]
+            company_data[key] = val
+
+    # Extract fields
+    company_name = company_data.get("llp_name", "").strip()
+    client_type = "llp"
+    email = str(company_data.get("email_id", "")).replace("[dot]", ".").replace("[at]", "@").strip()
+    phone = ""  # Not present in example
+    birthday = excel_to_date(company_data.get("date_of_incorporation"))
+    services = ["LLP"]  # Default from example
+    notes = f"LLPIN: {company_data.get('llpin', '')}\nROC: {company_data.get('roc_name', '')}\nAddress: {company_data.get('registered_address', '')}\nContribution: {company_data.get('total_obligation_of_contribution', '')}\nStatus: {company_data.get('llp_status', '')}"
+
+    # Validation
+    if not company_name or not email or not valid_email(email):
+        errors.append("Invalid company name or email")
+    else:
+        # Parse directors if sheet exists
+        contacts = []
+        if director_sheet:
+            for row in director_sheet.iter_rows(min_row=3, values_only=True):
+                if not row[0]: break
+                din = str(row[1] or "").strip()
+                name = str(row[2] or "").strip()
+                designation = str(row[3] or "").strip()
+                if name:
+                    contacts.append({
+                        "name": name,
+                        "designation": designation,
+                        "din": din if len(din) == 8 and din.isdigit() else "",  # Assume 8-digit DIN
+                        "email": None,
+                        "phone": None,
+                        "birthday": ""
+                    })
+
+        # Create client
+        current_client = {
+            "id": str(uuid.uuid4()),
+            "company_name": company_name,
+            "client_type": client_type,
+            "email": email,
+            "phone": phone,
+            "birthday": birthday,
+            "services": services,
+            "notes": notes,
+            "assigned_to": None,
+            "status": "active",
+            "contact_persons": contacts,
+            "dsc_details": [],
+            "created_by": current_user.id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        try:
+            await db.clients.insert_one(current_client)
+            count += 1
+        except Exception as e:
+            errors.append(str(e))
+
+    if count > 0:
+        return {"message": f"✅ Imported {count} clients successfully", "errors": errors}
+    else:
+        raise HTTPException(400, detail=f"No valid clients imported. Errors: {errors}")
+
+@api_router.post("/clients/import-csv")
+async def import_clients_from_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    content = await file.read()
+    content_str = content.decode("utf-8")
+    csv_reader = csv.DictReader(StringIO(content_str))
+    created_count = 0
+    errors = []
+    for row in csv_reader:
+        try:
+            # Parse fields
+            company_name = row.get("company_name", "").strip()
+            client_type = row.get("client_type", "proprietor").lower()
+            email = row.get("email", "").strip()
+            phone = row.get("phone", "").strip()
+            birthday = row.get("birthday", "")
+            services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
+            notes = row.get("notes", "").strip()
+            contact_name = row.get("contact_name_1", "").strip()
+            contact_designation = row.get("contact_designation_1", "").strip()
+            contact_email = row.get("contact_email_1", "").strip()
+            contact_phone = row.get("contact_phone_1", "").strip()
+            # Validation
+            if not company_name or not email or not valid_email(email) or not phone or not valid_phone(phone):
+                errors.append("Invalid row: missing/invalid company/email/phone")
+                continue
+            # Birthday format
+            if birthday:
+                birthday = excel_to_date(birthday)  # Reuse date handler
+            # Contacts
+            contacts = []
+            if contact_name:
+                contacts.append({
+                    "name": contact_name,
+                    "designation": contact_designation,
+                    "email": contact_email if valid_email(contact_email) else None,
+                    "phone": contact_phone if valid_phone(contact_phone) else None,
+                    "birthday": "",
+                    "din": ""
+                })
+            client = {
+                "id": str(uuid.uuid4()),
+                "company_name": company_name,
+                "client_type": client_type,
+                "email": email,
+                "phone": phone,
+                "birthday": birthday,
+                "services": services,
+                "notes": notes,
+                "assigned_to": None,
+                "status": "active",
+                "contact_persons": contacts,
+                "dsc_details": [],
+                "created_by": current_user.id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.clients.insert_one(client)
+            created_count += 1
+        except Exception as e:
+            errors.append(str(e))
+    return {
+        "message": f"Imported {created_count} clients",
+        "errors": errors
+    }
