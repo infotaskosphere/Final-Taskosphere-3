@@ -244,7 +244,7 @@ export default function Chat() {
     }
     if (window.confirm('Are you sure you want to delete these messages?')) {
       try {
-        await api.post('/chat/delete-multiple', { message_ids: selectedMessages });
+        await api.post('/chat/bulk-delete', { message_ids: selectedMessages });
         setMessages(messages.filter(msg => !selectedMessages.includes(msg.id)));
         setSelectedMessages([]);
         toast.success('Messages deleted');
