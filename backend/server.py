@@ -8,7 +8,7 @@ from fastapi import Request
 from dateutil import parser
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,13 +29,12 @@ from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
 import openpyxl
 from openpyxl import load_workbook
-
 OFFICE_LAT = 21.1652
 OFFICE_LON = 72.7799
 ALLOWED_RADIUS_METERS = 200
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
-  
+ 
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -264,6 +263,11 @@ class DSC(DSCBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+class DSCListResponse(BaseModel):
+    data: List[DSC]
+    total: int
+    page: int
+    limit: int
 class DSCMovementRequest(BaseModel):
     movement_type: str # "IN" or "OUT"
     person_name: str
@@ -1105,18 +1109,36 @@ async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_curre
     doc["expiry_date"] = doc["expiry_date"].isoformat()
     await db.dsc_register.insert_one(doc)
     return dsc
-@api_router.get("/dsc", response_model=List[DSC])
-async def get_dsc_list(current_user: User = Depends(check_permission("can_view_all_dsc"))):
-    dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
+@api_router.get("/dsc", response_model=DSCListResponse)
+async def get_dsc_list(
+    page: int = Query(1, ge=1),
+    limit: int = Query(15, ge=1, le=100),
+    sort_by: str = Query("holder_name"),
+    order: str = Query("asc", pattern="^(asc|desc)$", ignore_case=True),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(check_permission("can_view_all_dsc"))
+):
+    query = {}
+    if search:
+        query["$or"] = [
+            {"holder_name": {"$regex": search, "$options": "i"}},
+            {"dsc_type": {"$regex": search, "$options": "i"}},
+            {"associated_with": {"$regex": search, "$options": "i"}}
+        ]
+    sort_dir = 1 if order.lower() == "asc" else -1
+    cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip((page - 1) * limit).limit(limit)
+    dsc_list = await cursor.to_list(limit)
+    total = await db.dsc_register.count_documents(query)
+    now = datetime.now(timezone.utc)
     for dsc in dsc_list:
-        if isinstance(dsc["created_at"], str):
+        if isinstance(dsc.get("created_at"), str):
             dsc["created_at"] = datetime.fromisoformat(dsc["created_at"])
-        if isinstance(dsc["issue_date"], str):
+        if isinstance(dsc.get("issue_date"), str):
             dsc["issue_date"] = datetime.fromisoformat(dsc["issue_date"])
-        if isinstance(dsc["expiry_date"], str):
+        if isinstance(dsc.get("expiry_date"), str):
             dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
-        now = datetime.now(timezone.utc)
-        if dsc["expiry_date"] < now:
+        expiry_date = dsc["expiry_date"]
+        if expiry_date < now:
             movement_log = dsc.get("movement_log", [])
             updated = False
             if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
@@ -1142,7 +1164,7 @@ async def get_dsc_list(current_user: User = Depends(check_permission("can_view_a
                         "movement_log": movement_log
                     }}
                 )
-    return dsc_list
+    return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
 @api_router.put("/dsc/{dsc_id}", response_model=DSC)
 async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depends(check_permission("can_edit_dsc"))):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
@@ -2588,9 +2610,12 @@ async def get_staff_rankings(
     now = datetime.now(timezone.utc)
     start_date = None
     if period == "weekly":
-        start_date = now - timedelta(days=7)
+        start_date = (now - timedelta(days=7)).isoformat()
     elif period == "monthly":
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    else:
+        start_date = None
+    # Get staff/managers
     users = await db.users.find(
         {"role": {"$in": ["manager", "staff"]}},
         {"_id": 0, "password": 0}
@@ -2602,47 +2627,28 @@ async def get_staff_rankings(
             continue
         total_minutes = 0
         # ATTENDANCE
+        attendance_query = {"user_id": uid}
+        if start_date:
+            attendance_query["date"] = {"$gte": start_date[:10]}
         attendance_cursor = await db.attendance.find(
-            {"user_id": uid},
+            attendance_query,
             {"_id": 0, "date": 1, "duration_minutes": 1}
         ).to_list(1000)
         for record in attendance_cursor:
-            date_str = record.get("date")
-            if not date_str:
-                continue
-            try:
-                record_date = parser.isoparse(date_str).replace(tzinfo=timezone.utc)
-            except:
-                try:
-                    record_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-                except:
-                    continue
-            if start_date and record_date < start_date:
-                continue
             total_minutes += record.get("duration_minutes") or 0
         # 160 hour baseline
         work_score = min(total_minutes / (60 * 160), 1.0) * 100
         # TASKS
+        task_query = {"assigned_to": uid}
+        if start_date:
+            task_query["created_at"] = {"$gte": start_date}
         tasks = await db.tasks.find(
-            {"assigned_to": uid},
+            task_query,
             {"_id": 0}
         ).to_list(1000)
-        filtered_tasks = []
-        for task in tasks:
-            created = task.get("created_at")
-            if not created:
-                continue
-            if isinstance(created, str):
-                try:
-                    created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-                except ValueError:
-                    continue
-            if start_date and created < start_date:
-                continue
-            filtered_tasks.append(task)
-        total_tasks = len(filtered_tasks)
+        total_tasks = len(tasks)
         completed_tasks = len(
-            [t for t in filtered_tasks if t.get("status") == "completed"]
+            [t for t in tasks if t.get("status") == "completed"]
         )
         completion_percent = (
             (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
@@ -2650,7 +2656,7 @@ async def get_staff_rankings(
         # OVERDUE LOGIC
         overdue_with_reason = 0
         overdue_without_reason = 0
-        for task in filtered_tasks:
+        for task in tasks:
             status = task.get("status")
             due_date = task.get("due_date")
             if not due_date:
@@ -2668,22 +2674,19 @@ async def get_staff_rankings(
                     overdue_without_reason += 1
         # SPEED
         completion_times = []
-        for task in filtered_tasks:
+        for task in tasks:
             if task.get("status") == "completed":
                 created = task.get("created_at")
                 updated = task.get("updated_at")
                 if not created or not updated:
                     continue
-                try:
-                    if isinstance(created, str):
-                        created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-                    if isinstance(updated, str):
-                        updated = datetime.fromisoformat(updated).replace(tzinfo=timezone.utc)
-                    diff = (updated - created).total_seconds()
-                    if diff > 0:
-                        completion_times.append(diff)
-                except:
-                    continue
+                if isinstance(created, str):
+                    created = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
+                if isinstance(updated, str):
+                    updated = datetime.fromisoformat(updated).replace(tzinfo=timezone.utc)
+                diff = (updated - created).total_seconds()
+                if diff > 0:
+                    completion_times.append(diff)
         speed_score = 0
         if completion_times:
             avg_seconds = sum(completion_times) / len(completion_times)
@@ -2704,8 +2707,11 @@ async def get_staff_rankings(
             0.35 * work_score + 0.40 * adjusted_completion + 0.25 * speed_score
         )
         # STAFF ACTIVITY
+        activity_query = {"user_id": uid}
+        if start_date:
+            activity_query["timestamp"] = {"$gte": start_date}
         activities = await db.staff_activity.find(
-            {"user_id": uid, "timestamp": {"$gte": start_date.isoformat() if start_date else "1970-01-01"}},
+            activity_query,
             {"_id": 0}
         ).to_list(None)
         productive_duration = 0
@@ -2729,10 +2735,7 @@ async def get_staff_rankings(
     rankings.sort(key=lambda x: x["score"], reverse=True)
     for i, r in enumerate(rankings):
         r["rank"] = i + 1
-    return sanitize_user_data({
-        "period": period,
-        "rankings": rankings[:50]
-    }, current_user)
+    return rankings
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371000 # Earth radius in meters
     dlat = radians(lat2 - lat1)
@@ -2796,19 +2799,15 @@ async def get_audit_logs(
 ):
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(1000).to_list(1000)
     return logs
-
 # ==============================
 # TELEGRAM BOT CONFIGURATION
 # ==============================
 import httpx
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 ALLOWED_TELEGRAM_IDS = []
 allowed_ids = os.getenv("ALLOWED_TELEGRAM_IDS")
 if allowed_ids:
     ALLOWED_TELEGRAM_IDS = [int(x.strip()) for x in allowed_ids.split(",")]
-
 async def send_message(chat_id: int, text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     async with httpx.AsyncClient() as client:
@@ -2823,21 +2822,16 @@ async def send_message(chat_id: int, text: str):
 async def telegram_webhook(request: Request):
     data = await request.json()
     print("Webhook received:", data)
-
     if "message" not in data:
         return {"ok": True}
-
     telegram_user_id = data["message"]["from"]["id"]
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip()
-
     # 🔐 Allowed users check
     if ALLOWED_TELEGRAM_IDS and telegram_user_id not in ALLOWED_TELEGRAM_IDS:
         return {"ok": True}
-
     # Simple test response
     await send_message(chat_id, f"Echo: {text}")
-
     return {"ok": True}
     # ==============================
     # START NEW TASK
@@ -2914,7 +2908,7 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
     primary_name = names[0]
     co_names = names[1:] if len(names) > 1 else []
     # 🔍 Case-insensitive primary user search
-    primary_user = await db.users.find_one(
+    primary_primary_user = await db.users.find_one(
         {"full_name": {"$regex": f"^{primary_name}$", "$options": "i"}}
     )
     if not primary_user:
@@ -2956,7 +2950,6 @@ async def create_task_from_session(data, telegram_user_id, chat_id):
     await db.tasks.insert_one(task)
     send_message(chat_id, "✅ Task Created Successfully!")
     return True
-
 # ====================== UPDATED EXCEL IMPORT ENDPOINT ======================
 @api_router.post("/clients/import-excel")
 async def import_clients_from_excel(
@@ -2965,13 +2958,10 @@ async def import_clients_from_excel(
 ):
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files allowed")
-
     content = await file.read()
     wb = load_workbook(BytesIO(content), read_only=True, data_only=True)
-
     count = 0
     errors = []
-
     def excel_to_date(val):
         if isinstance(val, (int, float)):
             return (datetime(1899, 12, 30) + timedelta(days=val)).strftime("%Y-%m-%d")
@@ -2984,24 +2974,19 @@ async def import_clients_from_excel(
             except:
                 return ""
         return str(val) if val else ""
-
     def valid_email(e):
         if not e: return True
         import re
         return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", str(e).strip()))
-
     def valid_phone(p):
         if not p: return True
         s = str(p).strip().replace("+", "").replace(" ", "").replace("-", "")
         return len(s) >= 10 and s.isdigit()
-
     # Assuming one company per file, parse "MasterData" and "Director Details"
     master_sheet = wb.get_sheet_by_name("MasterData") if "MasterData" in wb.sheetnames else None
     director_sheet = wb.get_sheet_by_name("Director Details") if "Director Details" in wb.sheetnames else None
-
     if not master_sheet:
         raise HTTPException(400, detail="Missing 'MasterData' sheet")
-
     # Parse MasterData key-value
     company_data = {}
     for row in master_sheet.iter_rows(min_row=2, max_col=3, values_only=True):
@@ -3009,16 +2994,14 @@ async def import_clients_from_excel(
             key = str(row[0]).strip().replace(" ", "_").lower()
             val = row[1]
             company_data[key] = val
-
     # Extract fields
     company_name = company_data.get("llp_name", "").strip()
     client_type = "llp"
     email = str(company_data.get("email_id", "")).replace("[dot]", ".").replace("[at]", "@").strip()
-    phone = ""  # Not present in example
+    phone = "" # Not present in example
     birthday = excel_to_date(company_data.get("date_of_incorporation"))
-    services = ["LLP"]  # Default from example
+    services = ["LLP"] # Default from example
     notes = f"LLPIN: {company_data.get('llpin', '')}\nROC: {company_data.get('roc_name', '')}\nAddress: {company_data.get('registered_address', '')}\nContribution: {company_data.get('total_obligation_of_contribution', '')}\nStatus: {company_data.get('llp_status', '')}"
-
     # Validation
     if not company_name or not email or not valid_email(email):
         errors.append("Invalid company name or email")
@@ -3035,12 +3018,11 @@ async def import_clients_from_excel(
                     contacts.append({
                         "name": name,
                         "designation": designation,
-                        "din": din if len(din) == 8 and din.isdigit() else "",  # Assume 8-digit DIN
+                        "din": din if len(din) == 8 and din.isdigit() else "", # Assume 8-digit DIN
                         "email": None,
                         "phone": None,
                         "birthday": ""
                     })
-
         # Create client
         current_client = {
             "id": str(uuid.uuid4()),
@@ -3058,18 +3040,15 @@ async def import_clients_from_excel(
             "created_by": current_user.id,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-
         try:
             await db.clients.insert_one(current_client)
             count += 1
         except Exception as e:
             errors.append(str(e))
-
     if count > 0:
         return {"message": f"✅ Imported {count} clients successfully", "errors": errors}
     else:
         raise HTTPException(400, detail=f"No valid clients imported. Errors: {errors}")
-
 @api_router.post("/clients/import-csv")
 async def import_clients_from_csv(
     file: UploadFile = File(...),
@@ -3102,7 +3081,7 @@ async def import_clients_from_csv(
                 continue
             # Birthday format
             if birthday:
-                birthday = excel_to_date(birthday)  # Reuse date handler
+                birthday = excel_to_date(birthday) # Reuse date handler
             # Contacts
             contacts = []
             if contact_name:
