@@ -1107,6 +1107,31 @@ async def export_task_log_pdf(
         headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
     )
 # Dsc Routes
+@api_router.get("/dsc/counts")
+async def get_dsc_counts(
+    search: Optional[str] = "",
+    current_user: dict = Depends(get_current_user)
+):
+    query = {"is_deleted": False}
+
+    if search:
+        query["$or"] = [
+            {"holder_name": {"$regex": search, "$options": "i"}},
+            {"dsc_type": {"$regex": search, "$options": "i"}},
+            {"associated_with": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = await db.dsc_register.count_documents(query)
+    in_count = await db.dsc_register.count_documents({**query, "current_status": "IN"})
+    out_count = await db.dsc_register.count_documents({**query, "current_status": "OUT"})
+    expired_count = await db.dsc_register.count_documents({**query, "current_status": "EXPIRED"})
+
+    return {
+        "total": total,
+        "in": in_count,
+        "out": out_count,
+        "expired": expired_count
+    }
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
     dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
