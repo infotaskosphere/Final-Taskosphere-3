@@ -812,147 +812,177 @@ export default function Tasks() {
  </motion.div>
  {/* Task Cards Grid - Responsive with consistent card sizing */}
  <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
- {viewMode === 'list' ? (
- <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
- <div className="hidden sm:block overflow-x-auto">
- <table className="w-full">
- <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
- <tr>
- <th className="p-4 text-left">Task</th>
- <th className="p-4 text-left">Client</th>
- <th className="p-4 text-left">Priority</th>
- <th className="p-4 text-left">Status</th>
- <th className="p-4 text-left">Task Update</th>
- <th className="p-4 text-left">Assigned To</th>
- <th className="p-4 text-left">Assigned By</th>
- <th className="p-4 text-left">DOA</th>
- <th className="p-4 text-left">Due Date</th>
- <th className="p-4 text-left">Actions</th>
- </tr>
- </thead>
- <tbody>
- {filteredTasks.map((task) => {
- const taskIsOverdue = isOverdue(task);
- const displayStatus = getDisplayStatus(task);
- const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
- const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
- return (
- <tr key={task.id} className="border-t border-slate-100 hover:bg-slate-50 transition">
- <td className="p-4">{task.title}</td>
- <td className="p-4">{getClientName(task.client_id)}</td>
- <td className="p-4">
- <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
- </td>
- <td className="p-4">
- <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
- </td>
- <td className="p-4">
- <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
- <SelectTrigger className={`w-32 rounded-xl shadow-sm ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
- <SelectValue />
- </SelectTrigger>
- <SelectContent>
- <SelectItem value="pending">To Do</SelectItem>
- <SelectItem value="in_progress">In Progress</SelectItem>
- <SelectItem value="completed">Done</SelectItem>
- </SelectContent>
- </Select>
- </td>
- <td className="p-4">{getUserName(task.assigned_to)}</td>
- <td className="p-4">{getUserName(task.created_by)}</td>
- <td className="p-4">{task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}</td>
- <td className="p-4">{task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</td>
- <td className="p-4 flex gap-2">
- {canEditTasks && task.created_by === user?.id && (
- <Button
- variant="ghost"
- size="icon"
- onClick={() => handleEdit(task)}
- data-testid={`edit-task-${task.id}`}
- >
- <Edit className="h-4 w-4 text-blue-600" />
- </Button>
- )}
- {canDeleteTasks && (
- <Button
- variant="ghost"
- size="icon"
- onClick={() => handleDelete(task.id)}
- data-testid={`delete-task-${task.id}`}
- >
- <Trash2 className="h-4 w-4 text-red-600" />
- </Button>
- )}
- </td>
- </tr>
- );
- })}
- </tbody>
- </table>
- </div>
- <div className="block sm:hidden space-y-3 p-4">
- {filteredTasks.map((task) => {
- const taskIsOverdue = isOverdue(task);
- const displayStatus = getDisplayStatus(task);
- const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
- const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
- return (
- <Card key={task.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
- <div className="space-y-2">
- <h3 className="font-semibold text-base">{task.title}</h3>
- <div className="text-xs font-bold">{`Assigned to: ${getUserName(task.assigned_to)} | Assigned by: ${getUserName(task.created_by)} | DOA: ${task.created_at ? format(new Date(task.created_at), 'MMM dd') : '-'}`}</div>
- <p className="text-sm text-slate-600 line-clamp-2">{task.description || 'No description'}</p>
- <div className="flex gap-2">
- <Badge className={`${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label}</Badge>
- <Badge className={`${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</Badge>
- </div>
- <Select value={task.status} onValueChange={(value) => handleQuickStatusChange(task, value)}>
- <SelectTrigger className={`w-32 ${displayStatus === 'overdue' ? 'bg-red-100 text-red-700' : displayStatus === 'pending' ? 'bg-amber-100 text-amber-700' : displayStatus === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
- <SelectValue />
- </SelectTrigger>
- <SelectContent>
- <SelectItem value="pending">To Do</SelectItem>
- <SelectItem value="in_progress">In Progress</SelectItem>
- <SelectItem value="completed">Done</SelectItem>
- </SelectContent>
- </Select>
- <div className="text-xs text-slate-500">Due: {task.due_date ? format(new Date(task.due_date), 'MMM dd') : '-'}</div>
- <div className="text-xs text-slate-500">Client: {getClientName(task.client_id)}</div>
- <div className="flex gap-2 pt-2 border-t border-slate-200">
- {canEditTasks && task.created_by === user?.id && (
- <Button
- variant="ghost"
- size="icon"
- className="rounded-xl shadow-sm hover:shadow-md"
- onClick={() => handleEdit(task)}
- >
- <Edit className="h-4 w-4 text-blue-600" />
- </Button>
- )}
- {canDeleteTasks && (
- <Button
- variant="ghost"
- size="icon"
- className="rounded-xl shadow-sm hover:shadow-md"
- onClick={() => handleDelete(task.id)}
- >
- <Trash2 className="h-4 w-4 text-red-600" />
- </Button>
- )}
- </div>
- </div>
- </Card>
- );
- })}
- </div>
- {filteredTasks.length === 0 && (
- <div className="text-center py-12">
- <p className="text-slate-500 text-lg">No tasks found</p>
- <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or create a new task</p>
- </div>
- )}
- </Card>
- ) : (
+{viewMode === 'list' ? (
+  <motion.div
+    variants={containerVariants}
+    className="space-y-4"
+  >
+    {filteredTasks.map((task) => {
+      const taskIsOverdue = isOverdue(task);
+      const displayStatus = getDisplayStatus(task);
+      const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
+      const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+
+      return (
+        <motion.div key={task.id} variants={itemVariants}>
+          <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+            <div className="flex flex-col">
+
+              {/* Status + Priority + Badges */}
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <Badge className="bg-slate-100 text-slate-700 text-xs">
+                  {statusStyle.label}
+                </Badge>
+                <Badge className="bg-slate-100 text-slate-700 text-xs">
+                  {priorityStyle.label}
+                </Badge>
+
+                {task.is_recurring && (
+                  <Badge className="bg-purple-100 text-purple-700 text-xs">
+                    <Repeat className="h-3 w-3 inline mr-1" />
+                    Recurring
+                  </Badge>
+                )}
+
+                {task.created_by === user?.id && (
+                  <Badge className="bg-blue-100 text-blue-700 text-xs">
+                    Assigned By You
+                  </Badge>
+                )}
+              </div>
+
+              {/* Title */}
+              <h3
+                className="font-semibold mb-2 text-sm"
+                style={{ color: COLORS.deepBlue }}
+              >
+                {task.title}
+              </h3>
+
+              {/* Description */}
+              <p className="text-xs text-slate-600 mb-3">
+                {task.description || "No description"}
+              </p>
+
+              {/* Meta Info */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-500 mb-3">
+                {task.client_id && (
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-3.5 w-3.5" />
+                    {getClientName(task.client_id)}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <User className="h-3.5 w-3.5" />
+                  {getUserName(task.assigned_to)}
+                </div>
+
+                {task.due_date && (
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-3.5 w-3.5" />
+                    {format(new Date(task.due_date), 'MMM dd, yyyy')}
+                  </div>
+                )}
+
+                <div>
+                  DOA: {task.created_at
+                    ? format(new Date(task.created_at), 'MMM dd, yyyy')
+                    : 'N/A'}
+                </div>
+              </div>
+
+              {/* Button-based Status Actions (Same as Board) */}
+              {(canEditTasks &&
+                (
+                  task.assigned_to === user?.id ||
+                  task.sub_assignees?.includes(user?.id) ||
+                  task.created_by === user?.id
+                )) && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3 border-t border-slate-200">
+                  <button
+                    onClick={() => handleQuickStatusChange(task, 'pending')}
+                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+                    ${task.status === 'pending'
+                        ? 'bg-white border border-slate-300 text-slate-800'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                  >
+                    <Circle className="h-3.5 w-3.5 inline mr-1" />
+                    To Do
+                  </button>
+
+                  <button
+                    onClick={() => handleQuickStatusChange(task, 'in_progress')}
+                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+                    ${task.status === 'in_progress'
+                        ? 'bg-white border border-slate-300 text-slate-800'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                  >
+                    <ArrowRight className="h-3.5 w-3.5 inline mr-1" />
+                    Progress
+                  </button>
+
+                  <button
+                    onClick={() => handleQuickStatusChange(task, 'completed')}
+                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
+                    ${task.status === 'completed'
+                        ? 'bg-white border border-slate-300 text-slate-800'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                  >
+                    <Check className="h-3.5 w-3.5 inline mr-1" />
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {/* Category + Actions */}
+              <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-200">
+                <Badge
+                  variant="outline"
+                  style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
+                >
+                  {getCategoryLabel(task.category)}
+                </Badge>
+
+                <div className="flex gap-2">
+                  {canEditTasks && task.created_by === user?.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleEdit(task)}
+                    >
+                      <Edit className="h-4 w-4 text-blue-600" />
+                    </Button>
+                  )}
+
+                  {canDeleteTasks && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDelete(task.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </DashboardStripCard>
+        </motion.div>
+      );
+    })}
+
+    {filteredTasks.length === 0 && (
+      <div className="text-center py-12">
+        <p className="text-slate-500 text-lg">No tasks found</p>
+      </div>
+    )}
+  </motion.div>
+) : (
  <motion.div
  className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6"
  variants={containerVariants}
