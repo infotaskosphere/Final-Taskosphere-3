@@ -1,28 +1,65 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 
-/* Fetch All Tasks */
-export const useTasks = () => {
+/* ========================
+   GET TASKS
+======================== */
+export function useTasks() {
   return useQuery({
     queryKey: ["tasks"],
     queryFn: async () => {
-      const res = await api.get("/tasks");
-      return res.data || [];
+      const { data } = await api.get("/tasks");
+      return data || [];
     },
   });
-};
+}
 
-/* Update Task */
-export const useUpdateTask = () => {
+/* ========================
+   UPDATE TASK
+======================== */
+export function useUpdateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ id, data }) => {
-      const res = await api.patch(`/tasks/${id}`, data);
+      const res = await api.put(`/tasks/${id}`, data);
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries(["tasks"]);
     },
   });
-};
+}
+
+/* ========================
+   CREATE TASK
+======================== */
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const res = await api.post("/tasks", payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(["tasks"]);
+    },
+  });
+}
+
+/* ========================
+   DELETE TASK
+======================== */
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id) => {
+      await api.delete(`/tasks/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(["tasks"]);
+    },
+  });
+}
