@@ -218,13 +218,20 @@ export default function Attendance() {
   };
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
+
+  
     if (todayAttendance.punch_out) {
       return formatDuration(todayAttendance.duration_minutes);
     }
+
     const start = new Date(todayAttendance.punch_in);
-    const diffMs = Date.now() - start.getTime();
+    let diffMs = Date.now() - start.getTime();
+
+    if (diffMs < 0) diffMs = 0;
+
     const hours = Math.floor(diffMs / 3600000);
     const minutes = Math.floor((diffMs % 3600000) / 60000);
+
     return `${hours}h ${minutes}m`;
   };
   const getMonthAttendance = () => {
