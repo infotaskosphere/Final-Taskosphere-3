@@ -1,16 +1,18 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/lib/api";
 
+/* Fetch All Tasks */
 export const useTasks = () => {
   return useQuery({
-    queryKey: ['tasks'],
+    queryKey: ["tasks"],
     queryFn: async () => {
-      const res = await api.get('/tasks');
+      const res = await api.get("/tasks");
       return res.data || [];
     },
   });
 };
 
+/* Update Task */
 export const useUpdateTask = () => {
   const queryClient = useQueryClient();
 
@@ -20,7 +22,7 @@ export const useUpdateTask = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['tasks']);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
 };
