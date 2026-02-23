@@ -814,8 +814,8 @@ export default function Tasks() {
  <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
 {viewMode === 'list' ? (
   <motion.div
+    className="space-y-2"
     variants={containerVariants}
-    className="space-y-4"
   >
     {filteredTasks.map((task) => {
       const taskIsOverdue = isOverdue(task);
@@ -826,149 +826,130 @@ export default function Tasks() {
       return (
         <motion.div key={task.id} variants={itemVariants}>
           <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-1">
 
-              {/* Status + Priority + Badges */}
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
-                <Badge className="bg-slate-100 text-slate-700 text-xs">
-                  {statusStyle.label}
-                </Badge>
-                <Badge className="bg-slate-100 text-slate-700 text-xs">
-                  {priorityStyle.label}
-                </Badge>
+              {/* Top Row – Title + Inline Meta */}
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
 
-                {task.is_recurring && (
-                  <Badge className="bg-purple-100 text-purple-700 text-xs">
-                    <Repeat className="h-3 w-3 inline mr-1" />
-                    Recurring
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span
+                    className="font-semibold truncate"
+                    style={{ color: COLORS.deepBlue }}
+                  >
+                    {task.title}
+                  </span>
+
+                  <Badge className="px-1.5 py-0 text-[10px] bg-slate-100 text-slate-700">
+                    {priorityStyle.label}
                   </Badge>
-                )}
 
-                {task.created_by === user?.id && (
-                  <Badge className="bg-blue-100 text-blue-700 text-xs">
-                    Assigned By You
+                  <Badge className="px-1.5 py-0 text-[10px] bg-slate-100 text-slate-700">
+                    {statusStyle.label}
                   </Badge>
-                )}
-              </div>
 
-              {/* Title */}
-              <h3
-                className="font-semibold mb-2 text-sm"
-                style={{ color: COLORS.deepBlue }}
-              >
-                {task.title}
-              </h3>
-
-              {/* Description */}
-              <p className="text-xs text-slate-600 mb-3">
-                {task.description || "No description"}
-              </p>
-
-              {/* Meta Info */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-500 mb-3">
-                {task.client_id && (
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-3.5 w-3.5" />
-                    {getClientName(task.client_id)}
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <User className="h-3.5 w-3.5" />
-                  {getUserName(task.assigned_to)}
+                  {task.is_recurring && (
+                    <Badge className="px-1.5 py-0 text-[10px] bg-purple-100 text-purple-700">
+                      R
+                    </Badge>
+                  )}
                 </div>
 
-                {task.due_date && (
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-3.5 w-3.5" />
-                    {format(new Date(task.due_date), 'MMM dd, yyyy')}
-                  </div>
-                )}
+                {/* Inline Meta */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-500">
 
-                <div>
-                  DOA: {task.created_at
-                    ? format(new Date(task.created_at), 'MMM dd, yyyy')
-                    : 'N/A'}
+                  {task.client_id && (
+                    <span className="flex items-center gap-1">
+                      <Building2 className="h-3 w-3" />
+                      {getClientName(task.client_id)}
+                    </span>
+                  )}
+
+                  <span className="flex items-center gap-1">
+                    <User className="h-3 w-3" />
+                    {getUserName(task.assigned_to)}
+                  </span>
+
+                  {task.due_date && (
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {format(new Date(task.due_date), 'MMM dd')}
+                    </span>
+                  )}
+
                 </div>
               </div>
 
-              {/* Button-based Status Actions (Same as Board) */}
+              {/* Compact Status Buttons */}
               {(canEditTasks &&
                 (
                   task.assigned_to === user?.id ||
                   task.sub_assignees?.includes(user?.id) ||
                   task.created_by === user?.id
                 )) && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3 border-t border-slate-200">
+                <div className="flex gap-1 pt-1 border-t border-slate-200/40">
+
                   <button
                     onClick={() => handleQuickStatusChange(task, 'pending')}
-                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
-                    ${task.status === 'pending'
-                        ? 'bg-white border border-slate-300 text-slate-800'
+                    className={`h-7 px-2 text-[11px] rounded-md font-medium transition
+                      ${task.status === 'pending'
+                        ? 'bg-slate-200 text-slate-900'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                   >
-                    <Circle className="h-3.5 w-3.5 inline mr-1" />
                     To Do
                   </button>
 
                   <button
                     onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
-                    ${task.status === 'in_progress'
-                        ? 'bg-white border border-slate-300 text-slate-800'
+                    className={`h-7 px-2 text-[11px] rounded-md font-medium transition
+                      ${task.status === 'in_progress'
+                        ? 'bg-slate-200 text-slate-900'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                   >
-                    <ArrowRight className="h-3.5 w-3.5 inline mr-1" />
                     Progress
                   </button>
 
                   <button
                     onClick={() => handleQuickStatusChange(task, 'completed')}
-                    className={`h-9 rounded-xl text-xs font-semibold transition-all shadow-sm hover:shadow-md
-                    ${task.status === 'completed'
-                        ? 'bg-white border border-slate-300 text-slate-800'
+                    className={`h-7 px-2 text-[11px] rounded-md font-medium transition
+                      ${task.status === 'completed'
+                        ? 'bg-slate-200 text-slate-900'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                   >
-                    <Check className="h-3.5 w-3.5 inline mr-1" />
                     Done
                   </button>
+
+                  {/* Actions */}
+                  <div className="ml-auto flex gap-1">
+
+                    {canEditTasks && task.created_by === user?.id && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => handleEdit(task)}
+                      >
+                        <Edit className="h-3 w-3 text-blue-600" />
+                      </Button>
+                    )}
+
+                    {canDeleteTasks && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => handleDelete(task.id)}
+                      >
+                        <Trash2 className="h-3 w-3 text-red-600" />
+                      </Button>
+                    )}
+
+                  </div>
+
                 </div>
               )}
-
-              {/* Category + Actions */}
-              <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-200">
-                <Badge
-                  variant="outline"
-                  style={{ borderColor: COLORS.mediumBlue, color: COLORS.mediumBlue }}
-                >
-                  {getCategoryLabel(task.category)}
-                </Badge>
-
-                <div className="flex gap-2">
-                  {canEditTasks && task.created_by === user?.id && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleEdit(task)}
-                    >
-                      <Edit className="h-4 w-4 text-blue-600" />
-                    </Button>
-                  )}
-
-                  {canDeleteTasks && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDelete(task.id)}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-600" />
-                    </Button>
-                  )}
-                </div>
-              </div>
 
             </div>
           </DashboardStripCard>
@@ -977,10 +958,11 @@ export default function Tasks() {
     })}
 
     {filteredTasks.length === 0 && (
-      <div className="text-center py-12">
-        <p className="text-slate-500 text-lg">No tasks found</p>
+      <div className="text-center py-8 text-slate-500 text-sm">
+        No tasks found
       </div>
     )}
+
   </motion.div>
 ) : (
  <motion.div
