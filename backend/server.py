@@ -28,9 +28,9 @@ from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
 
-OFFICE_LAT = 21.188057
-OFFICE_LON = 72.813826
-ALLOWED_RADIUS_METERS = 100
+OFFICE_LAT = 21.1652
+OFFICE_LON = 72.7799
+ALLOWED_RADIUS_METERS = 200
 
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
