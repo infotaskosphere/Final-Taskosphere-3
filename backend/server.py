@@ -144,7 +144,6 @@ class UserPermissions(BaseModel):
     can_assign_tasks: bool = False # Can staff member assign tasks to others
     can_view_staff_activity: bool = False
     can_view_attendance: bool = False
-    can_use_chat: bool = False
     can_send_reminders: bool = False
     assigned_clients: List[str] = [] # List of client IDs user can access
     can_view_user_page: bool = False
@@ -156,6 +155,21 @@ class UserPermissions(BaseModel):
     can_edit_users: bool = False
     can_download_reports: bool = False
     can_view_selected_users_reports: bool = False
+    can_view_todo_dashboard: bool = False
+class Todo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    is_completed: bool = False
+    due_date: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
+class TodoCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
@@ -356,45 +370,6 @@ class Client(ClientBase):
 # Email Service Models
 class BirthdayEmailRequest(BaseModel):
     client_id: str
-# Chat & Messaging Models
-class ChatGroupCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    members: List[str] # List of user IDs
-    is_direct: bool = False # True for 1-on-1 chats
-class ChatGroup(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    description: Optional[str] = None
-    members: List[str]
-    created_by: str
-    is_direct: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_message_at: Optional[datetime] = None
-class ChatMessageCreate(BaseModel):
-    content: str
-    message_type: str = "text" # text, image, file
-    file_url: Optional[str] = None
-    file_name: Optional[str] = None
-    file_size: Optional[int] = None
-class ChatMessage(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    group_id: str
-    sender_id: str
-    sender_name: str
-    content: str
-    message_type: str = "text"
-    file_url: Optional[str] = None
-    file_name: Optional[str] = None
-    file_size: Optional[int] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    read_by: List[str] = []
-class FileUploadResponse(BaseModel):
-    file_url: str
-    file_name: str
-    file_size: int
 # Dashboard Stats Models
 class DashboardStats(BaseModel):
     total_tasks: int
@@ -597,7 +572,54 @@ async def create_audit_log(
     doc["timestamp"] = doc["timestamp"].isoformat()
     await db.audit_logs.insert_one(doc)
 # AUTH ROUTES
-# Auth routes
+# Create Personal Todo
+@api_router.post("/todos", response_model=Todo)
+async def create_personal_todo(todo_in: TodoCreate, current_user: User = Depends(get_current_user)):
+    new_todo = Todo(user_id=current_user.id, **todo_in.model_dump())
+    doc = new_todo.model_dump()
+    # Convert datetimes to strings for MongoDB
+    doc["created_at"] = doc["created_at"].isoformat()
+    doc["updated_at"] = doc["updated_at"].isoformat()
+    if doc["due_date"]: doc["due_date"] = doc["due_date"].isoformat()
+    await db.todos.insert_one(doc)
+    return new_todo
+
+# SEPARATE DASHBOARD PAGE DATA
+@api_router.get("/dashboard/todo-overview")
+async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
+    # Admin access by default; others check permission
+    is_admin = current_user.role == "admin"
+    has_permission = current_user.permissions.can_view_todo_dashboard if current_user.permissions else False
+    
+    if not (is_admin or has_permission):
+        raise HTTPException(status_code=403, detail="Dashboard access denied")
+
+    # Fetch all todos (Admin sees all, Staff with permission sees all for monitoring)
+    all_todos = await db.todos.find().to_list(2000)
+    return all_todos
+
+# PROMOTION LOGIC (Admin and Owner Access)
+@api_router.post("/todos/{todo_id}/promote-to-task")
+async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
+    todo = await db.todos.find_one({"id": todo_id})
+    if not todo: raise HTTPException(404, "Todo not found")
+
+    if current_user.role != "admin" and todo["user_id"] != current_user.id:
+        raise HTTPException(403, "Not authorized to promote this")
+
+    # Create formal task
+    new_task = {
+        "id": str(uuid.uuid4()),
+        "title": f"[PROMOTED] {todo['title']}",
+        "description": todo.get("description"),
+        "assigned_to": todo["user_id"],
+        "status": "pending",
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.tasks.insert_one(new_task)
+    await db.todos.delete_one({"id": todo_id}) # Remove from private list
+    return {"message": "Promoted successfully"}
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -2246,208 +2268,7 @@ async def update_user_permissions(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Permissions updated successfully"}
-# CHAT ROUTES
-from fastapi import APIRouter, HTTPException
-from bson import ObjectId
-@api_router.delete("/chat/message/{message_id}")
-async def delete_message(message_id: str):
-    result = await db.chat_messages.delete_one({"_id": ObjectId(message_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Message not found")
-    return {"success": True}
-@api_router.post("/chat/groups", response_model=ChatGroup)
-async def create_chat_group(
-    group_data: ChatGroupCreate,
-    current_user: User = Depends(get_current_user)
-):
-    members = list(set(group_data.members + [current_user.id]))
-    # Prevent duplicate direct chat
-    if group_data.is_direct and len(members) == 2:
-        existing = await db.chat_groups.find_one(
-            {
-                "is_direct": True,
-                "members": {"$all": members, "$size": 2}
-            },
-            {"_id": 0}
-        )
-        if existing:
-            if isinstance(existing["created_at"], str):
-                existing["created_at"] = datetime.fromisoformat(existing["created_at"])
-            return ChatGroup(**existing)
-    group = ChatGroup(
-        name=group_data.name,
-        description=group_data.description,
-        members=members,
-        created_by=current_user.id,
-        is_direct=group_data.is_direct
-    )
-    doc = group.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    await db.chat_groups.insert_one(doc)
-    return group
-@api_router.get("/chat/groups", response_model=List[dict])
-async def get_chat_groups(current_user: User = Depends(get_current_user)):
-    groups = await db.chat_groups.find(
-        {"members": current_user.id},
-        {"_id": 0}
-    ).sort("last_message_at", -1).to_list(100)
-    if not groups:
-        return []
-    # Collect all member IDs
-    user_ids = set()
-    for group in groups:
-        user_ids.update(group["members"])
-    users = await db.users.find(
-        {"id": {"$in": list(user_ids)}},
-        {"_id": 0, "password": 0}
-    ).to_list(200)
-    user_map = {u["id"]: u for u in users}
-    result = []
-    for group in groups:
-        # Convert datetime fields
-        if isinstance(group.get("created_at"), str):
-            group["created_at"] = datetime.fromisoformat(group["created_at"])
-        if isinstance(group.get("last_message_at"), str):
-            group["last_message_at"] = datetime.fromisoformat(group["last_message_at"])
-        # Add member details
-        group["member_details"] = [
-            {
-                "id": m,
-                "name": user_map.get(m, {}).get("full_name", "Unknown"),
-                "role": user_map.get(m, {}).get("role", "staff"),
-            }
-            for m in group["members"]
-        ]
-        # Direct chat display name
-        if group["is_direct"]:
-            other = [m for m in group["members"] if m != current_user.id]
-            group["display_name"] = (
-                user_map.get(other[0], {}).get("full_name", "Unknown")
-                if other else group["name"]
-            )
-        else:
-            group["display_name"] = group["name"]
-        # Unread count
-        unread = await db.chat_messages.count_documents({
-            "group_id": group["id"],
-            "sender_id": {"$ne": current_user.id},
-            "read_by": {"$ne": current_user.id}
-        })
-        group["unread_count"] = unread
-        # Last message
-        last_msg = await db.chat_messages.find_one(
-            {"group_id": group["id"]},
-            {"_id": 0},
-            sort=[("created_at", -1)]
-        )
-        if last_msg and isinstance(last_msg.get("created_at"), str):
-            last_msg["created_at"] = datetime.fromisoformat(last_msg["created_at"])
-        group["last_message"] = last_msg
-        result.append(group)
-    return result
-# SINGLE GROUP
-@api_router.get("/chat/groups/{group_id}")
-async def get_chat_group(
-    group_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    if isinstance(group.get("created_at"), str):
-        group["created_at"] = datetime.fromisoformat(group["created_at"])
-    return group
-# MESSAGES
-@api_router.get("/chat/groups/{group_id}/messages")
-async def get_chat_messages(
-    group_id: str,
-    limit: int = 50,
-    current_user: User = Depends(get_current_user)
-):
-    group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    messages = await db.chat_messages.find(
-        {"group_id": group_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(limit)
-    # Mark as read
-    await db.chat_messages.update_many(
-        {
-            "group_id": group_id,
-            "sender_id": {"$ne": current_user.id}
-        },
-        {"$addToSet": {"read_by": current_user.id}}
-    )
-    for msg in messages:
-        if isinstance(msg.get("created_at"), str):
-            msg["created_at"] = datetime.fromisoformat(msg["created_at"])
-    return list(reversed(messages))
-class BulkDeleteChatRequest(BaseModel):
-    message_ids: List[str]
-@api_router.post("/chat/messages/bulk-delete")
-async def bulk_delete_chat_messages(
-    payload: BulkDeleteChatRequest,
-    current_user: User = Depends(get_current_user)
-):
-    # Convert string IDs to ObjectId
-    object_ids = []
-    for msg_id in payload.message_ids:
-        try:
-            object_ids.append(ObjectId(msg_id))
-        except:
-            continue
-    result = await db.chat_messages.delete_many(
-        {"_id": {"$in": object_ids}}
-    )
-    return {
-        "message": "Messages deleted successfully",
-        "deleted_count": result.deleted_count
-    }
-async def send_chat_message(
-    group_id: str,
-    message_data: ChatMessageCreate,
-    current_user: User = Depends(get_current_user)
-):
-    group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if current_user.id not in group["members"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    message = ChatMessage(
-        group_id=group_id,
-        sender_id=current_user.id,
-        sender_name=current_user.full_name,
-        content=message_data.content,
-        message_type=message_data.message_type,
-        file_url=message_data.file_url,
-        file_name=message_data.file_name,
-        file_size=message_data.file_size,
-        read_by=[current_user.id]
-    )
-    doc = message.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    await db.chat_messages.insert_one(doc)
-    await db.chat_groups.update_one(
-        {"id": group_id},
-        {"$set": {"last_message_at": doc["created_at"]}}
-    )
-    return message
-# USERS FOR CHAT
-@api_router.get("/chat/users")
-async def get_chat_users(current_user: User = Depends(get_current_user)):
-    users = await db.users.find(
-        {"id": {"$ne": current_user.id}},
-        {"_id": 0, "password": 0}
-    ).to_list(200)
-    for user in users:
-        if isinstance(user.get("created_at"), str):
-            user["created_at"] = datetime.fromisoformat(user["created_at"])
-    return sanitize_user_data(users, current_user)
+
 # REMINDER ROUTES
 # MANUAL FULL REMINDER
 @api_router.post("/send-pending-task-reminders")
