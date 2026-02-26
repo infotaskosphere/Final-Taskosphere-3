@@ -190,16 +190,6 @@ function AppRoutes() {
           }
         />
 
-        {/* Chat */}
-        <Route
-          path="/chat"
-          element={
-            <Permission permission="can_use_chat">
-              <Chat />
-            </Permission>
-          }
-        />
-
         {/* Task Audit */}
         <Route
           path="/task-audit"
