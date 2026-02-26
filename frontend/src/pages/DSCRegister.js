@@ -52,14 +52,19 @@ export default function DSCRegister() {
     fetchDSC();
   }, []);
 
-  const fetchDSC = async () => {
-    try {
-      const response = await api.get('/dsc');
-      setDscList(response.data);
-    } catch (error) {
-      toast.error('Failed to fetch DSC');
-    }
-  };
+const fetchDSC = async () => {
+  try {
+    const response = await api.get('/dsc');
+    const data = Array.isArray(response.data) ? response.data : [];
+    
+    setDscList(data);
+  } catch (error) {
+    console.error('Fetch error:', error);
+    toast.error('Failed to fetch DSC');
+  
+    setDscList([]); 
+  }
+};
 
   const handleSubmit = async (e) => {
     e.preventDefault();
