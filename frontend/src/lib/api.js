@@ -8,7 +8,7 @@ import axios from "axios";
 const BASE_URL =
   process.env.REACT_APP_BACKEND_URL
     ? `${process.env.REACT_APP_BACKEND_URL}/api`
-    : "https://final-taskosphere-backend.onrender.com";
+    : "https://final-taskosphere-backend.onrender.com/api";
 
 const api = axios.create({
   baseURL: BASE_URL,
