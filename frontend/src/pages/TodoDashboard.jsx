@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ||
-  "https://takso-2.onrender.com/api";
+  "https://final-taskosphere-frontend.onrender.com";
 
 export default function TodoDashboard() {
   const { token } = useAuth();
