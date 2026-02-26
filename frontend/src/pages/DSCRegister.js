@@ -52,21 +52,18 @@ export default function DSCRegister() {
   const totalPages = Math.ceil(totalCount / rowsPerPage);
 
   useEffect(() => {
-    fetchDSC(currentTab.toUpperCase(), currentPage);
-  }, [currentTab, currentPage, rowsPerPage, searchQuery]);
-
-  // FIX: Refresh counts when search OR the list itself changes (e.g., after an edit)
-  useEffect(() => {
+    const status = currentTab.toUpperCase();
+    fetchDSC(status, currentPage);
     fetchCounts();
-  }, [searchQuery, dscList]);
-
-const fetchDSC = async (status, page) => {
-    try {
-      const params = { 
-        page, 
-        page_size: rowsPerPage, // Ensure this matches backend 'page_size'
-        search: searchQuery 
-      };
+  }, [currentTab, currentPage, rowsPerPage, searchQuery, dscList.length]); 
+ 
+  const fetchDSC = async (status, page) => {
+      try {
+        const params = { 
+          page, 
+          page_size: rowsPerPage, // Ensure this matches backend 'page_size'
+          search: searchQuery 
+        };
 
       // Ensure the status is sent exactly as the backend expects (Upper Case)
       if (status) {
