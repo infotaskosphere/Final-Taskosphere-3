@@ -101,7 +101,7 @@ export default function Attendance() {
         api.get('/tasks')
       ];
       if (canViewRankings) {
-        requests.push(api.get('/rankings?period=monthly'));
+        requests.push(api.get('/staff/rankings?period=monthly'));
       } else {
         requests.push(Promise.resolve({ data: { rankings: [] } }));
       }
