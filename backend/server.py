@@ -1107,6 +1107,7 @@ async def export_task_log_pdf(
         headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
     )
 # Dsc Routes
+# Dsc Routes
 @api_router.get("/dsc/counts")
 async def get_dsc_counts(
     search: Optional[str] = "",
@@ -1121,10 +1122,20 @@ async def get_dsc_counts(
             {"associated_with": {"$regex": search, "$options": "i"}},
         ]
 
+    # Dynamic date check for automatic shifting
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     total = await db.dsc_register.count_documents(query)
+    
+    # "IN" and "OUT" are still based on current_status
     in_count = await db.dsc_register.count_documents({**query, "current_status": "IN"})
     out_count = await db.dsc_register.count_documents({**query, "current_status": "OUT"})
-    expired_count = await db.dsc_register.count_documents({**query, "current_status": "EXPIRED"})
+    
+    # ✅ AUTOMATIC LOGIC: Count records where expiry_date is in the past
+    expired_count = await db.dsc_register.count_documents({
+        **query, 
+        "expiry_date": {"$lt": now_iso} 
+    })
 
     return {
         "total": total,
@@ -1132,6 +1143,7 @@ async def get_dsc_counts(
         "out": out_count,
         "expired": expired_count
     }
+
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
     dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
@@ -1154,8 +1166,17 @@ async def get_dsc_list(
     current_user: User = Depends(check_permission("can_view_all_dsc"))
 ):
     query = {"is_deleted": {"$ne": True}}
+    
+    # ✅ AUTOMATIC LOGIC: Dynamic Filter
     if status:
-        query["current_status"] = status.upper()
+        status_val = status.upper()
+        if status_val == "EXPIRED":
+            # If the user clicks the EXPIRED tab, return all where date < now
+            query["expiry_date"] = {"$lt": datetime.now(timezone.utc).isoformat()}
+        else:
+            # Otherwise, use the physical status (IN or OUT)
+            query["current_status"] = status_val
+
     if search:
         search_regex = {"$regex": search, "$options": "i"}
         query["$or"] = [
@@ -1163,9 +1184,11 @@ async def get_dsc_list(
             {"dsc_type": search_regex},
             {"associated_with": search_regex},
         ]
+
     sort_dir = 1 if order.lower() == "asc" else -1
     skip = (page - 1) * page_size
     total = await db.dsc_register.count_documents(query)
+    
     cursor = db.dsc_register.find(
         query,
         {
@@ -1176,13 +1199,21 @@ async def get_dsc_list(
             "associated_with": 1,
             "expiry_date": 1,
             "current_status": 1,
-            "certificate_number": 1
+            "certificate_number": 1,
+            "notes": 1,
+            "dsc_password": 1,
+            "entity_type": 1,
+            "issue_date": 1,
+            "movement_log": 1,
+            "current_location": 1
         }
     ).sort(sort_by, sort_dir).skip(skip).limit(page_size)
+    
     dsc_list = await cursor.to_list(None)
     for dsc in dsc_list:
         if isinstance(dsc.get("expiry_date"), str):
             dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
+            
     return {
         "data": dsc_list,
         "total": total,
@@ -1195,9 +1226,11 @@ async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depe
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+    
     update_data = dsc_data.model_dump()
     update_data["issue_date"] = update_data["issue_date"].isoformat()
     update_data["expiry_date"] = update_data["expiry_date"].isoformat()
+    
     await db.dsc_register.update_one({"id": dsc_id}, {"$set": update_data})
     await create_audit_log(
         current_user,
@@ -1207,6 +1240,7 @@ async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depe
         old_data=existing,
         new_data=update_data
     )
+    
     updated = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if isinstance(updated["created_at"], str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
@@ -1221,6 +1255,7 @@ async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission(
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+    
     await create_audit_log(
         current_user,
         action="DELETE_DSC",
@@ -1228,6 +1263,8 @@ async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission(
         record_id=dsc_id,
         old_data=existing
     )
+    
+    # Soft delete
     result = await db.dsc_register.update_one({"id": dsc_id}, {"$set": {"is_deleted": True}})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="DSC not found")
@@ -1239,22 +1276,22 @@ async def record_dsc_movement(
     movement_data: DSCMovementRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Record DSC IN/OUT movement"""
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
-    # Create movement record
+    
     movement = {
-        "id": str(uuid.uuid4()), # Add unique ID for each movement
+        "id": str(uuid.uuid4()), 
         "movement_type": movement_data.movement_type,
         "person_name": movement_data.person_name,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "notes": movement_data.notes,
         "recorded_by": current_user.full_name
     }
-    # Update DSC status and append to log
+    
     movement_log = existing.get("movement_log", [])
     movement_log.append(movement)
+    
     await db.dsc_register.update_one(
         {"id": dsc_id},
         {
@@ -1265,6 +1302,7 @@ async def record_dsc_movement(
             }
         }
     )
+    
     await create_audit_log(
         current_user,
         action="UPDATE_DSC",
@@ -1282,15 +1320,14 @@ async def update_dsc_movement(
     update_data: MovementUpdateRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a specific movement log entry"""
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+    
     movement_log = existing.get("movement_log", [])
     movement_found = False
     for i, movement in enumerate(movement_log):
         if movement.get("id") == movement_id:
-            # Update the movement
             movement_log[i]["movement_type"] = update_data.movement_type
             if update_data.person_name:
                 movement_log[i]["person_name"] = update_data.person_name
@@ -1300,10 +1337,12 @@ async def update_dsc_movement(
             movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
             movement_found = True
             break
+            
     if not movement_found:
         raise HTTPException(status_code=404, detail="Movement entry not found")
-    # Determine new current status based on most recent movement
+        
     new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+    
     await db.dsc_register.update_one(
         {"id": dsc_id},
         {
@@ -1313,6 +1352,7 @@ async def update_dsc_movement(
             }
         }
     )
+    
     await create_audit_log(
         current_user,
         action="UPDATE_DSC",
@@ -1322,7 +1362,7 @@ async def update_dsc_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-# DOCUMENT ROUTES
+    
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
