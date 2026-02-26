@@ -55,9 +55,10 @@ export default function DSCRegister() {
     fetchDSC(currentTab.toUpperCase(), currentPage);
   }, [currentTab, currentPage, rowsPerPage, searchQuery]);
 
+  // FIX: Refresh counts when search OR the list itself changes (e.g., after an edit)
   useEffect(() => {
     fetchCounts();
-  }, [searchQuery]);
+  }, [searchQuery, dscList]);
 
 const fetchDSC = async (status, page) => {
     try {
