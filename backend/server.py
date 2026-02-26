@@ -1106,7 +1106,7 @@ async def export_task_log_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
     )
-# Dsc Routes
+
 # Dsc Routes
 @api_router.get("/dsc/counts")
 async def get_dsc_counts(
@@ -1116,22 +1116,34 @@ async def get_dsc_counts(
     query = {"is_deleted": False}
 
     if search:
+        search_regex = {"$regex": search, "$options": "i"}
         query["$or"] = [
-            {"holder_name": {"$regex": search, "$options": "i"}},
-            {"dsc_type": {"$regex": search, "$options": "i"}},
-            {"associated_with": {"$regex": search, "$options": "i"}},
+            {"holder_name": search_regex},
+            {"dsc_type": search_regex},
+            {"associated_with": search_regex},
         ]
 
-    # Dynamic date check for automatic shifting
+    # Dynamic date for automatic shifting
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # 1. TOTAL: All active records matching search
     total = await db.dsc_register.count_documents(query)
     
-    # "IN" and "OUT" are still based on current_status
-    in_count = await db.dsc_register.count_documents({**query, "current_status": "IN"})
-    out_count = await db.dsc_register.count_documents({**query, "current_status": "OUT"})
+    # 2. IN: Marked "IN" AND not yet expired
+    in_count = await db.dsc_register.count_documents({
+        **query, 
+        "current_status": "IN",
+        "expiry_date": {"$gte": now_iso}
+    })
+
+    # 3. OUT: Marked "OUT" AND not yet expired
+    out_count = await db.dsc_register.count_documents({
+        **query, 
+        "current_status": "OUT",
+        "expiry_date": {"$gte": now_iso}
+    })
     
-    # ✅ AUTOMATIC LOGIC: Count records where expiry_date is in the past
+    # 4. EXPIRED: Any record where expiry date is in the past
     expired_count = await db.dsc_register.count_documents({
         **query, 
         "expiry_date": {"$lt": now_iso} 
@@ -1166,15 +1178,20 @@ async def get_dsc_list(
     current_user: User = Depends(check_permission("can_view_all_dsc"))
 ):
     query = {"is_deleted": {"$ne": True}}
+    now_iso = datetime.now(timezone.utc).isoformat()
     
-    # ✅ AUTOMATIC LOGIC: Dynamic Filter
+    # ✅ AUTOMATIC LOGIC: Sync list with Tab counts
     if status:
         status_val = status.upper()
         if status_val == "EXPIRED":
-            # If the user clicks the EXPIRED tab, return all where date < now
-            query["expiry_date"] = {"$lt": datetime.now(timezone.utc).isoformat()}
+            query["expiry_date"] = {"$lt": now_iso}
+        elif status_val == "IN":
+            query["current_status"] = "IN"
+            query["expiry_date"] = {"$gte": now_iso}
+        elif status_val == "OUT":
+            query["current_status"] = "OUT"
+            query["expiry_date"] = {"$gte": now_iso}
         else:
-            # Otherwise, use the physical status (IN or OUT)
             query["current_status"] = status_val
 
     if search:
@@ -1264,7 +1281,6 @@ async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission(
         old_data=existing
     )
     
-    # Soft delete
     result = await db.dsc_register.update_one({"id": dsc_id}, {"$set": {"is_deleted": True}})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="DSC not found")
@@ -1361,8 +1377,7 @@ async def update_dsc_movement(
         old_data=existing,
         new_data={"movement_log": movement_log}
     )
-    return {"message": "Movement updated successfully", "movement_log": movement_log}
-    
+    return {"message": "Movement updated successfully", "movement_log": movement_log}    
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
@@ -1375,6 +1390,8 @@ async def create_document(document_data: DocumentCreate, current_user: User = De
         doc["valid_upto"] = doc["valid_upto"].isoformat()
     await db.documents.insert_one(doc)
     return document
+
+# Dsc Routes
 @api_router.get("/documents", response_model=List[Document])
 async def get_documents(current_user: User = Depends(check_permission("can_view_documents"))):
     documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
