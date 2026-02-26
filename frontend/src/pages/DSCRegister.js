@@ -60,28 +60,31 @@ export default function DSCRegister() {
   }, [searchQuery]);
 
 const fetchDSC = async (status, page) => {
-  try {
-    // 1. Define params to match backend 'Query' names
-    const params = { 
-      page, 
-      page_size: rowsPerPage, // Matches backend 'page_size'
-      search: searchQuery     // Matches backend 'search'
-    };
+    try {
+      // 1. Setup base parameters
+      const params = { 
+        page, 
+        page_size: rowsPerPage, // Ensure this matches backend 'page_size'
+        search: searchQuery 
+      };
 
-    if (status !== 'EXPIRED') {
-      params.status = status; 
+      if (status) {
+        params.status = status;
+      }
+
+      const response = await api.get('/dsc', { params });
+
+      
+      setDscList(response.data.data || []);
+      
+      
+      setTotalCount(response.data.total || 0);
+      
+    } catch (error) {
+      console.error("Fetch DSC Error:", error);
+      toast.error('Failed to fetch DSC');
     }
-
-    const response = await api.get('/dsc', { params });
-
-   
-    setDscList(response.data.data || []);   // Your backend returns 'data'
-    setTotalCount(response.data.total || 0); // Your backend returns 'total'
-    
-  } catch (error) {
-    toast.error('Failed to fetch DSC');
-  }
-};
+  };
 
   const fetchCounts = async () => {
     try {
