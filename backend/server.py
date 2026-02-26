@@ -779,6 +779,60 @@ async def record_attendance(
         }
         await db.attendance.insert_one(doc)
         return Attendance(**doc)
+# ============================
+# STAFF RANKINGS (MONTHLY)
+# ============================
+@api_router.get("/staff/rankings")
+async def get_staff_rankings(
+    period: str = "monthly",
+    current_user: User = Depends(check_permission("can_view_staff_activity"))
+):
+    """
+    Returns staff ranking based on total attendance minutes for the selected period.
+    """
+
+    if period != "monthly":
+        raise HTTPException(status_code=400, detail="Only monthly ranking supported")
+
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+
+    # Fetch attendance for this month
+    attendance_list = await db.attendance.find(
+        {"date": {"$regex": f"^{current_month}"}},
+        {"_id": 0}
+    ).to_list(5000)
+
+    ranking_map = {}
+
+    for record in attendance_list:
+        uid = record["user_id"]
+        duration = record.get("duration_minutes") or 0
+
+        if uid not in ranking_map:
+            ranking_map[uid] = 0
+
+        ranking_map[uid] += duration
+
+    # Convert to sorted list
+    sorted_users = sorted(
+        ranking_map.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    rankings = []
+    for index, (uid, minutes) in enumerate(sorted_users, start=1):
+        rankings.append({
+            "user_id": uid,
+            "rank": index,
+            "total_minutes": minutes
+        })
+
+    return {
+        "period": period,
+        "rankings": rankings
+    }
     # =========================
     # 🔹 PUNCH OUT
     # =========================
