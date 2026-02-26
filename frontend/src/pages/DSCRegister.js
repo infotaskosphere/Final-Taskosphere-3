@@ -144,16 +144,29 @@ export default function DSCRegister() {
         ...movementData,
         movement_type: newType,
       });
+    
       toast.success(`DSC marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
 
+      // --- SAFETY CHECK STARTS HERE ---
       const response = await api.get('/dsc');
-      setDscList(response.data);
-      const updatedDSC = response.data.find(d => d.id === editingDSC.id);
+    
+    // Use the same robust check as fetchDSC
+      const actualData = Array.isArray(response.data) 
+        ? response.data 
+        : (response.data.data || response.data.dscs || []);
+
+      setDscList(actualData);
+
+      // Find the specific DSC in the checked 'actualData' array
+      const updatedDSC = actualData.find(d => d.id === editingDSC.id);
       if (updatedDSC) {
         setEditingDSC(updatedDSC);
       }
+    // --- SAFETY CHECK ENDS HERE ---
+
     } catch (error) {
+      console.error('Movement error:', error);
       toast.error('Failed to record movement');
     } finally {
       setLoading(false);
