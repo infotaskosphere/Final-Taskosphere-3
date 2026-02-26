@@ -2330,8 +2330,10 @@ async def auto_daily_reminder(request, call_next):
     try:
         india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
         today_str = india_time.date().isoformat()
+
         setting = await db.system_settings.find_one({"key": "last_reminder_date"})
         last_date = setting["value"] if setting else None
+
         if india_time.hour >= 10 and last_date != today_str:
             logger.info("Auto daily reminder triggered at 10:00 AM IST")
             await send_pending_task_reminders_internal()
@@ -2340,10 +2342,21 @@ async def auto_daily_reminder(request, call_next):
                 {"$set": {"value": today_str}},
                 upsert=True
             )
+
         # Add automatic cleanup for staff_activity (90 days retention)
         await db.staff_activity.delete_many({
-            "timestamp": {"$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()}
+            "timestamp": {
+                "$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+            }
         })
+
         # Calculate retention dates
         now = datetime.now(timezone.utc)
-        thirty_days
+        thirty_days = now - timedelta(days=30)
+
+    except Exception as e:
+        logger.error(f"Auto job failed: {e}")
+
+    # VERY IMPORTANT: continue request processing
+    response = await call_next(request)
+    return response
