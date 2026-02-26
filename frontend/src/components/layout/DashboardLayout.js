@@ -11,11 +11,9 @@ import {
   Users,
   LogOut,
   Menu,
-  X,
   Building2,
   Calendar,
   Activity,
-  MessageCircle,
   ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -34,7 +32,7 @@ const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -59,28 +57,39 @@ const DashboardLayout = ({ children }) => {
     navigate("/login", { replace: true });
   };
 
+  /* =============================
+     UPDATED NAV ITEMS
+     ============================= */
+
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
+
+    ...(hasPermission('can_view_todo_dashboard')
+      ? [{ path: '/todos', icon: CheckSquare, label: 'Todo Dashboard' }]
+      : []),
+
     { path: '/clients', icon: Building2, label: 'Clients' },
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
+
     ...(hasPermission('can_view_all_dsc')
       ? [{ path: '/dsc', icon: FileText, label: 'DSC Register' }]
       : []),
+
     ...(hasPermission('can_view_documents')
       ? [{ path: '/documents', icon: FileText, label: 'Documents Register' }]
       : []),
-    ...(hasPermission('can_use_chat')
-      ? [{ path: '/chat', icon: MessageCircle, label: 'Chat' }]
-      : []),
+
     ...(hasPermission('can_view_user_page')
       ? [{ path: '/users', icon: Users, label: 'Users' }]
       : []),
+
     ...(hasPermission('can_view_staff_activity')
       ? [{ path: '/staff-activity', icon: Activity, label: 'Staff Activity' }]
       : []),
+
     ...(hasPermission('can_view_audit_logs')
       ? [{ path: '/task-audit', icon: Activity, label: 'Task Audit Log' }]
       : []),
@@ -89,7 +98,6 @@ const DashboardLayout = ({ children }) => {
   return (
     <div className="min-h-screen bg-slate-50 relative">
 
-      {/* Overlay (FIXED z-index lower than dropdown) */}
       {userMenuOpen && (
         <div
           className="fixed inset-0 z-30"
