@@ -239,6 +239,8 @@ export default function DSCRegister() {
 
   const filterBySearch = (dsc) => {
     if (!searchQuery.trim()) return true;
+    if (!dsc) return false; // Added this safety check
+
     const query = searchQuery.toLowerCase();
     return (
       dsc.holder_name?.toLowerCase().includes(query) ||
