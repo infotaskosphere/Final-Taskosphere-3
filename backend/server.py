@@ -2360,3 +2360,5 @@ async def auto_daily_reminder(request, call_next):
     # VERY IMPORTANT: continue request processing
     response = await call_next(request)
     return response
+# Api Router
+app.include_router(api_router)
