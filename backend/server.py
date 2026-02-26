@@ -1116,7 +1116,7 @@ async def get_dsc_list(
     order: str = Query("asc", pattern="^(asc|desc)$", ignore_case=True),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=500),
     current_user: User = Depends(check_permission("can_view_all_dsc"))
 ):
     query = {}
