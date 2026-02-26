@@ -823,45 +823,6 @@ const fetchChatPreview = async () => {
                 </Button>
               )}
             </div>
-{/* Chat Widget */}
-<div className="mt-5 border-t pt-4">
-  <p className="text-sm font-semibold mb-2">Team Chat</p>
-  <div className="h-40 overflow-y-auto space-y-2 bg-slate-50 p-2 rounded-lg mb-3">
-    {chatMessages.length === 0 ? (
-      <p className="text-xs text-slate-400 text-center">
-        No messages yet
-      </p>
-    ) : (
-      chatMessages.slice(-5).map((msg) => (
-        <div
-          key={msg.id}
-          className="text-xs bg-white p-2 rounded-md shadow-sm"
-        >
-          <span className="font-semibold text-slate-700">
-            {msg.sender_name || 'User'}
-          </span>{" "}
-          {msg.content}
-        </div>
-      )))}
-  </div>
-  <div className="flex gap-2">
-    <input
-      value={chatInput}
-      onChange={(e) => setChatInput(e.target.value)}
-      placeholder="Quick reply..."
-      className="flex-1 p-2 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') handleSendQuickReplyPreview();
-      }}
-      />
-       
-      <Button
-        size="sm" onClick={handleSendQuickReplyPreview}
-      >
-        Send
-      </Button>
-  </div>
-</div>
           </CardContent>
         </Card>
       </motion.div>
