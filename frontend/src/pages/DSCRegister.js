@@ -61,27 +61,24 @@ export default function DSCRegister() {
 
 const fetchDSC = async (status, page) => {
     try {
-      // 1. Setup base parameters
       const params = { 
         page, 
         page_size: rowsPerPage, // Ensure this matches backend 'page_size'
         search: searchQuery 
       };
 
+      // Ensure the status is sent exactly as the backend expects (Upper Case)
       if (status) {
-        params.status = status;
+        params.status = status.toUpperCase();
       }
 
       const response = await api.get('/dsc', { params });
 
-      
+      // Use the 'data' and 'total' keys from your FastAPI response
       setDscList(response.data.data || []);
-      
-      
       setTotalCount(response.data.total || 0);
       
     } catch (error) {
-      console.error("Fetch DSC Error:", error);
       toast.error('Failed to fetch DSC');
     }
   };
