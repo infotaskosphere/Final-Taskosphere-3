@@ -89,7 +89,7 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(securit
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
         # Admin override
-        if current_user.role == "admin":
+        if current_user.role and current_user.role.lower() == "admin":
             return current_user
         user_permissions = current_user.permissions.model_dump() if current_user.permissions else {}
         if not user_permissions.get(permission_name, False):
