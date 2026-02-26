@@ -52,19 +52,28 @@ export default function DSCRegister() {
     fetchDSC();
   }, []);
 
-const fetchDSC = async () => {
-  try {
-    const response = await api.get('/dsc');
-    const data = Array.isArray(response.data) ? response.data : [];
+  const fetchDSC = async () => {
+    setLoading(true); // Good practice since you have a loading state
+    try {
+      const response = await api.get('/dsc');
     
-    setDscList(data);
-  } catch (error) {
-    console.error('Fetch error:', error);
-    toast.error('Failed to fetch DSC');
-  
-    setDscList([]); 
-  }
-};
+    // LOG THIS to see exactly what the backend is sending
+      console.log("API Response:", response.data);
+
+    // If your backend nests the array inside a 'data' or 'dscs' property:
+      const actualData = Array.isArray(response.data) 
+        ? response.data 
+        : (response.data.data || response.data.dscs || []);
+
+      setDscList(actualData);
+    } catch (error) {
+      console.error('Fetch error:', error);
+      toast.error('Failed to fetch DSC');
+      setDscList([]); // Reset to empty array so filter doesn't crash
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
