@@ -9,6 +9,7 @@ const TaskAudit = lazy(() => import("@/pages/TaskAudit"));
 const Register = lazy(() => import("@/pages/Register"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
+const TodoDashboard = lazy(() => import("@/pages/TodoDashboard")); // ✅ ADDED
 const DSCRegister = lazy(() => import("@/pages/DSCRegister"));
 const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister"));
 const Attendance = lazy(() => import("@/pages/Attendance"));
@@ -52,6 +53,7 @@ function AppRoutes() {
     <Suspense fallback={<div className="p-10">Loading...</div>}>
       <Routes>
 
+        {/* Public Routes */}
         <Route
           path="/"
           element={
@@ -79,6 +81,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Dashboard */}
         <Route
           path="/dashboard"
           element={
@@ -88,6 +91,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Tasks */}
         <Route
           path="/tasks"
           element={
@@ -97,6 +101,17 @@ function AppRoutes() {
           }
         />
 
+        {/* ✅ TODO DASHBOARD ADDED */}
+        <Route
+          path="/todos"
+          element={
+            <Permission permission="can_view_todo_dashboard">
+              <TodoDashboard />
+            </Permission>
+          }
+        />
+
+        {/* DSC */}
         <Route
           path="/dsc"
           element={
@@ -106,6 +121,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Documents */}
         <Route
           path="/documents"
           element={
@@ -115,6 +131,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Attendance */}
         <Route
           path="/attendance"
           element={
@@ -124,6 +141,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Reports */}
         <Route
           path="/reports"
           element={
@@ -133,6 +151,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Clients */}
         <Route
           path="/clients"
           element={
@@ -142,6 +161,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Users */}
         <Route
           path="/users"
           element={
@@ -151,6 +171,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Due Dates */}
         <Route
           path="/duedates"
           element={
@@ -160,6 +181,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Staff Activity */}
         <Route
           path="/staff-activity"
           element={
@@ -169,6 +191,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Chat */}
         <Route
           path="/chat"
           element={
@@ -178,6 +201,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Task Audit */}
         <Route
           path="/task-audit"
           element={
@@ -187,6 +211,7 @@ function AppRoutes() {
           }
         />
 
+        {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
 
       </Routes>
