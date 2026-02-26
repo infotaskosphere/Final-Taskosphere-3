@@ -15,11 +15,15 @@ import { format } from 'date-fns';
 
 export default function DSCRegister() {
 
-  const [dscList, setDscList] = useState([]);
-  const [totalRecords, setTotalRecords] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
+  // ============================
+  // STATE
+  // ============================
 
   const [activeTab, setActiveTab] = useState('in');
+  const [dscList, setDscList] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPagesBackend, setTotalPagesBackend] = useState(1);
+
   const [rowsPerPage, setRowsPerPage] = useState(15);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -84,7 +88,7 @@ export default function DSCRegister() {
       setTotalRecords(response.data?.total || 0);
 
       const pages = Math.ceil((response.data?.total || 0) / rowsPerPage);
-      setTotalPages(pages || 1);
+      setTotalPagesBackend(pages || 1);
 
     } catch (error) {
       toast.error('Failed to fetch DSC');
@@ -155,24 +159,15 @@ export default function DSCRegister() {
   };
 
   // ============================
-  // MOVEMENT
+  // PAGINATION HANDLER
   // ============================
 
-  const handleMovement = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+  const handlePageChange = (page) => {
+    if (activeTab === 'in') setCurrentPageIn(page);
+    if (activeTab === 'out') setCurrentPageOut(page);
+    if (activeTab === 'expired') setCurrentPageExpired(page);
 
-    try {
-      await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
-      toast.success(`DSC marked as ${movementData.movement_type}!`);
-      setMovementDialogOpen(false);
-      setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-      fetchDSC(activeTab, 1);
-    } catch {
-      toast.error('Failed to record movement');
-    } finally {
-      setLoading(false);
-    }
+    fetchDSC(activeTab, page);
   };
 
   // ============================
@@ -195,50 +190,46 @@ export default function DSCRegister() {
   };
 
   // ============================
-  // PAGINATION HANDLER
-  // ============================
-
-  const handlePageChange = (page) => {
-    if (activeTab === 'in') setCurrentPageIn(page);
-    if (activeTab === 'out') setCurrentPageOut(page);
-    if (activeTab === 'expired') setCurrentPageExpired(page);
-
-    fetchDSC(activeTab, page);
-  };
-
-  // ============================
-  // RENDER
+  // RENDER (LAYOUT IDENTICAL)
   // ============================
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="dsc-page">
 
       <Tabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value)}
         className="w-full"
       >
-
         <TabsList className="grid w-full max-w-xl grid-cols-3">
-          <TabsTrigger value="in">IN ({activeTab === 'in' ? totalRecords : 0})</TabsTrigger>
-          <TabsTrigger value="out">OUT ({activeTab === 'out' ? totalRecords : 0})</TabsTrigger>
-          <TabsTrigger value="expired">EXPIRED ({activeTab === 'expired' ? totalRecords : 0})</TabsTrigger>
+          <TabsTrigger value="in" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
+            <ArrowDownCircle className="h-4 w-4 mr-2" />
+            IN ({activeTab === 'in' ? totalRecords : 0})
+          </TabsTrigger>
+
+          <TabsTrigger value="out" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
+            <ArrowUpCircle className="h-4 w-4 mr-2" />
+            OUT ({activeTab === 'out' ? totalRecords : 0})
+          </TabsTrigger>
+
+          <TabsTrigger value="expired" className="data-[state=active]:bg-amber-700 data-[state=active]:text-white">
+            <AlertCircle className="h-4 w-4 mr-2" />
+            EXPIRED ({activeTab === 'expired' ? totalRecords : 0})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value={activeTab} className="mt-6">
-
-          <Card>
+          <Card className="border">
             <CardContent className="p-0">
-
               {dscList.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
-                  <p>No DSC records found</p>
+                  <p>No DSC certificates found</p>
                 </div>
               ) : (
                 <>
                   <DSCTable
                     dscList={dscList}
-                    onEdit={(dsc) => setEditingDSC(dsc)}
+                    onEdit={setEditingDSC}
                     onDelete={handleDelete}
                     getDSCStatus={getDSCStatus}
                   />
@@ -249,42 +240,39 @@ export default function DSCRegister() {
                       activeTab === 'out' ? currentPageOut :
                       currentPageExpired
                     }
-                    totalPages={totalPages}
+                    totalPages={totalPagesBackend}
                     onPageChange={handlePageChange}
                   />
                 </>
               )}
-
             </CardContent>
           </Card>
-
         </TabsContent>
-
       </Tabs>
     </div>
   );
 }
 
-
 // ============================
-// PAGINATION
+// PAGINATION COMPONENT
 // ============================
 
 function Pagination({ currentPage, totalPages, onPageChange }) {
   if (totalPages <= 1) return null;
 
   return (
-    <div className="flex items-center justify-center py-4 border-t">
+    <div className="flex items-center justify-center py-4 border-t border-slate-200">
       <Button
         variant="ghost"
         size="sm"
         onClick={() => onPageChange(Math.max(1, currentPage - 1))}
         disabled={currentPage === 1}
+        className="h-8 w-8 p-0"
       >
         <ChevronLeft className="h-4 w-4" />
       </Button>
 
-      <div className="mx-2 text-sm">
+      <div className="mx-2 text-sm text-slate-600">
         Page {currentPage} of {totalPages}
       </div>
 
@@ -293,6 +281,7 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
         size="sm"
         onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
         disabled={currentPage === totalPages}
+        className="h-8 w-8 p-0"
       >
         <ChevronRight className="h-4 w-4" />
       </Button>
@@ -300,40 +289,68 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
   );
 }
 
-
 // ============================
-// TABLE
+// TABLE COMPONENT
 // ============================
 
 function DSCTable({ dscList, onEdit, onDelete, getDSCStatus }) {
   return (
-    <table className="w-full">
-      <thead>
-        <tr>
-          <th>Holder</th>
-          <th>Type</th>
-          <th>Expiry</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {dscList.map((dsc) => {
-          const status = getDSCStatus(dsc.expiry_date);
-          return (
-            <tr key={dsc.id}>
-              <td>{dsc.holder_name}</td>
-              <td>{dsc.dsc_type}</td>
-              <td>{format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}</td>
-              <td>{status.text}</td>
-              <td>
-                <Button size="sm" onClick={() => onEdit(dsc)}>Edit</Button>
-                <Button size="sm" onClick={() => onDelete(dsc.id)}>Delete</Button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-auto border-collapse">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Holder Name
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Type
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Expiry Date
+            </th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Status
+            </th>
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Actions
+            </th>
+          </tr>
+        </thead>
+
+        <tbody className="divide-y divide-slate-100 bg-white">
+          {dscList.map((dsc) => {
+            const status = getDSCStatus(dsc.expiry_date);
+            return (
+              <tr key={dsc.id} className="hover:bg-slate-50 transition-colors">
+                <td className="px-4 py-3 text-sm font-medium text-slate-900">
+                  {dsc.holder_name}
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {dsc.dsc_type || '-'}
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`text-sm font-medium ${status.textColor}`}>
+                    {status.text}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)}>
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
