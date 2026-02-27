@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from backend.dependencies import db
-from backend.server import get_current_user
+from backend.dependencies import db, get_current_user
 from bson import ObjectId
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
