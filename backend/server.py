@@ -2641,5 +2641,5 @@ async def auto_daily_reminder(request, call_next):
     response = await call_next(request)
     return response
 # Api Router
+api_router.include_router(notification_router)
 app.include_router(api_router)
-app.include_router(notification_router)
