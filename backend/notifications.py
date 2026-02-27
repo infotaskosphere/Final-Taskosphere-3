@@ -1,16 +1,20 @@
-from fastapi import APIRouter, Depends
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
 from bson import ObjectId
-from database import db  # adjust if your db import is different
-from auth import get_current_user  # adjust if different
+from typing import List
+import uuid
 
+# IMPORTANT: do NOT add /api here
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+# These will be injected from server.py
+from server import db, get_current_user
 
 
 @router.get("/")
-async def get_notifications(current_user=Depends(get_current_user)):
+async def get_notifications(current_user = Depends(get_current_user)):
     notifications = await db.notifications.find(
-        {"user_id": current_user["id"]}
+        {"user_id": current_user.id}
     ).sort("created_at", -1).to_list(100)
 
     for n in notifications:
@@ -21,23 +25,27 @@ async def get_notifications(current_user=Depends(get_current_user)):
 
 
 @router.put("/{notification_id}/read")
-async def mark_as_read(notification_id: str, current_user=Depends(get_current_user)):
-    await db.notifications.update_one(
+async def mark_as_read(notification_id: str, current_user = Depends(get_current_user)):
+    result = await db.notifications.update_one(
         {
             "_id": ObjectId(notification_id),
-            "user_id": current_user["id"]
+            "user_id": current_user.id
         },
         {"$set": {"is_read": True}}
     )
 
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+
     return {"message": "Marked as read"}
 
 
+# Internal helper function
 async def create_notification(user_id: str, title: str, message: str):
     await db.notifications.insert_one({
         "user_id": user_id,
         "title": title,
         "message": message,
         "is_read": False,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.now(timezone.utc)
     })
