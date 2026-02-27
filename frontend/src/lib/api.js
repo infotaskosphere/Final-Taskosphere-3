@@ -1,10 +1,8 @@
 import axios from "axios";
-
 /**
  * Global API configuration for Taskosphere.
  * Handles base URL, JWT token injection, and global 403/401 error catching.
  */
-
 const BASE_URL =
   process.env.REACT_APP_BACKEND_URL
     ? `${process.env.REACT_APP_BACKEND_URL}/api`
@@ -23,16 +21,19 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     try {
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token") ||
+        sessionStorage.getItem("token");
 
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
 
-      // Debug outgoing requests
-      console.log(
-        `[API Outgoing] ${config.method?.toUpperCase()} ${config.url}`
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[API Outgoing] ${config.method?.toUpperCase()} ${config.url}`
+        );
+      }
 
       return config;
     } catch (err) {
@@ -50,12 +51,13 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-
     // Handle 401 Unauthorized
     if (status === 401) {
       console.warn("401 Unauthorized detected.");
 
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token") ||
+        sessionStorage.getItem("token");
 
       // Only clear session if token actually exists
       if (token) {
@@ -63,18 +65,18 @@ api.interceptors.response.use(
 
         localStorage.removeItem("token");
         localStorage.removeItem("user");
+        sessionStorage.removeItem("token");
+        sessionStorage.removeItem("user");
 
         if (window.location.pathname !== "/login") {
           window.location.href = "/login";
         }
       }
     }
-
     // Optional: Handle 403 (Forbidden)
     if (status === 403) {
       console.warn("403 Forbidden: Insufficient permissions.");
     }
-
     return Promise.reject(error);
   }
 );
@@ -84,7 +86,6 @@ export default api;
 /* ===============================
    Optional Helper Functions
 ================================= */
-
 export const fetchDashboardData = async () => {
   const response = await api.get("/dashboard/stats");
   return response.data;
