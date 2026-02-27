@@ -1,7 +1,7 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import db, get_current_user
-from backend.notifications import router as notification_router, create_notification
+from backend.dependencies import get_current_user
 from typing import Optional
 from datetime import date
 import pytz
