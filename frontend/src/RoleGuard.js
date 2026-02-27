@@ -1,15 +1,24 @@
 import React from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { Navigate } from "react-router-dom";
 
-const RoleGuard = ({ children, allowedRoles = ["Admin"] }) => {
-  const { user, loading } = useAuth();
+const RoleGuard = ({ children, permission }) => {
+  const { user, loading, hasPermission } = useAuth();
 
+  // While auth state is loading
   if (loading) return null;
 
-  if (!user) return null;
+  // If not logged in → redirect to login
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
-  if (!allowedRoles.includes(user.role)) return null;
+  // If permission is provided and user does not have it → block access
+  if (permission && !hasPermission(permission)) {
+    return <Navigate to="/unauthorized" replace />;
+  }
 
+  // If everything is fine → render page
   return <>{children}</>;
 };
 
