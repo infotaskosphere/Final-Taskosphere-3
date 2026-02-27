@@ -863,12 +863,12 @@ async def register(
     doc["created_at"] = doc["created_at"].isoformat()
     doc["permissions"] = default_permissions
     await db.users.insert_one(doc)
-    access_token = create_access_token({"sub": user.id})
+    access_token = create_access_token({"sub": str(user["_id"])})
     return {"access_token": access_token, "token_type": "bearer", "user": user}
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
+    user = await db.users.find_one({"email": credentials.email})
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
