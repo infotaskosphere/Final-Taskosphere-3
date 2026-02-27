@@ -342,6 +342,18 @@ export default function Clients() {
       }
       const data = {
         ...formData,
+
+        birthday: formData.birthday
+          ? new Date(formData.birthday).toISOString().split("T")[0]
+          : null,
+
+        contact_persons: formData.contact_persons.map(cp => ({
+          ...cp,
+          birthday: cp.birthday
+            ? new Date(cp.birthday).toISOString().split("T")[0]
+            : null
+        })),
+
         services: finalServices,
         assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to
       };
