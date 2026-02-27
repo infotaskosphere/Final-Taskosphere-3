@@ -306,6 +306,7 @@ const fetchPermissions = async (userId) => {
       can_view_user_page: false,
       can_view_audit_logs: false,
       can_delete_data: false,
+      todo_view_permissions: [],
     });
   }
 };
