@@ -720,6 +720,16 @@ async def create_audit_log(
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
+@api_router.get("/todos")
+async def get_my_todos(current_user: User = Depends(get_current_user)):
+    todos = await db.todos.find(
+        {"user_id": current_user.id}
+    ).to_list(1000)
+
+    for todo in todos:
+        todo["_id"] = str(todo["_id"])
+
+    return todos
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
