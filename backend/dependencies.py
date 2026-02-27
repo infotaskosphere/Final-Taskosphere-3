@@ -1,7 +1,16 @@
 import os
+from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+
+MONGO_URL = os.getenv("MONGO_URL")
+
+if not MONGO_URL:
+    raise Exception("MONGO_URL is not set")
+
+client = AsyncIOMotorClient(MONGO_URL)
+db = client["taskosphere"]
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
