@@ -17,7 +17,7 @@ import {
   FileText, Calendar, Search, Users, 
   Briefcase, BarChart3, Archive, MessageCircle, Trash 
 } from 'lucide-react';
-import { format, startOfDay, parse } from 'date-fns';
+import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -178,59 +178,6 @@ export default function Clients() {
     URL.revokeObjectURL(url);
   };
 
-  const excelDateToJSDate = (serial) => {
-    const utc_days = Math.floor(serial - 25569);
-    const utc_value = utc_days * 86400;
-    const date_info = new Date(utc_value * 1000);
-    const fractional_day = serial - Math.floor(serial) + 0.0000001;
-    let total_seconds = Math.floor(86400 * fractional_day);
-    const seconds = total_seconds % 60;
-    total_seconds -= seconds;
-    const hours = Math.floor(total_seconds / 3600);
-    const minutes = Math.floor(total_seconds / 60) % 60;
-    return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hours, minutes, seconds);
-  };
-
-  const validateEmail = (email) => /^[\w-]+(\.[\w-]+)*@([\w-]+\.)+[a-zA-Z]{2,7}$/.test(email);
-  const validatePhone = (phone) => /^\d{10,}$/.test(phone);
-
-  const detectClientTypeFromName = (name = '') => {
-    const lower = name.toLowerCase().trim();
-    const normalized = lower.replace(/\s+/g, ' ');
-    if (
-      normalized.includes('private limited') ||
-      normalized.includes('pvt ltd') ||
-      normalized.includes('pvt. ltd') ||
-      normalized.includes('pvt limited')
-    ) {
-      return 'pvt_ltd';
-    }
-    if (
-      normalized.includes('limited liability partnership') ||
-      normalized.includes('llp')
-    ) {
-      return 'llp';
-    }
-    if (
-      normalized.endsWith(' ltd') ||
-      normalized.endsWith(' limited') ||
-      normalized.includes(' ltd ') ||
-      normalized.includes(' limited ')
-    ) {
-      return 'pvt_ltd';
-    }
-    if (normalized.includes('partnership')) {
-      return 'partnership';
-    }
-    if (normalized.includes('huf')) {
-      return 'huf';
-    }
-    if (normalized.includes('trust')) {
-      return 'trust';
-    }
-    return 'proprietor';
-  };
-
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -247,14 +194,37 @@ export default function Clients() {
           }
           try {
             await api.post('/clients', {
-              company_name: row.company_name,
-              client_type: row.client_type || 'proprietor',
-              email: row.email,
-              phone: row.phone,
-              birthday: row.birthday || '',
-              services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-              contact_persons: [{ name: row.contact_name_1 || '', designation: row.contact_designation_1 || '', email: row.contact_email_1 || '', phone: row.contact_phone_1 || '', birthday: '', din: '' }],
-              status: 'active'
+              company_name: row.company_name?.trim(),
+              client_type: [
+                'proprietor',
+                'pvt_ltd',
+                'llp',
+                'partnership',
+                'huf',
+                'trust',
+                'other'
+              ].includes(row.client_type)
+                ? row.client_type
+                : 'proprietor',
+              email: row.email?.trim(),
+              phone: row.phone?.replace(/\D/g, ""),
+              birthday: row.birthday || null,
+              services: row.services
+                ? row.services.split(',').map(s => s.trim())
+                : [],
+              notes: null,
+              assigned_to: null,
+              contact_persons: [{
+                name: row.contact_name_1 || "",
+                designation: row.contact_designation_1 || null,
+                email: row.contact_email_1?.trim() || null,
+                phone: row.contact_phone_1
+                  ? row.contact_phone_1.replace(/\D/g, "")
+                  : null,
+                birthday: null,
+                din: null
+              }],
+              dsc_details: []
             });
             count++;
           } catch (e) { console.error("Import error:", e.response?.data || e); }
@@ -331,43 +301,67 @@ export default function Clients() {
     reader.readAsBinaryString(file);
   };
 
+  // UPDATED handleSubmit with email?.trim() safety
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+
     try {
+      // Remove raw "Other" tag and construct final services array
       let finalServices = [...formData.services];
-      finalServices = finalServices.filter(s => !s.startsWith('Other:'));
-      if (otherService.trim() && formData.services.includes('Other')) {
+      finalServices = finalServices.filter(s => !s.startsWith("Other:"));
+
+      if (otherService.trim() && formData.services.includes("Other")) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
-      const data = {
-        ...formData,
 
+      // Clean main phone (digits only)
+      const cleanPhone = formData.phone.replace(/\D/g, "");
+
+      // Clean contact persons
+      const cleanedContacts = formData.contact_persons.map(cp => ({
+        name: cp.name || "",
+        designation: cp.designation?.trim() || null,
+        email: cp.email?.trim() ? cp.email.trim() : null,
+        phone: cp.phone ? cp.phone.replace(/\D/g, "") : null,
+        birthday: cp.birthday
+          ? new Date(cp.birthday).toISOString().split("T")[0]
+          : null,
+        din: cp.din?.trim() || null
+      }));
+
+      // Construct backend-safe payload (DO NOT spread formData)
+      const payload = {
+        company_name: formData.company_name.trim(),
+        client_type: formData.client_type,
+        email: formData.email?.trim(),                    // ← FIXED: defensive optional chaining
+        phone: cleanPhone,
         birthday: formData.birthday
           ? new Date(formData.birthday).toISOString().split("T")[0]
           : null,
-
-        contact_persons: formData.contact_persons.map(cp => ({
-          ...cp,
-          birthday: cp.birthday
-            ? new Date(cp.birthday).toISOString().split("T")[0]
-            : null
-        })),
-
         services: finalServices,
-        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to
+        notes: formData.notes?.trim() || null,
+        assigned_to:
+          formData.assigned_to === "unassigned"
+            ? null
+            : formData.assigned_to,
+        contact_persons: cleanedContacts,
+        dsc_details: formData.dsc_details || []
       };
+
       if (editingClient) {
-        await api.put(`/clients/${editingClient.id}`, data);
+        await api.put(`/clients/${editingClient.id}`, payload);
       } else {
-        await api.post('/clients', data);
+        await api.post("/clients", payload);
       }
+
       setDialogOpen(false);
       resetForm();
       fetchClients();
-      toast.success('Saved successfully!');
+      toast.success("Saved successfully!");
+
     } catch (error) {
-      toast.error('Error saving client');
+      toast.error(error.response?.data?.detail || "Error saving client");
     } finally {
       setLoading(false);
     }
@@ -461,6 +455,43 @@ export default function Clients() {
       }));
       setOtherService('');
     }
+  };
+
+  const detectClientTypeFromName = (name = '') => {
+    const lower = name.toLowerCase().trim();
+    const normalized = lower.replace(/\s+/g, ' ');
+    if (
+      normalized.includes('private limited') ||
+      normalized.includes('pvt ltd') ||
+      normalized.includes('pvt. ltd') ||
+      normalized.includes('pvt limited')
+    ) {
+      return 'pvt_ltd';
+    }
+    if (
+      normalized.includes('limited liability partnership') ||
+      normalized.includes('llp')
+    ) {
+      return 'llp';
+    }
+    if (
+      normalized.endsWith(' ltd') ||
+      normalized.endsWith(' limited') ||
+      normalized.includes(' ltd ') ||
+      normalized.includes(' limited ')
+    ) {
+      return 'pvt_ltd';
+    }
+    if (normalized.includes('partnership')) {
+      return 'partnership';
+    }
+    if (normalized.includes('huf')) {
+      return 'huf';
+    }
+    if (normalized.includes('trust')) {
+      return 'trust';
+    }
+    return 'proprietor';
   };
 
   // ────────────────────────────────────────────────
@@ -757,8 +788,8 @@ export default function Clients() {
                           variant={ 
                             formData.services.includes(s) || 
                             (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))) 
-                              ? "default" 
-                              : "outline" 
+                            ? "default" 
+                            : "outline" 
                           } 
                           className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]" 
                           onClick={() => toggleService(s)}
@@ -857,6 +888,7 @@ export default function Clients() {
           </Dialog>
         </div>
       </div>
+
       {canViewAllClients && todayReminders.length > 0 && (
         <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
@@ -876,6 +908,7 @@ export default function Clients() {
           </CardContent>
         </Card>
       )}
+
       {canViewAllClients && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
@@ -918,6 +951,7 @@ export default function Clients() {
           </Card>
         </div>
       )}
+
       <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
@@ -950,6 +984,7 @@ export default function Clients() {
           </Select>
         </div>
       </div>
+
       <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
           <AutoSizer>
@@ -989,6 +1024,7 @@ export default function Clients() {
           </div>
         )}
       </div>
+
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1003,6 +1039,7 @@ export default function Clients() {
         onChange={handleImportExcel} 
         className="hidden" 
       />
+
       {/* NEW EXCEL PREVIEW DIALOG */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-auto">
@@ -1055,26 +1092,28 @@ export default function Clients() {
                 for (let row of previewData) {
                   try {
                     await api.post('/clients', {
-                      company_name: row.company_name,
-                      client_type: row.client_type,
-                      email: row.email,
-                      phone: row.phone,
-                      birthday: row.birthday,
-                      services: row.services 
-                        ? row.services.split(',').map(s => s.trim()) 
+                      company_name: row.company_name?.trim(),
+                      client_type: [
+                        'proprietor',
+                        'pvt_ltd',
+                        'llp',
+                        'partnership',
+                        'huf',
+                        'trust',
+                        'other'
+                      ].includes(row.client_type)
+                        ? row.client_type
+                        : 'proprietor',
+                      email: row.email?.trim(),
+                      phone: row.phone?.replace(/\D/g, ""),
+                      birthday: row.birthday || null,
+                      services: row.services
+                        ? row.services.split(',').map(s => s.trim())
                         : [],
-                      notes: row.notes,
+                      notes: row.notes?.trim() || null,
                       assigned_to: null,
-                      contact_persons: [{
-                        name: '',
-                        email: '',
-                        phone: '',
-                        designation: '',
-                        birthday: '',
-                        din: ''
-                      }],
-                      dsc_details: [],
-                      status: 'active'
+                      contact_persons: [],
+                      dsc_details: []
                     });
                     success++;
                   } catch (err) {
