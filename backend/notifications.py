@@ -1,58 +1,111 @@
+# backend/notifications.py
+
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
-from bson import ObjectId
+from typing import List
+import uuid
+
 from backend.dependencies import db, get_current_user
-
-router = APIRouter(
-    prefix="/notifications",
-    tags=["Notifications"]
-)
+from pydantic import BaseModel, Field, ConfigDict
 
 
-# -----------------------------
-# Get all notifications
-# -----------------------------
-@router.get("")
-async def get_notifications(current_user = Depends(get_current_user)):
+# ==========================================================
+# MODELS
+# ==========================================================
 
+class NotificationBase(BaseModel):
+    title: str
+    message: str
+    type: str = "system"  # task | dsc | system
+
+
+class Notification(NotificationBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    is_read: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ==========================================================
+# ROUTER
+# ==========================================================
+
+router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+
+# ==========================================================
+# INTERNAL FUNCTION (Used by other modules)
+# ==========================================================
+
+async def create_notification(
+    user_id: str,
+    title: str,
+    message: str,
+    type: str = "system"
+):
+    """
+    Internal function to create a notification.
+    Used from tasks, DSC, etc.
+    """
+
+    notification = Notification(
+        user_id=user_id,
+        title=title,
+        message=message,
+        type=type
+    )
+
+    doc = notification.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+
+    await db.notifications.insert_one(doc)
+
+    return notification
+
+
+# ==========================================================
+# ROUTES
+# ==========================================================
+
+@router.get("/", response_model=List[Notification])
+async def get_my_notifications(
+    current_user = Depends(get_current_user)
+):
     notifications = await db.notifications.find(
-        {"user_id": str(current_user["_id"])}
-    ).sort("created_at", -1).to_list(100)
+        {"user_id": current_user.id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
 
     for n in notifications:
-        n["id"] = str(n["_id"])
-        del n["_id"]
+        if isinstance(n.get("created_at"), str):
+            n["created_at"] = datetime.fromisoformat(n["created_at"])
 
-    return notifications
+    return [Notification(**n) for n in notifications]
 
 
-# -----------------------------
-# Get unread count
-# -----------------------------
 @router.get("/unread-count")
-async def get_unread_count(current_user = Depends(get_current_user)):
-
+async def get_unread_count(
+    current_user = Depends(get_current_user)
+):
     count = await db.notifications.count_documents({
-        "user_id": str(current_user["_id"]),
+        "user_id": current_user.id,
         "is_read": False
     })
 
-    return {"count": count}
+    return {"unread_count": count}
 
 
-# -----------------------------
-# Mark notification as read
-# -----------------------------
 @router.put("/{notification_id}/read")
-async def mark_as_read(
+async def mark_notification_read(
     notification_id: str,
     current_user = Depends(get_current_user)
 ):
-
     result = await db.notifications.update_one(
         {
-            "_id": ObjectId(notification_id),
-            "user_id": str(current_user["_id"])
+            "id": notification_id,
+            "user_id": current_user.id
         },
         {"$set": {"is_read": True}}
     )
@@ -60,18 +113,37 @@ async def mark_as_read(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    return {"message": "Marked as read"}
+    return {"message": "Notification marked as read"}
 
 
-# -----------------------------
-# Internal helper to create notification
-# -----------------------------
-async def create_notification(user_id: str, title: str, message: str):
+@router.put("/read-all")
+async def mark_all_read(
+    current_user = Depends(get_current_user)
+):
+    await db.notifications.update_many(
+        {
+            "user_id": current_user.id,
+            "is_read": False
+        },
+        {"$set": {"is_read": True}}
+    )
 
-    await db.notifications.insert_one({
-        "user_id": str(user_id),  # MUST be string of Mongo _id
-        "title": title,
-        "message": message,
-        "is_read": False,
-        "created_at": datetime.now(timezone.utc)
-    })
+    return {"message": "All notifications marked as read"}
+
+
+@router.delete("/{notification_id}")
+async def delete_notification(
+    notification_id: str,
+    current_user = Depends(get_current_user)
+):
+    result = await db.notifications.delete_one(
+        {
+            "id": notification_id,
+            "user_id": current_user.id
+        }
+    )
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+
+    return {"message": "Notification deleted"}
