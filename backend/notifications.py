@@ -6,7 +6,7 @@ from bson import ObjectId
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
-@router.get("/")
+@router.get("")
 async def get_notifications(current_user = Depends(get_current_user)):
     notifications = await db.notifications.find(
         {"user_id": current_user.id}
