@@ -979,9 +979,11 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
         {filteredClients.length > 0 ? (
           <AutoSizer>
             {({ height, width }) => {
-              const columnCount = width < 640 ? 1 : width < 1024 ? 2 : width < 1400 ? 3 : 4;
-              const columnWidth = width / columnCount;
-              const rowHeight = 460;
+              const CARD_SIZE = 190; // ~2 inch
+              const columnCount = Math.max(1, Math.floor(width / CARD_SIZE));
+              const columnWidth = CARD_SIZE;
+              const rowHeight = CARD_SIZE;
+              const rowCount = Math.ceil(filteredClients.length / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid
