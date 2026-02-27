@@ -1126,9 +1126,9 @@ query = {}
 if current_user.role != "admin":
     permissions = current_user.permissions.model_dump() if current_user.permissions else {}
 
-    if not permissions.get("can_view_all_tasks", False):
+if not permissions.get("can_view_all_tasks", False):
         # STRICT: user only sees tasks assigned to them
-        query = {"assigned_to": current_user.id}
+    query = {"assigned_to": current_user.id}
     query["type"] = {"$ne": "todo"}
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     # 🔥 Get all user IDs involved
