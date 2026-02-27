@@ -61,40 +61,80 @@ const DashboardLayout = ({ children }) => {
      UPDATED NAV ITEMS
      ============================= */
 
-  const navItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
-
-    ...(hasPermission('can_view_todo_dashboard')
-      ? [{ path: '/todos', icon: CheckSquare, label: 'Todo Dashboard' }]
-      : []),
-
-    { path: '/clients', icon: Building2, label: 'Clients' },
-    { path: '/attendance', icon: Clock, label: 'Attendance' },
-    { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-    { path: '/reports', icon: BarChart3, label: 'Reports' },
-
-    ...(hasPermission('can_view_all_dsc')
-      ? [{ path: '/dsc', icon: FileText, label: 'DSC Register' }]
-      : []),
-
-    ...(hasPermission('can_view_documents')
-      ? [{ path: '/documents', icon: FileText, label: 'Documents Register' }]
-      : []),
-
-    ...(hasPermission('can_view_user_page')
-      ? [{ path: '/users', icon: Users, label: 'Users' }]
-      : []),
-
-    ...(hasPermission('can_view_staff_activity')
-      ? [{ path: '/staff-activity', icon: Activity, label: 'Staff Activity' }]
-      : []),
-
-    ...(hasPermission('can_view_audit_logs')
-      ? [{ path: '/task-audit', icon: Activity, label: 'Task Audit Log' }]
-      : []),
-  ];
-
+const navItems = [
+  {
+    path: '/dashboard',
+    icon: LayoutDashboard,
+    label: 'Dashboard',
+    permission: 'can_view_dashboard'
+  },
+  {
+    path: '/tasks',
+    icon: CheckSquare,
+    label: 'Tasks',
+    permission: 'can_view_tasks'
+  },
+  {
+    path: '/todos',
+    icon: CheckSquare,
+    label: 'Todo Dashboard',
+    permission: 'can_view_todo_dashboard'
+  },
+  {
+    path: '/clients',
+    icon: Building2,
+    label: 'Clients',
+    permission: 'can_view_clients'
+  },
+  {
+    path: '/attendance',
+    icon: Clock,
+    label: 'Attendance',
+    permission: 'can_view_attendance'
+  },
+  {
+    path: '/duedates',
+    icon: Calendar,
+    label: 'Compliance Calendar',
+    permission: 'can_view_compliance_calendar'
+  },
+  {
+    path: '/reports',
+    icon: BarChart3,
+    label: 'Reports',
+    permission: 'can_view_reports'
+  },
+  {
+    path: '/dsc',
+    icon: FileText,
+    label: 'DSC Register',
+    permission: 'can_view_all_dsc'
+  },
+  {
+    path: '/documents',
+    icon: FileText,
+    label: 'Documents Register',
+    permission: 'can_view_documents'
+  },
+  {
+    path: '/users',
+    icon: Users,
+    label: 'Users',
+    permission: 'can_view_user_page'
+  },
+  {
+    path: '/staff-activity',
+    icon: Activity,
+    label: 'Staff Activity',
+    permission: 'can_view_staff_activity'
+  },
+  {
+    path: '/task-audit',
+    icon: Activity,
+    label: 'Task Audit Log',
+    permission: 'can_view_audit_logs'
+  },
+];
   return (
     <div className="min-h-screen bg-slate-50 relative">
 
@@ -119,7 +159,10 @@ const DashboardLayout = ({ children }) => {
           </div>
 
           <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-            {navItems.map((item) => {
+            {navItems
+              .filter((item) => hasPermission(item.permission))
+              .map((item) => {
+                
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
 
