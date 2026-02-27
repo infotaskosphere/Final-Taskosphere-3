@@ -700,24 +700,38 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
 # PROMOTION LOGIC (Admin and Owner Access)
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
+
     todo = await db.todos.find_one({"id": todo_id})
-    if not todo: raise HTTPException(404, "Todo not found")
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+
+    # Only creator or admin can promote
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
-        raise HTTPException(403, "Not authorized to promote this")
-    # Create formal task
+        raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+
     new_task = {
         "id": str(uuid.uuid4()),
-        "title": f"[PROMOTED] {todo['title']}",
+        "title": todo["title"],
         "description": todo.get("description"),
         "assigned_to": todo["user_id"],
+        "sub_assignees": [],
+        "priority": "medium",
         "status": "pending",
+        "category": "other",
+        "client_id": None,
+        "is_recurring": False,
+        "type": "task",   # ✅ IMPORTANT
         "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    await db.tasks.insert_one(new_task)
-    await db.todos.delete_one({"id": todo_id}) # Remove from private list
-    return {"message": "Promoted successfully"}
 
+    await db.tasks.insert_one(new_task)
+
+    # Delete from todos
+    await db.todos.delete_one({"id": todo_id})
+
+    return {"message": "Todo promoted to task successfully"}
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
