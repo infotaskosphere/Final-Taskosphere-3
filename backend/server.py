@@ -202,7 +202,6 @@ class UserPermissions(BaseModel):
     view_other_reports: List[str] = []
     view_other_todos: List[str] = []
     view_other_activity: List[str] = []
-
     # Admin-like Feature Grants
     can_edit_clients: bool = False
     can_use_chat: bool = False
@@ -671,7 +670,6 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     # =========================
     else:
         allowed_users = getattr(current_user.permissions, "view_other_todos", [])
-
         todos = await db.todos.find({
             "$or": [
                 {"user_id": current_user.id},
@@ -718,7 +716,7 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
     await db.tasks.insert_one(new_task)
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo promoted to task successfully"}
-  
+ 
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -1121,14 +1119,12 @@ async def import_tasks_from_csv(
     return await create_tasks_bulk(payload, current_user)
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
-query = {}
-
-if current_user.role != "admin":
-    permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-
-if not permissions.get("can_view_all_tasks", False):
-        # STRICT: user only sees tasks assigned to them
-    query = {"assigned_to": current_user.id}
+    query = {}
+    if current_user.role != "admin":
+        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if not permissions.get("can_view_all_tasks", False):
+            # STRICT: user only sees tasks assigned to them
+            query = {"assigned_to": current_user.id}
     query["type"] = {"$ne": "todo"}
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     # 🔥 Get all user IDs involved
@@ -1148,7 +1144,7 @@ if not permissions.get("can_view_all_tasks", False):
         if isinstance(task["created_at"], str):
             task["created_at"] = datetime.fromisoformat(task["created_at"])
         if isinstance(task["updated_at"], str):
-            task["updated_at"] = datetime.fromisoformat(task["updated_at"])s
+            task["updated_at"] = datetime.fromisoformat(task["updated_at"])
         if task.get("due_date") and isinstance(task["due_date"], str):
             task["due_date"] = datetime.fromisoformat(task["due_date"])
         # 🔥 ADD NAME FIELDS
@@ -1662,7 +1658,6 @@ async def get_attendance_history(
     else:
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
         allowed = permissions.get("view_other_attendance", [])
-
         if user_id is None:
             query["user_id"] = current_user.id
         elif user_id == current_user.id:
@@ -1949,7 +1944,6 @@ async def get_efficiency_report(
     else:
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
         allowed = permissions.get("view_other_reports", [])
-
         if user_id is None:
             query = {"user_id": current_user.id}
         elif user_id == current_user.id:
@@ -2056,7 +2050,6 @@ async def get_clients(current_user: User = Depends(get_current_user)):
         query = {}
     else:
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-
         if permissions.get("can_view_all_clients", False):
             query = {}
         else:
@@ -2400,7 +2393,6 @@ async def get_activity_summary(
     if current_user.role != "admin":
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
         allowed = permissions.get("view_other_activity", [])
-
         if user_id and user_id != current_user.id and user_id not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized")
     query = {}
