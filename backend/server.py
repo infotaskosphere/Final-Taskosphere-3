@@ -13,6 +13,7 @@ from dateutil import parser
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query
+from notifications import router as notification_router
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
@@ -1070,6 +1071,12 @@ async def create_task(task_data: TaskCreate, current_user: User = Depends(get_cu
     if doc["due_date"]:
         doc["due_date"] = doc["due_date"].isoformat()
     await db.tasks.insert_one(doc)
+    if task.assigned_to and task.assigned_to != current_user.id:
+        await create_notification(
+            user_id=task.assigned_to,
+            title="New Task Assigned",
+            message=f"You have been assigned task '{task.title}'"
+        )
     return task
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
@@ -2635,3 +2642,4 @@ async def auto_daily_reminder(request, call_next):
     return response
 # Api Router
 app.include_router(api_router)
+app.include_router(notification_router)
