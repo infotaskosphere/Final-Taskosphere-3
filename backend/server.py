@@ -1,7 +1,7 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import db, get_current_user
-from backend.dependencies import get_current_user
+from backend.notifications import router as notification_router, create_notification
 from typing import Optional
 from datetime import date
 import pytz
@@ -169,6 +169,9 @@ async def create_indexes():
     await db.dsc_register.create_index("expiry_date")
     await db.todos.create_index([("user_id", 1), ("created_at", -1)])
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
+    await db.notifications.create_index("user_id")
+    await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
+    await db.notifications.create_index("created_at")
     await db.attendance.create_index(
         [("user_id", 1), ("date", 1)],
         unique=True
