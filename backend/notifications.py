@@ -8,7 +8,7 @@ import uuid
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 # These will be injected from server.py
-from server import db, get_current_user
+from backend.server import db, get_current_user
 
 
 @router.get("/")
