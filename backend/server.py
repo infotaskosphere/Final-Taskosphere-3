@@ -1,6 +1,6 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
-from backend.core import db, get_current_user
+from backend.server import db, get_current_user
 from typing import Optional
 from datetime import date
 import pytz
