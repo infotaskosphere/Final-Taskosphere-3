@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -28,27 +29,31 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
+
 // Department categories with colors
 const DEPARTMENTS = [
-  { value: 'GST', label: 'GST', color: '#1E3A8A' },     // Deep Navy
-  { value: 'IT', label: 'IT', color: '#374151' },       // Charcoal Gray
-  { value: 'ACC', label: 'ACC', color: '#065F46' },     // Dark Emerald
-  { value: 'TDS', label: 'TDS', color: '#1F2937' },     // Slate Black
-  { value: 'ROC', label: 'ROC', color: '#7C2D12' },     // Burgundy Brown
-  { value: 'TM', label: 'TM', color: '#0F766E' },       // Teal
-  { value: 'MSME', label: 'MSME', color: '#92400E' },   // Dark Amber
-  { value: 'FEMA', label: 'FEMA', color: '#334155' },   // Blue Gray
-  { value: 'DSC', label: 'DSC', color: '#3F3F46' },     // Neutral Graphite
+  { value: 'GST', label: 'GST', color: '#1E3A8A' }, // Deep Navy
+  { value: 'IT', label: 'IT', color: '#374151' }, // Charcoal Gray
+  { value: 'ACC', label: 'ACC', color: '#065F46' }, // Dark Emerald
+  { value: 'TDS', label: 'TDS', color: '#1F2937' }, // Slate Black
+  { value: 'ROC', label: 'ROC', color: '#7C2D12' }, // Burgundy Brown
+  { value: 'TM', label: 'TM', color: '#0F766E' }, // Teal
+  { value: 'MSME', label: 'MSME', color: '#92400E' }, // Dark Amber
+  { value: 'FEMA', label: 'FEMA', color: '#334155' }, // Blue Gray
+  { value: 'DSC', label: 'DSC', color: '#3F3F46' }, // Neutral Graphite
   { value: 'OTHER', label: 'OTHER', color: '#475569' }, // Professional Slate
 ];
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -67,6 +72,7 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
+
 const UserCard = ({
   userData,
   onEdit,
@@ -75,8 +81,8 @@ const UserCard = ({
   currentUserId,
   COLORS,
   isAdmin,
-  canEditUsers,              // ✅ ADD
-  canManagePermissions       // ✅ ADD
+  canEditUsers, // ✅ ADD
+  canManagePermissions // ✅ ADD
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
@@ -193,6 +199,7 @@ const UserCard = ({
     </motion.div>
   );
 };
+
 export default function Users() {
   const { user, hasPermission } = useAuth();
 
@@ -223,29 +230,43 @@ export default function Users() {
     punch_out_time: '',
   });
   const [permissions, setPermissions] = useState({
+    // Global View Permissions
     can_view_all_tasks: false,
     can_view_all_clients: false,
     can_view_all_dsc: false,
     can_view_documents: false,
     can_view_all_duedates: false,
     can_view_reports: false,
+    can_view_audit_logs: false,
+
+    // User Management
     can_manage_users: false,
+    can_edit_users: false,
     can_assign_tasks: false,
-    assigned_clients: [],
+
+    // Staff Features
     can_view_staff_activity: false,
     can_view_attendance: false,
     can_use_chat: false,
     can_send_reminders: false,
+
+    // Editing
     can_edit_tasks: false,
     can_edit_dsc: false,
     can_edit_documents: false,
     can_edit_due_dates: false,
-    can_edit_users: false,
-    can_view_user_page: false,
-    can_view_audit_logs: false,
+    can_edit_clients: false,
     can_delete_data: false,
-    
-    todo_view_permissions: [],
+
+    // Client Assignment
+    assigned_clients: [],
+
+    // Cross User Viewing (NEW SYSTEM)
+    view_other_tasks: [],
+    view_other_attendance: [],
+    view_other_reports: [],
+    view_other_todos: [],
+    view_other_activity: [],
   });
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
@@ -271,6 +292,7 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
+
 const fetchPermissions = async (userId) => {
   try {
     const response = await api.get(`/users/${userId}/permissions`);
@@ -285,28 +307,43 @@ const fetchPermissions = async (userId) => {
 
     // fallback to default permissions instead of null
     setPermissions({
+      // Global View Permissions
       can_view_all_tasks: false,
       can_view_all_clients: false,
       can_view_all_dsc: false,
       can_view_documents: false,
       can_view_all_duedates: false,
       can_view_reports: false,
+      can_view_audit_logs: false,
+
+      // User Management
       can_manage_users: false,
+      can_edit_users: false,
       can_assign_tasks: false,
-      assigned_clients: [],
+
+      // Staff Features
       can_view_staff_activity: false,
       can_view_attendance: false,
       can_use_chat: false,
       can_send_reminders: false,
+
+      // Editing
       can_edit_tasks: false,
       can_edit_dsc: false,
       can_edit_documents: false,
       can_edit_due_dates: false,
-      can_edit_users: false,
-      can_view_user_page: false,
-      can_view_audit_logs: false,
+      can_edit_clients: false,
       can_delete_data: false,
-      todo_view_permissions: [],
+
+      // Client Assignment
+      assigned_clients: [],
+
+      // Cross User Viewing (NEW SYSTEM)
+      view_other_tasks: [],
+      view_other_attendance: [],
+      view_other_reports: [],
+      view_other_todos: [],
+      view_other_activity: [],
     });
   }
 };
@@ -407,7 +444,7 @@ const fetchPermissions = async (userId) => {
   };
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+      (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
@@ -565,9 +602,9 @@ const fetchPermissions = async (userId) => {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
           <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
             <TabsTrigger value="all">All ({users.length})</TabsTrigger>
-              <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
-              <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
-              <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
+            <TabsTrigger value="admin">Admins ({users.filter(u => u.role === 'admin').length})</TabsTrigger>
+            <TabsTrigger value="manager">Managers ({users.filter(u => u.role === 'manager').length})</TabsTrigger>
+            <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
             <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           </TabsList>
           {hasPermission("can_view_audit_logs") && (
@@ -589,17 +626,17 @@ const fetchPermissions = async (userId) => {
           ) : (
             filteredUsers.map((userData) => (
               <UserCard
-  key={userData.id}
-  userData={userData}
-  onEdit={handleEdit}
-  onDelete={handleDelete}
-  onPermissions={openPermissionsDialog}
-  currentUserId={user.id}
-  COLORS={COLORS}
-  isAdmin={isAdmin}
-  canEditUsers={canEditUsers}                 // ✅ ADD
-  canManagePermissions={canManagePermissions} // ✅ ADD
-/>
+                key={userData.id}
+                userData={userData}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onPermissions={openPermissionsDialog}
+                currentUserId={user.id}
+                COLORS={COLORS}
+                isAdmin={isAdmin}
+                canEditUsers={canEditUsers} // ✅ ADD
+                canManagePermissions={canManagePermissions} // ✅ ADD
+              />
             ))
           )}
         </motion.div>
@@ -661,6 +698,60 @@ const fetchPermissions = async (userId) => {
                   </div>
                 </AccordionContent>
               </AccordionItem>
+
+              {/* NEW CROSS-USER PERMISSION SECTION */}
+              <AccordionItem value="cross-user">
+                <AccordionTrigger className="font-semibold text-slate-700 text-sm">
+                  Cross User Access
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="bg-slate-50 rounded-2xl p-4 space-y-4">
+
+                    {[
+                      { key: "view_other_tasks", label: "View Other Users' Tasks" },
+                      { key: "view_other_attendance", label: "View Other Users' Attendance" },
+                      { key: "view_other_reports", label: "View Other Users' Reports" },
+                      { key: "view_other_todos", label: "View Other Users' Todos" },
+                      { key: "view_other_activity", label: "View Other Users' Activity" },
+                    ].map((section) => (
+                      <div key={section.key} className="space-y-2">
+                        <p className="text-sm font-medium text-slate-700">
+                          {section.label}
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                          {users
+                            .filter(u => u.id !== selectedUserForPermissions?.id)
+                            .map((u) => {
+                              const isSelected = permissions[section.key]?.includes(u.id);
+                              return (
+                                <div
+                                  key={u.id}
+                                  onClick={() =>
+                                    setPermissions(prev => ({
+                                      ...prev,
+                                      [section.key]: isSelected
+                                        ? prev[section.key].filter(id => id !== u.id)
+                                        : [...prev[section.key], u.id]
+                                    }))
+                                  }
+                                  className={`p-2 rounded-lg cursor-pointer text-sm border ${
+                                    isSelected
+                                      ? "bg-emerald-100 border-emerald-400"
+                                      : "bg-white border-slate-200"
+                                  }`}
+                                >
+                                  {u.full_name}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ))}
+
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
               <AccordionItem value="assigned-clients">
                 <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UserIcon className="h-4 w-4" /> Assigned Clients</AccordionTrigger>
                 <AccordionContent>
