@@ -686,7 +686,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
 
     # Staff must have permission to access dashboard
     if not is_admin:
-        if not current_user.permissions or not current_user.permissions.get("can_view_todo_dashboard", False):
+        if not current_user.permissions or not getattr(current_user.permissions, "can_view_todo_dashboard", False):
             raise HTTPException(status_code=403, detail="Dashboard access denied")
 
     # =========================
@@ -716,7 +716,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     # STAFF VIEW (OWN + ALLOWED)
     # =========================
     else:
-        allowed_users = current_user.permissions.get("todo_view_permissions", [])
+        allowed_users = getattr(current_user.permissions, "todo_view_permissions", [])
 
         todos = await db.todos.find({
             "$or": [
