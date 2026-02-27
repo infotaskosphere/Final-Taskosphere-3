@@ -1,4 +1,7 @@
 from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import date
 import pytz
 import logging
 import smtplib
@@ -402,11 +405,12 @@ class ClientBase(BaseModel):
     company_name: str = Field(..., min_length=3, max_length=255)
     client_type: str = Field(
         ...,
-        pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other)$"
+        pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$"
     )
     contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: EmailStr
     phone: str = Field(..., min_length=10, max_length=20)
+    date_of_incorporation: Optional[date] = None
     birthday: Optional[date] = None
     services: List[str] = Field(default_factory=list)
     dsc_details: List[ClientDSC] = Field(default_factory=list)
