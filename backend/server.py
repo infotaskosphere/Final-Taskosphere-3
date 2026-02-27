@@ -1,7 +1,6 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import db, get_current_user
-from backend.notifications import router as notification_router, create_notification
 from typing import Optional
 from datetime import date
 import pytz
@@ -866,7 +865,7 @@ async def register(
     doc["created_at"] = doc["created_at"].isoformat()
     doc["permissions"] = default_permissions
     await db.users.insert_one(doc)
-    access_token = create_access_token({"sub": str(user["_id"])})
+    access_token = create_access_token({"sub": user.id})
     return {"access_token": access_token, "token_type": "bearer", "user": user}
 
 @api_router.post("/auth/login", response_model=Token)
