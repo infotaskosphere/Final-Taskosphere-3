@@ -36,7 +36,7 @@ export default function TodoDashboard() {
     mutationFn: (data) => api.post("/todos", data),
     onSuccess: () => {
       toast.success("Todo added successfully");
-      queryClient.invalidateQueries(["todo-dashboard"]);
+      queryClient.invalidateQueries({ queryKey: ["todo-dashboard"] });
       setTitle("");
       setDescription("");
     },
@@ -48,7 +48,7 @@ export default function TodoDashboard() {
     mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
     onSuccess: () => {
       toast.success("Promoted to Task");
-      queryClient.invalidateQueries(["todo-dashboard"]);
+      queryClient.invalidateQueries({ queryKey: ["todo-dashboard"] });
     },
     onError: () => toast.error("Promotion failed"),
   });
