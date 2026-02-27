@@ -155,7 +155,8 @@ export default function Clients() {
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
 
-  const getClientNumber = (index) => `#${String(index + 1).padStart(3, '0')}`;
+  const getClientNumber = (index) =>
+    String(index + 1).padStart(3, '0');
 
   // ==================== HANDLERS ====================
   const downloadTemplate = () => {
@@ -473,99 +474,119 @@ export default function Clients() {
     }
   };
 
-  // ────────────────────────────────────────────────
-  // Virtualized Client Card Renderer
-  // ────────────────────────────────────────────────
-  const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
-    const index = rowIndex * columnCount + columnIndex;
-    const client = filteredClients[index];
-    if (index >= filteredClients.length || !client) return null;
-    return (
-      <div style={style} className="p-3 box-border">
-        <Card
-          className={`h-full overflow-hidden transition-all border-slate-200 flex flex-col ${
-            client.status === 'inactive' ? 'opacity-60 grayscale-[0.2]' : 'hover:shadow-md'
+// ────────────────────────────────────────────────
+// Virtualized Client Card Renderer
+// ────────────────────────────────────────────────
+const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
+  const index = rowIndex * columnCount + columnIndex;
+  const client = filteredClients[index];
+  if (index >= filteredClients.length || !client) return null;
+
+  return (
+    <div style={style} className="p-3 box-border">
+      <Card
+        className={`h-full flex flex-col rounded-2xl border border-slate-200 bg-white
+          transition-all duration-200
+          ${client.status === 'inactive'
+            ? 'opacity-60'
+            : 'hover:shadow-lg hover:-translate-y-1'
           }`}
-        >
-          <CardHeader className="pb-3 border-b bg-slate-50/50">
-            <div className="flex justify-between items-start">
-              <div>
-                <CardTitle className="text-base font-bold">
-                  {getClientNumber(index)} {client.company_name}
-                </CardTitle>
-                <p className="text-[10px] text-slate-500">
-                  {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
-                </p>
-              </div>
-              <div className="flex gap-1">
-                {client.status === 'inactive' && (
-                  <Badge variant="outline" className="text-[8px] uppercase text-slate-300 border-slate-200">
-                    Archived
-                  </Badge>
-                )}
-                {client.birthday && <Calendar className="h-4 w-4 text-blue-400" />}
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-4 space-y-4 flex-1 flex flex-col">
-            <div className="text-xs space-y-1 text-slate-600 font-medium flex-1">
-              <p className="flex items-center gap-2">
-                <Mail className="h-3 w-3 text-slate-400" /> {client.email || '—'}
+      >
+        {/* Header */}
+        <CardHeader className="pb-2 px-4 pt-4 border-b bg-slate-50/60">
+          <div className="flex justify-between items-start gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-sm font-semibold truncate">
+                {getClientNumber(index)} {client.company_name}
+              </CardTitle>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+                {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
               </p>
-              <div className="flex items-center justify-between">
-                <p className="flex items-center gap-2">
-                  <Briefcase className="h-3 w-3 text-slate-400" /> {client.phone || '—'}
-                </p>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-full"
-                  onClick={() => openWhatsApp(client.phone, client.company_name)}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                </Button>
-              </div>
             </div>
-            <div className="flex flex-wrap gap-1">
-              {client.services?.slice(0, 3).map(s => (
-                <Badge key={s} variant="secondary" className="text-[9px] bg-slate-100 text-slate-500 border-none px-2 rounded-full">
-                  {s.replace('Other: ', '')}
-                </Badge>
-              ))}
-              {client.services?.length > 3 && (
-                <span className="text-[9px] text-slate-400 ml-1">+{client.services.length - 3}</span>
-              )}
+            {client.status === 'inactive' && (
+              <Badge
+                variant="outline"
+                className="text-[9px] uppercase border-slate-200 text-slate-400"
+              >
+                Archived
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+
+        {/* Body */}
+        <CardContent className="px-4 py-3 flex flex-col gap-3 text-xs flex-1">
+          {/* Email */}
+          <div className="flex items-center gap-2 text-slate-600 truncate">
+            <Mail className="h-3 w-3 text-slate-400 shrink-0" />
+            <span className="truncate">{client.email || '—'}</span>
+          </div>
+
+          {/* Phone + WhatsApp */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-600">
+              <Briefcase className="h-3 w-3 text-slate-400" />
+              {client.phone || '—'}
             </div>
-            <div className="flex gap-2 pt-3 border-t justify-end mt-auto">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-full hover:bg-emerald-50"
+              onClick={() => openWhatsApp(client.phone, client.company_name)}
+            >
+              <MessageCircle className="h-4 w-4 text-emerald-500" />
+            </Button>
+          </div>
+
+          {/* Services */}
+          <div className="flex flex-wrap gap-1">
+            {client.services?.slice(0, 2).map(s => (
+              <Badge
+                key={s}
+                variant="secondary"
+                className="text-[9px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600"
+              >
+                {s.replace('Other: ', '')}
+              </Badge>
+            ))}
+            {client.services?.length > 2 && (
+              <span className="text-[9px] text-slate-400">
+                +{client.services.length - 2}
+              </span>
+            )}
+          </div>
+
+          {/* Footer Buttons */}
+          <div className="flex justify-end gap-2 pt-2 border-t mt-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-indigo-600 hover:bg-indigo-50"
+              onClick={() => handleEdit(client)}
+            >
+              <Edit className="h-3 w-3 mr-1" />
+              Edit
+            </Button>
+            {canDeleteData && (
               <Button
                 variant="ghost"
-                size="sm"
-                className="h-8 text-indigo-600 hover:bg-indigo-50 px-3"
-                onClick={() => handleEdit(client)}
+                size="icon"
+                className="h-7 w-7 text-red-500 hover:bg-red-50"
+                onClick={() => {
+                  if (confirm("Delete client record?")) {
+                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                  }
+                }}
               >
-                <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
-              {canDeleteData && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 text-red-500 hover:bg-red-50 px-3"
-                  onClick={() => {
-                    if (confirm("Delete client record?")) {
-                      api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                    }
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  };
-
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
