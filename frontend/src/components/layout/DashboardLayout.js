@@ -162,25 +162,28 @@ const navItems = [
             {navItems
               .filter((item) => hasPermission(item.permission))
               .map((item) => {
-                
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
 
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
-                  ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}`}
-                  style={isActive ? {
-                    background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`
-                  } : {}}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
-                </Link>
-              );
-            })}
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
+                    ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}`}
+                    style={
+                      isActive
+                        ? {
+                            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+                          }
+                        : {}
+                    }
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="font-medium">{item.label}</span>
+                  </Link>
+                );
+              })}
           </nav>
         </div>
       </aside>
