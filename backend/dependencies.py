@@ -1,5 +1,6 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -46,6 +47,7 @@ async def get_current_user(
         )
 
     user = await db.users.find_one({"id": user_id})
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
 
     if not user:
         raise HTTPException(
