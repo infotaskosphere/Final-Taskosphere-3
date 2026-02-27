@@ -311,36 +311,7 @@ export default function Dashboard() {
     });
   };
 
-  const handleSendQuickReply = async () => {
-  if (!chatInput.trim() || !defaultGroup) return;
-  try {
-    await api.post(
-      `/chat/groups/${defaultGroup.id}/messages`,
-      {
-        content: chatInput,
-        message_type: "text"
-      }
-    );
-    setChatInput('');
-    fetchChatPreview(); // refresh messages
-  } catch (error) {
-    toast.error("Failed to send message");
-  }
-};
-  const handleSendQuickReplyPreview = async () => {
-  if (!chatInput.trim()) return;
-  try {
-    const res = await api.post('/notifications', {
-      message: chatInput,
-      created_at: new Date().toISOString()
-    });
-    setChatMessages([...chatMessages, res.data]);
-    setChatInput('');
-  } catch (error) {
-    toast.error("Failed to send message");
-  }
-};
-  const handleDeleteTodo = (id) => {
+ const handleDeleteTodo = (id) => {
     deleteTaskMutation.mutate(id, {
       onSuccess: () => {
         toast.success('Todo deleted successfully!');
@@ -430,21 +401,6 @@ export default function Dashboard() {
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const [defaultGroup, setDefaultGroup] = useState(null);
-const fetchChatPreview = async () => {
-  try {
-    const groupsRes = await api.get("/chat/groups");
-    if (groupsRes.data.length > 0) {
-      const firstGroup = groupsRes.data[0];
-      setDefaultGroup(firstGroup);
-      const messagesRes = await api.get(
-        `/chat/groups/${firstGroup.id}/messages`
-      );
-      setChatMessages(messagesRes.data || []);
-    }
-  } catch (error) {
-    console.error("Failed to fetch chat preview");
-  }
-};
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
