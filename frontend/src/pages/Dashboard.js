@@ -161,15 +161,13 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [rankings, setRankings] = useState([]);
-  const [rankingPeriod, setRankingPeriod] = useState("all");
+  const [rankingPeriod, setRankingPeriod] = useState("monthly");
   const [chatMessages, setChatMessages] = useState([]);
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [newTodo, setNewTodo] = useState('');
-  // ── New state for due date picker ──────────────────────────────────────────
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
   const [chatInput, setChatInput] = useState('');
-  // ────────────────────────────────────────────────────────────────────────────
   const { data: tasks = [] } = useTasks();
   const { data: stats } = useDashboardStats();
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
@@ -232,25 +230,25 @@ export default function Dashboard() {
     fetchChatPreview();
   }, []);
 
-useEffect(() => {
-  async function fetchRankings() {
-    try {
-      const rankingRes = await api.get("/staff/rankings", {
-        params: {
-          period: "monthly", "weekly", "all",
-        },
-      });
+  useEffect(() => {
+    async function fetchRankings() {
+      try {
+        const rankingRes = await api.get("/staff/rankings", {
+          params: {
+            period: rankingPeriod, // dynamic value
+          },
+        });
 
-      setRankings(rankingRes.data?.rankings || []);
-    } catch (rankErr) {
-      console.warn("Rankings endpoint failed:", rankErr);
-      setRankings([]);
+        setRankings(rankingRes.data?.rankings || []);
+      } catch (rankErr) {
+        console.warn("Rankings endpoint failed:", rankErr);
+        setRankings([]);
+      }
     }
-  }
 
-  fetchRankings();
-}, []);
-
+    fetchRankings();
+  }, [rankingPeriod]);
+  
   const addTodo = () => {
     if (!newTodo.trim()) return;
     // ── New code: prepare payload with due_date (will be used when endpoint is fixed) ──
