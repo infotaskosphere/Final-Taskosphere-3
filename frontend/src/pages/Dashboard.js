@@ -162,12 +162,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [rankings, setRankings] = useState([]);
   const [rankingPeriod, setRankingPeriod] = useState("monthly");
-  const [chatMessages, setChatMessages] = useState([]);
   const notificationAudio = React.useRef(new Audio('/notification.mp3'));
   const [newTodo, setNewTodo] = useState('');
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
-  const [chatInput, setChatInput] = useState('');
   const { data: tasks = [] } = useTasks();
   const { data: stats } = useDashboardStats();
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
@@ -226,11 +224,7 @@ export default function Dashboard() {
     return `${h}h ${m}m`;
   };
 
-  useEffect(() => {
-    fetchChatPreview();
-  }, []);
-
-  useEffect(() => {
+   useEffect(() => {
     async function fetchRankings() {
       try {
         const rankingRes = await api.get("/staff/rankings", {
@@ -258,7 +252,7 @@ export default function Dashboard() {
       created_at: new Date().toISOString(),
       due_date: selectedDueDate ? selectedDueDate.toISOString() : null,
     };
-    // ────────────────────────────────────────────────────────────────────────────────
+    
     createTaskMutation.mutate(todoPayload, {
       onSuccess: () => {
         setNewTodo('');
