@@ -33,7 +33,7 @@ import uuid
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
 from datetime import datetime, timedelta, timezone
-import re   # ← Added for phone validation
+import re # ← Added for phone validation
 rankings_cache = {}
 rankings_cache_time = {}
 import openpyxl
@@ -196,6 +196,16 @@ class UserPermissions(BaseModel):
     can_download_reports: bool = False
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
+    # Cross User Viewing
+    view_other_tasks: List[str] = []
+    view_other_attendance: List[str] = []
+    view_other_reports: List[str] = []
+    view_other_todos: List[str] = []
+    view_other_activity: List[str] = []
+
+    # Admin-like Feature Grants
+    can_edit_clients: bool = False
+    can_use_chat: bool = False
 class Todo(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -403,7 +413,6 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
-
     @field_validator('phone')
     @classmethod
     def validate_phone(cls, v: str) -> str:
@@ -415,7 +424,6 @@ class ClientBase(BaseModel):
         if not (10 <= len(cleaned) <= 15):
             raise ValueError('Phone number must be 10-15 digits')
         return v
-
     @field_validator('company_name')
     @classmethod
     def validate_company_name(cls, v: str) -> str:
@@ -641,10 +649,6 @@ async def create_audit_log(
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
-    # Staff must have permission to access dashboard
-    if not is_admin:
-        if not current_user.permissions or not getattr(current_user.permissions, "can_view_todo_dashboard", False):
-            raise HTTPException(status_code=403, detail="Dashboard access denied")
     # =========================
     # ADMIN VIEW (SEE ALL)
     # =========================
@@ -666,7 +670,8 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     # STAFF VIEW (OWN + ALLOWED)
     # =========================
     else:
-        allowed_users = getattr(current_user.permissions, "todo_view_permissions", [])
+        allowed_users = getattr(current_user.permissions, "view_other_todos", [])
+
         todos = await db.todos.find({
             "$or": [
                 {"user_id": current_user.id},
@@ -713,7 +718,7 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
     await db.tasks.insert_one(new_task)
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo promoted to task successfully"}
-   
+  
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -760,7 +765,14 @@ async def register(
         "can_edit_due_dates": False,
         "can_edit_users": False,
         "can_download_reports": False,
-        "can_view_selected_users_reports": False
+        "can_view_selected_users_reports": False,
+        "view_other_tasks": [],
+        "view_other_attendance": [],
+        "view_other_reports": [],
+        "view_other_todos": [],
+        "view_other_activity": [],
+        "can_edit_clients": False,
+        "can_use_chat": False
     }
     doc = user.model_dump()
     doc["password"] = hashed_password
@@ -1110,16 +1122,17 @@ async def import_tasks_from_csv(
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
     query = {}
-    if current_user.role == "admin":
-        pass
-    else:
+    if current_user.role != "admin":
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-        # If user does NOT have view-all permission
+
         if not permissions.get("can_view_all_tasks", False):
+            allowed_users = permissions.get("view_other_tasks", [])
+
             query["$or"] = [
                 {"assigned_to": current_user.id},
                 {"sub_assignees": current_user.id},
-                {"created_by": current_user.id} # 🔥 THIS IS NEW
+                {"created_by": current_user.id},
+                {"assigned_to": {"$in": allowed_users}}
             ]
     query["type"] = {"$ne": "todo"}
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
@@ -1648,19 +1661,21 @@ async def get_attendance_history(
     - Staff → can only see own
     """
     query = {}
-    # Admin override
     if current_user.role == "admin":
         if user_id:
             query["user_id"] = user_id
     else:
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-        # If user has permission to view attendance
-        if permissions.get("can_view_attendance"):
-            if user_id:
-                query["user_id"] = user_id
-        else:
-            # No permission → force own data only
+        allowed = permissions.get("view_other_attendance", [])
+
+        if user_id is None:
             query["user_id"] = current_user.id
+        elif user_id == current_user.id:
+            query["user_id"] = current_user.id
+        elif user_id in allowed:
+            query["user_id"] = user_id
+        else:
+            raise HTTPException(status_code=403, detail="Not authorized")
     attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
     for attendance in attendance_list:
         if isinstance(attendance["punch_in"], str):
@@ -1938,18 +1953,16 @@ async def get_efficiency_report(
         query = {"user_id": user_id} if user_id else {}
     else:
         permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        allowed = permissions.get("view_other_reports", [])
+
         if user_id is None:
-            if permissions.get("can_view_reports", False):
-                query = {}
-            else:
-                raise HTTPException(status_code=403, detail="Not authorized to view all reports")
+            query = {"user_id": current_user.id}
         elif user_id == current_user.id:
             query = {"user_id": current_user.id}
+        elif user_id in allowed:
+            query = {"user_id": user_id}
         else:
-            if permissions.get("can_view_selected_users_reports", False):
-                query = {"user_id": user_id}
-            else:
-                raise HTTPException(status_code=403, detail="Not authorized to view this report")
+            raise HTTPException(status_code=403, detail="Not authorized")
     # Get activity logs
     logs = await db.activity_logs.find(query, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
     # Get user data
@@ -2042,10 +2055,17 @@ async def create_client(client_data: ClientCreate, current_user: User = Depends(
     await db.clients.insert_one(doc)
     return client
 @api_router.get("/clients", response_model=List[Client])
-async def get_clients(current_user: User = Depends(check_permission("can_view_all_clients"))):
+async def get_clients(current_user: User = Depends(get_current_user)):
     query = {}
-    if current_user.role == "staff":
-        query["assigned_to"] = current_user.id
+    if current_user.role == "admin":
+        query = {}
+    else:
+        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+
+        if permissions.get("can_view_all_clients", False):
+            query = {}
+        else:
+            query["assigned_to"] = current_user.id
     clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
     for client in clients:
         if isinstance(client["created_at"], str):
@@ -2149,7 +2169,6 @@ async def import_clients_from_file(
     current_user: User = Depends(get_current_user)
 ):
     filename = file.filename.lower()
-
     try:
         if filename.endswith(".csv"):
             content = await file.read()
@@ -2161,24 +2180,18 @@ async def import_clients_from_file(
             raise HTTPException(status_code=400, detail="Only CSV or XLSX files are supported")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
-
     df = df.dropna(how="all").reset_index(drop=True)
-
     created_clients = 0
     duplicate_clients = 0
     added_contacts = 0
     skipped_rows = 0
     invalid_rows = 0
     validation_errors = []
-
     current_client_id = None
-
     for idx, row in df.iterrows():
         try:
             row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
-
             company_name = row.get("company_name", "").strip()
-
             # ====================== NEW CLIENT ROW ======================
             if company_name:
                 # Check duplicate
@@ -2189,7 +2202,6 @@ async def import_clients_from_file(
                     current_client_id = existing["id"]
                     duplicate_clients += 1
                     continue
-
                 # Parse birthday
                 birthday = None
                 if row.get("birthday"):
@@ -2197,9 +2209,7 @@ async def import_clients_from_file(
                         birthday = parser.parse(row["birthday"]).date()
                     except:
                         birthday = None
-
                 services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
-
                 contact_persons = []
                 if row.get("contact_name_1"):
                     contact_persons.append({
@@ -2208,19 +2218,17 @@ async def import_clients_from_file(
                         "email": row.get("contact_email_1") or None,
                         "phone": row.get("contact_phone_1") or None,
                     })
-
                 # === FULL PYDANTIC VALIDATION ===
                 client_create = ClientCreate(
                     company_name=company_name,
                     client_type=row.get("client_type") or "other",
                     email=row.get("email"),
-                    phone=row.get("phone") or "9999999999",  # temporary fallback - will be cleaned
+                    phone=row.get("phone") or "9999999999", # temporary fallback - will be cleaned
                     birthday=birthday,
                     services=services,
                     contact_persons=contact_persons,
                     notes=row.get("notes")
                 )
-
                 client_doc = client_create.model_dump()
                 client_doc["id"] = str(uuid.uuid4())
                 client_doc["created_by"] = current_user.id
@@ -2228,12 +2236,9 @@ async def import_clients_from_file(
                 # Clean temporary phone
                 if client_doc.get("phone") == "9999999999":
                     client_doc["phone"] = row.get("phone") or ""
-
                 await db.clients.insert_one(client_doc)
-
                 current_client_id = client_doc["id"]
                 created_clients += 1
-
             # ====================== ADDITIONAL CONTACT ROW ======================
             else:
                 if current_client_id and row.get("contact_name_1"):
@@ -2250,7 +2255,6 @@ async def import_clients_from_file(
                     added_contacts += 1
                 else:
                     skipped_rows += 1
-
         except ValidationError as ve:
             invalid_rows += 1
             validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
@@ -2260,7 +2264,6 @@ async def import_clients_from_file(
             invalid_rows += 1
             skipped_rows += 1
             continue
-
     return {
         "message": "Client import completed successfully",
         "clients_created": created_clients,
@@ -2268,7 +2271,7 @@ async def import_clients_from_file(
         "contacts_added": added_contacts,
         "invalid_rows": invalid_rows,
         "rows_skipped": skipped_rows,
-        "validation_errors": validation_errors[:20]  # limit displayed errors
+        "validation_errors": validation_errors[:20] # limit displayed errors
     }
 # DASHBOARD ROUTES
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
@@ -2399,8 +2402,12 @@ async def get_activity_summary(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     """Get staff activity summary (admin only)"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if current_user.role != "admin":
+        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        allowed = permissions.get("view_other_activity", [])
+
+        if user_id and user_id != current_user.id and user_id not in allowed:
+            raise HTTPException(status_code=403, detail="Not authorized")
     query = {}
     if user_id:
         query["user_id"] = user_id
