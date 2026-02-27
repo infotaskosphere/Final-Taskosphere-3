@@ -12,10 +12,10 @@ import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from "react-router-dom";
-import {
-  Plus, Edit, Trash2, Mail, Cake, X, UserPlus,
-  FileText, Calendar, Search, Users,
-  Briefcase, BarChart3, Archive, MessageCircle, Trash
+import { 
+  Plus, Edit, Trash2, Mail, Cake, X, UserPlus, 
+  FileText, Calendar, Search, Users, 
+  Briefcase, BarChart3, Archive, MessageCircle, Trash 
 } from 'lucide-react';
 import { format, startOfDay, parse } from 'date-fns';
 import Papa from 'papaparse';
@@ -51,8 +51,8 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  
-  // NEW PREVIEW STATES (added exactly as instructed)
+
+  // NEW PREVIEW STATES
   const [previewData, setPreviewData] = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -61,8 +61,10 @@ export default function Clients() {
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
+
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
@@ -144,7 +146,7 @@ export default function Clients() {
 
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
-      const matchesSearch =
+      const matchesSearch = 
         (c?.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.phone || '').includes(searchTerm);
@@ -155,7 +157,7 @@ export default function Clients() {
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
 
-  const getClientNumber = (index) =>
+  const getClientNumber = (index) => 
     String(index + 1).padStart(3, '0');
 
   // ==================== HANDLERS ====================
@@ -192,11 +194,9 @@ export default function Clients() {
   const validateEmail = (email) => /^[\w-]+(\.[\w-]+)*@([\w-]+\.)+[a-zA-Z]{2,7}$/.test(email);
   const validatePhone = (phone) => /^\d{10,}$/.test(phone);
 
-  // NEW: CLIENT TYPE DETECTION (added exactly as instructed)
   const detectClientTypeFromName = (name = '') => {
     const lower = name.toLowerCase().trim();
     const normalized = lower.replace(/\s+/g, ' ');
-
     if (
       normalized.includes('private limited') ||
       normalized.includes('pvt ltd') ||
@@ -205,14 +205,12 @@ export default function Clients() {
     ) {
       return 'pvt_ltd';
     }
-
     if (
       normalized.includes('limited liability partnership') ||
       normalized.includes('llp')
     ) {
       return 'llp';
     }
-
     if (
       normalized.endsWith(' ltd') ||
       normalized.endsWith(' limited') ||
@@ -221,19 +219,15 @@ export default function Clients() {
     ) {
       return 'pvt_ltd';
     }
-
     if (normalized.includes('partnership')) {
       return 'partnership';
     }
-
     if (normalized.includes('huf')) {
       return 'huf';
     }
-
     if (normalized.includes('trust')) {
       return 'trust';
     }
-
     return 'proprietor';
   };
 
@@ -276,53 +270,39 @@ export default function Clients() {
     });
   };
 
-  // REPLACED handleImportExcel WITH PREVIEW VERSION (exactly as instructed)
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-
     reader.onload = (e) => {
       const workbook = XLSX.read(e.target.result, { type: 'binary' });
-
       const normalizeHeader = (header) => {
         if (!header) return '';
-        return header.toString().toLowerCase().replace(/\s+/g, '_');
+        return header.toString().toLowerCase().replace(/\s+/g, '*');
       };
-
       let combinedRows = [];
-
       workbook.SheetNames.forEach(sheetName => {
         const sheet = workbook.Sheets[sheetName];
         const rawRows = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
           defval: ''
         });
-
         if (rawRows.length < 2) return;
-
         const headers = rawRows[0].map(normalizeHeader);
-
         for (let i = 1; i < rawRows.length; i++) {
           const rowArray = rawRows[i];
           if (rowArray.every(cell => cell === '')) continue;
-
           let row = {};
           headers.forEach((h, idx) => {
             row[h] = rowArray[idx];
           });
-
-          const companyName =
-            row.company_name ||
-            row.companyname ||
-            row['company name'] ||
+          const companyName = 
+            row.company_name || 
+            row.companyname || 
+            row['company name'] || 
             '';
-
           if (!companyName) continue;
-
           const detectedType = detectClientTypeFromName(companyName);
-
           combinedRows.push({
             sheet: sheetName,
             company_name: companyName,
@@ -335,7 +315,6 @@ export default function Clients() {
           });
         }
       });
-
       setPreviewHeaders([
         'sheet',
         'company_name',
@@ -346,11 +325,9 @@ export default function Clients() {
         'services',
         'notes'
       ]);
-
       setPreviewData(combinedRows);
       setPreviewOpen(true);
     };
-
     reader.readAsBinaryString(file);
   };
 
@@ -474,119 +451,109 @@ export default function Clients() {
     }
   };
 
-// ────────────────────────────────────────────────
-// Virtualized Client Card Renderer
-// ────────────────────────────────────────────────
-const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
-  const index = rowIndex * columnCount + columnIndex;
-  const client = filteredClients[index];
-  if (index >= filteredClients.length || !client) return null;
+  // ────────────────────────────────────────────────
+  // REFINED Virtualized Client Card Renderer
+  // ────────────────────────────────────────────────
+  const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
+    const index = rowIndex * columnCount + columnIndex;
+    const client = filteredClients[index];
+    if (index >= filteredClients.length || !client) return null;
 
-  return (
-    <div style={style} className="p-3 box-border">
-      <Card
-        className={`h-full flex flex-col rounded-2xl border border-slate-200 bg-white
-          transition-all duration-200
-          ${client.status === 'inactive'
-            ? 'opacity-60'
-            : 'hover:shadow-lg hover:-translate-y-1'
-          }`}
-      >
-        {/* Header */}
-        <CardHeader className="pb-2 px-4 pt-4 border-b bg-slate-50/60">
-          <div className="flex justify-between items-start gap-2">
-            <div className="min-w-0">
-              <CardTitle className="text-sm font-semibold truncate">
-                {getClientNumber(index)} {client.company_name}
-              </CardTitle>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+    return (
+      <div style={style} className="p-3 box-border">
+        <Card className="h-full w-full rounded-2xl border border-slate-200 bg-white overflow-hidden hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 group relative">
+          
+          {/* Status Indicator */}
+          {client.status === 'inactive' && (
+            <div className="absolute top-3 right-3 px-2 py-0.5 text-[9px] font-medium bg-amber-100 text-amber-700 rounded-full z-10">
+              Archived
+            </div>
+          )}
+
+          <div className="p-4 flex flex-col h-full">
+            {/* Header */}
+            <div className="mb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-slate-400 font-medium tracking-tight">
+                  {getClientNumber(index)}
+                </span>
+                <h3 className="font-semibold text-sm leading-tight truncate pr-8 text-slate-900">
+                  {client.company_name}
+                </h3>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wide">
                 {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
               </p>
             </div>
-            {client.status === 'inactive' && (
-              <Badge
-                variant="outline"
-                className="text-[9px] uppercase border-slate-200 text-slate-400"
-              >
-                Archived
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
 
-        {/* Body */}
-        <CardContent className="px-4 py-3 flex flex-col gap-3 text-xs flex-1">
-          {/* Email */}
-          <div className="flex items-center gap-2 text-slate-600 truncate">
-            <Mail className="h-3 w-3 text-slate-400 shrink-0" />
-            <span className="truncate">{client.email || '—'}</span>
-          </div>
-
-          {/* Phone + WhatsApp */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-600">
-              <Briefcase className="h-3 w-3 text-slate-400" />
-              {client.phone || '—'}
+            {/* Contact Info */}
+            <div className="space-y-2 text-xs text-slate-600 flex-1">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                <span className="truncate font-medium">{client.phone || '—'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Mail className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                <span className="truncate">{client.email || '—'}</span>
+              </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-full hover:bg-emerald-50"
-              onClick={() => openWhatsApp(client.phone, client.company_name)}
-            >
-              <MessageCircle className="h-4 w-4 text-emerald-500" />
-            </Button>
-          </div>
 
-          {/* Services */}
-          <div className="flex flex-wrap gap-1">
-            {client.services?.slice(0, 2).map(s => (
-              <Badge
-                key={s}
-                variant="secondary"
-                className="text-[9px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600"
-              >
-                {s.replace('Other: ', '')}
-              </Badge>
-            ))}
-            {client.services?.length > 2 && (
-              <span className="text-[9px] text-slate-400">
-                +{client.services.length - 2}
-              </span>
-            )}
-          </div>
+            {/* Footer */}
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <div>
+                {client.services?.length > 0 && (
+                  <div className="inline-flex items-center px-2.5 py-1 bg-slate-100 text-slate-700 text-[10px] rounded-full font-medium">
+                    {client.services[0].replace('Other: ', '').length > 16 
+                      ? client.services[0].replace('Other: ', '').substring(0, 13) + '...' 
+                      : client.services[0].replace('Other: ', '')}
+                  </div>
+                )}
+              </div>
 
-          {/* Footer Buttons */}
-          <div className="flex justify-end gap-2 pt-2 border-t mt-auto">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-indigo-600 hover:bg-indigo-50"
-              onClick={() => handleEdit(client)}
-            >
-              <Edit className="h-3 w-3 mr-1" />
-              Edit
-            </Button>
-            {canDeleteData && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-red-500 hover:bg-red-50"
-                onClick={() => {
-                  if (confirm("Delete client record?")) {
-                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                  }
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
+              {/* Action Buttons - Visible on Hover */}
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    openWhatsApp(client.phone, client.company_name); 
+                  }}
+                  className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-xl transition-colors"
+                  title="Message on WhatsApp"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    handleEdit(client); 
+                  }}
+                  className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-xl transition-colors"
+                  title="Edit Client"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+                {canDeleteData && (
+                  <button
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      if (confirm("Delete this client permanently?")) {
+                        api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                      }
+                    }}
+                    className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors"
+                    title="Delete Client"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
+        </Card>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -598,16 +565,16 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           <Button variant="outline" onClick={downloadTemplate} className="border-indigo-600 text-indigo-600">
             <FileText className="mr-2 h-4 w-4" />CSV Format
           </Button>
-          <Button
-            variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
+          <Button 
+            variant="secondary" 
+            onClick={() => fileInputRef.current?.click()} 
             disabled={importLoading}
           >
             {importLoading ? 'Importing...' : 'Add CSV'}
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) resetForm();
+          <Dialog open={dialogOpen} onOpenChange={(open) => { 
+            setDialogOpen(open); 
+            if (!open) resetForm(); 
           }}>
             <DialogTrigger asChild>
               <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg transition-all">
@@ -623,9 +590,9 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                   </div>
                   <div className="flex items-center gap-3 bg-slate-50 px-3 py-1.5 rounded-xl border">
                     <Label className="text-[10px] font-bold uppercase text-slate-400">Status: {formData.status}</Label>
-                    <Switch
-                      checked={formData.status === 'active'}
-                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
+                    <Switch 
+                      checked={formData.status === 'active'} 
+                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})} 
                     />
                   </div>
                 </DialogHeader>
@@ -635,11 +602,11 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Company Name *</Label>
-                        <Input
-                          className="bg-white border-slate-200 h-11"
-                          value={formData.company_name}
-                          onChange={e => setFormData({...formData, company_name: e.target.value})}
-                          required
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          value={formData.company_name} 
+                          onChange={e => setFormData({...formData, company_name: e.target.value})} 
+                          required 
                         />
                       </div>
                       <div className="space-y-2">
@@ -655,30 +622,30 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Email *</Label>
-                        <Input
-                          className="bg-white border-slate-200 h-11"
-                          type="email"
-                          value={formData.email}
-                          onChange={e => setFormData({...formData, email: e.target.value})}
-                          required
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          type="email" 
+                          value={formData.email} 
+                          onChange={e => setFormData({...formData, email: e.target.value})} 
+                          required 
                         />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Phone *</Label>
-                        <Input
-                          className="bg-white border-slate-200 h-11"
-                          value={formData.phone}
-                          onChange={e => setFormData({...formData, phone: e.target.value})}
-                          required
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          value={formData.phone} 
+                          onChange={e => setFormData({...formData, phone: e.target.value})} 
+                          required 
                         />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label className="text-xs font-semibold uppercase text-slate-500">Date of Incorporation / Birthday</Label>
-                        <Input
-                          className="bg-white border-slate-200 h-11"
-                          type="date"
-                          value={formData.birthday}
-                          onChange={e => setFormData({...formData, birthday: e.target.value})}
+                        <Input 
+                          className="bg-white border-slate-200 h-11" 
+                          type="date" 
+                          value={formData.birthday} 
+                          onChange={e => setFormData({...formData, birthday: e.target.value})} 
                         />
                       </div>
                     </div>
@@ -689,11 +656,11 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                         <h3 className="text-base font-bold text-slate-800">Contact Persons</h3>
                         <p className="text-xs text-slate-400">Manage associated contacts</p>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={addContact}
-                        variant="outline"
+                      <Button 
+                        type="button" 
+                        size="sm" 
+                        onClick={addContact} 
+                        variant="outline" 
                         className="h-9 bg-white border-slate-200 rounded-lg"
                       >
                         <Plus className="h-4 w-4 mr-1.5" /> Add Contact
@@ -701,18 +668,18 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                     </div>
                     <div className="space-y-4">
                       {formData.contact_persons.map((cp, idx) => (
-                        <div
-                          key={idx}
+                        <div 
+                          key={idx} 
                           className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm relative space-y-4"
                         >
                           <div className="flex justify-between items-center">
                             <span className="text-sm font-bold text-slate-700">Contact Person #{idx + 1}</span>
                             {formData.contact_persons.length > 1 && (
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => removeContact(idx)}
+                              <Button 
+                                type="button" 
+                                size="icon" 
+                                variant="ghost" 
+                                onClick={() => removeContact(idx)} 
                                 className="h-8 w-8 text-slate-300 hover:text-red-500"
                               >
                                 <Trash className="h-4 w-4" />
@@ -722,46 +689,46 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Name</Label>
-                              <Input
-                                value={cp.name}
-                                onChange={e => updateContact(idx, 'name', e.target.value)}
+                              <Input 
+                                value={cp.name} 
+                                onChange={e => updateContact(idx, 'name', e.target.value)} 
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Designation</Label>
-                              <Input
-                                value={cp.designation}
-                                onChange={e => updateContact(idx, 'designation', e.target.value)}
+                              <Input 
+                                value={cp.designation} 
+                                onChange={e => updateContact(idx, 'designation', e.target.value)} 
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Email</Label>
-                              <Input
-                                type="email"
-                                value={cp.email}
-                                onChange={e => updateContact(idx, 'email', e.target.value)}
+                              <Input 
+                                type="email" 
+                                value={cp.email} 
+                                onChange={e => updateContact(idx, 'email', e.target.value)} 
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Phone</Label>
-                              <Input
-                                value={cp.phone}
-                                onChange={e => updateContact(idx, 'phone', e.target.value)}
+                              <Input 
+                                value={cp.phone} 
+                                onChange={e => updateContact(idx, 'phone', e.target.value)} 
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">Birthday</Label>
-                              <Input
-                                type="date"
-                                value={cp.birthday || ''}
-                                onChange={e => updateContact(idx, 'birthday', e.target.value)}
+                              <Input 
+                                type="date" 
+                                value={cp.birthday || ''} 
+                                onChange={e => updateContact(idx, 'birthday', e.target.value)} 
                               />
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs text-slate-500">DIN</Label>
-                              <Input
-                                value={cp.din || ''}
-                                onChange={e => updateContact(idx, 'din', e.target.value)}
+                              <Input 
+                                value={cp.din || ''} 
+                                onChange={e => updateContact(idx, 'din', e.target.value)} 
                               />
                             </div>
                           </div>
@@ -773,15 +740,15 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Services *</Label>
                     <div className="flex flex-wrap gap-2">
                       {SERVICES.map(s => (
-                        <Badge
-                          key={s}
-                          variant={
-                            formData.services.includes(s) ||
-                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:')))
-                              ? "default"
-                              : "outline"
-                          }
-                          className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]"
+                        <Badge 
+                          key={s} 
+                          variant={ 
+                            formData.services.includes(s) || 
+                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))) 
+                              ? "default" 
+                              : "outline" 
+                          } 
+                          className="cursor-pointer px-4 py-1.5 rounded-full text-[11px]" 
                           onClick={() => toggleService(s)}
                         >
                           {s}
@@ -792,15 +759,15 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                       <div className="flex gap-2 items-end">
                         <div className="flex-1 space-y-1">
                           <Label className="text-xs text-slate-500">Specify other service</Label>
-                          <Input
-                            placeholder="e.g. IEC Registration, FEMA Compliance..."
-                            value={otherService}
-                            onChange={e => setOtherService(e.target.value)}
+                          <Input 
+                            placeholder="e.g. IEC Registration, FEMA Compliance..." 
+                            value={otherService} 
+                            onChange={e => setOtherService(e.target.value)} 
                           />
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
+                        <Button 
+                          type="button" 
+                          size="sm" 
                           onClick={addOtherService}
                         >
                           Add
@@ -810,19 +777,19 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Notes</Label>
-                    <Textarea
-                      className="bg-slate-50 border-slate-100 min-h-[120px] rounded-xl"
-                      placeholder="Additional information, remarks, internal notes..."
-                      value={formData.notes}
-                      onChange={e => setFormData({...formData, notes: e.target.value})}
+                    <Textarea 
+                      className="bg-slate-50 border-slate-100 min-h-[120px] rounded-xl" 
+                      placeholder="Additional information, remarks, internal notes..." 
+                      value={formData.notes} 
+                      onChange={e => setFormData({...formData, notes: e.target.value})} 
                     />
                   </div>
                   {canAssignClients && (
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Assigned To</Label>
-                      <Select
-                        value={formData.assigned_to}
-                        onValueChange={v => setFormData({...formData, assigned_to: v})}
+                      <Select 
+                        value={formData.assigned_to} 
+                        onValueChange={v => setFormData({...formData, assigned_to: v})} 
                       >
                         <SelectTrigger className="bg-white border-slate-200 h-11">
                           <SelectValue placeholder="Select staff member" />
@@ -848,24 +815,24 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                       </Button>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                      <Button
-                        type="button"
-                        className="bg-indigo-600 text-white"
+                      <Button 
+                        type="button" 
+                        className="bg-indigo-600 text-white" 
                         onClick={() => fileInputRef.current?.click()}
                       >
                         Add CSV
                       </Button>
-                      <Button
-                        type="button"
-                        className="bg-indigo-600 text-white"
-                        disabled={importLoading}
+                      <Button 
+                        type="button" 
+                        className="bg-indigo-600 text-white" 
+                        disabled={importLoading} 
                         onClick={() => excelInputRef.current?.click()}
                       >
                         Add Master Data
                       </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
+                      <Button 
+                        type="submit" 
+                        disabled={loading} 
                         className="bg-indigo-900 text-white px-10"
                       >
                         {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Create Client'}
@@ -878,7 +845,6 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           </Dialog>
         </div>
       </div>
-
       {canViewAllClients && todayReminders.length > 0 && (
         <Card className="bg-pink-50 border-pink-100 animate-pulse">
           <CardContent className="p-4 flex items-center gap-4">
@@ -898,7 +864,6 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           </CardContent>
         </Card>
       )}
-
       {canViewAllClients && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3 bg-white border-slate-100 shadow-sm">
@@ -941,15 +906,14 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           </Card>
         </div>
       )}
-
       <div className="flex flex-col md:flex-row gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" />
-          <Input
-            placeholder="Search company, email or phone..."
-            className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
+          <Input 
+            placeholder="Search company, email or phone..." 
+            className="pl-9 h-10 bg-slate-50 border-none focus-visible:ring-indigo-500" 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)} 
           />
         </div>
         <div className="flex gap-2">
@@ -974,16 +938,14 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           </Select>
         </div>
       </div>
-
       <div className="h-[70vh] min-h-[500px] w-full border rounded-xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_SIZE = 190; // ~2 inch
+              const CARD_SIZE = 190;
               const columnCount = Math.max(1, Math.floor(width / CARD_SIZE));
               const columnWidth = CARD_SIZE;
               const rowHeight = CARD_SIZE;
-              const rowCount = Math.ceil(filteredClients.length / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid
@@ -997,11 +959,11 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                   overscanRowCount={3}
                 >
                   {({ columnIndex, rowIndex, style }) => (
-                    <ClientCard
-                      columnIndex={columnIndex}
-                      rowIndex={rowIndex}
-                      style={style}
-                      columnCount={columnCount}
+                    <ClientCard 
+                      columnIndex={columnIndex} 
+                      rowIndex={rowIndex} 
+                      style={style} 
+                      columnCount={columnCount} 
                     />
                   )}
                 </Grid>
@@ -1015,23 +977,21 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
           </div>
         )}
       </div>
-
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept=".csv"
-        onChange={handleImportCSV}
-        className="hidden"
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        accept=".csv" 
+        onChange={handleImportCSV} 
+        className="hidden" 
       />
-      <input
-        type="file"
-        ref={excelInputRef}
-        accept=".xlsx"
-        onChange={handleImportExcel}
-        className="hidden"
+      <input 
+        type="file" 
+        ref={excelInputRef} 
+        accept=".xlsx" 
+        onChange={handleImportExcel} 
+        className="hidden" 
       />
-
-      {/* NEW EXCEL PREVIEW DIALOG (added exactly as instructed, before closing main div) */}
+      {/* NEW EXCEL PREVIEW DIALOG */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-auto">
           <DialogHeader>
@@ -1040,7 +1000,6 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
               Review and edit data before importing.
             </DialogDescription>
           </DialogHeader>
-
           <div className="overflow-auto border rounded-lg">
             <table className="min-w-full text-xs">
               <thead className="bg-slate-100 sticky top-0">
@@ -1057,13 +1016,13 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                   <tr key={rowIndex}>
                     {previewHeaders.map(header => (
                       <td key={header} className="border p-1">
-                        <Input
-                          value={row[header] || ''}
+                        <Input 
+                          value={row[header] || ''} 
                           onChange={e => {
                             const updated = [...previewData];
                             updated[rowIndex][header] = e.target.value;
                             setPreviewData(updated);
-                          }}
+                          }} 
                         />
                       </td>
                     ))}
@@ -1072,18 +1031,15 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
               </tbody>
             </table>
           </div>
-
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewOpen(false)}>
               Cancel
             </Button>
-
-            <Button
-              className="bg-indigo-600 text-white"
+            <Button 
+              className="bg-indigo-600 text-white" 
               onClick={async () => {
                 setImportLoading(true);
                 let success = 0;
-
                 for (let row of previewData) {
                   try {
                     await api.post('/clients', {
@@ -1092,8 +1048,8 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                       email: row.email,
                       phone: row.phone,
                       birthday: row.birthday,
-                      services: row.services
-                        ? row.services.split(',').map(s => s.trim())
+                      services: row.services 
+                        ? row.services.split(',').map(s => s.trim()) 
                         : [],
                       notes: row.notes,
                       assigned_to: null,
@@ -1108,13 +1064,11 @@ const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
                       dsc_details: [],
                       status: 'active'
                     });
-
                     success++;
                   } catch (err) {
                     console.error(err);
                   }
                 }
-
                 toast.success(`${success} clients imported`);
                 fetchClients();
                 setPreviewOpen(false);
