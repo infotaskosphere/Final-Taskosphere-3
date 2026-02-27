@@ -33,14 +33,14 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 // ──────────────────────────────────────────────────────────────────────────────
-import { useTasks, useUpdateTask, useCreateTask, useDeleteTask } from "@/hooks/useTasks";
+import { useTasks, useUpdateTask } from "@/hooks/useTasks";
 import {
   useDashboardStats,
   useUpcomingDueDates,
   useTodayAttendance,
 } from "@/hooks/useDashboard";
 import { useQueryClient } from '@tanstack/react-query';
-
+import { useQuery, useMutation } from "@tanstack/react-query";
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -171,9 +171,16 @@ export default function Dashboard() {
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
-  const createTaskMutation = useCreateTask();
-  const deleteTaskMutation = useDeleteTask();
   const queryClient = useQueryClient();
+
+  // Dedicated Todos Query (separate from tasks)
+  const { data: todosRaw = [] } = useQuery({
+    queryKey: ["todos"],
+    queryFn: async () => {
+      const res = await api.get("/todos");
+      return res.data;
+    },
+  });
 
   const tasksAssignedToMe = useMemo(() => {
     return tasks
@@ -184,7 +191,6 @@ export default function Dashboard() {
       )
       .slice(0, 6);
   }, [tasks, user]);
-
   const tasksAssignedByMe = useMemo(() => {
     return tasks
       .filter(
@@ -196,22 +202,15 @@ export default function Dashboard() {
   }, [tasks, user]);
 
   const todos = useMemo(() => {
-    return tasks
-      .filter(
-        (task) =>
-          task.created_by === user?.id &&
-          task.assigned_to === user?.id
-      )
-      .map((task) => ({
-        ...task,
-        completed: task.status === "completed",
-      }));
-  }, [tasks, user]);
+    return todosRaw.map((todo) => ({
+      ...todo,
+      completed: todo.status === "completed",
+    }));
+  }, [todosRaw]);
 
   const recentTasks = useMemo(() => {
     return tasks.slice(0, 5);
   }, [tasks]);
-
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) {
@@ -223,7 +222,6 @@ export default function Dashboard() {
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
-
    useEffect(() => {
     async function fetchRankings() {
       try {
@@ -232,41 +230,59 @@ export default function Dashboard() {
             period: rankingPeriod, // dynamic value
           },
         });
-
         setRankings(rankingRes.data?.rankings || []);
       } catch (rankErr) {
         console.warn("Rankings endpoint failed:", rankErr);
         setRankings([]);
       }
     }
-
     fetchRankings();
   }, [rankingPeriod]);
-  
+
+  // Create Todo
+  const createTodo = useMutation({
+    mutationFn: (data) => api.post("/todos", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      toast.success("Todo added successfully!");
+    },
+    onError: () => toast.error("Failed to add todo"),
+  });
+
+  // Update Todo
+  const updateTodo = useMutation({
+    mutationFn: ({ id, status }) =>
+      api.put(`/todos/${id}`, { status }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["todos"] }),
+  });
+
+  // Delete Todo
+  const deleteTodo = useMutation({
+    mutationFn: (id) => api.delete(`/todos/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      toast.success("Todo deleted successfully!");
+    },
+    onError: () => toast.error("Failed to delete todo"),
+  });
+
   const addTodo = () => {
     if (!newTodo.trim()) return;
-    // ── New code: prepare payload with due_date (will be used when endpoint is fixed) ──
+
     const todoPayload = {
       title: newTodo.trim(),
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      due_date: selectedDueDate ? selectedDueDate.toISOString() : null,
+      status: "pending",
+      due_date: selectedDueDate
+        ? selectedDueDate.toISOString()
+        : null,
     };
-    
-    createTaskMutation.mutate(todoPayload, {
-      onSuccess: () => {
-        setNewTodo('');
-        // ── Clear due date after successful add ──────────────────────────────────────
-        setSelectedDueDate(undefined);
-        // ────────────────────────────────────────────────────────────────────────────────
-        toast.success('Todo added successfully!');
-      },
-      onError: () => {
-        toast.error('Failed to add todo');
-      }
-    });
-  };
 
+    createTodo.mutate(todoPayload);
+
+    setNewTodo("");
+    setSelectedDueDate(undefined);
+  };
   const updateAssignedTaskStatus = (taskId, newStatus) => {
     updateTaskMutation.mutate({
       id: taskId,
@@ -284,40 +300,18 @@ export default function Dashboard() {
       }
     });
   };
-
   const handleToggleTodo = (id) => {
-    const todo = todos.find(t => t.id === id);
+    const todo = todosRaw.find((t) => t.id === id);
     if (!todo) return;
-    const newStatus = todo.completed ? 'pending' : 'completed';
-    updateTaskMutation.mutate({
-      id,
-      data: {
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      }
-    }, {
-      onSuccess: () => {
-        if (newStatus === 'completed') {
-          toast.success('Task marked as done!');
-        }
-      },
-      onError: () => {
-        toast.error('Failed to update todo');
-      }
-    });
-  };
 
+    const newStatus =
+      todo.status === "completed" ? "pending" : "completed";
+
+    updateTodo.mutate({ id, status: newStatus });
+  };
  const handleDeleteTodo = (id) => {
-    deleteTaskMutation.mutate(id, {
-      onSuccess: () => {
-        toast.success('Todo deleted successfully!');
-      },
-      onError: () => {
-        toast.error('Failed to delete todo');
-      }
-    });
+    deleteTodo.mutate(id);
   };
-
   const handlePunchAction = async (action) => {
     try {
       setLoading(true);
