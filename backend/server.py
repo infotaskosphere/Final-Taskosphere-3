@@ -1056,18 +1056,31 @@ async def get_staff_rankings(
         uid = record["user_id"]
         duration = record.get("duration_minutes") or 0
         ranking_map[uid] = ranking_map.get(uid, 0) + duration
-    sorted_users = sorted(
-        ranking_map.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-    rankings = []
-    for index, (uid, minutes) in enumerate(sorted_users, start=1):
-        rankings.append({
-            "user_id": uid,
-            "rank": index,
-            "total_minutes": minutes
-        })
+        sorted_users = sorted(
+            ranking_map.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+# 🔥 Fetch user names
+        user_ids = [uid for uid, _ in sorted_users]
+
+        users = await db.users.find(
+            {"id": {"$in": user_ids}},
+            {"_id": 0, "id": 1, "full_name": 1}
+        ).to_list(1000)
+
+        user_map = {u["id"]: u["full_name"] for u in users}
+
+        rankings = []
+
+        for index, (uid, minutes) in enumerate(sorted_users, start=1):
+            rankings.append({
+                "user_id": uid,
+                "user_name": user_map.get(uid, "Unknown User"),
+                "rank": index,
+                "total_minutes": minutes
+            })
     result = {
         "period": period,
         "rankings": rankings
