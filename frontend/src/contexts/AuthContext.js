@@ -15,22 +15,30 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔹 Load user from storage on app start
+  // ===============================
+  // Load user from storage on app start
+  // ===============================
   useEffect(() => {
-    let token = localStorage.getItem("token");
-    let storedUser = localStorage.getItem("user");
+    const loadUser = () => {
+      let token =
+        localStorage.getItem("token") ||
+        sessionStorage.getItem("token");
 
-    if (!token || !storedUser) {
-      token = sessionStorage.getItem("token");
-      storedUser = sessionStorage.getItem("user");
-    }
+      let storedUser =
+        localStorage.getItem("user") ||
+        sessionStorage.getItem("user");
 
-    if (token && storedUser) {
+      if (!token || !storedUser) {
+        setLoading(false);
+        return;
+      }
+
       try {
         const parsedUser = JSON.parse(storedUser);
 
+        // Ensure permissions exist
         if (!parsedUser.permissions) {
-          parsedUser.permissions = {};
+          parsedUser.permissions = [];
         }
 
         // Set axios header
@@ -39,44 +47,47 @@ export const AuthProvider = ({ children }) => {
         setUser(parsedUser);
       } catch (error) {
         console.error("Failed to parse stored user:", error);
-        localStorage.clear();
-        sessionStorage.clear();
+        logout();
       }
-    }
 
-    setLoading(false);
+      setLoading(false);
+    };
+
+    loadUser();
   }, []);
 
-  // 🔹 Login function (corrected for FastAPI response)
+  // ===============================
+  // Login
+  // ===============================
   const login = (responseData, rememberMe) => {
     const storage = rememberMe ? localStorage : sessionStorage;
 
-    const token = responseData.access_token;
-    const userData = responseData.user;
+    const token = responseData?.access_token;
+    const userData = responseData?.user;
 
     if (!token || !userData) {
       console.error("Invalid login response structure");
       return;
     }
 
+    // Ensure permissions exist
     if (!userData.permissions) {
-      userData.permissions = {};
+      userData.permissions = [];
     }
 
-    // Save token
+    // Save token & user
     storage.setItem("token", token);
-
-    // Save user
     storage.setItem("user", JSON.stringify(userData));
 
     // Set axios header
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-    // Update state
     setUser(userData);
   };
 
-  // 🔹 Logout function
+  // ===============================
+  // Logout
+  // ===============================
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -88,14 +99,30 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  // 🔹 Permission checker
+  // ===============================
+  // Permission Checker
+  // ===============================
   const hasPermission = (permission) => {
     if (!user) return false;
 
-    // Admin override
-    if (user.role === "admin") return true;
+    // Admin override (case insensitive)
+    if (user.role?.toLowerCase() === "admin") {
+      return true;
+    }
 
-    return user.permissions?.[permission] === true;
+    const perms = user.permissions;
+
+    // If permissions is an array
+    if (Array.isArray(perms)) {
+      return perms.includes(permission);
+    }
+
+    // If permissions is an object
+    if (typeof perms === "object") {
+      return perms?.[permission] === true;
+    }
+
+    return false;
   };
 
   return (
