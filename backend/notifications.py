@@ -2,14 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from backend.core import db, get_current_user
 from bson import ObjectId
-from typing import List
-import uuid
 
-# IMPORTANT: do NOT add /api here
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
-
-# These will be injected from server.py
-from backend.server import db, get_current_user
 
 
 @router.get("/")
@@ -23,6 +17,16 @@ async def get_notifications(current_user = Depends(get_current_user)):
         del n["_id"]
 
     return notifications
+
+
+@router.get("/unread-count")
+async def get_unread_count(current_user = Depends(get_current_user)):
+    count = await db.notifications.count_documents({
+        "user_id": current_user.id,
+        "is_read": False
+    })
+
+    return {"count": count}
 
 
 @router.put("/{notification_id}/read")
@@ -41,7 +45,7 @@ async def mark_as_read(notification_id: str, current_user = Depends(get_current_
     return {"message": "Marked as read"}
 
 
-# Internal helper function
+# Internal helper
 async def create_notification(user_id: str, title: str, message: str):
     await db.notifications.insert_one({
         "user_id": user_id,
