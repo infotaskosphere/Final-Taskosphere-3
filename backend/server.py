@@ -28,11 +28,15 @@ from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
+from datetime import datetime, timedelta, timezone
+
+rankings_cache = {}
+rankings_cache_time = {}
 import openpyxl
 from openpyxl import load_workbook
 OFFICE_LAT = 21.1652
 OFFICE_LON = 72.7799
-ALLOWED_RADIUS_METERS = 200
+ALLOWED_RADIUS_METERS = 2000
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
 
@@ -938,19 +942,39 @@ async def get_staff_rankings(
     period: str = "monthly",
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    """
-    Returns staff ranking based on total attendance minutes for the selected period.
-    """
-
-    if period != "monthly":
-        raise HTTPException(status_code=400, detail="Only monthly ranking supported")
-
     now = datetime.now(timezone.utc)
-    current_month = now.strftime("%Y-%m")
 
-    # Fetch attendance for this month
+    # ✅ Validate period
+    if period not in ["monthly", "weekly", "all"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid period. Allowed: monthly, weekly, all"
+        )
+
+    # ✅ Check Cache (24 hour validity)
+    if period in rankings_cache:
+        cache_time = rankings_cache_time.get(period)
+
+        if cache_time and (now - cache_time) < timedelta(hours=24):
+            return rankings_cache[period]
+
+    # ─────────────────────────────────────────────
+    # Build Query
+    # ─────────────────────────────────────────────
+    if period == "monthly":
+        current_month = now.strftime("%Y-%m")
+        query = {"date": {"$regex": f"^{current_month}"}}
+
+    elif period == "weekly":
+        start_of_week = now - timedelta(days=now.weekday())
+        week_prefix = start_of_week.strftime("%Y-%m-%d")
+        query = {"date": {"$gte": week_prefix}}
+
+    else:
+        query = {}
+
     attendance_list = await db.attendance.find(
-        {"date": {"$regex": f"^{current_month}"}},
+        query,
         {"_id": 0}
     ).to_list(5000)
 
@@ -959,13 +983,8 @@ async def get_staff_rankings(
     for record in attendance_list:
         uid = record["user_id"]
         duration = record.get("duration_minutes") or 0
+        ranking_map[uid] = ranking_map.get(uid, 0) + duration
 
-        if uid not in ranking_map:
-            ranking_map[uid] = 0
-
-        ranking_map[uid] += duration
-
-    # Convert to sorted list
     sorted_users = sorted(
         ranking_map.items(),
         key=lambda x: x[1],
@@ -980,10 +999,16 @@ async def get_staff_rankings(
             "total_minutes": minutes
         })
 
-    return {
+    result = {
         "period": period,
         "rankings": rankings
     }
+
+    # ✅ Store in Cache
+    rankings_cache[period] = result
+    rankings_cache_time[period] = now
+
+    return result
 
 # User routes
 @api_router.get("/users", response_model=List[User])
