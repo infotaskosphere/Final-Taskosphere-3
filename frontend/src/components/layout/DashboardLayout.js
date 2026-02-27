@@ -19,7 +19,6 @@ import {
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
-
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
@@ -27,40 +26,37 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 const DashboardLayout = ({ children }) => {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-
   useActivityTracker(true);
-
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 1024;
       setIsMobile(mobile);
       setSidebarOpen(!mobile);
     };
-
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
+  if (loading) return null;
+  if (!user) {
+    navigate("/login", { replace: true });
+    return null;
+  }
   const handleLogout = () => {
     logout();
     toast.success("Logged out successfully");
     navigate("/login", { replace: true });
   };
-
   /* =============================
      UPDATED NAV ITEMS
      ============================= */
-
 const navItems = [
   {
     path: '/dashboard',
@@ -135,16 +131,17 @@ const navItems = [
     permission: 'can_view_audit_logs'
   },
 ];
+  const visibleNavItems = navItems.filter(
+    (item) => item.permission && hasPermission(item.permission)
+  );
   return (
     <div className="min-h-screen bg-slate-50 relative">
-
       {userMenuOpen && (
         <div
           className="fixed inset-0 z-30"
           onClick={() => setUserMenuOpen(false)}
         />
       )}
-
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-full border-r shadow-lg transition-all duration-300 z-40
@@ -157,44 +154,37 @@ const navItems = [
           <div className="py-4 flex justify-center">
             <img src="/logo.png" alt="Taskosphere" className="h-16 object-contain" />
           </div>
-
           <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-            {navItems
-              .filter((item) => hasPermission(item.permission))
-              .map((item) => {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.path;
-
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
-                    ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}`}
-                    style={
-                      isActive
-                        ? {
-                            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-                          }
-                        : {}
-                    }
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span className="font-medium">{item.label}</span>
-                  </Link>
-                );
-              })}
+            {visibleNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.path;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
+                  ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}`}
+                  style={
+                    isActive
+                      ? {
+                          background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+                        }
+                      : {}
+                  }
+                >
+                  <Icon className="h-5 w-5" />
+                  <span className="font-medium">{item.label}</span>
+                </Link>
+              );
+            })}
           </nav>
         </div>
       </aside>
-
       {/* Main Content */}
       <div className={`${sidebarOpen ? 'lg:ml-64' : ''} transition-all duration-300`}>
-
         {/* Header */}
         <header className="sticky top-0 bg-white border-b z-40">
           <div className="flex items-center justify-between px-6 py-4">
-
             <Button
               variant="ghost"
               size="icon"
@@ -202,10 +192,8 @@ const navItems = [
             >
               <Menu className="h-5 w-5" />
             </Button>
-
             <div className="flex items-center space-x-4">
               <NotificationBell />
-
               {/* User Menu */}
               <div className="relative z-50">
                 <button
@@ -218,21 +206,19 @@ const navItems = [
                       background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`
                     }}
                   >
-                    {user?.full_name?.charAt(0).toUpperCase()}
+                    {user?.full_name?.[0]?.toUpperCase() || "U"}
                   </div>
                   <span className="hidden md:block font-semibold">
                     {user?.full_name}
                   </span>
                   <ChevronDown className={`h-4 w-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-
                 {userMenuOpen && (
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2 z-50">
                     <div className="px-4 py-3 border-b">
                       <p className="font-semibold text-sm">{user?.full_name}</p>
                       <p className="text-xs text-slate-500">{user?.email}</p>
                     </div>
-
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50"
@@ -246,7 +232,6 @@ const navItems = [
             </div>
           </div>
         </header>
-
         {/* Page Content */}
         <main className="p-6">
           <div className="max-w-7xl mx-auto">
@@ -257,5 +242,4 @@ const navItems = [
     </div>
   );
 };
-
 export default DashboardLayout;
