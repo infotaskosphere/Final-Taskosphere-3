@@ -1121,19 +1121,14 @@ async def import_tasks_from_csv(
     return await create_tasks_bulk(payload, current_user)
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
-    query = {}
-    if current_user.role != "admin":
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+query = {}
 
-        if not permissions.get("can_view_all_tasks", False):
-            allowed_users = permissions.get("view_other_tasks", [])
+if current_user.role != "admin":
+    permissions = current_user.permissions.model_dump() if current_user.permissions else {}
 
-            query["$or"] = [
-                {"assigned_to": current_user.id},
-                {"sub_assignees": current_user.id},
-                {"created_by": current_user.id},
-                {"assigned_to": {"$in": allowed_users}}
-            ]
+    if not permissions.get("can_view_all_tasks", False):
+        # STRICT: user only sees tasks assigned to them
+        query = {"assigned_to": current_user.id}
     query["type"] = {"$ne": "todo"}
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     # 🔥 Get all user IDs involved
@@ -1153,7 +1148,7 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
         if isinstance(task["created_at"], str):
             task["created_at"] = datetime.fromisoformat(task["created_at"])
         if isinstance(task["updated_at"], str):
-            task["updated_at"] = datetime.fromisoformat(task["updated_at"])
+            task["updated_at"] = datetime.fromisoformat(task["updated_at"])s
         if task.get("due_date") and isinstance(task["due_date"], str):
             task["due_date"] = datetime.fromisoformat(task["due_date"])
         # 🔥 ADD NAME FIELDS
