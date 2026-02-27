@@ -42,11 +42,10 @@ OFFICE_LON = 72.7799
 ALLOWED_RADIUS_METERS = 2000
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
-
 # Added missing helper functions (required by the original code - they are called but were never defined)
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine formula - distance in meters (original code uses this for geo-fencing)"""
-    R = 6371000  # Earth radius in meters
+    R = 6371000 # Earth radius in meters
     phi1 = radians(lat1)
     phi2 = radians(lat2)
     delta_phi = radians(lat2 - lat1)
@@ -54,11 +53,10 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = sin(delta_phi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(delta_lambda / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return R * c
-
 def calculate_expected_hours(expected_start_time: Optional[str], expected_end_time: Optional[str]) -> float:
     """Calculate expected working hours per day (used in staff-report)"""
     if not expected_start_time or not expected_end_time:
-        return 8.0  # default 8 hours
+        return 8.0 # default 8 hours
     try:
         h1, m1 = map(int, expected_start_time.split(":"))
         h2, m2 = map(int, expected_end_time.split(":"))
@@ -69,7 +67,6 @@ def calculate_expected_hours(expected_start_time: Optional[str], expected_end_ti
         return end - start
     except:
         return 8.0
-
 def sanitize_user_data(user_data, current_user):
     """
     Remove sensitive fields for non-admin users
@@ -87,24 +84,20 @@ def sanitize_user_data(user_data, current_user):
     # If single user
     u_dict = user_data.dict() if hasattr(u, "dict") else dict(user_data)
     return u_dict
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 security = HTTPBearer()
-
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,7 +118,6 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(securit
     if isinstance(user.get("created_at"), str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
     return User(**user)
-
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
         # Admin override
@@ -139,13 +131,10 @@ def check_permission(permission_name: str):
             )
         return current_user
     return dependency
-
 app = FastAPI()
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
 @app.on_event("startup")
 async def create_indexes():
     await db.tasks.create_index("assigned_to")
@@ -166,7 +155,8 @@ async def create_indexes():
         [("user_id", 1), ("date", 1)],
         unique=True
     )
-
+    # ✅ STEP 1 — ADD UNIQUE INDEX (VERY IMPORTANT)
+    await db.clients.create_index("company_name", unique=True)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -181,7 +171,6 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "Accept"],
     expose_headers=["*"],
 )
-
 # ALL MODELS
 class UserPermissions(BaseModel):
     can_view_all_tasks: bool = False
@@ -206,7 +195,6 @@ class UserPermissions(BaseModel):
     can_download_reports: bool = False
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
-
 class Todo(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -217,12 +205,10 @@ class Todo(BaseModel):
     due_date: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
-
 class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[datetime] = None
-
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
@@ -235,10 +221,8 @@ class UserBase(BaseModel):
     expected_end_time: Optional[str] = None # "18:00"
     late_grace_minutes: int = 15 # Default grace period in minutes
     telegram_id: Optional[int] = None
-
 class UserCreate(UserBase):
     password: str
-
 class User(UserBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -246,7 +230,6 @@ class User(UserBase):
         default_factory=lambda: datetime.now(india_tz)
     )
     is_active: bool = True
-
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -260,7 +243,6 @@ class Attendance(BaseModel):
     location: Optional[Dict[str, float]] = None
     is_early_leave: bool = False
     early_minutes: int = 0
-
 # Staff Activity Tracking
 class StaffActivityLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -271,23 +253,19 @@ class StaffActivityLog(BaseModel):
     category: str = "other" # "browser", "productivity", "communication", "entertainment", "other"
     duration_seconds: int = 0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 class StaffActivityCreate(BaseModel):
     app_name: str
     window_title: Optional[str] = None
     url: Optional[str] = None
     category: str = "other"
     duration_seconds: int = 0
-
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: User
-
 class TaskBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -303,13 +281,10 @@ class TaskBase(BaseModel):
     recurrence_interval: Optional[int] = 1 # Every X days/weeks/months
     recurrence_end_date: Optional[datetime] = None
     type: Optional[str] = None
-
 class TaskCreate(TaskBase):
     pass
-
 class BulkTaskCreate(BaseModel):
     tasks: List[TaskCreate]
-
 class Task(TaskBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -317,13 +292,11 @@ class Task(TaskBase):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     parent_task_id: Optional[str] = None # If this is a recurring instance
-
 class DSCMovement(BaseModel):
     movement_type: str # "IN" or "OUT"
     person_name: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
-
 class DSCBase(BaseModel):
     holder_name: str
     dsc_type: Optional[str] = None # Type of DSC (Class 3, Signature, Encryption, etc.)
@@ -337,33 +310,27 @@ class DSCBase(BaseModel):
     taken_by: Optional[str] = None # Person who took it
     taken_date: Optional[datetime] = None
     movement_log: List[dict] = [] # Log of all movements
-
 class DSCCreate(DSCBase):
     pass
-
 class DSC(DSCBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 class DSCListResponse(BaseModel):
     data: List[DSC]
     total: int
     page: int
     limit: int
-
 class DSCMovementRequest(BaseModel):
     movement_type: str # "IN" or "OUT"
     person_name: str
     notes: Optional[str] = None
-
 class MovementUpdateRequest(BaseModel):
     movement_id: str
     movement_type: str # "IN" or "OUT"
     person_name: Optional[str] = None
     notes: Optional[str] = None
-
 # Due Date Reminder Models
 class DueDateBase(BaseModel):
     title: str
@@ -375,35 +342,28 @@ class DueDateBase(BaseModel):
     assigned_to: Optional[str] = None
     client_id: Optional[str] = None
     status: str = "pending"
-
 class DueDateCreate(DueDateBase):
     pass
-
 class DueDate(DueDateBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 class AttendanceBase(BaseModel):
     punch_in: datetime
     punch_out: Optional[datetime] = None
-
 class AttendanceCreate(BaseModel):
     action: str # "punch_in" or "punch_out"
-
 class NotificationBase(BaseModel):
     title: str
     message: str
     type: str # "task", "dsc", "system"
-
 class Notification(NotificationBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     is_read: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -411,11 +371,9 @@ class ActivityLog(BaseModel):
     date: str
     screen_time_minutes: int = 0
     tasks_completed: int = 0
-
 class ActivityLogUpdate(BaseModel):
     screen_time_minutes: Optional[int] = None
     tasks_completed: Optional[int] = None
-
 # Client Management Models
 class ContactPerson(BaseModel):
     name: str
@@ -424,14 +382,12 @@ class ContactPerson(BaseModel):
     designation: Optional[str] = None
     birthday: Optional[date] = None
     din: Optional[str] = None
-
 class ClientDSC(BaseModel):
     certificate_number: str
     holder_name: str
     issue_date: date
     expiry_date: date
     notes: Optional[str] = None
-
 class ClientBase(BaseModel):
     company_name: str
     client_type: str # proprietor, pvt_ltd, llp, partnership, huf, trust
@@ -443,20 +399,16 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = [] # DSC certificates for this client
     assigned_to: Optional[str] = None # staff ID
     notes: Optional[str] = None
-
 class ClientCreate(ClientBase):
     pass
-
 class Client(ClientBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 # Email Service Models
 class BirthdayEmailRequest(BaseModel):
     client_id: str
-
 # Dashboard Stats Models
 class DashboardStats(BaseModel):
     total_tasks: int
@@ -472,14 +424,12 @@ class DashboardStats(BaseModel):
     team_workload: List[dict]
     compliance_status: dict
     expired_dsc_count: int = 0
-
 # DOCUMENT MODELS
 class DocumentMovement(BaseModel):
     movement_type: str # "IN" or "OUT"
     person_name: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
-
 class DocumentBase(BaseModel):
     document_name: Optional[str] = None
     document_type: Optional[str] = None
@@ -492,27 +442,22 @@ class DocumentBase(BaseModel):
     current_status: str = "IN"
     current_location: str = "with_company"
     movement_log: List[dict] = []
-
 class DocumentCreate(DocumentBase):
     pass
-
 class Document(DocumentBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 class DocumentMovementRequest(BaseModel):
     movement_type: str # IN / OUT
     person_name: str
     notes: Optional[str] = None
-
 class DocumentMovementUpdateRequest(BaseModel):
     movement_id: str
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
-
 class AuditLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -523,10 +468,8 @@ class AuditLog(BaseModel):
     old_data: Optional[dict] = None
     new_data: Optional[dict] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 # ROUTER
 api_router = APIRouter(prefix="/api")
-
 # HELPERS
 # Email Service Functions
 def send_birthday_email(recipient_email: str, client_name: str):
@@ -578,7 +521,6 @@ def send_birthday_email(recipient_email: str, client_name: str):
     except Exception as e:
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
-
 # Task Analytics
 @api_router.get("/tasks/analytics")
 async def get_task_analytics(
@@ -620,20 +562,16 @@ async def get_task_analytics(
         "completed_tasks": completed,
         "pending_tasks": pending
     }
-
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
-
 def get_password_hash(password):
     return pwd_context.hash(password)
-
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
 # Email helper function
 def send_email(to_email: str, subject: str, body: str):
     sendgrid_key = os.getenv("SENDGRID_API_KEY")
@@ -652,7 +590,6 @@ def send_email(to_email: str, subject: str, body: str):
         return response.status_code == 202
     except Exception as e:
         raise Exception(f"SendGrid error: {str(e)}")
-
 async def create_audit_log(
     current_user: User,
     action: str,
@@ -673,88 +610,66 @@ async def create_audit_log(
     doc = log.model_dump()
     doc["timestamp"] = doc["timestamp"].isoformat()
     await db.audit_logs.insert_one(doc)
-
 # AUTH ROUTES
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
-
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
-
     is_admin = current_user.role == "admin"
-
     # Staff must have permission to access dashboard
     if not is_admin:
         if not current_user.permissions or not getattr(current_user.permissions, "can_view_todo_dashboard", False):
             raise HTTPException(status_code=403, detail="Dashboard access denied")
-
     # =========================
     # ADMIN VIEW (SEE ALL)
     # =========================
     if is_admin:
         todos = await db.todos.find().to_list(2000)
-
         grouped_todos = {}
-
         for todo in todos:
             user = await db.users.find_one({"id": todo["user_id"]}, {"_id": 0})
             user_name = user["full_name"] if user else "Unknown User"
-
             if user_name not in grouped_todos:
                 grouped_todos[user_name] = []
-
             todo["_id"] = str(todo["_id"])
             grouped_todos[user_name].append(todo)
-
         return {
             "role": "admin",
             "grouped_todos": grouped_todos
         }
-
     # =========================
     # STAFF VIEW (OWN + ALLOWED)
     # =========================
     else:
         allowed_users = getattr(current_user.permissions, "todo_view_permissions", [])
-
         todos = await db.todos.find({
             "$or": [
                 {"user_id": current_user.id},
                 {"user_id": {"$in": allowed_users}}
             ]
         }).to_list(2000)
-
         for todo in todos:
             todo["_id"] = str(todo["_id"])
-
         return {
             "role": "staff",
             "todos": todos
         }
-
-
 # ==========================================================
 # PROMOTE TODO TO TASK (ADMIN + OWNER ONLY)
 # ==========================================================
-
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
-
     try:
         todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
     except:
         raise HTTPException(status_code=400, detail="Invalid Todo ID")
-
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
-
     # Only creator or admin can promote
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
-
     now = datetime.now(timezone.utc)
-
     new_task = {
         "id": str(uuid.uuid4()),
         "title": todo["title"],
@@ -771,13 +686,10 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
         "created_at": now,
         "updated_at": now
     }
-
     await db.tasks.insert_one(new_task)
-
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
-
     return {"message": "Todo promoted to task successfully"}
-    
+   
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -833,7 +745,6 @@ async def register(
     await db.users.insert_one(doc)
     access_token = create_access_token({"sub": user.id})
     return {"access_token": access_token, "token_type": "bearer", "user": user}
-
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
@@ -845,7 +756,6 @@ async def login(credentials: UserLogin):
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
     access_token = create_access_token({"sub": user_obj.id})
     return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
-
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     # Explicitly build the response to guarantee the fields are included
@@ -865,7 +775,6 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "is_active": current_user.is_active
     }, current_user)
-
 # ATTENDANCE ROUTE - FIXED: punch_in and punch_out now correctly inside one function
 @api_router.post("/attendance")
 async def record_attendance(
@@ -993,7 +902,6 @@ async def record_attendance(
         return Attendance(**updated)
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
-
 # ============================
 # STAFF RANKINGS (MONTHLY)
 # ============================
@@ -1003,54 +911,43 @@ async def get_staff_rankings(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     now = datetime.now(timezone.utc)
-
     # ✅ Validate period
     if period not in ["monthly", "weekly", "all"]:
         raise HTTPException(
             status_code=400,
             detail="Invalid period. Allowed: monthly, weekly, all"
         )
-
     # ✅ Check Cache (24 hour validity)
     if period in rankings_cache:
         cache_time = rankings_cache_time.get(period)
-
         if cache_time and (now - cache_time) < timedelta(hours=24):
             return rankings_cache[period]
-
     # ─────────────────────────────────────────────
     # Build Query
     # ─────────────────────────────────────────────
     if period == "monthly":
         current_month = now.strftime("%Y-%m")
         query = {"date": {"$regex": f"^{current_month}"}}
-
     elif period == "weekly":
         start_of_week = now - timedelta(days=now.weekday())
         week_prefix = start_of_week.strftime("%Y-%m-%d")
         query = {"date": {"$gte": week_prefix}}
-
     else:
         query = {}
-
     attendance_list = await db.attendance.find(
         query,
         {"_id": 0}
     ).to_list(5000)
-
     ranking_map = {}
-
     for record in attendance_list:
         uid = record["user_id"]
         duration = record.get("duration_minutes") or 0
         ranking_map[uid] = ranking_map.get(uid, 0) + duration
-
     sorted_users = sorted(
         ranking_map.items(),
         key=lambda x: x[1],
         reverse=True
     )
-
     rankings = []
     for index, (uid, minutes) in enumerate(sorted_users, start=1):
         rankings.append({
@@ -1058,18 +955,14 @@ async def get_staff_rankings(
             "rank": index,
             "total_minutes": minutes
         })
-
     result = {
         "period": period,
         "rankings": rankings
     }
-
     # ✅ Store in Cache
     rankings_cache[period] = result
     rankings_cache_time[period] = now
-
     return result
-
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
@@ -1080,7 +973,6 @@ async def get_users(current_user: User = Depends(check_permission("can_view_user
         if isinstance(user["created_at"], str):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
     return sanitize_user_data(users, current_user)
-
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(user_id: str, user_data: dict, current_user: User = Depends(check_permission("can_edit_users"))):
     if current_user.role != "admin":
@@ -1104,7 +996,6 @@ async def update_user(user_id: str, user_data: dict, current_user: User = Depend
     if isinstance(updated["created_at"], str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
     return sanitize_user_data(User(**updated), current_user)
-
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, current_user: User = Depends(check_permission("can_edit_users"))):
     if current_user.role != "admin":
@@ -1125,14 +1016,12 @@ async def delete_user(user_id: str, current_user: User = Depends(check_permissio
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted successfully"}
-
 @api_router.get("/users/{user_id}/permissions")
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed")
     user = await db.users.find_one({"id": user_id})
     return user.get("permissions", {})
-
 # Task routes
 @api_router.post("/tasks", response_model=Task)
 async def create_task(task_data: TaskCreate, current_user: User = Depends(get_current_user)):
@@ -1144,7 +1033,6 @@ async def create_task(task_data: TaskCreate, current_user: User = Depends(get_cu
         doc["due_date"] = doc["due_date"].isoformat()
     await db.tasks.insert_one(doc)
     return task
-
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
     payload: BulkTaskCreate,
@@ -1166,7 +1054,6 @@ async def create_tasks_bulk(
         "message": "Tasks created successfully",
         "count": len(created_tasks)
     }
-
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
     file: UploadFile = File(...),
@@ -1196,7 +1083,6 @@ async def import_tasks_from_csv(
         tasks.append(task_data)
     payload = BulkTaskCreate(tasks=tasks)
     return await create_tasks_bulk(payload, current_user)
-
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
     query = {}
@@ -1237,7 +1123,6 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
         task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
         task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
     return tasks
-
 @api_router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str, current_user: User = Depends(get_current_user)):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
@@ -1253,7 +1138,6 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
     if task.get("due_date") and isinstance(task["due_date"], str):
         task["due_date"] = datetime.fromisoformat(task["due_date"])
     return Task(**task)
-
 @api_router.patch("/tasks/{task_id}", response_model=Task)
 async def patch_task(
     task_id: str,
@@ -1280,7 +1164,6 @@ async def patch_task(
     )
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     return Task(**updated_task)
-
 @api_router.put("/tasks/{task_id}", response_model=Task)
 async def update_task(task_id: str, task_data: TaskCreate, current_user: User = Depends(check_permission("can_edit_tasks"))):
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
@@ -1307,7 +1190,6 @@ async def update_task(task_id: str, task_data: TaskCreate, current_user: User = 
     if updated.get("due_date") and isinstance(updated["due_date"], str):
         updated["due_date"] = datetime.fromisoformat(updated["due_date"])
     return Task(**updated)
-
 @api_router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str, current_user: User = Depends(check_permission("can_edit_tasks"))):
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
@@ -1324,7 +1206,6 @@ async def delete_task(task_id: str, current_user: User = Depends(check_permissio
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task deleted successfully"}
-
 @api_router.get("/tasks/{task_id}/export-log-pdf")
 async def export_task_log_pdf(
     task_id: str,
@@ -1372,7 +1253,6 @@ async def export_task_log_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
     )
-
 # Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
@@ -1383,7 +1263,6 @@ async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_curre
     doc["expiry_date"] = doc["expiry_date"].isoformat()
     await db.dsc_register.insert_one(doc)
     return dsc
-
 @api_router.get("/dsc")
 async def get_dsc_list(
     sort_by: str = Query("holder_name"),
@@ -1448,7 +1327,6 @@ async def get_dsc_list(
                 dsc["current_status"] = "EXPIRED"
                 dsc["movement_log"] = movement_log
     return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
-
 @api_router.put("/dsc/{dsc_id}", response_model=DSC)
 async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depends(check_permission("can_edit_dsc"))):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
@@ -1474,7 +1352,6 @@ async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depe
     if isinstance(updated["expiry_date"], str):
         updated["expiry_date"] = datetime.fromisoformat(updated["expiry_date"])
     return DSC(**updated)
-
 @api_router.delete("/dsc/{dsc_id}")
 async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission("can_edit_dsc"))):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
@@ -1491,7 +1368,6 @@ async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="DSC not found")
     return {"message": "DSC deleted successfully"}
-
 @api_router.post("/dsc/{dsc_id}/movement")
 async def record_dsc_movement(
     dsc_id: str,
@@ -1533,7 +1409,6 @@ async def record_dsc_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": f"DSC marked as {movement_data.movement_type}", "movement": movement}
-
 @api_router.put("/dsc/{dsc_id}/movement/{movement_id}")
 async def update_dsc_movement(
     dsc_id: str,
@@ -1581,7 +1456,6 @@ async def update_dsc_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-
 # DOCUMENT ROUTES
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
@@ -1595,7 +1469,6 @@ async def create_document(document_data: DocumentCreate, current_user: User = De
         doc["valid_upto"] = doc["valid_upto"].isoformat()
     await db.documents.insert_one(doc)
     return document
-
 @api_router.get("/documents", response_model=List[Document])
 async def get_documents(current_user: User = Depends(check_permission("can_view_documents"))):
     documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
@@ -1607,7 +1480,6 @@ async def get_documents(current_user: User = Depends(check_permission("can_view_
         if d.get("valid_upto") and isinstance(d["valid_upto"], str):
             d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
     return documents
-
 @api_router.put("/documents/{document_id}", response_model=Document)
 async def update_document(document_id: str, document_data: DocumentCreate, current_user: User = Depends(check_permission("can_edit_documents"))):
     existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
@@ -1631,7 +1503,6 @@ async def update_document(document_id: str, document_data: DocumentCreate, curre
     if isinstance(updated["created_at"], str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
     return Document(**updated)
-
 @api_router.delete("/documents/{document_id}")
 async def delete_document(document_id: str, current_user: User = Depends(check_permission("can_edit_documents"))):
     existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
@@ -1648,7 +1519,6 @@ async def delete_document(document_id: str, current_user: User = Depends(check_p
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"message": "Document deleted successfully"}
-
 @api_router.post("/documents/{document_id}/movement")
 async def record_document_movement(
     document_id: str,
@@ -1686,7 +1556,6 @@ async def record_document_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": "Movement recorded successfully"}
-
 @api_router.put("/documents/{document_id}/movement/{movement_id}")
 async def update_document_movement(
     document_id: str,
@@ -1730,7 +1599,6 @@ async def update_document_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": "Movement updated successfully"}
-
 # ATTENDANCE ROUTES
 # Attendance routes
 @api_router.get("/attendance/today", response_model=Optional[Attendance])
@@ -1744,7 +1612,6 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
     if attendance.get("punch_out") and isinstance(attendance["punch_out"], str):
         attendance["punch_out"] = datetime.fromisoformat(attendance["punch_out"])
     return Attendance(**attendance)
-
 @api_router.get("/attendance/history", response_model=List[Attendance])
 async def get_attendance_history(
     user_id: Optional[str] = None,
@@ -1777,7 +1644,6 @@ async def get_attendance_history(
         if attendance.get("punch_out") and isinstance(attendance["punch_out"], str):
             attendance["punch_out"] = datetime.fromisoformat(attendance["punch_out"])
     return attendance_list
-
 @api_router.get("/attendance/my-summary")
 async def get_my_attendance_summary(
     current_user: User = Depends(get_current_user)
@@ -1822,7 +1688,6 @@ async def get_my_attendance_summary(
         "total_minutes": total_minutes_all,
         "monthly_summary": formatted_data
     }
-
 @api_router.get("/attendance/staff-report")
 async def get_staff_attendance_report(
     month: Optional[str] = None,
@@ -1896,7 +1761,6 @@ async def get_staff_attendance_report(
         "total_staff": len(result),
         "staff_report": result
     }
-
 @api_router.get("/attendance/export-pdf")
 async def export_attendance_pdf(
     user_id: str,
@@ -1927,7 +1791,6 @@ async def export_attendance_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
     )
-
 # DUE DATE ROUTES
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
@@ -1945,7 +1808,6 @@ async def create_due_date(
     doc["due_date"] = doc["due_date"].isoformat()
     await db.due_dates.insert_one(doc)
     return due_date
-
 @api_router.get("/duedates", response_model=List[DueDate])
 async def get_due_dates(current_user: User = Depends(get_current_user)):
     query = {}
@@ -1970,7 +1832,6 @@ async def get_due_dates(current_user: User = Depends(get_current_user)):
         if isinstance(dd.get("due_date"), str):
             dd["due_date"] = datetime.fromisoformat(dd["due_date"])
     return [DueDate(**dd) for dd in due_dates]
-
 @api_router.get("/duedates/upcoming")
 async def get_upcoming_due_dates(
     days: int = 30,
@@ -1993,7 +1854,6 @@ async def get_upcoming_due_dates(
             dd["days_remaining"] = (dd_date - now).days
             upcoming.append(dd)
     return sorted(upcoming, key=lambda x: x["days_remaining"])
-
 @api_router.put("/duedates/{due_date_id}", response_model=DueDate)
 async def update_due_date(
     due_date_id: str,
@@ -2023,7 +1883,6 @@ async def update_due_date(
     if isinstance(updated.get("due_date"), str):
         updated["due_date"] = datetime.fromisoformat(updated["due_date"])
     return DueDate(**updated)
-
 @api_router.delete("/duedates/{due_date_id}")
 async def delete_due_date(
     due_date_id: str,
@@ -2043,7 +1902,6 @@ async def delete_due_date(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Due date not found")
     return {"message": "Due date deleted successfully"}
-
 # REPORTS ROUTES
 # Reports routes
 @api_router.get("/reports/efficiency")
@@ -2089,7 +1947,6 @@ async def get_efficiency_report(
         report_data[user_id]["total_tasks_completed"] += log.get("tasks_completed", 0)
         report_data[user_id]["days_logged"] += 1
     return list(report_data.values())
-
 @api_router.get("/reports/export")
 async def export_reports(
     format: str = "csv",
@@ -2149,7 +2006,6 @@ async def export_reports(
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
-
 # CLIENT ROUTES
 # Client Management routes
 @api_router.post("/clients", response_model=Client)
@@ -2161,7 +2017,6 @@ async def create_client(client_data: ClientCreate, current_user: User = Depends(
         doc["birthday"] = doc["birthday"].isoformat()
     await db.clients.insert_one(doc)
     return client
-
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(check_permission("can_view_all_clients"))):
     query = {}
@@ -2174,7 +2029,6 @@ async def get_clients(current_user: User = Depends(check_permission("can_view_al
         if client.get("birthday") and isinstance(client["birthday"], str):
             client["birthday"] = date.fromisoformat(client["birthday"])
     return clients
-
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -2185,7 +2039,6 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
     if client.get("birthday") and isinstance(client["birthday"], str):
         client["birthday"] = date.fromisoformat(client["birthday"])
     return Client(**client)
-
 @api_router.put("/clients/{client_id}", response_model=Client)
 async def update_client(client_id: str, client_data: ClientCreate, current_user: User = Depends(get_current_user)):
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -2211,7 +2064,6 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
     if updated.get("birthday") and isinstance(updated["birthday"], str):
         updated["birthday"] = date.fromisoformat(updated["birthday"])
     return Client(**updated)
-
 @api_router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, current_user: User = Depends(get_current_user)):
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -2230,7 +2082,6 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
     return {"message": "Client deleted successfully"}
-
 # BIRTHDAY EMAIL ROUTES
 # Birthday Email routes
 @api_router.post("/clients/{client_id}/send-birthday-email")
@@ -2248,7 +2099,6 @@ async def send_client_birthday_email(
         client["company_name"]
     )
     return {"message": "Birthday email queued for delivery"}
-
 @api_router.get("/clients/upcoming-birthdays")
 async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
     """Get clients with birthdays in the next N days"""
@@ -2268,37 +2118,132 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
                 client["days_until_birthday"] = days_until
                 upcoming.append(client)
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
-
+# ✅ STEP 2 — REPLACE /clients/import WITH THIS ENTERPRISE VERSION
 @api_router.post("/clients/import")
-async def import_clients_from_csv(
+async def import_clients_from_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    if file.content_type != 'text/csv':
-        raise HTTPException(400, "Invalid file type")
-    content = await file.read()
-    content_str = content.decode('utf-8')
-    csv_reader = csv.DictReader(StringIO(content_str))
-    tasks = []
-    for row in csv_reader:
-        task_data = ClientCreate(
-            title=row.get('title', ''),
-            description=row.get('description'),
-            assigned_to=row.get('assigned_to'),
-            sub_assignees=row.get('sub_assignees', '').split(',') if row.get('sub_assignees') else [],
-            due_date=parser.parse(row['due_date']) if row.get('due_date') else None,
-            priority=row.get('priority', 'medium'),
-            status=row.get('status', 'pending'),
-            category=row.get('category', 'other'),
-            client_id=row.get('client_id'),
-            is_recurring=bool(row.get('is_recurring', False)),
-            recurrence_pattern=row.get('recurrence_pattern', 'monthly'),
-            recurrence_interval=int(row.get('recurrence_interval', 1))
-        )
-        tasks.append(task_data)
-    payload = BulkTaskCreate(tasks=tasks)
-    return await create_tasks_bulk(payload, current_user)
+    filename = file.filename.lower()
 
+    # ===============================
+    # 🔹 READ FILE (CSV OR XLSX)
+    # ===============================
+    try:
+        if filename.endswith(".csv"):
+            content = await file.read()
+            df = pd.read_csv(BytesIO(content))
+        elif filename.endswith(".xlsx"):
+            content = await file.read()
+            df = pd.read_excel(BytesIO(content))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV or XLSX supported")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
+
+    # Remove completely empty rows
+    df = df.dropna(how="all")
+
+    created_clients = 0
+    added_contacts = 0
+    skipped_rows = 0
+    duplicate_clients = 0
+
+    current_client_id = None
+
+    for _, row in df.iterrows():
+
+        row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
+
+        company_name = row.get("company_name", "")
+
+        # =====================================================
+        # 🟢 NEW CLIENT ROW
+        # =====================================================
+        if company_name:
+
+            # 🔒 Duplicate Check (case insensitive)
+            existing = await db.clients.find_one({
+                "company_name": {"$regex": f"^{company_name}$", "$options": "i"}
+            })
+
+            if existing:
+                current_client_id = existing["id"]
+                duplicate_clients += 1
+                continue
+
+            try:
+                birthday = None
+                if row.get("birthday"):
+                    birthday = parser.parse(row["birthday"]).date()
+
+                services = []
+                if row.get("services"):
+                    services = [s.strip() for s in row["services"].split(",") if s.strip()]
+
+                contact_persons = []
+
+                if row.get("contact_name_1"):
+                    contact_persons.append({
+                        "name": row.get("contact_name_1"),
+                        "designation": row.get("contact_designation_1"),
+                        "email": row.get("contact_email_1"),
+                        "phone": row.get("contact_phone_1"),
+                    })
+
+                client_doc = {
+                    "id": str(uuid.uuid4()),
+                    "company_name": company_name,
+                    "client_type": row.get("client_type"),
+                    "email": row.get("email"),
+                    "phone": row.get("phone"),
+                    "birthday": birthday.isoformat() if birthday else None,
+                    "services": services,
+                    "contact_persons": contact_persons,
+                    "notes": row.get("notes"),
+                    "assigned_to": None,
+                    "created_by": current_user.id,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+
+                await db.clients.insert_one(client_doc)
+
+                current_client_id = client_doc["id"]
+                created_clients += 1
+
+            except Exception:
+                skipped_rows += 1
+                continue
+
+        # =====================================================
+        # 🔵 CONTACT ROW
+        # =====================================================
+        else:
+            if current_client_id and row.get("contact_name_1"):
+
+                contact_data = {
+                    "name": row.get("contact_name_1"),
+                    "designation": row.get("contact_designation_1"),
+                    "email": row.get("contact_email_1"),
+                    "phone": row.get("contact_phone_1"),
+                }
+
+                await db.clients.update_one(
+                    {"id": current_client_id},
+                    {"$push": {"contact_persons": contact_data}}
+                )
+
+                added_contacts += 1
+            else:
+                skipped_rows += 1
+
+    return {
+        "message": "Import completed",
+        "clients_created": created_clients,
+        "duplicate_clients_skipped": duplicate_clients,
+        "contacts_added": added_contacts,
+        "rows_skipped": skipped_rows
+    }
 # DASHBOARD ROUTES
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
@@ -2407,7 +2352,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         team_workload=team_workload,
         compliance_status=compliance_status
     )
-
 # STAFF ACTIVITY ROUTES
 # Staff Activity Tracking Endpoints
 @api_router.post("/activity/log")
@@ -2421,7 +2365,6 @@ async def log_staff_activity(activity_data: StaffActivityCreate, current_user: U
     doc["timestamp"] = doc["timestamp"].isoformat()
     await db.staff_activity.insert_one(doc)
     return {"message": "Activity logged successfully"}
-
 @api_router.get("/activity/summary")
 async def get_activity_summary(
     user_id: Optional[str] = None,
@@ -2486,7 +2429,6 @@ async def get_activity_summary(
             data["productivity_percent"] = 0
         result.append(data)
     return result
-
 @api_router.get("/activity/user/{user_id}")
 async def get_user_activity(
     user_id: str,
@@ -2501,7 +2443,6 @@ async def get_user_activity(
         {"_id": 0}
     ).sort("timestamp", -1).to_list(limit)
     return activities
-
 # USER PERMISSIONS
 # Update user permissions endpoint
 @api_router.put("/users/{user_id}/permissions")
@@ -2530,7 +2471,6 @@ async def update_user_permissions(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Permissions updated successfully"}
-
 # REMINDER ROUTES
 # MANUAL FULL REMINDER
 @api_router.post("/send-pending-task-reminders")
@@ -2582,8 +2522,6 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_sent": success_count,
         "emails_failed": failed_emails
     }
-
-
 # AUDIT LOGS ROUTE
 @api_router.get("/audit-logs")
 async def get_audit_logs(
@@ -2594,20 +2532,15 @@ async def get_audit_logs(
     """
     Fetch audit logs with optional filtering
     """
-
     query = {}
-
     if module:
         query["module"] = module
-
     if record_id:
         query["record_id"] = record_id
-
     logs = await db.audit_logs.find(
         query,
         {"_id": 0}
     ).sort("timestamp", -1).to_list(2000)
-
     # Convert timestamp string to datetime if needed
     for log in logs:
         if isinstance(log.get("timestamp"), str):
@@ -2615,9 +2548,7 @@ async def get_audit_logs(
                 log["timestamp"] = datetime.fromisoformat(log["timestamp"])
             except:
                 pass
-
     return logs
-
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
     tasks = await db.tasks.find(
@@ -2648,17 +2579,14 @@ async def send_pending_task_reminders_internal():
             )
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
-
 # AUTO DAILY REMINDER (ONLY ONE)
 @app.middleware("http")
 async def auto_daily_reminder(request, call_next):
     try:
         india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
         today_str = india_time.date().isoformat()
-
         setting = await db.system_settings.find_one({"key": "last_reminder_date"})
         last_date = setting["value"] if setting else None
-
         if india_time.hour >= 10 and last_date != today_str:
             logger.info("Auto daily reminder triggered at 10:00 AM IST")
             await send_pending_task_reminders_internal()
@@ -2667,24 +2595,19 @@ async def auto_daily_reminder(request, call_next):
                 {"$set": {"value": today_str}},
                 upsert=True
             )
-
             # Add automatic cleanup for staff_activity (90 days retention)
             await db.staff_activity.delete_many({
                 "timestamp": {
                     "$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
                 }
             })
-
             # Calculate retention dates
             now = datetime.now(timezone.utc)
             thirty_days = now - timedelta(days=30)
-
     except Exception as e:
         logger.error(f"Auto job failed: {e}")
-
     # VERY IMPORTANT: continue request processing
     response = await call_next(request)
     return response
-
 # Api Router
 app.include_router(api_router)
