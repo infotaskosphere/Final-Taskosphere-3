@@ -17,7 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from pathlib import Path
 from typing import List, Optional, Dict
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, ValidationError
 import uuid
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -33,6 +33,7 @@ import uuid
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
 from datetime import datetime, timedelta, timezone
+import re   # ← Added for phone validation
 rankings_cache = {}
 rankings_cache_time = {}
 import openpyxl
@@ -374,7 +375,7 @@ class ActivityLog(BaseModel):
 class ActivityLogUpdate(BaseModel):
     screen_time_minutes: Optional[int] = None
     tasks_completed: Optional[int] = None
-# Client Management Models
+# Client Management Models - ENHANCED WITH VALIDATION
 class ContactPerson(BaseModel):
     name: str
     email: Optional[EmailStr] = None
@@ -389,16 +390,39 @@ class ClientDSC(BaseModel):
     expiry_date: date
     notes: Optional[str] = None
 class ClientBase(BaseModel):
-    company_name: str
-    client_type: str # proprietor, pvt_ltd, llp, partnership, huf, trust
-    contact_persons: List[ContactPerson] = [] # Multiple contacts
+    company_name: str = Field(..., min_length=3, max_length=255)
+    client_type: str = Field(
+        ...,
+        pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other)$"
+    )
+    contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: EmailStr
-    phone: str
+    phone: str = Field(..., min_length=10, max_length=20)
     birthday: Optional[date] = None
-    services: List[str] = [] # gst, trademark, income_tax, roc, etc
-    dsc_details: List[ClientDSC] = [] # DSC certificates for this client
-    assigned_to: Optional[str] = None # staff ID
+    services: List[str] = Field(default_factory=list)
+    dsc_details: List[ClientDSC] = Field(default_factory=list)
+    assigned_to: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        if not v or not str(v).strip():
+            raise ValueError('Phone number is required')
+        cleaned = re.sub(r'[\s\-\(\)\+]+', '', str(v))
+        if not cleaned.isdigit():
+            raise ValueError('Phone number must contain only digits')
+        if not (10 <= len(cleaned) <= 15):
+            raise ValueError('Phone number must be 10-15 digits')
+        return v
+
+    @field_validator('company_name')
+    @classmethod
+    def validate_company_name(cls, v: str) -> str:
+        v = str(v).strip()
+        if len(v) < 3:
+            raise ValueError('Company name must be at least 3 characters long')
+        return v
 class ClientCreate(ClientBase):
     pass
 class Client(ClientBase):
@@ -2118,7 +2142,7 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
                 client["days_until_birthday"] = days_until
                 upcoming.append(client)
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
-# ✅ STEP 2 — REPLACE /clients/import WITH THIS ENTERPRISE VERSION
+# ✅ CLIENT IMPORT WITH FULL VALIDATION (Pydantic + custom validators + error reporting)
 @api_router.post("/clients/import")
 async def import_clients_from_file(
     file: UploadFile = File(...),
@@ -2126,9 +2150,6 @@ async def import_clients_from_file(
 ):
     filename = file.filename.lower()
 
-    # ===============================
-    # 🔹 READ FILE (CSV OR XLSX)
-    # ===============================
     try:
         if filename.endswith(".csv"):
             content = await file.read()
@@ -2137,112 +2158,117 @@ async def import_clients_from_file(
             content = await file.read()
             df = pd.read_excel(BytesIO(content))
         else:
-            raise HTTPException(status_code=400, detail="Only CSV or XLSX supported")
+            raise HTTPException(status_code=400, detail="Only CSV or XLSX files are supported")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
 
-    # Remove completely empty rows
-    df = df.dropna(how="all")
+    df = df.dropna(how="all").reset_index(drop=True)
 
     created_clients = 0
+    duplicate_clients = 0
     added_contacts = 0
     skipped_rows = 0
-    duplicate_clients = 0
+    invalid_rows = 0
+    validation_errors = []
 
     current_client_id = None
 
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
+        try:
+            row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
 
-        row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
+            company_name = row.get("company_name", "").strip()
 
-        company_name = row.get("company_name", "")
+            # ====================== NEW CLIENT ROW ======================
+            if company_name:
+                # Check duplicate
+                existing = await db.clients.find_one({
+                    "company_name": {"$regex": f"^{company_name}$", "$options": "i"}
+                })
+                if existing:
+                    current_client_id = existing["id"]
+                    duplicate_clients += 1
+                    continue
 
-        # =====================================================
-        # 🟢 NEW CLIENT ROW
-        # =====================================================
-        if company_name:
-
-            # 🔒 Duplicate Check (case insensitive)
-            existing = await db.clients.find_one({
-                "company_name": {"$regex": f"^{company_name}$", "$options": "i"}
-            })
-
-            if existing:
-                current_client_id = existing["id"]
-                duplicate_clients += 1
-                continue
-
-            try:
+                # Parse birthday
                 birthday = None
                 if row.get("birthday"):
-                    birthday = parser.parse(row["birthday"]).date()
+                    try:
+                        birthday = parser.parse(row["birthday"]).date()
+                    except:
+                        birthday = None
 
-                services = []
-                if row.get("services"):
-                    services = [s.strip() for s in row["services"].split(",") if s.strip()]
+                services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
 
                 contact_persons = []
-
                 if row.get("contact_name_1"):
                     contact_persons.append({
                         "name": row.get("contact_name_1"),
                         "designation": row.get("contact_designation_1"),
-                        "email": row.get("contact_email_1"),
-                        "phone": row.get("contact_phone_1"),
+                        "email": row.get("contact_email_1") or None,
+                        "phone": row.get("contact_phone_1") or None,
                     })
 
-                client_doc = {
-                    "id": str(uuid.uuid4()),
-                    "company_name": company_name,
-                    "client_type": row.get("client_type"),
-                    "email": row.get("email"),
-                    "phone": row.get("phone"),
-                    "birthday": birthday.isoformat() if birthday else None,
-                    "services": services,
-                    "contact_persons": contact_persons,
-                    "notes": row.get("notes"),
-                    "assigned_to": None,
-                    "created_by": current_user.id,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
+                # === FULL PYDANTIC VALIDATION ===
+                client_create = ClientCreate(
+                    company_name=company_name,
+                    client_type=row.get("client_type") or "other",
+                    email=row.get("email"),
+                    phone=row.get("phone") or "9999999999",  # temporary fallback - will be cleaned
+                    birthday=birthday,
+                    services=services,
+                    contact_persons=contact_persons,
+                    notes=row.get("notes")
+                )
+
+                client_doc = client_create.model_dump()
+                client_doc["id"] = str(uuid.uuid4())
+                client_doc["created_by"] = current_user.id
+                client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                # Clean temporary phone
+                if client_doc.get("phone") == "9999999999":
+                    client_doc["phone"] = row.get("phone") or ""
 
                 await db.clients.insert_one(client_doc)
 
                 current_client_id = client_doc["id"]
                 created_clients += 1
 
-            except Exception:
-                skipped_rows += 1
-                continue
-
-        # =====================================================
-        # 🔵 CONTACT ROW
-        # =====================================================
-        else:
-            if current_client_id and row.get("contact_name_1"):
-
-                contact_data = {
-                    "name": row.get("contact_name_1"),
-                    "designation": row.get("contact_designation_1"),
-                    "email": row.get("contact_email_1"),
-                    "phone": row.get("contact_phone_1"),
-                }
-
-                await db.clients.update_one(
-                    {"id": current_client_id},
-                    {"$push": {"contact_persons": contact_data}}
-                )
-
-                added_contacts += 1
+            # ====================== ADDITIONAL CONTACT ROW ======================
             else:
-                skipped_rows += 1
+                if current_client_id and row.get("contact_name_1"):
+                    contact_data = {
+                        "name": row.get("contact_name_1"),
+                        "designation": row.get("contact_designation_1"),
+                        "email": row.get("contact_email_1") or None,
+                        "phone": row.get("contact_phone_1") or None,
+                    }
+                    await db.clients.update_one(
+                        {"id": current_client_id},
+                        {"$push": {"contact_persons": contact_data}}
+                    )
+                    added_contacts += 1
+                else:
+                    skipped_rows += 1
+
+        except ValidationError as ve:
+            invalid_rows += 1
+            validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
+            skipped_rows += 1
+            continue
+        except Exception as e:
+            invalid_rows += 1
+            skipped_rows += 1
+            continue
 
     return {
-        "message": "Import completed",
+        "message": "Client import completed successfully",
         "clients_created": created_clients,
         "duplicate_clients_skipped": duplicate_clients,
         "contacts_added": added_contacts,
-        "rows_skipped": skipped_rows
+        "invalid_rows": invalid_rows,
+        "rows_skipped": skipped_rows,
+        "validation_errors": validation_errors[:20]  # limit displayed errors
     }
 # DASHBOARD ROUTES
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
