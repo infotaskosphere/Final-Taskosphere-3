@@ -24,7 +24,7 @@ export default function TodoDashboard() {
 
   // 📥 Fetch Todos
   const { data: todos = [], isLoading } = useQuery({
-    queryKey: ["todo-dashboard"],
+    queryKey: ["todos"],
     queryFn: async () => {
       const res = await api.get("/dashboard/todo-overview");
       return res.data;
@@ -36,7 +36,7 @@ export default function TodoDashboard() {
     mutationFn: (data) => api.post("/todos", data),
     onSuccess: () => {
       toast.success("Todo added successfully");
-      queryClient.invalidateQueries({ queryKey: ["todo-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
       setTitle("");
       setDescription("");
     },
@@ -48,7 +48,7 @@ export default function TodoDashboard() {
     mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
     onSuccess: () => {
       toast.success("Promoted to Task");
-      queryClient.invalidateQueries({ queryKey: ["todo-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
     onError: () => toast.error("Promotion failed"),
   });
