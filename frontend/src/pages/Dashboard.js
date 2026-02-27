@@ -232,20 +232,24 @@ export default function Dashboard() {
     fetchChatPreview();
   }, []);
 
-  useEffect(() => {
-    async function fetchRankings() {
-      try {
-        const rankingRes = await api.get(
-          `/staff/rankings?period=${user.role === "admin" ? rankingPeriod : "all"}`
-        );
-        setRankings(rankingRes.data?.rankings || []);
-      } catch (rankErr) {
-        console.warn("Rankings endpoint failed:", rankErr);
-        setRankings([]);
-      }
+useEffect(() => {
+  async function fetchRankings() {
+    try {
+      const rankingRes = await api.get("/staff/rankings", {
+        params: {
+          period: "monthly", "weekly", "all",
+        },
+      });
+
+      setRankings(rankingRes.data?.rankings || []);
+    } catch (rankErr) {
+      console.warn("Rankings endpoint failed:", rankErr);
+      setRankings([]);
     }
-    fetchRankings();
-  }, [rankingPeriod, user.role]);
+  }
+
+  fetchRankings();
+}, []);
 
   const addTodo = () => {
     if (!newTodo.trim()) return;
