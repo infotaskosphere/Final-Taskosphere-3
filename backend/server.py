@@ -26,10 +26,13 @@ from sendgrid.helpers.mail import Mail
 import csv
 from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
+from fastapi import HTTPException, Depends
+from bson import ObjectId
+from datetime import datetime, timezone
+import uuid
 from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
 from datetime import datetime, timedelta, timezone
-
 rankings_cache = {}
 rankings_cache_time = {}
 import openpyxl
@@ -672,42 +675,85 @@ async def create_audit_log(
     await db.audit_logs.insert_one(doc)
 
 # AUTH ROUTES
-# Create Personal Todo
-@api_router.post("/todos", response_model=Todo)
-async def create_personal_todo(todo_in: TodoCreate, current_user: User = Depends(get_current_user)):
-    new_todo = Todo(user_id=current_user.id, **todo_in.model_dump())
-    doc = new_todo.model_dump()
-    # Convert datetimes to strings for MongoDB
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["updated_at"] = doc["updated_at"].isoformat()
-    if doc["due_date"]: doc["due_date"] = doc["due_date"].isoformat()
-    await db.todos.insert_one(doc)
-    return new_todo
+# ==========================================================
+# TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
+# ==========================================================
 
-# SEPARATE DASHBOARD PAGE DATA
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
-    # Admin access by default; others check permission
-    is_admin = current_user.role == "admin"
-    has_permission = current_user.permissions.can_view_todo_dashboard if current_user.permissions else False
-    
-    if not (is_admin or has_permission):
-        raise HTTPException(status_code=403, detail="Dashboard access denied")
-    # Fetch all todos (Admin sees all, Staff with permission sees all for monitoring)
-    all_todos = await db.todos.find().to_list(2000)
-    return all_todos
 
-# PROMOTION LOGIC (Admin and Owner Access)
+    is_admin = current_user.role == "admin"
+
+    # Staff must have permission to access dashboard
+    if not is_admin:
+        if not current_user.permissions or not current_user.permissions.get("can_view_todo_dashboard", False):
+            raise HTTPException(status_code=403, detail="Dashboard access denied")
+
+    # =========================
+    # ADMIN VIEW (SEE ALL)
+    # =========================
+    if is_admin:
+        todos = await db.todos.find().to_list(2000)
+
+        grouped_todos = {}
+
+        for todo in todos:
+            user = await db.users.find_one({"id": todo["user_id"]}, {"_id": 0})
+            user_name = user["full_name"] if user else "Unknown User"
+
+            if user_name not in grouped_todos:
+                grouped_todos[user_name] = []
+
+            todo["_id"] = str(todo["_id"])
+            grouped_todos[user_name].append(todo)
+
+        return {
+            "role": "admin",
+            "grouped_todos": grouped_todos
+        }
+
+    # =========================
+    # STAFF VIEW (OWN + ALLOWED)
+    # =========================
+    else:
+        allowed_users = current_user.permissions.get("todo_view_permissions", [])
+
+        todos = await db.todos.find({
+            "$or": [
+                {"user_id": current_user.id},
+                {"user_id": {"$in": allowed_users}}
+            ]
+        }).to_list(2000)
+
+        for todo in todos:
+            todo["_id"] = str(todo["_id"])
+
+        return {
+            "role": "staff",
+            "todos": todos
+        }
+
+
+# ==========================================================
+# PROMOTE TODO TO TASK (ADMIN + OWNER ONLY)
+# ==========================================================
+
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
 
-    todo = await db.todos.find_one({"id": todo_id})
+    try:
+        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+    except:
+        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
 
     # Only creator or admin can promote
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+
+    now = datetime.now(timezone.utc)
 
     new_task = {
         "id": str(uuid.uuid4()),
@@ -720,18 +766,18 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
         "category": "other",
         "client_id": None,
         "is_recurring": False,
-        "type": "task",   # ✅ IMPORTANT
+        "type": "task",
         "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat()
+        "created_at": now,
+        "updated_at": now
     }
 
     await db.tasks.insert_one(new_task)
 
-    # Delete from todos
-    await db.todos.delete_one({"id": todo_id})
+    await db.todos.delete_one({"_id": ObjectId(todo_id)})
 
     return {"message": "Todo promoted to task successfully"}
+    
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
