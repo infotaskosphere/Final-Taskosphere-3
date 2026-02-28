@@ -982,81 +982,60 @@ async def get_staff_rankings(
     now = datetime.now(timezone.utc)
 
     if period not in ["monthly", "weekly", "all"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid period. Allowed: monthly, weekly, all"
-        )
+        raise HTTPException(status_code=400, detail="Invalid period")
 
-    if period in rankings_cache:
-        cache_time = rankings_cache_time.get(period)
-        if cache_time and (now - cache_time) < timedelta(hours=24):
-            return rankings_cache[period]
-
-    # Build query
+    # Date filter
     if period == "monthly":
         current_month = now.strftime("%Y-%m")
-        query = {"date": {"$regex": f"^{current_month}"}}
+        match_stage = {"date": {"$regex": f"^{current_month}"}}
     elif period == "weekly":
         start_of_week = now - timedelta(days=now.weekday())
         week_prefix = start_of_week.strftime("%Y-%m-%d")
-        query = {"date": {"$gte": week_prefix}}
+        match_stage = {"date": {"$gte": week_prefix}}
     else:
-        query = {}
+        match_stage = {}
 
-    attendance_list = await db.attendance.find(
-        query,
-        {"_id": 0}
-    ).to_list(5000)
-
-    ranking_map = {}
-
-    for record in attendance_list:
-        uid = record.get("user_id")
-        duration = record.get("duration_minutes") or 0
-
-        if uid:
-            ranking_map[uid] = ranking_map.get(uid, 0) + duration
-
-    sorted_users = sorted(
-        ranking_map.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    user_ids = [uid for uid, _ in sorted_users]
-
-    # MATCH USING users.id (NOT _id)
-    users = await db.users.find(
+    pipeline = [
+        {"$match": match_stage},
         {
-            "id": {"$in": user_ids},
-            "role": {"$ne": "admin"}  # lowercase as per your DB
+            "$group": {
+                "_id": "$user_id",
+                "total_minutes": {"$sum": "$duration_minutes"}
+            }
         },
         {
-            "_id": 0,
-            "id": 1,
-            "full_name": 1
-        }
-    ).to_list(1000)
+            "$lookup": {
+                "from": "users",
+                "localField": "_id",
+                "foreignField": "id",
+                "as": "user"
+            }
+        },
+        {"$unwind": "$user"},
+        {
+            "$match": {
+                "user.role": {"$ne": "admin"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "user_id": "$_id",
+                "user_name": "$user.full_name",
+                "profile_picture": "$user.profile_picture",
+                "total_minutes": 1
+            }
+        },
+        {"$sort": {"total_minutes": -1}}
+    ]
 
-    user_map = {u["id"]: u["full_name"] for u in users}
+    rankings = await db.attendance.aggregate(pipeline).to_list(100)
 
-    rankings = []
-    rank_position = 1
+    # Add rank position
+    for index, item in enumerate(rankings):
+        item["rank"] = index + 1
 
-    for uid, minutes in sorted_users:
-        if uid not in user_map:
-            continue
-
-        rankings.append({
-            "user_id": uid,
-            "user_name": user_map[uid],
-            "rank": rank_position,
-            "total_minutes": minutes
-        })
-
-        rank_position += 1
-
-    result = {
+    return {
         "period": period,
         "rankings": rankings
     }
