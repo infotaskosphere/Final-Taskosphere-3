@@ -14,6 +14,7 @@ export default function TodoDashboard() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [selectedUser, setSelectedUser] = useState("all");
   const [promotingId, setPromotingId] = useState(null);
 
@@ -35,14 +36,13 @@ export default function TodoDashboard() {
   });
 
   // ==============================
-  // GROUP TODOS (ADMIN VIEW)
+  // GROUP FOR ADMIN
   // ==============================
 
   const groupedTodos = useMemo(() => {
     if (!isAdmin) return {};
-
     return todos.reduce((acc, todo) => {
-      const owner = todo.user_name || todo.user_id || "Unknown User";
+      const owner = todo.user_name || todo.user_id || "Unknown";
       if (!acc[owner]) acc[owner] = [];
       acc[owner].push(todo);
       return acc;
@@ -51,9 +51,7 @@ export default function TodoDashboard() {
 
   const filteredGroupedTodos = useMemo(() => {
     if (!isAdmin) return {};
-
     if (selectedUser === "all") return groupedTodos;
-
     return {
       [selectedUser]: groupedTodos[selectedUser] || [],
     };
@@ -74,8 +72,26 @@ export default function TodoDashboard() {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       setTitle("");
       setDescription("");
+      setDueDate("");
     },
     onError: () => toast.error("Failed to create todo"),
+  });
+
+  // ==============================
+  // DELETE TODO
+  // ==============================
+
+  const deleteTodo = useMutation({
+    mutationFn: async (id) => {
+      return axios.delete(`${API_BASE}/todos/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Todo deleted");
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+    onError: () => toast.error("Failed to delete todo"),
   });
 
   // ==============================
@@ -95,8 +111,8 @@ export default function TodoDashboard() {
       toast.success("Promoted to Task successfully");
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
-    onError: () => toast.error("Promotion failed"),
     onSettled: () => setPromotingId(null),
+    onError: () => toast.error("Promotion failed"),
   });
 
   // ==============================
@@ -109,7 +125,13 @@ export default function TodoDashboard() {
       toast.error("Title is required");
       return;
     }
-    createTodo.mutate({ title, description });
+
+    createTodo.mutate({
+      title,
+      description,
+      due_date: dueDate ? new Date(dueDate).toISOString() : null,
+      status: "pending",
+    });
   };
 
   // ==============================
@@ -118,14 +140,17 @@ export default function TodoDashboard() {
 
   const renderTodoCard = (todo) => {
     const isOwner = todo.user_id === user?.id;
-    const canPromote = isAdmin || isOwner;
+    const canModify = isAdmin || isOwner;
     const isPromoting = promotingId === todo._id;
+
+    const isOverdue =
+      todo.due_date && new Date(todo.due_date) < new Date();
 
     return (
       <div
         key={todo._id}
-        className={`bg-white shadow rounded-2xl p-5 flex justify-between items-center transition ${
-          isPromoting ? "opacity-50 scale-95" : ""
+        className={`bg-white shadow rounded-2xl p-5 flex justify-between items-center ${
+          isOverdue ? "border border-red-400 bg-red-50" : ""
         }`}
       >
         <div>
@@ -136,16 +161,36 @@ export default function TodoDashboard() {
               {todo.description}
             </p>
           )}
+
+          {todo.due_date && (
+            <p
+              className={`text-xs mt-2 ${
+                isOverdue ? "text-red-600 font-semibold" : "text-gray-500"
+              }`}
+            >
+              Due: {new Date(todo.due_date).toLocaleDateString()}
+              {isOverdue && " (Overdue)"}
+            </p>
+          )}
         </div>
 
-        {canPromote && (
-          <button
-            onClick={() => promoteTodo.mutate(todo._id)}
-            disabled={isPromoting}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition disabled:opacity-50"
-          >
-            {isPromoting ? "Promoting..." : "Promote to Task"}
-          </button>
+        {canModify && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => promoteTodo.mutate(todo._id)}
+              disabled={isPromoting}
+              className="bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+            >
+              {isPromoting ? "Promoting..." : "Promote"}
+            </button>
+
+            <button
+              onClick={() => deleteTodo.mutate(todo._id)}
+              className="bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition"
+            >
+              Delete
+            </button>
+          </div>
         )}
       </div>
     );
@@ -178,6 +223,13 @@ export default function TodoDashboard() {
             rows={3}
           />
 
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="border rounded-lg p-2"
+          />
+
           <button
             type="submit"
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
@@ -193,13 +245,11 @@ export default function TodoDashboard() {
       ) : todos.length === 0 ? (
         <p className="text-gray-500">No todos found.</p>
       ) : isAdmin ? (
-        <div className="space-y-8">
-
-          {/* FILTER */}
+        <div className="space-y-6">
           <select
             value={selectedUser}
             onChange={(e) => setSelectedUser(e.target.value)}
-            className="border rounded-lg p-2 mb-4"
+            className="border rounded-lg p-2"
           >
             <option value="all">All Users</option>
             {Object.keys(groupedTodos).map((name) => (
@@ -215,7 +265,6 @@ export default function TodoDashboard() {
                 <h2 className="text-xl font-semibold mb-3">
                   {userName}
                 </h2>
-
                 <div className="space-y-4">
                   {userTodos.map(renderTodoCard)}
                 </div>
