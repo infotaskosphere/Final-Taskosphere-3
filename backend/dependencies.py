@@ -25,7 +25,7 @@ db = client["taskosphere"]
 # AUTHENTICATION
 # ==========================================================
 
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = "HS256"
 
 if not SECRET_KEY:
