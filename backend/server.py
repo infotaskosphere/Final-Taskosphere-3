@@ -104,33 +104,11 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
-security = HTTPBearer()
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-
-async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if user is None:
-        raise credentials_exception
-    user["permissions"] = user.get("permissions", UserPermissions().model_dump())
-    if isinstance(user.get("created_at"), str):
-        user["created_at"] = datetime.fromisoformat(user["created_at"])
-    return User(**user)
 
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
