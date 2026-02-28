@@ -218,15 +218,19 @@ export default function Dashboard() {
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
-   useEffect(() => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // UPDATED: Fetch Star Performers from NEW backend endpoint (no original lines deleted)
+  // ─────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
     async function fetchRankings() {
       try {
-        const rankingRes = await api.get("/staff/rankings", {
+        const apiPeriod = rankingPeriod === "all" ? "all_time" : rankingPeriod;
+        const rankingRes = await api.get("/api/reports/performance-rankings", {
           params: {
-            period: rankingPeriod, // dynamic value
+            period: apiPeriod,
           },
         });
-        setRankings(rankingRes.data?.rankings || []);
+        setRankings(rankingRes.data || []);
       } catch (rankErr) {
         console.warn("Rankings endpoint failed:", rankErr);
         setRankings([]);
@@ -296,7 +300,7 @@ export default function Dashboard() {
       todo.status === "completed" ? "pending" : "completed";
     updateTodo.mutate({ id, status: newStatus });
   };
- const handleDeleteTodo = (id) => {
+  const handleDeleteTodo = (id) => {
     deleteTodo.mutate(id);
   };
   const handlePunchAction = async (action) => {
@@ -430,12 +434,22 @@ export default function Dashboard() {
               {member.user_name || 'Unknown User'}
             </p>
             <p className="text-xs text-slate-500">Team Member</p>
+            {/* ── NEW: Badge & Score from backend ───────────────────────────────── */}
+            <div className="flex items-center gap-2 mt-1">
+              <Badge variant="outline" className="text-xs font-medium">
+                {member.badge || 'Good Performer'}
+              </Badge>
+              <span className="text-emerald-600 font-bold text-sm">
+                {member.overall_score}%
+              </span>
+            </div>
+            {/* ──────────────────────────────────────────────────────────────── */}
           </div>
         </div>
         <div className="text-right">
           <p className={`text-2xl font-bold tracking-tighter ${isTop ? 'text-yellow-700' : 'text-emerald-700'}`}>
-            {member.total_minutes
-              ? `${Math.floor(member.total_minutes / 60)}h ${String(member.total_minutes % 60).padStart(2, '0')}m`
+            {member.total_hours
+              ? `${Math.floor(member.total_hours)}h ${Math.round((member.total_hours % 1) * 60)}m`
               : '0h 00m'}
           </p>
           <p className="text-xs text-slate-500 font-medium">
