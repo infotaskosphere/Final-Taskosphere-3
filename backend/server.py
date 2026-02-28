@@ -796,7 +796,29 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
     await db.tasks.insert_one(new_task)
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo promoted to task successfully"}
+    
+# Delete Todo Route
+@api_router.delete("/todos/{todo_id}")
+async def delete_todo(
+    todo_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+    except:
+        raise HTTPException(status_code=400, detail="Invalid Todo ID")
 
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+
+    # Only owner or admin can delete
+    if current_user.role != "admin" and todo["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await db.todos.delete_one({"_id": ObjectId(todo_id)})
+
+    return {"message": "Todo deleted successfully"}
+    
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
