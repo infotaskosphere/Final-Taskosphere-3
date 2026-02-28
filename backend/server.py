@@ -729,32 +729,32 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     # =========================
     # STAFF VIEW (OWN + ALLOWED)
     # =========================
-else:
+    else:
     # Safely extract allowed users for cross-user todo viewing
-    permissions = getattr(current_user, "permissions", {}) or {}
+        permissions = getattr(current_user, "permissions", {}) or {}
 
-    allowed_users = permissions.get("view_other_todos", [])
+        allowed_users = permissions.get("view_other_todos", [])
 
     # Ensure it's always a list (extra safety)
-    if not isinstance(allowed_users, list):
-        allowed_users = []
+        if not isinstance(allowed_users, list):
+            allowed_users = []
 
     # Fetch own todos + permitted users' todos
-    todos = await db.todos.find({
-        "$or": [
-            {"user_id": current_user.id},
-            {"user_id": {"$in": allowed_users}}
-        ]
-    }).to_list(2000)
+        todos = await db.todos.find({
+            "$or": [
+                {"user_id": current_user.id},
+                {"user_id": {"$in": allowed_users}}
+            ]
+        }).to_list(2000)
 
     # Convert ObjectId to string
-    for todo in todos:
-        todo["_id"] = str(todo["_id"])
+        for todo in todos:
+            todo["_id"] = str(todo["_id"])
 
-    return {
-        "role": "staff",
-        "todos": todos
-    }
+        return {
+            "role": "staff",
+            "todos": todos
+        }
 
 # ==========================================================
 # PROMOTE TODO TO TASK (ADMIN + OWNER ONLY)
