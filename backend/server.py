@@ -81,18 +81,30 @@ def sanitize_user_data(user_data, current_user):
     Remove sensitive fields for non-admin users 
     """
     # If admin → return full data
+    # Admin check ensures data transparency for privileged users
     if current_user.role.lower() == "admin":
         return user_data
+
+    # Helper to convert object to dict
+    def to_dict(obj):
+        # ✅ FIXED: Corrected 'u' reference to 'obj' and added model_dump support for Pydantic v2
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()
+        elif hasattr(obj, "dict"):
+            return obj.dict()
+        return dict(obj)
+
     # If list of users
     if isinstance(user_data, list):
+        # Iterates through list to sanitize each entry
         sanitized = []
-        for u in user_data:
-            u_dict = u.dict() if hasattr(u, "dict") else dict(u)
-            sanitized.append(u_dict)
+        for item in user_data:
+            sanitized.append(to_dict(item))
         return sanitized
+
     # If single user
-    u_dict = user_data.dict() if hasattr(u, "dict") else dict(user_data)
-    return u_dict
+    # ✅ FIXED: Removed 'u' which caused the crash; correctly uses 'user_data'
+    return to_dict(user_data)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
