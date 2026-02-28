@@ -980,20 +980,19 @@ async def get_staff_rankings(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     now = datetime.now(timezone.utc)
-    # ✅ Validate period
+
     if period not in ["monthly", "weekly", "all"]:
         raise HTTPException(
             status_code=400,
             detail="Invalid period. Allowed: monthly, weekly, all"
         )
-    # ✅ Check Cache (24 hour validity)
+
     if period in rankings_cache:
         cache_time = rankings_cache_time.get(period)
         if cache_time and (now - cache_time) < timedelta(hours=24):
             return rankings_cache[period]
-    # ─────────────────────────────────────────────
-    # Build Query
-    # ─────────────────────────────────────────────
+
+    # Build query
     if period == "monthly":
         current_month = now.strftime("%Y-%m")
         query = {"date": {"$regex": f"^{current_month}"}}
@@ -1003,50 +1002,70 @@ async def get_staff_rankings(
         query = {"date": {"$gte": week_prefix}}
     else:
         query = {}
+
     attendance_list = await db.attendance.find(
-    query,
-    {"_id": 0}
-).to_list(5000)
-# Aggregate total duration per user
-ranking_map = {}
-for record in attendance_list:
-    uid = record.get("user_id")
-    duration = record.get("duration_minutes") or 0
-    if uid:
-        ranking_map[uid] = ranking_map.get(uid, 0) + duration
-# Convert to sorted list
-sorted_users = sorted(
-    ranking_map.items(),
-    key=lambda x: x[1],
-    reverse=True
-)
-rankings = []
-for index, (uid, minutes) in enumerate(sorted_users, start=1):
-    # Fetch user by Mongo _id
-    try:
-        user = await db.users.find_one({"_id": ObjectId(uid)})
-    except:
-        user = None
-    # Skip if user not found
-    if not user:
-        continue
-    # Skip admin users
-    if user.get("role") == "admin":
-        continue
-    rankings.append({
-        "user_id": str(uid),
-        "user_name": user.get("full_name", "Unknown User"),
-        "rank": index,
-        "total_minutes": minutes
-    })
-result = {
-    "period": period,
-    "rankings": rankings
-}
+        query,
+        {"_id": 0}
+    ).to_list(5000)
+
+    ranking_map = {}
+
+    for record in attendance_list:
+        uid = record.get("user_id")
+        duration = record.get("duration_minutes") or 0
+
+        if uid:
+            ranking_map[uid] = ranking_map.get(uid, 0) + duration
+
+    sorted_users = sorted(
+        ranking_map.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    user_ids = [uid for uid, _ in sorted_users]
+
+    # MATCH USING users.id (NOT _id)
+    users = await db.users.find(
+        {
+            "id": {"$in": user_ids},
+            "role": {"$ne": "admin"}  # lowercase as per your DB
+        },
+        {
+            "_id": 0,
+            "id": 1,
+            "full_name": 1
+        }
+    ).to_list(1000)
+
+    user_map = {u["id"]: u["full_name"] for u in users}
+
+    rankings = []
+    rank_position = 1
+
+    for uid, minutes in sorted_users:
+        if uid not in user_map:
+            continue
+
+        rankings.append({
+            "user_id": uid,
+            "user_name": user_map[uid],
+            "rank": rank_position,
+            "total_minutes": minutes
+        })
+
+        rank_position += 1
+
+    result = {
+        "period": period,
+        "rankings": rankings
+    }
+   
 # ✅ Store in Cache
-rankings_cache[period] = result
-rankings_cache_time[period] = now
-return result
+    rankings_cache[period] = result
+    rankings_cache_time[period] = now
+    return result
+
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
