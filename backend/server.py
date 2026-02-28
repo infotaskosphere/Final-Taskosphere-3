@@ -449,6 +449,21 @@ class DashboardStats(BaseModel):
     team_workload: List[dict]
     compliance_status: dict
     expired_dsc_count: int = 0
+
+# ====================== NEW: PERFORMANCE METRIC MODEL (added here - no original line touched) ======================
+class PerformanceMetric(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    attendance_percent: float = 0.0
+    total_hours: float = 0.0
+    task_completion_percent: float = 0.0
+    todo_ontime_percent: float = 0.0
+    timely_punchin_percent: float = 0.0
+    overall_score: float = 0.0
+    rank: int = 0
+    badge: str = "Good Performer"
+
 # DOCUMENT MODELS
 class DocumentMovement(BaseModel):
     movement_type: str # "IN" or "OUT"
@@ -720,7 +735,7 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
     await db.tasks.insert_one(new_task)
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo promoted to task successfully"}
-   
+  
 # Delete Todo Route
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
@@ -738,7 +753,7 @@ async def delete_todo(
         raise HTTPException(status_code=403, detail="Not authorized")
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo deleted successfully"}
-   
+  
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -971,7 +986,6 @@ async def record_attendance(
         return Attendance(**updated)
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
-
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
     period: str = "monthly",
@@ -980,15 +994,13 @@ async def get_top_performers_data(
 ):
     """Single source of truth for both Dashboard Star Performers and Reports Top Performers"""
     now = datetime.now(timezone.utc)
-
     # Date filter
     if period == "weekly":
         start_date = now - timedelta(days=7)
     elif period == "monthly":
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    else:  # all_time
+    else: # all_time
         start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
-
     pipeline = [
         {
             "$match": {
@@ -1027,15 +1039,12 @@ async def get_top_performers_data(
         {"$sort": {"completed_tasks": -1}},
         {"$limit": limit}
     ]
-
     performers = await db.tasks.aggregate(pipeline).to_list(limit)
-
     # Add rank
     for idx, p in enumerate(performers):
         p["rank"] = idx + 1
-
     return performers
-    
+   
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
@@ -2085,6 +2094,205 @@ async def export_reports(
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
+
+# ====================== PERFORMANCE RANKINGS + PDF EXPORT (NEW - added here, no original line touched) ======================
+@api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
+async def get_performance_rankings(
+    period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
+    current_user: User = Depends(check_permission("can_view_reports"))
+):
+    """⭐ Star & 🏆 Top Performer Rankings (cached 5 min)"""
+    cache_key = f"rankings_{period}"
+    if cache_key in rankings_cache and (datetime.now() - rankings_cache_time.get(cache_key, datetime.min)).total_seconds() < 300:
+        return rankings_cache[cache_key]
+
+    now = datetime.now(timezone.utc)
+
+    # Date range
+    if period == "weekly":
+        start_date = now - timedelta(days=7)
+        expected_working_days = 5
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        expected_working_days = 22
+    else:  # all_time
+        start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        expected_working_days = max(22, (now - start_date).days // 30 * 22)
+
+    end_date_str = now.strftime("%Y-%m-%d")
+    start_date_str = start_date.strftime("%Y-%m-%d")
+
+    users = await db.users.find(
+        {"role": {"$ne": "admin"}},
+        {"id": 1, "full_name": 1, "profile_picture": 1, "expected_start_time": 1}
+    ).to_list(100)
+
+    rankings = []
+
+    for user in users:
+        uid = user["id"]
+
+        # Attendance %
+        att_records = await db.attendance.find(
+            {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
+            {"_id": 0, "duration_minutes": 1, "is_late": 1}
+        ).to_list(1000)
+
+        days_present = len(att_records)
+        total_minutes = sum(r.get("duration_minutes", 0) for r in att_records)
+        total_hours = round(total_minutes / 60, 1)
+
+        attendance_percent = round((days_present / expected_working_days) * 100, 1) if expected_working_days else 0
+
+        timely_days = len([r for r in att_records if not r.get("is_late", False)])
+        timely_punchin_percent = round((timely_days / days_present) * 100, 1) if days_present else 0
+
+        # Tasks %
+        tasks_assigned = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "created_at": {"$gte": start_date.isoformat()}
+        })
+        tasks_completed = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": "completed",
+            "$or": [
+                {"completed_at": {"$gte": start_date.isoformat()}},
+                {"updated_at": {"$gte": start_date.isoformat()}}
+            ]
+        })
+        task_completion_percent = round((tasks_completed / tasks_assigned) * 100, 1) if tasks_assigned else 0
+
+        # To-Do on-time %
+        todos = await db.todos.find({
+            "user_id": uid,
+            "created_at": {"$gte": start_date.isoformat()}
+        }).to_list(500)
+
+        completed_ontime = 0
+        for t in todos:
+            if t.get("is_completed"):
+                due = t.get("due_date")
+                completed_at = t.get("updated_at") or t.get("created_at")
+                if due and completed_at and completed_at <= due:
+                    completed_ontime += 1
+
+        todo_ontime_percent = round((completed_ontime / len(todos)) * 100, 1) if todos else 0
+
+        # Overall Score
+        score = (
+            attendance_percent * 0.25 +
+            min(total_hours / 180, 1) * 100 * 0.20 +
+            task_completion_percent * 0.25 +
+            todo_ontime_percent * 0.15 +
+            timely_punchin_percent * 0.15
+        )
+        overall_score = round(min(score, 100), 1)
+
+        # Badge
+        if overall_score >= 95:
+            badge = "⭐ Star Performer"
+        elif overall_score >= 85:
+            badge = "🏆 Top Performer"
+        else:
+            badge = "Good Performer"
+
+        rankings.append(PerformanceMetric(
+            user_id=uid,
+            user_name=user["full_name"],
+            profile_picture=user.get("profile_picture"),
+            attendance_percent=attendance_percent,
+            total_hours=total_hours,
+            task_completion_percent=task_completion_percent,
+            todo_ontime_percent=todo_ontime_percent,
+            timely_punchin_percent=timely_punchin_percent,
+            overall_score=overall_score,
+            badge=badge
+        ))
+
+    rankings.sort(key=lambda x: x.overall_score, reverse=True)
+    for i, r in enumerate(rankings):
+        r.rank = i + 1
+
+    rankings_cache[cache_key] = rankings
+    rankings_cache_time[cache_key] = datetime.now()
+
+    return rankings
+
+
+@api_router.get("/reports/performance-rankings/pdf")
+async def export_performance_rankings_pdf(
+    period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
+    current_user: User = Depends(check_permission("can_view_reports"))
+):
+    """Download Performance Rankings as Professional PDF"""
+    rankings = await get_performance_rankings(period=period, current_user=current_user)
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, txt=f"PERFORMANCE RANKINGS - {period.upper()}", ln=True, align="C")
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, txt=f"Generated on: {datetime.now(india_tz).strftime('%d %b %Y, %I:%M %p IST')}", ln=True, align="C")
+    pdf.cell(0, 8, txt=f"Report Period: {period.capitalize()}", ln=True, align="C")
+    pdf.ln(5)
+
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(79, 70, 229)
+    pdf.set_text_color(255, 255, 255)
+
+    col_widths = [15, 55, 45, 22, 28, 28, 28, 28, 35]
+    headers = ["Rank", "Employee", "Badge", "Score", "Attendance", "Hours", "Tasks", "To-Do", "Punch-in"]
+
+    for i, header in enumerate(headers):
+        pdf.cell(col_widths[i], 10, header, border=1, align="C", fill=True)
+    pdf.ln()
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", "", 9)
+
+    for r in rankings[:20]:
+        if r.badge.startswith("⭐"):
+            pdf.set_fill_color(255, 215, 0)
+        elif r.badge.startswith("🏆"):
+            pdf.set_fill_color(255, 182, 193)
+        else:
+            pdf.set_fill_color(240, 240, 240)
+
+        row = [
+            str(r.rank),
+            r.user_name[:30],
+            r.badge,
+            f"{r.overall_score}%",
+            f"{r.attendance_percent}%",
+            f"{r.total_hours}h",
+            f"{r.task_completion_percent}%",
+            f"{r.todo_ontime_percent}%",
+            f"{r.timely_punchin_percent}%"
+        ]
+
+        for i, value in enumerate(row):
+            pdf.cell(col_widths[i], 9, value, border=1, align="C", fill=True)
+        pdf.ln()
+
+    pdf.ln(10)
+    pdf.set_font("Arial", "I", 9)
+    pdf.cell(0, 8, txt="Taskosphere • Performance Ranking System • Confidential", align="C")
+
+    output = BytesIO()
+    pdf_output = pdf.output(dest="S").encode("latin1")
+    output.write(pdf_output)
+    output.seek(0)
+
+    filename = f"performance_rankings_{period}_{datetime.now(india_tz).strftime('%Y%m%d')}.pdf"
+
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 # CLIENT ROUTES
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
@@ -2191,10 +2399,8 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
     for client in clients:
         if client.get("birthday"):
             bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-            # Get birthday this year
             this_year_bday = bday.replace(year=today.year)
             if this_year_bday < today:
-                # If birthday passed, check next year
                 this_year_bday = bday.replace(year=today.year + 1)
             days_until = (this_year_bday - today).days
             if 0 <= days_until <= days:
