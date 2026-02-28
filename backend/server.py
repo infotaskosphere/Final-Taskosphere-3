@@ -1,6 +1,6 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
-from backend.dependencies import db, get_current_user, create_access_token
+from backend.dependencies import get_current_user, create_access_token
 from typing import Optional
 from backend.dependencies import create_access_token
 from datetime import date
@@ -153,9 +153,11 @@ async def create_indexes():
         [("user_id", 1), ("date", 1)],
         unique=True
     )
-    # ✅ STEP 1 — ADD UNIQUE INDEX (VERY IMPORTANT)
-    await db.clients.create_index("company_name", unique=True)
-
+# ✅ STEP 1 — ADD UNIQUE INDEX (VERY IMPORTANT)
+    await db.clients.create_index(
+        [("user_id", 1), ("company_name", 1)],
+        unique=True
+    )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
