@@ -22,6 +22,7 @@ import {
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
 const CHART_COLORS = {
@@ -31,6 +32,7 @@ const CHART_COLORS = {
   warning: '#5CCB5F', // Light Green
   accent: '#0A2D4D', // Darker Blue
 };
+
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -43,6 +45,7 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
+
 export default function Reports() {
   const { user, hasPermission } = useAuth();
   const canViewReports = hasPermission("can_view_reports");
@@ -56,9 +59,33 @@ export default function Reports() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedUserId, setSelectedUserId] = useState("all");
+
+  // ── NEW: Star Performers state + fetch (added without deleting anything) ──
+  const [starPerformers, setStarPerformers] = useState([]);
+
+  // ── NEW: Period selector state (exactly like Dashboard) ──
+  const [rankingPeriod, setRankingPeriod] = useState("monthly");
+
   useEffect(() => {
     fetchAllData();
   }, []);
+
+  // ── NEW: Re-fetch Star Performers when period changes (no original lines deleted) ──
+  useEffect(() => {
+    const fetchStarPerformers = async () => {
+      try {
+        const rankingsRes = await api.get('/api/reports/performance-rankings', {
+          params: { period: rankingPeriod === "all" ? "all_time" : rankingPeriod },
+        });
+        setStarPerformers(rankingsRes.data || []);
+      } catch (error) {
+        console.warn("Failed to fetch star performers:", error);
+        setStarPerformers([]);
+      }
+    };
+    fetchStarPerformers();
+  }, [rankingPeriod]);
+
   const fetchAllData = async () => {
     try {
       const [reportsRes, statsRes, tasksRes] = await Promise.all([
@@ -75,19 +102,23 @@ export default function Reports() {
       setLoading(false);
     }
   };
+
   const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
+
   const getAverageScreenTime = () => {
     if (filteredReportData.length === 0) return 0;
     const total = filteredReportData.reduce((sum, item) => sum + item.total_screen_time, 0);
     return Math.round(total / filteredReportData.length);
   };
+
   const getTotalTasksCompleted = () => {
     return filteredReportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
   };
+
   // Task Status Distribution for Pie Chart
   const getTaskStatusData = () => {
     const pending = tasks.filter(t => t.status === 'pending').length;
@@ -99,6 +130,7 @@ export default function Reports() {
       { name: 'Completed', value: completed, color: CHART_COLORS.success },
     ].filter(item => item.value > 0);
   };
+
   // Task Category Distribution
   const getTaskCategoryData = () => {
     const categoryCount = {};
@@ -115,7 +147,9 @@ export default function Reports() {
       .sort((a, b) => b.tasks - a.tasks)
       .slice(0, 6);
   };
-  // Employee Performance Data for Bar Chart
+
+  // ── UPDATED: Employee Performance Data now uses real Star Performers data ──
+  // (kept original logic for non-admin fallback + all other charts untouched)
   const getEmployeePerformanceData = () => {
     if (!isAdmin) {
       if (filteredReportData.length > 0) {
@@ -129,20 +163,23 @@ export default function Reports() {
       }
       return [];
     } else {
-      return filteredReportData.slice(0, 5).map((item, index) => ({
-        name: item.user?.full_name?.split(' ')[0] || 'User',
-        tasks: item.total_tasks_completed,
-        hours: Math.round(item.total_screen_time / 60),
+      // Use fresh Star Performers data (overall_score as main metric)
+      return starPerformers.slice(0, 5).map((member, index) => ({
+        name: member.user_name?.split(' ')[0] || 'User',
+        tasks: Math.round(member.overall_score), // Star performer score
+        hours: Math.round(member.total_hours || 0),
         fill: COLORS[index % COLORS.length],
       }));
     }
   };
+
   // Helper function to get start of day
   const getStartOfDay = (date) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     return d;
   };
+
   // Weekly Trend Data from tasks
   const getWeeklyTrendData = () => {
     const today = new Date();
@@ -177,6 +214,7 @@ export default function Reports() {
     });
     return days;
   };
+
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -193,6 +231,7 @@ export default function Reports() {
     }
     return null;
   };
+
   const handleDownloadReports = () => {
     const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
     const csvData = filteredReportData.map(item => [
@@ -211,6 +250,7 @@ export default function Reports() {
     link.click();
     document.body.removeChild(link);
   };
+
   const handleExportPDF = () => {
     const doc = new jsPDF();
     doc.text('Efficiency Reports', 10, 10);
@@ -226,19 +266,22 @@ export default function Reports() {
     });
     doc.save('efficiency_reports.pdf');
   };
+
   const filteredReportData = (() => {
-  if (!canViewAllReports && !canViewSelectedReports && !isAdmin) {
-    // Normal user → backend should already return only their data
-    return reportData;
-  }
+    if (!canViewAllReports && !canViewSelectedReports && !isAdmin) {
+      // Normal user → backend should already return only their data
+      return reportData;
+    }
 
-  if (selectedUserId === "all") {
-    return reportData;
-  }
+    if (selectedUserId === "all") {
+      return reportData;
+    }
 
-  return reportData.filter(r => r.user?._id === selectedUserId);
-})();
+    return reportData.filter(r => r.user?._id === selectedUserId);
+  })();
+
   const uniqueUsers = Array.from(new Map(reportData.map(r => [r.user?._id, r.user])).values());
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -246,6 +289,7 @@ export default function Reports() {
       </div>
     );
   }
+
   if (!canViewReports) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -253,6 +297,7 @@ export default function Reports() {
       </div>
     );
   }
+
   return (
     <motion.div
       className="space-y-8"
@@ -278,22 +323,24 @@ export default function Reports() {
           </div>
         )}
       </motion.div>
+
       {(isAdmin || canViewAllReports || canViewSelectedReports) && (
-  <div className="mb-4">
-    <select
-      value={selectedUserId}
-      onChange={(e) => setSelectedUserId(e.target.value)}
-      className="border rounded px-3 py-2"
-    >
-      <option value="all">All Employees</option>
-      {uniqueUsers.map((user) => (
-        <option key={user?._id} value={user?._id}>
-          {user?.full_name}
-        </option>
-      ))}
-    </select>
-  </div>
-)}
+        <div className="mb-4">
+          <select
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+            className="border rounded px-3 py-2"
+          >
+            <option value="all">All Employees</option>
+            {uniqueUsers.map((user) => (
+              <option key={user?._id} value={user?._id}>
+                {user?.full_name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Summary Stats Grid */}
       <motion.div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
@@ -358,6 +405,7 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Charts Row 1 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -398,6 +446,7 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
+
         {/* Task Category Bar Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-category-chart">
           <CardHeader>
@@ -426,16 +475,41 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Charts Row 2 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
         variants={itemVariants}
       >
-        {/* Employee Performance Bar Chart */}
+        {/* Employee Performance Bar Chart → NOW STAR PERFORMERS (title + data updated) */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="employee-performance-chart">
           <CardHeader>
-            <CardTitle className="text-xl font-outfit">{isAdmin ? "Top Performers" : "Your Performance"}</CardTitle>
-            <CardDescription>{isAdmin ? "Tasks completed by team members" : "Your completed tasks"}</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-outfit">
+                  {isAdmin ? "Star Performers" : "Your Performance"}
+                </CardTitle>
+                <CardDescription>
+                  {isAdmin ? "Top ranked by overall performance score" : "Your performance metrics"}
+                </CardDescription>
+              </div>
+              {/* ── NEW: Period selector (exactly like Dashboard) ── */}
+              {isAdmin && (
+                <div className="flex gap-1">
+                  {["all", "monthly", "weekly"].map(p => (
+                    <Button
+                      key={p}
+                      variant={rankingPeriod === p ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setRankingPeriod(p)}
+                      className="text-xs px-3 py-1"
+                    >
+                      {p.toUpperCase()}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {getEmployeePerformanceData().length > 0 ? (
@@ -444,7 +518,7 @@ export default function Reports() {
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="tasks" name="Tasks" radius={[8, 8, 0, 0]}>
+                  <Bar dataKey="tasks" name="Performance Score" radius={[8, 8, 0, 0]}>
                     {getEmployeePerformanceData().map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
@@ -458,6 +532,7 @@ export default function Reports() {
             )}
           </CardContent>
         </Card>
+
         {/* Weekly Trend Area Chart */}
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="weekly-trend-chart">
           <CardHeader>
@@ -502,6 +577,7 @@ export default function Reports() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Team Workload Table */}
       {isAdmin && dashboardStats?.team_workload && (
         <motion.div variants={itemVariants}>
