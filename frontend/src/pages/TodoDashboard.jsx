@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import axios from "axios";
@@ -17,19 +17,22 @@ export default function TodoDashboard() {
   const [selectedUser, setSelectedUser] = useState("all");
   const [promotingId, setPromotingId] = useState(null);
 
-  const api = axios.create({
-    baseURL: API_BASE,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const isAdmin = user?.role === "admin";
 
   // ==============================
-  // FETCH TODOS
+  // FETCH TODOS (WAIT FOR TOKEN)
   // ==============================
 
   const { data, isLoading } = useQuery({
     queryKey: ["todos"],
+    enabled: !!token, // 🔥 prevents 401 on first render
     queryFn: async () => {
-      const res = await api.get("/dashboard/todo-overview");
+      const res = await axios.get(
+        `${API_BASE}/dashboard/todo-overview`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
       return res.data;
     },
   });
@@ -39,13 +42,18 @@ export default function TodoDashboard() {
   // ==============================
 
   const createTodo = useMutation({
-    mutationFn: (data) => api.post("/todos", data),
+    mutationFn: async (payload) => {
+      return axios.post(`${API_BASE}/todos`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
     onSuccess: () => {
       toast.success("Todo added successfully");
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       setTitle("");
       setDescription("");
     },
+    onError: () => toast.error("Failed to create todo"),
   });
 
   // ==============================
@@ -55,17 +63,23 @@ export default function TodoDashboard() {
   const promoteTodo = useMutation({
     mutationFn: async (id) => {
       setPromotingId(id);
-      return api.post(`/todos/${id}/promote-to-task`);
+      return axios.post(
+        `${API_BASE}/todos/${id}/promote-to-task`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
     },
     onSuccess: () => {
       toast.success("Promoted to Task successfully");
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
-    onSettled: () => {
-      setPromotingId(null);
-    },
     onError: () => toast.error("Promotion failed"),
+    onSettled: () => setPromotingId(null),
   });
+
+  // ==============================
+  // FORM SUBMIT
+  // ==============================
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -73,35 +87,35 @@ export default function TodoDashboard() {
       toast.error("Title is required");
       return;
     }
+
     createTodo.mutate({ title, description });
   };
 
-  const isAdmin = user?.role === "admin";
-
   // ==============================
-  // CARD RENDER
+  // RENDER TODO CARD
   // ==============================
 
   const renderTodoCard = (todo) => {
     const isOwner = todo.user_id === user?.id;
     const canPromote = isAdmin || isOwner;
-
     const isPromoting = promotingId === todo._id;
 
     return (
       <div
         key={todo._id}
         className={`bg-white shadow rounded-2xl p-5 flex justify-between items-center transition-all duration-300 ${
-          isPromoting ? "opacity-50 scale-95" : "opacity-100 scale-100"
+          isPromoting ? "opacity-50 scale-95" : ""
         }`}
       >
         <div>
           <h3 className="text-lg font-semibold">{todo.title}</h3>
+
           {todo.description && (
             <p className="text-sm text-gray-500 mt-1">
               {todo.description}
             </p>
           )}
+
           {!canPromote && (
             <p className="text-xs text-gray-400 mt-2">Read Only</p>
           )}
@@ -121,6 +135,20 @@ export default function TodoDashboard() {
   };
 
   // ==============================
+  // FILTERED ADMIN DATA
+  // ==============================
+
+  const filteredGroupedTodos = useMemo(() => {
+    if (!isAdmin || !data?.grouped_todos) return {};
+
+    if (selectedUser === "all") return data.grouped_todos;
+
+    return {
+      [selectedUser]: data.grouped_todos[selectedUser] || [],
+    };
+  }, [data, selectedUser, isAdmin]);
+
+  // ==============================
   // MAIN UI
   // ==============================
 
@@ -138,6 +166,7 @@ export default function TodoDashboard() {
             onChange={(e) => setTitle(e.target.value)}
             className="w-full border rounded-lg p-2"
           />
+
           <textarea
             placeholder="Description (optional)"
             value={description}
@@ -145,6 +174,7 @@ export default function TodoDashboard() {
             className="w-full border rounded-lg p-2"
             rows={3}
           />
+
           <button
             type="submit"
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
@@ -154,16 +184,17 @@ export default function TodoDashboard() {
         </form>
       </div>
 
+      {/* LOADING */}
       {isLoading ? (
         <p>Loading...</p>
       ) : !data ? (
         <p>No data found.</p>
       ) : (
         <div className="space-y-8">
-          {/* ADMIN VIEW */}
+
+          {/* ================= ADMIN VIEW ================= */}
           {isAdmin && data.grouped_todos && (
             <>
-              {/* USER FILTER */}
               <div className="mb-6">
                 <select
                   value={selectedUser}
@@ -179,18 +210,13 @@ export default function TodoDashboard() {
                 </select>
               </div>
 
-              {/* FILTERED DISPLAY */}
-              {Object.entries(data.grouped_todos)
-                .filter(([userName]) =>
-                  selectedUser === "all"
-                    ? true
-                    : userName === selectedUser
-                )
-                .map(([userName, userTodos]) => (
+              {Object.entries(filteredGroupedTodos).map(
+                ([userName, userTodos]) => (
                   <div key={userName}>
                     <h2 className="text-xl font-semibold mb-3">
                       {userName}
                     </h2>
+
                     <div className="space-y-4">
                       {userTodos.length === 0 ? (
                         <p className="text-gray-500">No todos.</p>
@@ -199,14 +225,16 @@ export default function TodoDashboard() {
                       )}
                     </div>
                   </div>
-                ))}
+                )
+              )}
             </>
           )}
 
-          {/* STAFF VIEW */}
+          {/* ================= STAFF VIEW ================= */}
           {!isAdmin && data.todos && (
             <div>
               <h2 className="text-xl font-semibold mb-3">Todos</h2>
+
               <div className="space-y-4">
                 {data.todos.length === 0 ? (
                   <p className="text-gray-500">No todos found.</p>
