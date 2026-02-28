@@ -2164,7 +2164,7 @@ async def export_reports(
         raise HTTPException(status_code=400, detail="Invalid format")
 
 # CLIENT ROUTES
-# Client Management routes
+
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
     client = Client(**client_data.model_dump(), created_by=current_user.id)
@@ -2251,7 +2251,7 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
     return {"message": "Client deleted successfully"}
 
 # BIRTHDAY EMAIL ROUTES
-# Birthday Email routes
+
 @api_router.post("/clients/{client_id}/send-birthday-email")
 async def send_client_birthday_email(
     client_id: str,
@@ -2318,84 +2318,75 @@ async def import_clients_from_file(
         try:
             row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
             company_name = row.get("company_name", "").strip()
-# ====================== NEW CLIENT ROW ======================
-# ====================== NEW CLIENT ROW ======================
-if company_name:
-    # 🔒 Escape regex safely
-    safe_company = re.escape(company_name)
 
-    # 🔒 Safe user_id handling (your system uses string UUID)
-    user_id = current_user.id
+        # ====================== NEW CLIENT ROW ======================
+            if company_name:
 
-    # 🔍 Check duplicate per user (case-insensitive exact match)
-    existing = await db.clients.find_one({
-        "created_by": user_id,
-        "company_name": {
-            "$regex": f"^{safe_company}$",
-            "$options": "i"
-        }
-    })
+                safe_company = re.escape(company_name)
+                user_id = current_user.id
 
-    if existing:
-        current_client_id = existing["id"]  # ✅ use UUID field
-        duplicate_clients += 1
-        continue
+            # Check duplicate (case-insensitive, per user)
+                existing = await db.clients.find_one({
+                    "created_by": user_id,
+                    "company_name": {
+                        "$regex": f"^{safe_company}$",
+                        "$options": "i"
+                    }
+                })
 
-    # 🎂 Parse birthday safely
-    birthday = None
-    if row.get("birthday"):
-        try:
-            birthday = parser.parse(row["birthday"]).date()
-        except Exception:
-            birthday = None
+                if existing:
+                    current_client_id = existing["id"]
+                    duplicate_clients += 1
+                    continue
 
-    # 🛠 Parse services
-    services = [
-        s.strip()
-        for s in row.get("services", "").split(",")
-        if s.strip()
-    ]
+            # Parse birthday
+                birthday = None
+                if row.get("birthday"):
+                    try:
+                        birthday = parser.parse(row["birthday"]).date()
+                    except Exception:
+                        birthday = None
 
-    # 👤 Parse contact persons
-    contact_persons = []
+            # Parse services
+                services = [
+                    s.strip()
+                    for s in row.get("services", "").split(",")
+                    if s.strip()
+                ]
 
-    if row.get("contact_name_1"):
-        contact_persons.append({
-            "name": row.get("contact_name_1"),
-            "designation": row.get("contact_designation_1"),
-            "email": row.get("contact_email_1") or None,
-            "phone": row.get("contact_phone_1") or None,
-        })
+            # Parse contacts
+                contact_persons = []
+                if row.get("contact_name_1"):
+                    contact_persons.append({
+                        "name": row.get("contact_name_1"),
+                        "designation": row.get("contact_designation_1"),
+                        "email": row.get("contact_email_1") or None,
+                        "phone": row.get("contact_phone_1") or None,
+                    })
 
-    # ✅ FULL PYDANTIC VALIDATION
-    client_create = ClientCreate(
-        company_name=company_name,
-        client_type=row.get("client_type") or "other",
-        email=row.get("email"),
-        phone=row.get("phone") or "9999999999",  # temporary fallback
-        birthday=birthday,
-        services=services,
-        contact_persons=contact_persons,
-        notes=row.get("notes")
-    )
+            # Pydantic validation
+                client_create = ClientCreate(
+                    company_name=company_name,
+                    client_type=row.get("client_type") or "other",
+                    email=row.get("email"),
+                    phone=row.get("phone"),
+                    birthday=birthday,
+                    services=services,
+                    contact_persons=contact_persons,
+                    notes=row.get("notes")
+                )
 
-    client_doc = client_create.model_dump()
+                client_doc = client_create.model_dump()
+                client_doc["id"] = str(uuid.uuid4())
+                client_doc["created_by"] = user_id
+                client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
 
-    # 🆔 Add UUID-based ID (your system standard)
-    client_doc["id"] = str(uuid.uuid4())
-    client_doc["created_by"] = user_id
-    client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                await db.clients.insert_one(client_doc)
 
-    # Clean fallback phone if used
-    if client_doc.get("phone") == "9999999999":
-        client_doc["phone"] = row.get("phone") or ""
+                current_client_id = client_doc["id"]
+                created_clients += 1
 
-    # 💾 Insert into DB
-    await db.clients.insert_one(client_doc)
-
-    current_client_id = client_doc["id"]
-    created_clients += 1
-            # ====================== ADDITIONAL CONTACT ROW ======================
+        # ====================== ADDITIONAL CONTACT ROW ======================
             else:
                 if current_client_id and row.get("contact_name_1"):
                     contact_data = {
@@ -2404,23 +2395,27 @@ if company_name:
                         "email": row.get("contact_email_1") or None,
                         "phone": row.get("contact_phone_1") or None,
                     }
+
                     await db.clients.update_one(
                         {"id": current_client_id},
                         {"$push": {"contact_persons": contact_data}}
                     )
+
                     added_contacts += 1
                 else:
                     skipped_rows += 1
+
         except ValidationError as ve:
             invalid_rows += 1
             validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
             skipped_rows += 1
             continue
-        except Exception as e:
+
+        except Exception:
             invalid_rows += 1
             skipped_rows += 1
             continue
-    return {
+        return {
         "message": "Client import completed successfully",
         "clients_created": created_clients,
         "duplicate_clients_skipped": duplicate_clients,
