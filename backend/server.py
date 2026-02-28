@@ -337,6 +337,12 @@ class UserPermissions(BaseModel):
     view_other_activity: List[str] = Field(default_factory=list)
     can_edit_clients: bool = False
     can_use_chat: bool = False
+    
+class User(BaseModel):
+    id: str
+    name: str
+    email: str
+    permissions: list[str] = []
 class Todo(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
