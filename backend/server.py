@@ -101,7 +101,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
+SECRET_KEY = os.environ["SECRET_KEY"]  ⚠️ Important: This will crash app if SECRET_KEY missing — which is GOOD. You never want silent fallback in production.  🔎 Why This Is 100% The Issue  Your JWT decode:  payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])  If SECRET_KEY differs from login signing key → 401.  And your logs show intermittent 401 after login.  That only happens when:  token is valid  but signature fails  That is SECRET_KEY mismatch.  🧠 Everything Else In Your Code Is Correct  ✔ CORS has allow_credentials=True ✔ HTTPBearer correct ✔ ACCESS_TOKEN_EXPIRE_MINUTES = 7 days (good) ✔ notifications router correct ✔ bcrypt version fixed  Only missing stable SECRET_KEY in production.  🎯 Final Checklist  Do this:  Add SECRET_KEY in Render environment  Remove fallback default  Redeploy  Clear browser localStorage  Login again  After that, logs will show:  GET /api/notifications/ → 200 OK  No more random logout.  If you want, I can also help you:  Convert to refresh token system (enterprise-grade auth)  Add token blacklist on logout  Add multi-device session control  But first fix SECRET_KEY.
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 security = HTTPBearer()
