@@ -971,36 +971,40 @@ async def record_attendance(
         return Attendance(**updated)
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
-# ============================
-# STAFF RANKINGS (MONTHLY)
-# ============================
-@api_router.get("/staff/rankings")
-async def get_staff_rankings(
+
+# ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
+async def get_top_performers_data(
     period: str = "monthly",
-    current_user: User = Depends(check_permission("can_view_staff_activity"))
+    limit: int = 5,
+    db = None
 ):
+    """Single source of truth for both Dashboard Star Performers and Reports Top Performers"""
     now = datetime.now(timezone.utc)
 
-    if period not in ["monthly", "weekly", "all"]:
-        raise HTTPException(status_code=400, detail="Invalid period")
-
     # Date filter
-    if period == "monthly":
-        current_month = now.strftime("%Y-%m")
-        match_stage = {"date": {"$regex": f"^{current_month}"}}
-    elif period == "weekly":
-        start_of_week = now - timedelta(days=now.weekday())
-        week_prefix = start_of_week.strftime("%Y-%m-%d")
-        match_stage = {"date": {"$gte": week_prefix}}
-    else:
-        match_stage = {}
+    if period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:  # all_time
+        start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     pipeline = [
-        {"$match": match_stage},
+        {
+            "$match": {
+                "status": "completed",
+                "assigned_to": {"$ne": None},
+                # Support both completed_at (new) and updated_at (old tasks)
+                "$or": [
+                    {"completed_at": {"$gte": start_date.isoformat()}},
+                    {"updated_at": {"$gte": start_date.isoformat()}}
+                ]
+            }
+        },
         {
             "$group": {
-                "_id": "$user_id",
-                "total_minutes": {"$sum": "$duration_minutes"}
+                "_id": "$assigned_to",
+                "completed_tasks": {"$sum": 1}
             }
         },
         {
@@ -1008,43 +1012,30 @@ async def get_staff_rankings(
                 "from": "users",
                 "localField": "_id",
                 "foreignField": "id",
-                "as": "user"
+                "as": "user_info"
             }
         },
-        {"$unwind": "$user"},
-        {
-            "$match": {
-                "user.role": {"$ne": "admin"}
-            }
-        },
+        {"$unwind": "$user_info"},
         {
             "$project": {
-                "_id": 0,
                 "user_id": "$_id",
-                "user_name": "$user.full_name",
-                "profile_picture": "$user.profile_picture",
-                "total_minutes": 1
+                "user_name": "$user_info.full_name",
+                "profile_picture": "$user_info.profile_picture",
+                "completed_tasks": 1
             }
         },
-        {"$sort": {"total_minutes": -1}}
+        {"$sort": {"completed_tasks": -1}},
+        {"$limit": limit}
     ]
 
-    rankings = await db.attendance.aggregate(pipeline).to_list(100)
+    performers = await db.tasks.aggregate(pipeline).to_list(limit)
 
-    # Add rank position
-    for index, item in enumerate(rankings):
-        item["rank"] = index + 1
+    # Add rank
+    for idx, p in enumerate(performers):
+        p["rank"] = idx + 1
 
-    return {
-        "period": period,
-        "rankings": rankings
-    }
-   
-# ✅ Store in Cache
-    rankings_cache[period] = result
-    rankings_cache_time[period] = now
-    return result
-
+    return performers
+    
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
