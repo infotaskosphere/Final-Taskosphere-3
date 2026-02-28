@@ -22,7 +22,6 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid } from 'react-window';
-
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -31,12 +30,10 @@ const CLIENT_TYPES = [
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
 ];
-
 const SERVICES = [
   'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
-
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
@@ -51,20 +48,16 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-
   // NEW PREVIEW STATES
   const [previewData, setPreviewData] = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen] = useState(false);
-
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
-
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
@@ -78,11 +71,9 @@ export default function Clients() {
     notes: '',
     status: 'active',
   });
-
   // ADVANCED VALIDATION STATES (added for refined form validation)
   const [formErrors, setFormErrors] = useState({});
   const [contactErrors, setContactErrors] = useState([]);
-
   // Safe date formatter to prevent Invalid Date errors (fixes contact person upload issue)
   const safeDate = (dateStr) => {
     if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return null;
@@ -90,7 +81,6 @@ export default function Clients() {
     if (isNaN(date.getTime())) return null;
     return date.toISOString().split('T')[0];
   };
-
   useEffect(() => {
     fetchClients();
     if (canAssignClients) fetchUsers();
@@ -99,7 +89,6 @@ export default function Clients() {
       setDialogOpen(true);
     }
   }, [location]);
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -108,7 +97,6 @@ export default function Clients() {
       toast.error('Failed to fetch clients');
     }
   };
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -117,14 +105,12 @@ export default function Clients() {
       console.error('Failed to fetch users:', error);
     }
   };
-
   // ==================== UTILS ====================
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
-
   // ==================== MEMOIZED DATA ====================
   const stats = useMemo(() => {
     const totalClients = clients.length;
@@ -140,7 +126,6 @@ export default function Clients() {
     });
     return { totalClients, activeClients, serviceCounts };
   }, [clients]);
-
   const todayReminders = useMemo(() => {
     const today = startOfDay(new Date());
     return clients.filter(c => {
@@ -155,7 +140,6 @@ export default function Clients() {
       }) ?? false;
     });
   }, [clients]);
-
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -168,20 +152,16 @@ export default function Clients() {
       return matchesSearch && matchesService && matchesStatus;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
-
   const getClientNumber = (index) =>
     String(index + 1).padStart(3, '0');
-
   // ==================== ADVANCED FORM VALIDATION ====================
   const validateForm = () => {
     const errors = {};
     const cErrors = [];
-
     // Company Name
     if (!formData.company_name?.trim() || formData.company_name.trim().length < 2) {
       errors.company_name = 'Company name must be at least 2 characters';
     }
-
     // Email
     const trimmedEmail = formData.email?.trim();
     if (!trimmedEmail) {
@@ -189,7 +169,6 @@ export default function Clients() {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       errors.email = 'Please enter a valid email address';
     }
-
     // Phone (exactly 10 digits)
     const cleanPhone = formData.phone.replace(/\D/g, '');
     if (!cleanPhone) {
@@ -197,18 +176,15 @@ export default function Clients() {
     } else if (cleanPhone.length !== 10) {
       errors.phone = 'Phone number must be exactly 10 digits';
     }
-
     // Services
     if (formData.services.length === 0) {
       errors.services = 'At least one service must be selected';
     }
-
     // Contact Persons
     let hasValidContact = false;
     formData.contact_persons.forEach((cp, idx) => {
       const contactErr = {};
       const trimmedName = cp.name?.trim();
-
       if (!trimmedName) {
         if (cp.email?.trim() || cp.phone?.trim() || cp.designation?.trim() || cp.birthday || cp.din?.trim()) {
           contactErr.name = 'Contact name is required';
@@ -216,25 +192,20 @@ export default function Clients() {
       } else {
         hasValidContact = true;
       }
-
       if (cp.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cp.email.trim())) {
         contactErr.email = 'Invalid email format';
       }
-
       const cCleanPhone = cp.phone ? cp.phone.replace(/\D/g, '') : '';
       if (cCleanPhone && cCleanPhone.length !== 10) {
         contactErr.phone = 'Phone must be 10 digits';
       }
-
       if (Object.keys(contactErr).length > 0) {
         cErrors[idx] = contactErr;
       }
     });
-
     if (!hasValidContact) {
       errors.contacts = 'At least one contact person with a valid name is required';
     }
-
     // Duplicate email check
     const allEmails = new Set();
     if (trimmedEmail) allEmails.add(trimmedEmail.toLowerCase());
@@ -244,13 +215,10 @@ export default function Clients() {
     if (allEmails.size !== (trimmedEmail ? 1 : 0) + formData.contact_persons.filter(cp => cp.email?.trim()).length) {
       errors.email = (errors.email || '') + ' (duplicate email detected)';
     }
-
     setFormErrors(errors);
     setContactErrors(cErrors);
-
     return Object.keys(errors).length === 0 && cErrors.length === 0;
   };
-
   // ==================== HANDLERS ====================
   const downloadTemplate = () => {
     const headers = [
@@ -268,7 +236,6 @@ export default function Clients() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -318,92 +285,170 @@ export default function Clients() {
       }
     });
   };
-
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
       const workbook = XLSX.read(e.target.result, { type: 'binary' });
-      const normalizeHeader = (header) => {
-        if (!header) return '';
-        return header.toString().toLowerCase().replace(/\s+/g, '*');
-      };
-      let combinedRows = [];
-      workbook.SheetNames.forEach(sheetName => {
-        const sheet = workbook.Sheets[sheetName];
-        const rawRows = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-          defval: ''
+      if (workbook.SheetNames.includes('MasterData')) {
+        // Special handling for MDS data format (single company)
+        setImportLoading(true);
+        const masterSheet = workbook.Sheets['MasterData'];
+        const masterRows = XLSX.utils.sheet_to_json(masterSheet, { header: 1 });
+        const masterData = {};
+        masterRows.slice(1).forEach(row => {
+          if (row.length >= 2) {
+            const key = row[0].trim();
+            const value = row[1].trim();
+            masterData[key] = value;
+          }
         });
-        if (rawRows.length < 2) return;
-        const headers = rawRows[0].map(normalizeHeader);
-        for (let i = 1; i < rawRows.length; i++) {
-          const rowArray = rawRows[i];
-          if (rowArray.every(cell => cell === '')) continue;
-          let row = {};
-          headers.forEach((h, idx) => {
-            row[h] = rowArray[idx];
-          });
-          const companyName =
-            row.company_name ||
-            row.companyname ||
-            row['company name'] ||
-            '';
-          if (!companyName) continue;
-          const detectedType = detectClientTypeFromName(companyName);
-          combinedRows.push({
-            sheet: sheetName,
-            company_name: companyName,
-            client_type: row.client_type || detectedType,
-            email: row.email || '',
-            phone: row.phone || '',
-            birthday: row.birthday || '',
-            services: row.services || '',
-            notes: row.notes || ''
-          });
+        // Fix email
+        if (masterData['Email Id']) {
+          masterData['Email Id'] = masterData['Email Id'].replace(/\[dot\]/g, '.').replace(/\[at\]/g, '@');
         }
-      });
-      setPreviewHeaders([
-        'sheet',
-        'company_name',
-        'client_type',
-        'email',
-        'phone',
-        'birthday',
-        'services',
-        'notes'
-      ]);
-      setPreviewData(combinedRows);
-      setPreviewOpen(true);
+        // Birthday (Date of Incorporation)
+        let birthday = null;
+        if (masterData['Date of Incorporation']) {
+          const parts = masterData['Date of Incorporation'].split('/');
+          if (parts.length === 3) {
+            birthday = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          }
+        }
+        // Directors (contact persons)
+        const directorSheet = workbook.Sheets['Director Details'];
+        let contact_persons = [];
+        if (directorSheet) {
+          const directorData = XLSX.utils.sheet_to_json(directorSheet, {
+            header: ['srno', 'din', 'name', 'designation', 'category', 'appointment', 'cessation', 'signatory'],
+            range: 2 // Start from data rows (skipping title and headers)
+          });
+          contact_persons = directorData.map(d => ({
+            name: d.name?.trim() || '',
+            designation: d.designation?.trim() || '',
+            email: '',
+            phone: '',
+            birthday: null,
+            din: d.din?.trim() || ''
+          }));
+        }
+        // Client type detection
+        const client_type = detectClientTypeFromName(masterData['Company Name']);
+        // Services (default to ROC since it's from MDS)
+        const services = ['ROC'];
+        // Notes (compile relevant info)
+        const notes = `
+CIN: ${masterData['CIN'] || ''}
+Registered Address: ${masterData['Registered Address'] || ''}
+ROC Name: ${masterData['ROC Name'] || ''}
+Registration Number: ${masterData['Registration Number'] || ''}
+Authorised Capital (Rs): ${masterData['Authorised Capital (Rs)'] || ''}
+Paid up Capital (Rs): ${masterData['Paid up Capital (Rs)'] || ''}
+Date of last AGM: ${masterData['Date of last AGM'] || ''}
+Date of Balance Sheet: ${masterData['Date of Balance Sheet'] || ''}
+Company Status: ${masterData['Company Status'] || ''}
+        `.trim();
+        // Payload
+        const payload = {
+          company_name: masterData['Company Name']?.trim() || '',
+          client_type,
+          email: masterData['Email Id'] || '',
+          phone: '',
+          birthday,
+          services,
+          notes,
+          assigned_to: null,
+          contact_persons,
+          dsc_details: [],
+          status: 'active'
+        };
+        // Directly import
+        api.post('/clients', payload)
+          .then(() => {
+            toast.success('Client imported successfully from Master Data!');
+            fetchClients();
+            setImportLoading(false);
+          })
+          .catch(err => {
+            toast.error('Failed to import client: ' + (err.response?.data?.detail || err.message));
+            setImportLoading(false);
+          });
+      } else {
+        // Existing general Excel import logic
+        const normalizeHeader = (header) => {
+          if (!header) return '';
+          return header.toString().toLowerCase().replace(/\s+/g, '*');
+        };
+        let combinedRows = [];
+        workbook.SheetNames.forEach(sheetName => {
+          const sheet = workbook.Sheets[sheetName];
+          const rawRows = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            defval: ''
+          });
+          if (rawRows.length < 2) return;
+          const headers = rawRows[0].map(normalizeHeader);
+          for (let i = 1; i < rawRows.length; i++) {
+            const rowArray = rawRows[i];
+            if (rowArray.every(cell => cell === '')) continue;
+            let row = {};
+            headers.forEach((h, idx) => {
+              row[h] = rowArray[idx];
+            });
+            const companyName =
+              row.company_name ||
+              row.companyname ||
+              row['company name'] ||
+              '';
+            if (!companyName) continue;
+            const detectedType = detectClientTypeFromName(companyName);
+            combinedRows.push({
+              sheet: sheetName,
+              company_name: companyName,
+              client_type: row.client_type || detectedType,
+              email: row.email || '',
+              phone: row.phone || '',
+              birthday: row.birthday || '',
+              services: row.services || '',
+              notes: row.notes || ''
+            });
+          }
+        });
+        setPreviewHeaders([
+          'sheet',
+          'company_name',
+          'client_type',
+          'email',
+          'phone',
+          'birthday',
+          'services',
+          'notes'
+        ]);
+        setPreviewData(combinedRows);
+        setPreviewOpen(true);
+      }
     };
     reader.readAsBinaryString(file);
   };
-
   // UPDATED handleSubmit with Advanced Validation
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     const isValid = validateForm();
     if (!isValid) {
       toast.error('Please fix the highlighted errors before saving');
       return;
     }
-
     setLoading(true);
-
     try {
       // Remove raw "Other" tag and construct final services array
       let finalServices = [...formData.services];
       finalServices = finalServices.filter(s => !s.startsWith("Other:"));
-
       if (otherService.trim() && formData.services.includes("Other")) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
-
       // Clean main phone (digits only)
       const cleanPhone = formData.phone.replace(/\D/g, "");
-
       // Clean contact persons (robust date handling)
       const cleanedContacts = formData.contact_persons.map(cp => ({
         name: cp.name || "",
@@ -413,7 +458,6 @@ export default function Clients() {
         birthday: safeDate(cp.birthday),
         din: cp.din?.trim() || null
       }));
-
       // Construct backend-safe payload
       const payload = {
         company_name: formData.company_name.trim(),
@@ -428,25 +472,21 @@ export default function Clients() {
         contact_persons: cleanedContacts,
         dsc_details: formData.dsc_details || []
       };
-
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
       } else {
         await api.post("/clients", payload);
       }
-
       setDialogOpen(false);
       resetForm();
       fetchClients();
       toast.success("Saved successfully!");
-
     } catch (error) {
       toast.error(error.response?.data?.detail || "Error saving client");
     } finally {
       setLoading(false);
     }
   };
-
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
@@ -464,12 +504,10 @@ export default function Clients() {
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true);
-
     // Clear validation on edit
     setFormErrors({});
     setContactErrors([]);
   };
-
   const resetForm = () => {
     setFormData({
       company_name: '',
@@ -489,7 +527,6 @@ export default function Clients() {
     setFormErrors({});
     setContactErrors([]);
   };
-
   // Clear errors when dialog closes
   useEffect(() => {
     if (!dialogOpen) {
@@ -497,7 +534,6 @@ export default function Clients() {
       setContactErrors([]);
     }
   }, [dialogOpen]);
-
   // ==================== DYNAMIC FIELDS ====================
   const updateContact = (idx, field, val) => {
     setFormData(p => ({
@@ -514,32 +550,26 @@ export default function Clients() {
       setContactErrors(newCerr);
     }
   };
-
   const addContact = () => setFormData(p => ({
     ...p,
     contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }]
   }));
-
   const removeContact = (idx) => setFormData(p => ({
     ...p,
     contact_persons: p.contact_persons.filter((_, i) => i !== idx)
   }));
-
   const updateDSC = (idx, field, val) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
   }));
-
   const addDSC = () => setFormData(p => ({
     ...p,
     dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
   }));
-
   const removeDSC = (idx) => setFormData(p => ({
     ...p,
     dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
-
   const toggleService = (s) => {
     setFormData(p => {
       const services = p.services.includes(s)
@@ -552,7 +582,6 @@ export default function Clients() {
       setFormErrors(prev => ({ ...prev, services: undefined }));
     }
   };
-
   const addOtherService = () => {
     if (otherService.trim()) {
       setFormData(prev => ({
@@ -565,7 +594,6 @@ export default function Clients() {
       setOtherService('');
     }
   };
-
   const detectClientTypeFromName = (name = '') => {
     const lower = name.toLowerCase().trim();
     const normalized = lower.replace(/\s+/g, ' ');
@@ -602,7 +630,6 @@ export default function Clients() {
     }
     return 'proprietor';
   };
-
   // ────────────────────────────────────────────────
   // REFINED Virtualized Client Card Renderer – Premium SaaS look
   // ────────────────────────────────────────────────
@@ -610,7 +637,6 @@ export default function Clients() {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
     if (index >= filteredClients.length || !client) return null;
-
     return (
       <div style={style} className="p-4 box-border">
         <Card className="h-full w-full rounded-3xl border border-slate-100 bg-white overflow-hidden hover:shadow-2xl hover:border-indigo-200 hover:-translate-y-1 transition-all duration-300 group relative">
@@ -620,7 +646,6 @@ export default function Clients() {
               Archived
             </div>
           )}
-
           <div className="p-6 flex flex-col h-full">
             {/* Header with Avatar */}
             <div className="flex items-start gap-4 mb-5">
@@ -641,7 +666,6 @@ export default function Clients() {
                 </p>
               </div>
             </div>
-
             {/* Contact Info */}
             <div className="space-y-3 text-sm text-slate-600 flex-1">
               <div className="flex items-center gap-3">
@@ -653,7 +677,6 @@ export default function Clients() {
                 <span className="truncate">{client.email || '—'}</span>
               </div>
             </div>
-
             {/* Footer */}
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
               <div>
@@ -665,7 +688,6 @@ export default function Clients() {
                   </Badge>
                 )}
               </div>
-
               {/* Action Buttons */}
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
                 <button
@@ -709,7 +731,6 @@ export default function Clients() {
       </div>
     );
   };
-
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8 space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
@@ -736,7 +757,6 @@ export default function Clients() {
           >
             {importLoading ? 'Importing...' : 'Import CSV'}
           </Button>
-
           <Dialog open={dialogOpen} onOpenChange={(open) => {
             setDialogOpen(open);
             if (!open) resetForm();
@@ -831,7 +851,6 @@ export default function Clients() {
                       </div>
                     </div>
                   </div>
-
                   {/* Contact Persons */}
                   <div className="bg-white border border-slate-100 rounded-3xl p-8">
                     <div className="flex justify-between items-end mb-6">
@@ -929,7 +948,6 @@ export default function Clients() {
                       ))}
                     </div>
                   </div>
-
                   {/* Services */}
                   <div className="space-y-4">
                     <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Services Offered</Label>
@@ -966,7 +984,6 @@ export default function Clients() {
                       </div>
                     )}
                   </div>
-
                   {/* Notes */}
                   <div className="space-y-3">
                     <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Internal Notes</Label>
@@ -977,7 +994,6 @@ export default function Clients() {
                       onChange={e => setFormData({...formData, notes: e.target.value})}
                     />
                   </div>
-
                   {canAssignClients && (
                     <div className="space-y-3">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Assign To Staff</Label>
@@ -999,7 +1015,6 @@ export default function Clients() {
                       </Select>
                     </div>
                   )}
-
                   <DialogFooter className="pt-8 border-t flex flex-col sm:flex-row gap-4">
                     <div className="flex gap-3 flex-1">
                       <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-2xl">
@@ -1040,7 +1055,6 @@ export default function Clients() {
           </Dialog>
         </div>
       </div>
-
       {/* Today's Celebrations */}
       {canViewAllClients && todayReminders.length > 0 && (
         <Card className="bg-gradient-to-r from-pink-50 to-rose-50 border-pink-100 shadow-sm">
@@ -1061,7 +1075,6 @@ export default function Clients() {
           </CardContent>
         </Card>
       )}
-
       {/* Stats Dashboard */}
       {canViewAllClients && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -1113,7 +1126,6 @@ export default function Clients() {
           </Card>
         </div>
       )}
-
       {/* Filters */}
       <div className="flex flex-col lg:flex-row gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
@@ -1147,7 +1159,6 @@ export default function Clients() {
           </Select>
         </div>
       </div>
-
       {/* Virtualized Client Grid */}
       <div className="h-[72vh] min-h-[520px] w-full border border-slate-100 rounded-3xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
@@ -1191,7 +1202,6 @@ export default function Clients() {
           </div>
         )}
       </div>
-
       <input
         type="file"
         ref={fileInputRef}
@@ -1206,7 +1216,6 @@ export default function Clients() {
         onChange={handleImportExcel}
         className="hidden"
       />
-
       {/* Excel Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
