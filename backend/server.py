@@ -44,10 +44,16 @@ rankings_cache = {}
 rankings_cache_time = {}
 import openpyxl
 from openpyxl import load_workbook
+
 OFFICE_LAT = 21.1652
 OFFICE_LON = 72.7799
 ALLOWED_RADIUS_METERS = 2000
+
+APPROVED_OFFICE_IPS = [
+    "49.36.81.196",
+]
 india_tz = pytz.timezone("Asia/Kolkata")
+
 import requests
 
 # Added missing helper functions (required by the original code - they are called but were never defined)
@@ -887,48 +893,73 @@ async def get_me(current_user: User = Depends(get_current_user)):
     }, current_user)
 
 # ATTENDANCE ROUTE - FIXED: punch_in and punch_out now correctly inside one function
+def get_real_client_ip(request: Request):
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host
+
+
 @api_router.post("/attendance")
 async def record_attendance(
     data: dict,
+    request: Request,
     current_user: User = Depends(get_current_user)
 ):
     india_tz = pytz.timezone("Asia/Kolkata")
     now = datetime.now(india_tz)
     today_str = now.date().isoformat()
+
     # =========================
     # 🔹 PUNCH IN
     # =========================
     if data["action"] == "punch_in":
+
         existing = await db.attendance.find_one(
             {"user_id": current_user.id, "date": today_str},
             {"_id": 0}
         )
         if existing:
             raise HTTPException(status_code=400, detail="Already punched in today")
+
+        # 🔐 Get Client IP
+        client_ip = get_real_client_ip(request)
+        ip_allowed = client_ip in APPROVED_OFFICE_IPS
+
         # ✅ GEO-FENCING (ONLY PUNCH IN)
         location = data.get("location")
         if not location:
             raise HTTPException(status_code=400, detail="Location required")
+
         user_lat = location.get("latitude")
         user_lon = location.get("longitude")
+
         if user_lat is None or user_lon is None:
             raise HTTPException(status_code=400, detail="Invalid location data")
+
         distance = calculate_distance(
             float(user_lat),
             float(user_lon),
             OFFICE_LAT,
             OFFICE_LON
         )
-        if distance > ALLOWED_RADIUS_METERS:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Punch-in allowed only from office. You are {int(distance)} meters away."
-            )
+
+        # 🔒 FINAL SECURITY RULE:
+        # Allow if IP is approved OR within GPS radius
+        if not ip_allowed:
+            if distance > ALLOWED_RADIUS_METERS:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Punch-in allowed only from office. You are {int(distance)} meters away."
+                )
+
         # ⏰ Late Calculation
         is_late = False
         late_by_minutes = 0
+
         expected_str = current_user.expected_start_time
         grace = current_user.late_grace_minutes or 15
+
         if expected_str:
             try:
                 from datetime import time
@@ -946,6 +977,7 @@ async def record_attendance(
                         is_late = True
             except:
                 pass
+
         doc = {
             "id": str(uuid.uuid4()),
             "user_id": current_user.id,
@@ -956,9 +988,12 @@ async def record_attendance(
             "is_late": is_late,
             "late_by_minutes": late_by_minutes if is_late else 0,
             "location": location,
-            "distance_from_office_meters": int(distance)
+            "distance_from_office_meters": int(distance),
+            "ip_address": client_ip  # 🔍 logged for audit
         }
+
         await db.attendance.insert_one(doc)
+
         return Attendance(**doc)
     # =========================
     # 🔹 PUNCH OUT
