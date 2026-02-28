@@ -25,7 +25,9 @@ class Notification(NotificationBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     is_read: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # ==========================================================
@@ -69,12 +71,12 @@ async def create_notification(
 # ROUTES
 # ==========================================================
 
-@router.get("/", response_model=List[Notification])
+@router.get("", response_model=List[Notification])
 async def get_my_notifications(
     current_user = Depends(get_current_user)
 ):
     notifications = await db.notifications.find(
-        {"user_id": current_user.id},
+        {"user_id": current_user["_id"]},
         {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
 
@@ -90,7 +92,7 @@ async def get_unread_count(
     current_user = Depends(get_current_user)
 ):
     count = await db.notifications.count_documents({
-        "user_id": current_user.id,
+        "user_id": current_user["_id"],
         "is_read": False
     })
 
@@ -105,7 +107,7 @@ async def mark_notification_read(
     result = await db.notifications.update_one(
         {
             "id": notification_id,
-            "user_id": current_user.id
+            "user_id": current_user["_id"]
         },
         {"$set": {"is_read": True}}
     )
@@ -122,7 +124,7 @@ async def mark_all_read(
 ):
     await db.notifications.update_many(
         {
-            "user_id": current_user.id,
+            "user_id": current_user["_id"],
             "is_read": False
         },
         {"$set": {"is_read": True}}
@@ -139,7 +141,7 @@ async def delete_notification(
     result = await db.notifications.delete_one(
         {
             "id": notification_id,
-            "user_id": current_user.id
+            "user_id": current_user["_id"]
         }
     )
 
