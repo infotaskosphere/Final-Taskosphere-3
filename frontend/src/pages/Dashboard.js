@@ -103,7 +103,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
       `}
       onClick={(e) => {
         e.stopPropagation();
-        navigate(`/tasks?filter=assigned-to-me`); // Enhanced: always opens detail view
+        navigate(`/tasks?filter=assigned-to-me&taskId=${task.id}`); // Enhanced: always opens detail view
       }}
     >
       {/* Title + Capsules */}
