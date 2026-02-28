@@ -12,6 +12,7 @@ from dateutil import parser
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from backend.dependencies import check_permission
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
