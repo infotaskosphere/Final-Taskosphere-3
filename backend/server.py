@@ -2119,4 +2119,8 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
     if updated.get("birthday") and isinstance(updated["birthday"], str):
         updated["birthday"] = date.fromisoformat(updated["birthday"])
     return Client(**updated)
-@api_router.delete("/clients/{client
+@api_router.delete("/clients/{client_id}")
+async def delete_client(
+    client_id: str,
+    current_user: User = Depends(get_current_user)
+):
