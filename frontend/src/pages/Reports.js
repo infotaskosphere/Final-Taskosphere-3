@@ -74,7 +74,7 @@ export default function Reports() {
   useEffect(() => {
     const fetchStarPerformers = async () => {
       try {
-        const rankingsRes = await api.get('/api/reports/performance-rankings', {
+        const rankingsRes = await api.get('/reports/performance-rankings', {
           params: { period: rankingPeriod === "all" ? "all_time" : rankingPeriod },
         });
         setStarPerformers(rankingsRes.data || []);
