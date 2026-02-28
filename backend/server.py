@@ -641,8 +641,8 @@ async def health():
 # ───────────────────────────────────────────────────────────────
 @api_router.post("/clients/import-master")
 async def import_clients_master(
-    file: UploadFile = File(...),
     background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
     if current_user.role != "admin":
