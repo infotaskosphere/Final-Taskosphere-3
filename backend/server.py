@@ -2,6 +2,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import db, get_current_user
 from typing import Optional
+from backend.dependencies import create_access_token
 from datetime import date
 import pytz
 import logging
@@ -669,12 +670,6 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return pwd_context.hash(password)
-
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # Email helper function
 def send_email(to_email: str, subject: str, body: str):
