@@ -1110,44 +1110,51 @@ async def get_staff_rankings(
         query = {}
 
     attendance_list = await db.attendance.find(
-        query,
-        {"_id": 0}
-    ).to_list(5000)
+    query,
+    {"_id": 0}
+).to_list(5000)
 
-    # Aggregate total duration per user
-    ranking_map = {}
-    for record in attendance_list:
-        uid = record.get("user_id")
-        duration = record.get("duration_minutes") or 0
-        if uid:
-            ranking_map[uid] = ranking_map.get(uid, 0) + duration
+# Aggregate total duration per user
+ranking_map = {}
 
-    # Sort users by total minutes
-    sorted_users = sorted(
-        ranking_map.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
+for record in attendance_list:
+    uid = record.get("user_id")
+    duration = record.get("duration_minutes") or 0
 
-    user_ids = [uid for uid, _ in sorted_users]
+    if uid:
+        ranking_map[uid] = ranking_map.get(uid, 0) + duration
 
-    # Fetch user names once
-    users = await db.users.find(
-        {"id": {"$in": user_ids}},
-        {"_id": 0, "id": 1, "full_name": 1}
-    ).to_list(1000)
+# Convert to sorted list
+sorted_users = sorted(
+    ranking_map.items(),
+    key=lambda x: x[1],
+    reverse=True
+)
 
-    user_map = {u["id"]: u["full_name"] for u in users}
+rankings = []
 
-    rankings = []
+for index, (uid, minutes) in enumerate(sorted_users, start=1):
 
-    for index, (uid, minutes) in enumerate(sorted_users, start=1):
-        rankings.append({
-            "user_id": uid,
-            "user_name": user_map.get(uid, "Unknown User"),
-            "rank": index,
-            "total_minutes": minutes
-        })
+    # Fetch user by Mongo _id
+    try:
+        user = await db.users.find_one({"_id": ObjectId(uid)})
+    except:
+        user = None
+
+    # Skip if user not found
+    if not user:
+        continue
+
+    # Skip admin users
+    if user.get("role") == "admin":
+        continue
+
+    rankings.append({
+        "user_id": str(uid),
+        "user_name": user.get("full_name", "Unknown User"),
+        "rank": index,
+        "total_minutes": minutes
+    })
 
     result = {
         "period": period,
