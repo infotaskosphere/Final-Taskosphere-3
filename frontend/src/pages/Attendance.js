@@ -49,7 +49,7 @@ export default function Attendance() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [showPunchInModal, setShowPunchInModal] = useState(false);
-  const [yesterdayUnfinishedTodos, setYesterdayUnfinishedTodos] = useState([]);
+  
   // --- ADDED STATES (NO DELETIONS) ---
   const [myRank, setMyRank] = useState('—');
   const [tasksCompleted, setTasksCompleted] = useState(0);
@@ -58,24 +58,7 @@ export default function Attendance() {
   useEffect(() => {
     fetchData();
   }, []);
-  useEffect(() => {
-    const fetchYesterdayTodos = async () => {
-      try {
-        const res = await api.get('/tasks');
-        const yesterday = subDays(new Date(), 1);
-        const yesterdayStr = yesterday.toDateString();
-        const unfinished = res.data.filter(task =>
-          task.type === 'todo' &&
-          new Date(task.created_at).toDateString() === yesterdayStr &&
-          task.status !== 'completed'
-        );
-        setYesterdayUnfinishedTodos(unfinished);
-      } catch (err) {
-        console.error('Failed to load yesterday todos', err);
-      }
-    };
-    fetchYesterdayTodos();
-  }, [user?.id]);
+  
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
       setShowPunchInModal(true);
@@ -470,47 +453,47 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Unfinished Todos from Yesterday */}
+      {/* Monthly Performance Summary */}
       <motion.div variants={itemVariants}>
-        <Card className="border border-red-200 bg-red-50/30 shadow-sm">
+        <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-700">
-              <Clock className="h-5 w-5" />
-              Unfinished Todos from Yesterday
+            <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+              <TrendingUp className="h-5 w-5" />
+              Monthly Performance Summary
             </CardTitle>
-            <CardDescription>Complete these to clear your backlog</CardDescription>
+            <CardDescription>
+              Your attendance insights for {format(selectedDate, 'MMMM yyyy')}
+            </CardDescription>
           </CardHeader>
+
           <CardContent>
-            {yesterdayUnfinishedTodos.length === 0 ? (
-              <p className="text-center py-6 text-slate-500 text-sm">
-                All caught up! No unfinished todos from yesterday.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {yesterdayUnfinishedTodos.map((todo) => (
-                  <div
-                    key={todo.id}
-                    className="flex items-center justify-between p-4 bg-white rounded-xl border shadow-sm hover:shadow-md transition"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-900">{todo.title}</p>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Added: {format(new Date(todo.created_at), 'MMM d, yyyy')}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        toast.success('Marked as done (implement patch if needed)');
-                      }}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      Mark Done
-                    </Button>
-                  </div>
-                ))}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              {/* Total Hours */}
+              <div className="bg-white rounded-xl p-5 border shadow-sm">
+                <p className="text-xs text-slate-500 uppercase">Total Hours</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
+                  {formatDuration(monthTotalMinutes)}
+                </p>
               </div>
-            )}
+
+                {/* Days Present */}
+              <div className="bg-white rounded-xl p-5 border shadow-sm">
+                <p className="text-xs text-slate-500 uppercase">Days Present</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
+                  {monthDaysPresent}
+                </p>
+              </div>
+
+              {/* Days Late */}
+              <div className="bg-white rounded-xl p-5 border shadow-sm">
+                <p className="text-xs text-slate-500 uppercase">Days Late</p>
+                <p className="text-2xl font-bold mt-1 text-red-500">
+                    {totalDaysLateThisMonth}
+                  </p>
+                </div>
+
+            </div>
           </CardContent>
         </Card>
       </motion.div>
@@ -587,23 +570,7 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Monthly Summary */}
-      {mySummary?.monthly_summary && mySummary.monthly_summary.length > 0 && (
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg font-outfit" style={{ color: COLORS.deepBlue }}>
-                Monthly Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <p className="text-center py-4 text-slate-500">Monthly details table/chart goes here</p>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+
       {/* Auto Punch-In Popup */}
       {showPunchInModal && (
         <motion.div
