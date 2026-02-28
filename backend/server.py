@@ -860,35 +860,50 @@ async def register(
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
+    # 1. Find user by email
     user = await db.users.find_one({"email": credentials.email})
+    
+    # 2. Verify password
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # 3. Prepare user object for the response
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
     if isinstance(user["created_at"], str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
+    
+    # 4. Create Pydantic model
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
+    
+    # ✅ 5. CREATE TOKEN USING UUID STRING
+    # We use user_obj.id (the UUID) so get_current_user can find it later
     access_token = create_access_token({"sub": user_obj.id})
+    
     return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
+    """
+    Returns the current user's profile.
+    Uses current_user.id (UUID string) to ensure consistency with the frontend.
+    """
     # Explicitly build the response to guarantee the fields are included
-    return sanitize_user_data({
-        "id": current_user.id,
+    user_info = {
+        "id": current_user.id, # ✅ Ensure UUID string is used
         "email": current_user.email,
         "full_name": current_user.full_name,
         "role": current_user.role,
         "profile_picture": current_user.profile_picture,
         "permissions": current_user.permissions.model_dump() if current_user.permissions else None,
         "departments": current_user.departments,
-        # ───────────────────────────────────────────────────────────────
-        # These are the two fields you need for per-user late calculation
         "expected_start_time": current_user.expected_start_time,
         "late_grace_minutes": current_user.late_grace_minutes,
-        # ───────────────────────────────────────────────────────────────
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "is_active": current_user.is_active
-    }, current_user)
+    }
+    
+    # Apply the redrafted sanitization
+    return sanitize_user_data(user_info, current_user)
 
 # ATTENDANCE ROUTE - FIXED: punch_in and punch_out now correctly inside one function
 @api_router.post("/attendance")
