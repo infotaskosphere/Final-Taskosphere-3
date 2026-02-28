@@ -80,21 +80,25 @@ def sanitize_user_data(user_data, current_user):
     """ 
     Remove sensitive fields for non-admin users 
     """
-    # If admin → return full data
-    # Admin check ensures data transparency for privileged users
     if current_user.role.lower() == "admin":
         return user_data
 
-    # Helper to convert object to dict
     def to_dict(obj):
-        # ✅ FIXED: Corrected 'u' reference to 'obj' and added model_dump support for Pydantic v2
         if hasattr(obj, "model_dump"):
             return obj.model_dump()
         elif hasattr(obj, "dict"):
             return obj.dict()
-        return dict(obj)
+        return dict(obj) if not isinstance(obj, dict) else obj
 
-    # If list of users
+    if isinstance(user_data, list):
+        sanitized = []
+        for item in user_data:
+            sanitized.append(to_dict(item))
+        return sanitized
+
+    # ✅ FIXED: Reference 'user_data' directly instead of 'u'
+    return to_dict(user_data)
+    # Case 1: If user_data is a list (e.g., from the /users endpoint)
     if isinstance(user_data, list):
         # Iterates through list to sanitize each entry
         sanitized = []
@@ -102,8 +106,8 @@ def sanitize_user_data(user_data, current_user):
             sanitized.append(to_dict(item))
         return sanitized
 
-    # If single user
-    # ✅ FIXED: Removed 'u' which caused the crash; correctly uses 'user_data'
+    # Case 2: If user_data is a single user object (e.g., from /auth/me)
+    # ✅ FIXED: Corrected reference to 'user_data' to prevent NameError startup crash
     return to_dict(user_data)
 
 logger = logging.getLogger(__name__)
@@ -883,13 +887,8 @@ async def login(credentials: UserLogin):
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
-    """
-    Returns the current user's profile.
-    Uses current_user.id (UUID string) to ensure consistency with the frontend.
-    """
-    # Explicitly build the response to guarantee the fields are included
     user_info = {
-        "id": current_user.id, # ✅ Ensure UUID string is used
+        "id": current_user.id, 
         "email": current_user.email,
         "full_name": current_user.full_name,
         "role": current_user.role,
@@ -898,9 +897,13 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "departments": current_user.departments,
         "expected_start_time": current_user.expected_start_time,
         "late_grace_minutes": current_user.late_grace_minutes,
-        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "created_at": current_user.created_at.isoformat() if hasattr(current_user.created_at, 'isoformat') else current_user.created_at,
         "is_active": current_user.is_active
     }
+    return sanitize_user_data(user_info, current_user)
+    
+    # 2. Return sanitized data using the fixed helper above
+    return sanitize_user_data(user_info, current_user)
     
     # Apply the redrafted sanitization
     return sanitize_user_data(user_info, current_user)
