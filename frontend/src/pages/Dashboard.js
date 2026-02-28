@@ -225,7 +225,7 @@ export default function Dashboard() {
     async function fetchRankings() {
       try {
         const apiPeriod = rankingPeriod === "all" ? "all_time" : rankingPeriod;
-        const rankingRes = await api.get("/api/reports/performance-rankings", {
+        const rankingRes = await api.get("/reports/performance-rankings", {
           params: {
             period: apiPeriod,
           },
