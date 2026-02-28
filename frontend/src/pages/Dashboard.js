@@ -907,12 +907,7 @@ export default function Dashboard() {
                           <p className={`text-sm sm:text-base font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
                             {member.name || 'Unknown User'}
                           </p>
-                          <RoleGuard>
-                            <p className="text-xs text-slate-500 capitalize">
-                              {member.role || 'Staff'}
-                            </p>
-                          </RoleGuard>
-                        </div>
+                       </div>
                       </div>
                       <div className="text-right">
                         <p className={`text-sm sm:text-base font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
