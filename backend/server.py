@@ -1,6 +1,6 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
-from backend.dependencies import db, get_current_user
+from backend.dependencies import db, get_current_user, create_access_token
 from typing import Optional
 from backend.dependencies import create_access_token
 from datetime import date
@@ -109,27 +109,6 @@ security = HTTPBearer()
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-
-async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if user is None:
-        raise credentials_exception
-    user["permissions"] = user.get("permissions", UserPermissions().model_dump())
-    if isinstance(user.get("created_at"), str):
-        user["created_at"] = datetime.fromisoformat(user["created_at"])
-    return User(**user)
 
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
