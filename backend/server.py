@@ -1408,7 +1408,8 @@ async def get_dsc_list(
     query = {}
     # 🔎 Universal search (works across all tabs)
     if search:
-        search_regex = {"$regex": search, "$options": "i"}
+        safe_search = re.escape(search)
+        search_regex = {"$regex": safe_search, "$options": "i"}
         query["$or"] = [
             {"holder_name": search_regex},
             {"dsc_type": search_regex},
@@ -2315,32 +2316,48 @@ async def import_clients_from_file(
         try:
             row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
             company_name = row.get("company_name", "").strip()
-            # ====================== NEW CLIENT ROW ======================
-            if company_name:
-                # Check duplicate
-                existing = await db.clients.find_one({
-                    "company_name": {"$regex": f"^{company_name}$", "$options": "i"}
-                })
-                if existing:
-                    current_client_id = existing["id"]
-                    duplicate_clients += 1
-                    continue
-                # Parse birthday
-                birthday = None
-                if row.get("birthday"):
-                    try:
-                        birthday = parser.parse(row["birthday"]).date()
-                    except:
-                        birthday = None
-                services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
-                contact_persons = []
-                if row.get("contact_name_1"):
-                    contact_persons.append({
-                        "name": row.get("contact_name_1"),
-                        "designation": row.get("contact_designation_1"),
-                        "email": row.get("contact_email_1") or None,
-                        "phone": row.get("contact_phone_1") or None,
-                    })
+# ====================== NEW CLIENT ROW ======================
+if company_name:
+    safe_company = re.escape(company_name)
+
+    user_id = current_user.id
+    if not isinstance(user_id, ObjectId):
+        user_id = ObjectId(user_id)
+
+    existing = await db.clients.find_one({
+        "user_id": user_id,
+        "company_name": {
+            "$regex": f"^{safe_company}$",
+            "$options": "i"
+        }
+    })
+
+    if existing:
+        current_client_id = str(existing["_id"])  # ✅ FIXED
+        duplicate_clients += 1
+        continue
+
+    # Parse birthday safely
+    birthday = None
+    if row.get("birthday"):
+        try:
+            birthday = parser.parse(row["birthday"]).date()
+        except Exception:
+            birthday = None
+
+    services = [
+        s.strip() for s in row.get("services", "").split(",") if s.strip()
+    ]
+
+    contact_persons = []
+    if row.get("contact_name_1"):
+        contact_persons.append({
+            "name": row.get("contact_name_1"),
+            "designation": row.get("contact_designation_1"),
+            "email": row.get("contact_email_1") or None,
+            "phone": row.get("contact_phone_1") or None,
+        })
+        
                 # === FULL PYDANTIC VALIDATION ===
                 client_create = ClientCreate(
                     company_name=company_name,
