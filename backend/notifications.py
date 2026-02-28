@@ -64,13 +64,13 @@ async def create_notification(
 # ROUTES
 # ==========================================================
 
-@router.get("", response_model=List[Notification])
+@router.get("/", response_model=List[Notification])
 async def get_my_notifications(
     current_user = Depends(get_current_user)
 ):
-    # ✅ Use current_user["id"] to match UUID consistency fix
+    # ✅ Use current_user.id to match UUID consistency fix
     notifications = await db.notifications.find(
-        {"user_id": current_user["id"]}, 
+        {"user_id": current_user.id}, 
         {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
 
@@ -85,9 +85,9 @@ async def get_my_notifications(
 async def get_unread_count(
     current_user = Depends(get_current_user)
 ):
-    # ✅ Use current_user["id"]
+    # ✅ Use current_user.id
     count = await db.notifications.count_documents({
-        "user_id": current_user["id"],
+        "user_id": current_user.id,
         "is_read": False
     })
 
@@ -99,11 +99,11 @@ async def mark_notification_read(
     notification_id: str,
     current_user = Depends(get_current_user)
 ):
-    # ✅ Use current_user["id"]
+    # ✅ Use current_user.id
     result = await db.notifications.update_one(
         {
             "id": notification_id,
-            "user_id": current_user["id"]
+            "user_id": current_user.id
         },
         {"$set": {"is_read": True}}
     )
@@ -118,10 +118,10 @@ async def mark_notification_read(
 async def mark_all_read(
     current_user = Depends(get_current_user)
 ):
-    # ✅ Use current_user["id"]
+    # ✅ Use current_user.id
     await db.notifications.update_many(
         {
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "is_read": False
         },
         {"$set": {"is_read": True}}
@@ -135,11 +135,11 @@ async def delete_notification(
     notification_id: str,
     current_user = Depends(get_current_user)
 ):
-    # ✅ Use current_user["id"]
+    # ✅ Use current_user.id
     result = await db.notifications.delete_one(
         {
             "id": notification_id,
-            "user_id": current_user["id"]
+            "user_id": current_user.id
         }
     )
 
