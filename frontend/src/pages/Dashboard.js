@@ -172,7 +172,6 @@ export default function Dashboard() {
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
   const queryClient = useQueryClient();
-
   // Dedicated Todos Query (separate from tasks)
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos"],
@@ -181,7 +180,6 @@ export default function Dashboard() {
       return res.data;
     },
   });
-
   const tasksAssignedToMe = useMemo(() => {
     return tasks
       .filter(
@@ -200,14 +198,12 @@ export default function Dashboard() {
       )
       .slice(0, 6);
   }, [tasks, user]);
-
   const todos = useMemo(() => {
     return todosRaw.map((todo) => ({
       ...todo,
       completed: todo.status === "completed",
     }));
   }, [todosRaw]);
-
   const recentTasks = useMemo(() => {
     return tasks.slice(0, 5);
   }, [tasks]);
@@ -238,7 +234,6 @@ export default function Dashboard() {
     }
     fetchRankings();
   }, [rankingPeriod]);
-
   // Create Todo
   const createTodo = useMutation({
     mutationFn: (data) => api.post("/todos", data),
@@ -248,7 +243,6 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to add todo"),
   });
-
   // Update Todo
   const updateTodo = useMutation({
     mutationFn: ({ id, status }) =>
@@ -256,7 +250,6 @@ export default function Dashboard() {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["todos"] }),
   });
-
   // Delete Todo
   const deleteTodo = useMutation({
     mutationFn: (id) => api.delete(`/todos/${id}`),
@@ -266,10 +259,8 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to delete todo"),
   });
-
   const addTodo = () => {
     if (!newTodo.trim()) return;
-
     const todoPayload = {
       title: newTodo.trim(),
       status: "pending",
@@ -277,9 +268,7 @@ export default function Dashboard() {
         ? selectedDueDate.toISOString()
         : null,
     };
-
     createTodo.mutate(todoPayload);
-
     setNewTodo("");
     setSelectedDueDate(undefined);
   };
@@ -303,10 +292,8 @@ export default function Dashboard() {
   const handleToggleTodo = (id) => {
     const todo = todosRaw.find((t) => t.id === id);
     if (!todo) return;
-
     const newStatus =
       todo.status === "completed" ? "pending" : "completed";
-
     updateTodo.mutate({ id, status: newStatus });
   };
  const handleDeleteTodo = (id) => {
@@ -391,6 +378,74 @@ export default function Dashboard() {
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const [defaultGroup, setDefaultGroup] = useState(null);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // REFACTORED STAR PERFORMERS DISPLAY (clean, modern, using exact backend fields)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const RankingItem = React.memo(({ member, index, period }) => {
+    const isTop = index === 0;
+    const isSecond = index === 1;
+    const isThird = index === 2;
+    const rank = index + 1;
+
+    const getMedal = () => {
+      if (isTop) return '🥇';
+      if (isSecond) return '🥈';
+      if (isThird) return '🥉';
+      return `#${rank}`;
+    };
+
+    const getBgClass = () => {
+      if (isTop) return "bg-gradient-to-r from-yellow-100 via-amber-50 to-yellow-50 border-yellow-300 shadow-md";
+      if (isSecond) return "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300";
+      if (isThird) return "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300";
+      return "bg-slate-50 border-slate-200 hover:bg-slate-100";
+    };
+
+    return (
+      <motion.div
+        whileHover={{ y: -2 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${getBgClass()}`}
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-9 text-2xl font-bold text-center">
+            {getMedal()}
+          </div>
+          <div className={`w-12 h-12 rounded-2xl overflow-hidden ring-2 flex-shrink-0 ${isTop ? 'ring-yellow-400' : 'ring-slate-200'}`}>
+            {member.profile_picture ? (
+              <img
+                src={member.profile_picture}
+                alt={member.user_name || 'User'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className={`w-full h-full flex items-center justify-center text-white font-semibold text-2xl ${isTop ? 'bg-yellow-500' : 'bg-slate-700'}`}>
+                {member.user_name ? member.user_name.charAt(0).toUpperCase() : '?'}
+              </div>
+            )}
+          </div>
+          <div>
+            <p className={`font-semibold text-lg ${isTop ? 'text-yellow-800' : 'text-slate-900'}`}>
+              {member.user_name || 'Unknown User'}
+            </p>
+            <p className="text-xs text-slate-500">Team Member</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className={`text-2xl font-bold tracking-tighter ${isTop ? 'text-yellow-700' : 'text-emerald-700'}`}>
+            {member.total_minutes
+              ? `${Math.floor(member.total_minutes / 60)}h ${String(member.total_minutes % 60).padStart(2, '0')}m`
+              : '0h 00m'}
+          </p>
+          <p className="text-xs text-slate-500 font-medium">
+            this {period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'period'}
+          </p>
+        </div>
+      </motion.div>
+    );
+  });
+
   return (
     <motion.div
       className="space-y-4 sm:space-y-6"
@@ -618,7 +673,7 @@ export default function Dashboard() {
                     <div
                       key={task.id}
                       className={`py-2 px-3 rounded-lg border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
-                      onClick={() => navigate('/tasks')} // ← made clickable
+                      onClick={() => navigate('/tasks')}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -678,7 +733,7 @@ export default function Dashboard() {
                     <div
                       key={due.id}
                       className={`py-2 px-3 rounded-lg border cursor-pointer hover:shadow-md hover:border-orange-300 transition ${color.bg}`}
-                      onClick={() => navigate('/duedates')} // ← made clickable
+                      onClick={() => navigate('/duedates')}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-sm text-slate-900 truncate">
@@ -878,48 +933,15 @@ export default function Dashboard() {
                 No ranking data available
               </div>
             ) : (
-              <div className="space-y-3 max-h-[340px] sm:max-h-[380px] overflow-y-auto pr-2">
-                {rankings.slice(0, 5).map((member, index) => {
-                  const isTop = index === 0;
-                  const isSecond = index === 1;
-                  const isThird = index === 2;
-                  return (
-                    <div key={member.user_id || index} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl transition border cursor-pointer hover:bg-slate-100 ${
-                      isTop ? "bg-gradient-to-r from-yellow-100 via-yellow-50 to-amber-100 border-yellow-300 shadow-md" :
-                      isSecond ? "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300" :
-                      isThird ? "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300" :
-                      "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-7 text-sm font-semibold">
-                          {isTop && "🥇"}{isSecond && "🥈"}{isThird && "🥉"}{!isTop && !isSecond && !isThird && `#${member.rank || index + 1}`}
-                        </div>
-                        <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0 ${isTop ? "ring-2 ring-yellow-400" : "bg-slate-200"}`}>
-                          {member.profile_picture ? (
-                            <img src={member.profile_picture} alt={member.name || 'User'} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className={`w-full h-full flex items-center justify-center text-xs font-semibold text-white ${isTop ? "bg-yellow-500" : "bg-emerald-500"}`}>
-                              {member.name ? member.name.charAt(0).toUpperCase() : '?'}
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <p className={`text-sm sm:text-base font-medium ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
-                            {member.name || 'Unknown User'}
-                          </p>
-                       </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm sm:text-base font-semibold ${isTop ? "text-yellow-700" : "text-slate-900"}`}>
-                          {member.score ? `${member.score}%` : 'N/A'}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {member.hours_worked ? `${member.hours_worked}h` : '0h'} worked
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="space-y-3 max-h-[380px] overflow-y-auto pr-2">
+                {rankings.slice(0, 5).map((member, index) => (
+                  <RankingItem
+                    key={member.user_id || index}
+                    member={member}
+                    index={index}
+                    period={rankingPeriod}
+                  />
+                ))}
               </div>
             )}
             {rankings.length > 5 && (
