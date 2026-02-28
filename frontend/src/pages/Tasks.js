@@ -132,6 +132,9 @@ export default function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('list');
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const highlightId = params.get("taskId");
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
