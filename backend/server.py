@@ -108,16 +108,29 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
+
         # Admin override
         if current_user.role == "admin":
             return current_user
-        user_permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+
+        # Safely extract permissions (handle both dict and model)
+        permissions = current_user.permissions
+
+        if isinstance(permissions, dict):
+            user_permissions = permissions
+        elif permissions:
+            user_permissions = permissions.model_dump()
+        else:
+            user_permissions = {}
+
         if not user_permissions.get(permission_name, False):
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission"
             )
+
         return current_user
+
     return dependency
 app = FastAPI()
 @app.get("/health")
