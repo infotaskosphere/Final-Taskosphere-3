@@ -453,7 +453,7 @@ class ClientBase(BaseModel):
     def validate_phone(cls, v: str) -> str:
         if not v or not str(v).strip():
             raise ValueError('Phone number is required')
-        cleaned = re.sub(r'[\s- +]+', '', str(v))
+        cleaned = re.sub(r"\s|-|\+", "", str(v))
         if not cleaned.isdigit():
             raise ValueError('Phone number must contain only digits')
         if not (10 <= len(cleaned) <= 15):
@@ -2319,15 +2319,17 @@ async def import_clients_from_file(
             row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
             company_name = row.get("company_name", "").strip()
 # ====================== NEW CLIENT ROW ======================
+# ====================== NEW CLIENT ROW ======================
 if company_name:
+    # 🔒 Escape regex safely
     safe_company = re.escape(company_name)
 
+    # 🔒 Safe user_id handling (your system uses string UUID)
     user_id = current_user.id
-    if not isinstance(user_id, ObjectId):
-        user_id = ObjectId(user_id)
 
+    # 🔍 Check duplicate per user (case-insensitive exact match)
     existing = await db.clients.find_one({
-        "user_id": user_id,
+        "created_by": user_id,
         "company_name": {
             "$regex": f"^{safe_company}$",
             "$options": "i"
@@ -2335,11 +2337,11 @@ if company_name:
     })
 
     if existing:
-        current_client_id = str(existing["_id"])  # ✅ FIXED
+        current_client_id = existing["id"]  # ✅ use UUID field
         duplicate_clients += 1
         continue
 
-    # Parse birthday safely
+    # 🎂 Parse birthday safely
     birthday = None
     if row.get("birthday"):
         try:
@@ -2347,11 +2349,16 @@ if company_name:
         except Exception:
             birthday = None
 
+    # 🛠 Parse services
     services = [
-        s.strip() for s in row.get("services", "").split(",") if s.strip()
+        s.strip()
+        for s in row.get("services", "").split(",")
+        if s.strip()
     ]
 
+    # 👤 Parse contact persons
     contact_persons = []
+
     if row.get("contact_name_1"):
         contact_persons.append({
             "name": row.get("contact_name_1"),
@@ -2359,28 +2366,35 @@ if company_name:
             "email": row.get("contact_email_1") or None,
             "phone": row.get("contact_phone_1") or None,
         })
-        
-                # === FULL PYDANTIC VALIDATION ===
-                client_create = ClientCreate(
-                    company_name=company_name,
-                    client_type=row.get("client_type") or "other",
-                    email=row.get("email"),
-                    phone=row.get("phone") or "9999999999", # temporary fallback - will be cleaned
-                    birthday=birthday,
-                    services=services,
-                    contact_persons=contact_persons,
-                    notes=row.get("notes")
-                )
-                client_doc = client_create.model_dump()
-                client_doc["id"] = str(uuid.uuid4())
-                client_doc["created_by"] = current_user.id
-                client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
-                # Clean temporary phone
-                if client_doc.get("phone") == "9999999999":
-                    client_doc["phone"] = row.get("phone") or ""
-                await db.clients.insert_one(client_doc)
-                current_client_id = client_doc["id"]
-                created_clients += 1
+
+    # ✅ FULL PYDANTIC VALIDATION
+    client_create = ClientCreate(
+        company_name=company_name,
+        client_type=row.get("client_type") or "other",
+        email=row.get("email"),
+        phone=row.get("phone") or "9999999999",  # temporary fallback
+        birthday=birthday,
+        services=services,
+        contact_persons=contact_persons,
+        notes=row.get("notes")
+    )
+
+    client_doc = client_create.model_dump()
+
+    # 🆔 Add UUID-based ID (your system standard)
+    client_doc["id"] = str(uuid.uuid4())
+    client_doc["created_by"] = user_id
+    client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Clean fallback phone if used
+    if client_doc.get("phone") == "9999999999":
+        client_doc["phone"] = row.get("phone") or ""
+
+    # 💾 Insert into DB
+    await db.clients.insert_one(client_doc)
+
+    current_client_id = client_doc["id"]
+    created_clients += 1
             # ====================== ADDITIONAL CONTACT ROW ======================
             else:
                 if current_client_id and row.get("contact_name_1"):
