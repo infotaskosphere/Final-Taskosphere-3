@@ -1004,7 +1004,7 @@ export default function Dashboard() {
               <div className="space-y-3 max-h-[320px] sm:max-h-[420px] overflow-y-auto pr-2">
                 {todos.map((todo) => (
                   <div
-                    key={todo.id}
+                    key={todo._id}
                     className={`flex items-center justify-between gap-3 p-4 rounded-2xl border ${
                       todo.completed ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'
                     } ${!todo.completed && isOverdue(todo.due_date) ? 'border-red-400 bg-red-50/60' : ''}`}
@@ -1013,7 +1013,7 @@ export default function Dashboard() {
                       <input
                         type="checkbox"
                         checked={todo.completed}
-                        onChange={() => handleToggleTodo(todo.id)}
+                        onChange={() => handleToggleTodo(todo._id)}
                         className="h-5 w-5 sm:h-6 sm:w-6 flex-shrink-0 accent-emerald-600"
                       />
                       <div className="flex-1 min-w-0">
@@ -1044,7 +1044,7 @@ export default function Dashboard() {
                         {/* ──────────────────────────────────────────────────────────── */}
                       </div>
                     </div>
-                    <Button variant="destructive" size="sm" onClick={() => handleDeleteTodo(todo.id)}>
+                    <Button variant="destructive" size="sm" onClick={() => handleDeleteTodo(todo._id)}>
                       Delete
                     </Button>
                   </div>
