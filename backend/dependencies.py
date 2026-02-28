@@ -1,6 +1,5 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
-# Removed: from bson import ObjectId (No longer needed for your UUID logic)
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -34,7 +33,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """
-    Extract user from JWT token and return user document using UUID string.
+    Extract user from JWT token and return user model object using UUID string.
     """
     try:
         token = credentials.credentials
@@ -54,13 +53,20 @@ async def get_current_user(
         )
 
     # ✅ FIXED: Query by 'id' field (UUID string) instead of '_id' (ObjectId)
-    # Your server.py creates users with 'id': str(uuid.uuid4())
-    user = await db.users.find_one({"id": user_id})
+    user_dict = await db.users.find_one({"id": user_id})
 
-    if not user:
+    if not user_dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
 
-    return user
+    # ✅ CRITICAL: Convert to Pydantic Model via local import
+    # This ensures routes can access current_user.role, current_user.id, etc.
+    from backend.server import User 
+    
+    # Clean MongoDB internal field to prevent validation errors
+    if "_id" in user_dict:
+        user_dict.pop("_id")
+        
+    return User(**user_dict)
