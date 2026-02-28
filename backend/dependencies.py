@@ -19,6 +19,28 @@ if not MONGO_URL:
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
+
+# ==========================================================
+# PERMISSION CHECK
+# ==========================================================
+
+def check_permission(permission: str):
+    async def permission_checker(
+        current_user = Depends(get_current_user)
+    ):
+        # If your User model has permissions attribute
+        user_permissions = getattr(current_user, "permissions", [])
+
+        if permission not in user_permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this resource",
+            )
+
+        return current_user
+
+    return permission_checker
+
 # ==========================================================
 # AUTH CONFIG
 # ==========================================================
