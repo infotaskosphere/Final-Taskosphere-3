@@ -168,15 +168,18 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com",
-        "https://final-taskosphere-3.vercel.app",
+        "https://final-tasksphere-frontend.onrender.com",   # ← FIXED (removed extra 'o')
+        "https://final-taskosphere-3.vercel.app",           # keep your Vercel link
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://final-tasksphere-backend.onrender.com",    # optional but recommended
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
     expose_headers=["*"],
+    max_age=3600,  # cache preflight for 1 hour
 )
 # ALL MODELS
 class UserPermissions(BaseModel):
