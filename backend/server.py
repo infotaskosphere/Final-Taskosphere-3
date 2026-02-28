@@ -26,6 +26,10 @@ from sendgrid.helpers.mail import Mail
 import csv
 from backend.dependencies import get_current_user, create_access_token
 from backend.notifications import router as notification_router, create_notification
+import uvicorn
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("backend.server:app", host="0.0.0.0", port=port)
 # ───────────────────────────────────────────────────────────────
 # CONFIG & GLOBALS
 # ───────────────────────────────────────────────────────────────
