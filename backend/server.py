@@ -2230,7 +2230,7 @@ async def export_reports(
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
-    current_user: User = Depends(check_permission("can_view_reports"))
+    current_user: User = Depends(get_current_user)
 ):
     """⭐ Star & 🏆 Top Performer Rankings (cached 5 min)"""
     cache_key = f"rankings_{period}"
@@ -2344,7 +2344,7 @@ async def get_performance_rankings(
 @api_router.get("/reports/performance-rankings/pdf")
 async def export_performance_rankings_pdf(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
-    current_user: User = Depends(check_permission("can_view_reports"))
+    current_user: User = Depends(get_current_user)
 ):
     """Download Performance Rankings as Professional PDF"""
     rankings = await get_performance_rankings(period=period, current_user=current_user)
