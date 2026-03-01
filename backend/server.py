@@ -902,10 +902,18 @@ async def get_me(current_user: User = Depends(get_current_user)):
     }, current_user)
 # ATTENDANCE ROUTE - FIXED: punch_in and punch_out now correctly inside one function
 def get_real_client_ip(request: Request):
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host
+    # 1️⃣ Try Render / proxy header first
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        # First IP is the real client IP
+        return x_forwarded_for.split(",")[0].strip()
+
+    # 2️⃣ Fallback
+    if request.client:
+        return request.client.host
+
+    return None
+    
 @api_router.post("/attendance")
 async def record_attendance(
     data: dict,
