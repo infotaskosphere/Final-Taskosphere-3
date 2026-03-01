@@ -25,12 +25,13 @@ import 'jspdf-autotable';
 
 // Brand color palette
 const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
+
 const CHART_COLORS = {
-  primary: '#0D3B66', // Deep Blue
-  secondary: '#1F6FB2', // Medium Blue
-  success: '#1FAF5A', // Emerald Green
-  warning: '#5CCB5F', // Light Green
-  accent: '#0A2D4D', // Darker Blue
+  primary: '#0D3B66',
+  secondary: '#1F6FB2',
+  success: '#1FAF5A',
+  warning: '#5CCB5F',
+  accent: '#0A2D4D',
 };
 
 // Animation variants
@@ -41,35 +42,38 @@ const containerVariants = {
     transition: { staggerChildren: 0.1 }
   }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
 
 export default function Reports() {
+
   const { user, hasPermission } = useAuth();
-  const canViewReports = hasPermission("can_view_reports");
+
+  // ✅ FIXED: removed duplicate line
   const canViewReports = hasPermission("can_view_reports");
   const canDownloadReports = hasPermission("can_download_reports");
 
   const isAdmin = user?.role === "admin";
+
   const [reportData, setReportData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedUserId, setSelectedUserId] = useState("all");
 
-  // ── NEW: Star Performers state + fetch (added without deleting anything) ──
   const [starPerformers, setStarPerformers] = useState([]);
-
-  // ── NEW: Period selector state (exactly like Dashboard) ──
   const [rankingPeriod, setRankingPeriod] = useState("monthly");
-
+    // ✅ FIXED: wait for user before fetching
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    if (user) {
+      fetchAllData();
+    }
+  }, [user]);
 
-  // ── NEW: Re-fetch Star Performers when period changes (no original lines deleted) ──
+  // Star Performers fetch
   useEffect(() => {
     const fetchStarPerformers = async () => {
       try {
@@ -84,48 +88,58 @@ export default function Reports() {
     };
     fetchStarPerformers();
   }, [rankingPeriod]);
-const fetchAllData = async () => {
-  try {
-    const reportRequests = [];
 
-    // Always fetch own report
-    reportRequests.push(api.get('/reports/efficiency'));
+  const fetchAllData = async () => {
+    try {
+      const reportRequests = [];
 
-    // Fetch cross-user reports (if any)
-    const allowedUsers = user?.permissions?.view_other_reports || [];
+      // Always fetch own report
+      reportRequests.push(api.get('/reports/efficiency'));
 
-    allowedUsers.forEach((id) => {
-      reportRequests.push(
-        api.get('/reports/efficiency', {
-          params: { user_id: id }
-        })
-      );
-    });
+      // Fetch cross-user reports (if any)
+      const allowedUsers = user?.permissions?.view_other_reports || [];
 
-    const reportResponses = await Promise.all(reportRequests);
+      allowedUsers.forEach((id) => {
+        reportRequests.push(
+          api.get('/reports/efficiency', {
+            params: { user_id: id }
+          })
+        );
+      });
 
-    const combinedReports = reportResponses
-      .map(res => res.data)
-      .filter(Boolean);
+      const reportResponses = await Promise.all(reportRequests);
 
-    setReportData(combinedReports);
+      const combinedReports = reportResponses
+        .map(res => res.data)
+        .filter(Boolean);
 
-    const [statsRes, tasksRes] = await Promise.all([
-      api.get('/dashboard/stats'),
-      api.get('/tasks'),
-    ]);
+      setReportData(combinedReports);
 
-    setDashboardStats(statsRes.data);
-    setTasks(tasksRes.data);
+      const [statsRes, tasksRes] = await Promise.all([
+        api.get('/dashboard/stats'),
+        api.get('/tasks'),
+      ]);
 
-  } catch (error) {
-    toast.error('Failed to fetch reports');
-  } finally {
-    setLoading(false);
-  }
-};
+      setDashboardStats(statsRes.data);
+      setTasks(tasksRes.data);
 
-  const formatTime = (minutes) => {
+    } catch (error) {
+      toast.error('Failed to fetch reports');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filtering logic
+  const filteredReportData =
+    selectedUserId === "all"
+      ? reportData
+      : reportData.filter(r => r.user?.id === selectedUserId);
+
+  const uniqueUsers = Array.from(
+    new Map(reportData.map(r => [r.user?.id, r.user])).values()
+  );
+    const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
@@ -133,19 +147,26 @@ const fetchAllData = async () => {
 
   const getAverageScreenTime = () => {
     if (filteredReportData.length === 0) return 0;
-    const total = filteredReportData.reduce((sum, item) => sum + item.total_screen_time, 0);
+    const total = filteredReportData.reduce(
+      (sum, item) => sum + item.total_screen_time,
+      0
+    );
     return Math.round(total / filteredReportData.length);
   };
 
   const getTotalTasksCompleted = () => {
-    return filteredReportData.reduce((sum, item) => sum + item.total_tasks_completed, 0);
+    return filteredReportData.reduce(
+      (sum, item) => sum + item.total_tasks_completed,
+      0
+    );
   };
 
-  // Task Status Distribution for Pie Chart
+  // Task Status Distribution
   const getTaskStatusData = () => {
     const pending = tasks.filter(t => t.status === 'pending').length;
     const inProgress = tasks.filter(t => t.status === 'in_progress').length;
     const completed = tasks.filter(t => t.status === 'completed').length;
+
     return [
       { name: 'Pending', value: pending, color: CHART_COLORS.warning },
       { name: 'In Progress', value: inProgress, color: CHART_COLORS.primary },
@@ -156,10 +177,12 @@ const fetchAllData = async () => {
   // Task Category Distribution
   const getTaskCategoryData = () => {
     const categoryCount = {};
+
     tasks.forEach(task => {
       const category = task.category || 'Other';
       categoryCount[category] = (categoryCount[category] || 0) + 1;
     });
+
     return Object.entries(categoryCount)
       .map(([name, count], index) => ({
         name: name.toUpperCase().replace('_', ' '),
@@ -170,8 +193,7 @@ const fetchAllData = async () => {
       .slice(0, 6);
   };
 
-  // ── UPDATED: Employee Performance Data now uses real Star Performers data ──
-  // (kept original logic for non-admin fallback + all other charts untouched)
+  // Employee Performance / Star Performers
   const getEmployeePerformanceData = () => {
     if (!isAdmin) {
       if (filteredReportData.length > 0) {
@@ -185,30 +207,33 @@ const fetchAllData = async () => {
       }
       return [];
     } else {
-      // Use fresh Star Performers data (overall_score as main metric)
       return starPerformers.slice(0, 5).map((member, index) => ({
         name: member.user_name?.split(' ')[0] || 'User',
-        tasks: Math.round(member.overall_score), // Star performer score
+        tasks: Math.round(member.overall_score),
         hours: Math.round(member.total_hours || 0),
         fill: COLORS[index % COLORS.length],
       }));
     }
   };
 
-  // Helper function to get start of day
   const getStartOfDay = (date) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     return d;
   };
 
-  // Weekly Trend Data from tasks
   const getWeeklyTrendData = () => {
     const today = new Date();
-    const diff = today.getDay() - 1; // Monday as 0
-    const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (diff >= 0 ? diff : diff + 7));
+    const diff = today.getDay() - 1;
+    const monday = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() - (diff >= 0 ? diff : diff + 7)
+    );
+
     const startOfWeek = getStartOfDay(monday);
     const days = [];
+
     for (let i = 0; i < 7; i++) {
       const day = new Date(startOfWeek);
       day.setDate(startOfWeek.getDate() + i);
@@ -218,6 +243,7 @@ const fetchAllData = async () => {
         pending: 0,
       });
     }
+
     tasks.forEach((task) => {
       if (task.status === 'completed' && task.completed_at) {
         const compDate = getStartOfDay(new Date(task.completed_at));
@@ -226,6 +252,7 @@ const fetchAllData = async () => {
           days[dayIndex].completed += 1;
         }
       }
+
       if (task.status !== 'completed' && task.created_at) {
         const createDate = getStartOfDay(new Date(task.created_at));
         const dayIndex = Math.floor((createDate - startOfWeek) / 86400000);
@@ -234,10 +261,10 @@ const fetchAllData = async () => {
         }
       }
     });
+
     return days;
   };
 
-  // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -256,190 +283,241 @@ const fetchAllData = async () => {
 
   const handleDownloadReports = () => {
     const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
+
     const csvData = filteredReportData.map(item => [
       item.user?.full_name || 'Unknown',
       item.total_tasks_completed,
       item.total_screen_time
     ]);
-    const csvContent = [headers, ...csvData].map(row => row.join(',')).join('\n');
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.join(','))
+      .join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
+
     link.setAttribute('href', url);
     link.setAttribute('download', 'efficiency_reports.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
   };
 
-const handleExportPDF = () => {
-  const doc = new jsPDF();
-  doc.text('Efficiency Reports', 10, 10);
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.text('Efficiency Reports', 10, 10);
 
-  const tableData = filteredReportData.map(item => [
-    item.user?.full_name || 'Unknown',
-    item.total_tasks_completed || 0,
-    item.total_screen_time || 0
-  ]);
+    const tableData = filteredReportData.map(item => [
+      item.user?.full_name || 'Unknown',
+      item.total_tasks_completed || 0,
+      item.total_screen_time || 0
+    ]);
 
-  doc.autoTable({
-    head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
-    body: tableData,
-    startY: 20,
-  });
+    doc.autoTable({
+      head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
+      body: tableData,
+      startY: 20,
+    });
 
-  doc.save('efficiency_reports.pdf');
-};
+    doc.save('efficiency_reports.pdf');
+  };
+  const formatTime = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  };
 
-const filteredReportData =
-  selectedUserId === "all"
-    ? reportData
-    : reportData.filter(r => r.user?.id === selectedUserId);
+  const getAverageScreenTime = () => {
+    if (filteredReportData.length === 0) return 0;
+    const total = filteredReportData.reduce(
+      (sum, item) => sum + item.total_screen_time,
+      0
+    );
+    return Math.round(total / filteredReportData.length);
+  };
 
-const uniqueUsers = Array.from(
-  new Map(reportData.map(r => [r.user?.id, r.user])).values()
-);
+  const getTotalTasksCompleted = () => {
+    return filteredReportData.reduce(
+      (sum, item) => sum + item.total_tasks_completed,
+      0
+    );
+  };
 
-if (loading) {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div
-        className="animate-spin rounded-full h-8 w-8 border-b-2"
-        style={{ borderColor: '#0D3B66' }}
-      />
-    </div>
-  );
-}
+  // Task Status Distribution
+  const getTaskStatusData = () => {
+    const pending = tasks.filter(t => t.status === 'pending').length;
+    const inProgress = tasks.filter(t => t.status === 'in_progress').length;
+    const completed = tasks.filter(t => t.status === 'completed').length;
 
-if (!canViewReports) {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <p className="text-slate-500">
-        You do not have permission to view reports.
-      </p>
-    </div>
-  );
-}
+    return [
+      { name: 'Pending', value: pending, color: CHART_COLORS.warning },
+      { name: 'In Progress', value: inProgress, color: CHART_COLORS.primary },
+      { name: 'Completed', value: completed, color: CHART_COLORS.success },
+    ].filter(item => item.value > 0);
+  };
 
-return (
-  <motion.div
-    className="space-y-8"
-    data-testid="reports-page"
-    variants={containerVariants}
-    initial="hidden"
-    animate="visible"
-  >
-      {/* Header */}
-      <motion.div variants={itemVariants} className="flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-bold font-outfit tracking-tight" style={{ color: '#0D3B66' }}>Analytics & Reports</h1>
-          <p className="text-slate-600 mt-2 text-lg">Track performance, productivity, and business insights</p>
+  // Task Category Distribution
+  const getTaskCategoryData = () => {
+    const categoryCount = {};
+
+    tasks.forEach(task => {
+      const category = task.category || 'Other';
+      categoryCount[category] = (categoryCount[category] || 0) + 1;
+    });
+
+    return Object.entries(categoryCount)
+      .map(([name, count], index) => ({
+        name: name.toUpperCase().replace('_', ' '),
+        tasks: count,
+        fill: COLORS[index % COLORS.length],
+      }))
+      .sort((a, b) => b.tasks - a.tasks)
+      .slice(0, 6);
+  };
+
+  // Employee Performance / Star Performers
+  const getEmployeePerformanceData = () => {
+    if (!isAdmin) {
+      if (filteredReportData.length > 0) {
+        const item = filteredReportData[0];
+        return [{
+          name: 'You',
+          tasks: item.total_tasks_completed,
+          hours: Math.round(item.total_screen_time / 60),
+          fill: COLORS[0],
+        }];
+      }
+      return [];
+    } else {
+      return starPerformers.slice(0, 5).map((member, index) => ({
+        name: member.user_name?.split(' ')[0] || 'User',
+        tasks: Math.round(member.overall_score),
+        hours: Math.round(member.total_hours || 0),
+        fill: COLORS[index % COLORS.length],
+      }));
+    }
+  };
+
+  const getStartOfDay = (date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const getWeeklyTrendData = () => {
+    const today = new Date();
+    const diff = today.getDay() - 1;
+    const monday = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() - (diff >= 0 ? diff : diff + 7)
+    );
+
+    const startOfWeek = getStartOfDay(monday);
+    const days = [];
+
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+      days.push({
+        name: day.toLocaleDateString('en-us', { weekday: 'short' }),
+        completed: 0,
+        pending: 0,
+      });
+    }
+
+    tasks.forEach((task) => {
+      if (task.status === 'completed' && task.completed_at) {
+        const compDate = getStartOfDay(new Date(task.completed_at));
+        const dayIndex = Math.floor((compDate - startOfWeek) / 86400000);
+        if (dayIndex >= 0 && dayIndex < 7) {
+          days[dayIndex].completed += 1;
+        }
+      }
+
+      if (task.status !== 'completed' && task.created_at) {
+        const createDate = getStartOfDay(new Date(task.created_at));
+        const dayIndex = Math.floor((createDate - startOfWeek) / 86400000);
+        if (dayIndex >= 0 && dayIndex < 7) {
+          days[dayIndex].pending += 1;
+        }
+      }
+    });
+
+    return days;
+  };
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white p-3 shadow-lg rounded-lg border border-slate-200">
+          <p className="font-medium text-slate-900">{label}</p>
+          {payload.map((entry, index) => (
+            <p key={index} style={{ color: entry.color }} className="text-sm">
+              {entry.name}: {entry.value}
+            </p>
+          ))}
         </div>
-        {(isAdmin || canDownloadReports) && (
-          <div className="flex gap-2">
-            <Button onClick={handleDownloadReports} variant="outline">
-              Download CSV
-            </Button>
-            <Button onClick={handleExportPDF} variant="outline">
-              Export PDF
-            </Button>
-          </div>
-        )}
-      </motion.div>
+      );
+    }
+    return null;
+  };
 
-      {(isAdmin || user?.permissions?.view_other_reports?.length > 0) && (
-        <div className="mb-4">
-          <select
-            value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
-            className="border rounded px-3 py-2"
-          >
-            <option value="all">All Employees</option>
-            {uniqueUsers.map((user) => (
-              <option key={user?._id} value={user?._id}>
-                {user?.full_name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+  const handleDownloadReports = () => {
+    const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
 
-      {/* Summary Stats Grid */}
-      <motion.div
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-        variants={itemVariants}
-      >
-        <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 100%)' }} data-testid="total-tasks-stat">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-100 text-sm font-medium">Total Tasks</p>
-                <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.total_tasks || 0}</p>
-                <p className="text-blue-100 text-xs mt-2">All time</p>
-              </div>
-              <div className="bg-white/20 p-4 rounded-2xl">
-                <Target className="h-8 w-8 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1FAF5A 0%, #5CCB5F 100%)' }} data-testid="completed-tasks-stat">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-100 text-sm font-medium">Completed</p>
-                <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.completed_tasks || 0}</p>
-                <p className="text-green-100 text-xs mt-2">{dashboardStats?.total_tasks > 0 ? Math.round((dashboardStats?.completed_tasks / dashboardStats?.total_tasks) * 100) : 0}% completion rate</p>
-              </div>
-              <div className="bg-white/20 p-4 rounded-2xl">
-                <CheckCircle2 className="h-8 w-8 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        {isAdmin && (
-          <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #1F6FB2 0%, #0D3B66 100%)' }} data-testid="team-size-stat">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm font-medium">Team Members</p>
-                  <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.team_workload?.length || 0}</p>
-                  <p className="text-blue-100 text-xs mt-2">Active users</p>
-                </div>
-                <div className="bg-white/20 p-4 rounded-2xl">
-                  <Users className="h-8 w-8 text-white" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        <Card className="border-0 shadow-lg text-white overflow-hidden group hover:scale-[1.02] transition-transform duration-200" style={{ background: 'linear-gradient(135deg, #5CCB5F 0%, #1FAF5A 100%)' }} data-testid="pending-tasks-stat">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-100 text-sm font-medium">Pending Tasks</p>
-                <p className="text-4xl font-bold font-outfit mt-2">{dashboardStats?.pending_tasks || 0}</p>
-                <p className="text-green-100 text-xs mt-2">{dashboardStats?.overdue_tasks || 0} overdue</p>
-              </div>
-              <div className="bg-white/20 p-4 rounded-2xl">
-                <AlertTriangle className="h-8 w-8 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+    const csvData = filteredReportData.map(item => [
+      item.user?.full_name || 'Unknown',
+      item.total_tasks_completed,
+      item.total_screen_time
+    ]);
 
+    const csvContent = [headers, ...csvData]
+      .map(row => row.join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'efficiency_reports.csv');
+    link.click();
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.text('Efficiency Reports', 10, 10);
+
+    const tableData = filteredReportData.map(item => [
+      item.user?.full_name || 'Unknown',
+      item.total_tasks_completed || 0,
+      item.total_screen_time || 0
+    ]);
+
+    doc.autoTable({
+      head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
+      body: tableData,
+      startY: 20,
+    });
+
+    doc.save('efficiency_reports.pdf');
+  };
       {/* Charts Row 1 */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
         variants={itemVariants}
       >
+
         {/* Task Status Pie Chart */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-status-chart">
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader>
-            <CardTitle className="text-xl font-outfit">Task Status Distribution</CardTitle>
-            <CardDescription>Overview of task statuses</CardDescription>
+            <CardTitle className="text-xl font-outfit">
+              Task Status Distribution
+            </CardTitle>
+            <CardDescription>
+              Overview of task statuses
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {getTaskStatusData().length > 0 ? (
@@ -453,7 +531,9 @@ return (
                     outerRadius={100}
                     paddingAngle={5}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) =>
+                      `${name} ${(percent * 100).toFixed(0)}%`
+                    }
                   >
                     {getTaskStatusData().map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
@@ -465,24 +545,33 @@ return (
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-64 text-slate-500">
-                <p>No task data available</p>
+                No task data available
               </div>
             )}
           </CardContent>
         </Card>
 
         {/* Task Category Bar Chart */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="task-category-chart">
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader>
-            <CardTitle className="text-xl font-outfit">Tasks by Category</CardTitle>
-            <CardDescription>Distribution across service categories</CardDescription>
+            <CardTitle className="text-xl font-outfit">
+              Tasks by Category
+            </CardTitle>
+            <CardDescription>
+              Distribution across service categories
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {getTaskCategoryData().length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={getTaskCategoryData()} layout="vertical">
                   <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 12 }} />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={80}
+                    tick={{ fontSize: 12 }}
+                  />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar dataKey="tasks" radius={[0, 8, 8, 0]}>
                     {getTaskCategoryData().map((entry, index) => (
@@ -493,7 +582,7 @@ return (
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-64 text-slate-500">
-                <p>No category data available</p>
+                No category data available
               </div>
             )}
           </CardContent>
@@ -505,8 +594,9 @@ return (
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
         variants={itemVariants}
       >
-        {/* Employee Performance Bar Chart → NOW STAR PERFORMERS (title + data updated) */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="employee-performance-chart">
+
+        {/* Star Performers / Your Performance */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -514,10 +604,12 @@ return (
                   {isAdmin ? "Star Performers" : "Your Performance"}
                 </CardTitle>
                 <CardDescription>
-                  {isAdmin ? "Top ranked by overall performance score" : "Your performance metrics"}
+                  {isAdmin
+                    ? "Top ranked by overall performance score"
+                    : "Your performance metrics"}
                 </CardDescription>
               </div>
-              {/* ── NEW: Period selector (exactly like Dashboard) ── */}
+
               {isAdmin && (
                 <div className="flex gap-1">
                   {["all", "monthly", "weekly"].map(p => (
@@ -535,6 +627,7 @@ return (
               )}
             </div>
           </CardHeader>
+
           <CardContent>
             {getEmployeePerformanceData().length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
@@ -542,7 +635,11 @@ return (
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="tasks" name="Performance Score" radius={[8, 8, 0, 0]}>
+                  <Bar
+                    dataKey="tasks"
+                    name="Performance Score"
+                    radius={[8, 8, 0, 0]}
+                  >
                     {getEmployeePerformanceData().map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
@@ -551,31 +648,25 @@ return (
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-64 text-slate-500">
-                <p>No performance data available</p>
+                No performance data available
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Weekly Trend Area Chart */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid="weekly-trend-chart">
+        {/* Weekly Trend */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader>
-            <CardTitle className="text-xl font-outfit">Weekly Activity Trend</CardTitle>
-            <CardDescription>Task completion pattern this week</CardDescription>
+            <CardTitle className="text-xl font-outfit">
+              Weekly Activity Trend
+            </CardTitle>
+            <CardDescription>
+              Task completion pattern this week
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={getWeeklyTrendData()}>
-                <defs>
-                  <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS.success} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={CHART_COLORS.success} stopOpacity={0.1}/>
-                  </linearGradient>
-                  <linearGradient id="colorPending" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS.warning} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={CHART_COLORS.warning} stopOpacity={0.1}/>
-                  </linearGradient>
-                </defs>
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis />
                 <Tooltip content={<CustomTooltip />} />
@@ -583,18 +674,16 @@ return (
                 <Area
                   type="monotone"
                   dataKey="completed"
-                  name="Completed"
                   stroke={CHART_COLORS.success}
-                  fillOpacity={1}
-                  fill="url(#colorCompleted)"
+                  fillOpacity={0.3}
+                  fill={CHART_COLORS.success}
                 />
                 <Area
                   type="monotone"
                   dataKey="pending"
-                  name="Pending"
                   stroke={CHART_COLORS.warning}
-                  fillOpacity={1}
-                  fill="url(#colorPending)"
+                  fillOpacity={0.3}
+                  fill={CHART_COLORS.warning}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -605,7 +694,7 @@ return (
       {/* Team Workload Table */}
       {isAdmin && dashboardStats?.team_workload && (
         <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm" data-testid="team-workload-table">
+          <Card className="border border-slate-200 shadow-sm">
             <CardHeader className="bg-slate-50 border-b border-slate-200">
               <CardTitle className="text-sm font-medium text-slate-600 uppercase tracking-wider flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" />
@@ -617,49 +706,50 @@ return (
                 <table className="w-full">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Employee</th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Total Tasks</th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Pending</th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Completed</th>
-                      <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Progress</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Employee
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Total Tasks
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Pending
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Completed
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Progress
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {dashboardStats.team_workload.map((member, index) => {
-                      const progress = member.total_tasks > 0
-                        ? Math.round((member.completed_tasks / member.total_tasks) * 100)
-                        : 0;
+                      const progress =
+                        member.total_tasks > 0
+                          ? Math.round(
+                              (member.completed_tasks /
+                                member.total_tasks) *
+                                100
+                            )
+                          : 0;
+
                       return (
-                        <tr key={member.user_id} className="hover:bg-slate-50 transition-colors" data-testid={`workload-row-${index}`}>
+                        <tr key={member.user_id}>
                           <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white font-semibold">
-                                {member.user_name?.charAt(0) || '?'}
-                              </div>
-                              <span className="font-medium text-slate-900">{member.user_name}</span>
-                            </div>
+                            {member.user_name}
                           </td>
-                          <td className="px-6 py-4 text-slate-600 font-semibold">{member.total_tasks}</td>
-                          <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-medium">
-                              {member.pending_tasks}
-                            </span>
+                          <td className="px-6 py-4 font-semibold">
+                            {member.total_tasks}
                           </td>
                           <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-medium">
-                              {member.completed_tasks}
-                            </span>
+                            {member.pending_tasks}
                           </td>
                           <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="flex-1 bg-slate-200 rounded-full h-2 max-w-24">
-                                <div
-                                  className="bg-gradient-to-r from-orange-500 to-rose-500 h-2 rounded-full transition-all duration-500"
-                                  style={{ width: `${progress}%` }}
-                                />
-                              </div>
-                              <span className="text-sm font-medium text-slate-600">{progress}%</span>
-                            </div>
+                            {member.completed_tasks}
+                          </td>
+                          <td className="px-6 py-4">
+                            {progress}%
                           </td>
                         </tr>
                       );
@@ -671,6 +761,7 @@ return (
           </Card>
         </motion.div>
       )}
+
     </motion.div>
   );
 }
