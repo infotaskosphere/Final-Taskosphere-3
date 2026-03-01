@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import RoleGuard from "@/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -81,11 +81,12 @@ const UserCard = ({
   currentUserId,
   COLORS,
   isAdmin,
-  canEditUsers, // ✅ ADD
-  canManagePermissions // ✅ ADD
+  canEditUsers,
+  canManagePermissions
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
+
   const getRoleIcon = (role) => {
     switch(role) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -93,6 +94,7 @@ const UserCard = ({
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
+
   const getRoleStyle = (role) => {
     switch(role) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -100,7 +102,9 @@ const UserCard = ({
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
+
   const roleStyle = getRoleStyle(userData.role);
+
   return (
     <motion.div
       variants={itemVariants}
@@ -137,6 +141,7 @@ const UserCard = ({
           </button>
         )}
       </div>
+
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -169,6 +174,7 @@ const UserCard = ({
           </div>
         </div>
       </div>
+
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => (
@@ -176,6 +182,7 @@ const UserCard = ({
           ))}
         </div>
       )}
+
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -202,12 +209,11 @@ const UserCard = ({
 
 export default function Users() {
   const { user, hasPermission } = useAuth();
-
-  const isAdmin = user?.role === "admin"; // ✅ ADD THIS
-
+  const isAdmin = user?.role === "admin";
   const canViewUserPage = hasPermission("can_view_user_page");
   const canEditUsers = hasPermission("can_edit_users");
   const canManagePermissions = hasPermission("can_manage_users");
+
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,6 +222,7 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
+
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -229,6 +236,7 @@ export default function Users() {
     grace_time: '',
     punch_out_time: '',
   });
+
   const [permissions, setPermissions] = useState({
     // Global View Permissions
     can_view_all_tasks: false,
@@ -238,18 +246,15 @@ export default function Users() {
     can_view_all_duedates: false,
     can_view_reports: false,
     can_view_audit_logs: false,
-
     // User Management
     can_manage_users: false,
     can_edit_users: false,
     can_assign_tasks: false,
-
     // Staff Features
     can_view_staff_activity: false,
     can_view_attendance: false,
     can_use_chat: false,
     can_send_reminders: false,
-
     // Editing
     can_edit_tasks: false,
     can_edit_dsc: false,
@@ -257,10 +262,8 @@ export default function Users() {
     can_edit_due_dates: false,
     can_edit_clients: false,
     can_delete_data: false,
-
     // Client Assignment
     assigned_clients: [],
-
     // Cross User Viewing (NEW SYSTEM)
     view_other_tasks: [],
     view_other_attendance: [],
@@ -268,14 +271,17 @@ export default function Users() {
     view_other_todos: [],
     view_other_activity: [],
   });
+
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
       fetchClients();
     }
   }, [isAdmin]);
+
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -284,6 +290,7 @@ export default function Users() {
       toast.error('Failed to fetch users');
     }
   };
+
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -293,64 +300,58 @@ export default function Users() {
     }
   };
 
-const fetchPermissions = async (userId) => {
-  try {
-    const response = await api.get(`/users/${userId}/permissions`);
+  const fetchPermissions = async (userId) => {
+    try {
+      const response = await api.get(`/users/${userId}/permissions`);
+      setPermissions(prev => ({
+        ...prev,
+        ...(response.data || {})
+      }));
+    } catch (error) {
+      console.error('Failed to fetch permissions');
+      // fallback to default permissions instead of null
+      setPermissions({
+        // Global View Permissions
+        can_view_all_tasks: false,
+        can_view_all_clients: false,
+        can_view_all_dsc: false,
+        can_view_documents: false,
+        can_view_all_duedates: false,
+        can_view_reports: false,
+        can_view_audit_logs: false,
+        // User Management
+        can_manage_users: false,
+        can_edit_users: false,
+        can_assign_tasks: false,
+        // Staff Features
+        can_view_staff_activity: false,
+        can_view_attendance: false,
+        can_use_chat: false,
+        can_send_reminders: false,
+        // Editing
+        can_edit_tasks: false,
+        can_edit_dsc: false,
+        can_edit_documents: false,
+        can_edit_due_dates: false,
+        can_edit_clients: false,
+        can_delete_data: false,
+        // Client Assignment
+        assigned_clients: [],
+        // Cross User Viewing (NEW SYSTEM)
+        view_other_tasks: [],
+        view_other_attendance: [],
+        view_other_reports: [],
+        view_other_todos: [],
+        view_other_activity: [],
+      });
+    }
+  };
 
-    setPermissions(prev => ({
-      ...prev,
-      ...(response.data || {})
-    }));
-
-  } catch (error) {
-    console.error('Failed to fetch permissions');
-
-    // fallback to default permissions instead of null
-    setPermissions({
-      // Global View Permissions
-      can_view_all_tasks: false,
-      can_view_all_clients: false,
-      can_view_all_dsc: false,
-      can_view_documents: false,
-      can_view_all_duedates: false,
-      can_view_reports: false,
-      can_view_audit_logs: false,
-
-      // User Management
-      can_manage_users: false,
-      can_edit_users: false,
-      can_assign_tasks: false,
-
-      // Staff Features
-      can_view_staff_activity: false,
-      can_view_attendance: false,
-      can_use_chat: false,
-      can_send_reminders: false,
-
-      // Editing
-      can_edit_tasks: false,
-      can_edit_dsc: false,
-      can_edit_documents: false,
-      can_edit_due_dates: false,
-      can_edit_clients: false,
-      can_delete_data: false,
-
-      // Client Assignment
-      assigned_clients: [],
-
-      // Cross User Viewing (NEW SYSTEM)
-      view_other_tasks: [],
-      view_other_attendance: [],
-      view_other_reports: [],
-      view_other_todos: [],
-      view_other_activity: [],
-    });
-  }
-};
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
+
   const handleDepartmentChange = (dept) => {
     setFormData(prev => ({
       ...prev,
@@ -359,6 +360,7 @@ const fetchPermissions = async (userId) => {
         : [...prev.departments, dept]
     }));
   };
+
   const handleProfilePictureChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -372,6 +374,7 @@ const fetchPermissions = async (userId) => {
       toast.error('Failed to upload profile picture');
     }
   };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -390,6 +393,7 @@ const fetchPermissions = async (userId) => {
       setLoading(false);
     }
   };
+
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
@@ -407,6 +411,7 @@ const fetchPermissions = async (userId) => {
     });
     setDialogOpen(true);
   };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
@@ -417,11 +422,13 @@ const fetchPermissions = async (userId) => {
       toast.error('Failed to delete user');
     }
   };
+
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
     await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
+
   const toggleClientAssignment = (clientId) => {
     setPermissions(prev => ({
       ...prev,
@@ -430,6 +437,7 @@ const fetchPermissions = async (userId) => {
         : [...prev.assigned_clients, clientId]
     }));
   };
+
   const handleSavePermissions = async () => {
     setLoading(true);
     try {
@@ -442,15 +450,18 @@ const fetchPermissions = async (userId) => {
       setLoading(false);
     }
   };
+
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role === activeTab;
     return matchesSearch && matchesTab;
   });
+
   const filteredClients = clients.filter(client =>
     client.company_name.toLowerCase().includes(clientSearchQuery.toLowerCase())
   );
+
   if (!canViewUserPage) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -466,6 +477,7 @@ const fetchPermissions = async (userId) => {
       </div>
     );
   }
+
   return (
     <motion.div
       className="space-y-6"
@@ -478,19 +490,36 @@ const fetchPermissions = async (userId) => {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>Team Members</h1>
           <p className="text-slate-600 mt-1">Manage your team and their permissions</p>
         </div>
+
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           {canEditUsers && (
             <DialogTrigger asChild>
               <Button
                 className="rounded-xl font-medium text-white w-full md:w-auto"
                 style={{ background: COLORS.deepBlue }}
-                onClick={() => { setSelectedUser(null); setFormData({ full_name: '', email: '', password: '', role: 'staff', departments: [], phone: '', birthday: '', profile_picture: '', punch_in_time: '', grace_time: '', punch_out_time: '' }); }}
+                onClick={() => {
+                  setSelectedUser(null);
+                  setFormData({
+                    full_name: '',
+                    email: '',
+                    password: '',
+                    role: 'staff',
+                    departments: [],
+                    phone: '',
+                    birthday: '',
+                    profile_picture: '',
+                    punch_in_time: '',
+                    grace_time: '',
+                    punch_out_time: ''
+                  });
+                }}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Team Member
               </Button>
             </DialogTrigger>
           )}
+
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-outfit text-xl sm:text-2xl" style={{ color: COLORS.deepBlue }}>
@@ -500,6 +529,7 @@ const fetchPermissions = async (userId) => {
                 {selectedUser ? 'Update team member details' : 'Create a new team member account'}
               </DialogDescription>
             </DialogHeader>
+
             <div className="space-y-4 py-4">
               <div className="flex justify-center">
                 <div className="relative">
@@ -516,6 +546,7 @@ const fetchPermissions = async (userId) => {
                   </label>
                 </div>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="full_name">Full Name</Label>
@@ -526,6 +557,7 @@ const fetchPermissions = async (userId) => {
                   <Input id="email" name="email" type="email" value={formData.email} onChange={handleInputChange} />
                 </div>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="password">{selectedUser ? 'New Password (optional)' : 'Password'}</Label>
@@ -536,6 +568,7 @@ const fetchPermissions = async (userId) => {
                   <Input id="phone" name="phone" value={formData.phone} onChange={handleInputChange} />
                 </div>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="birthday">Birthdate</Label>
@@ -553,6 +586,7 @@ const fetchPermissions = async (userId) => {
                   </Select>
                 </div>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="punch_in_time">Punch In Time</Label>
@@ -567,6 +601,7 @@ const fetchPermissions = async (userId) => {
                   <Input id="punch_out_time" name="punch_out_time" type="time" value={formData.punch_out_time} onChange={handleInputChange} />
                 </div>
               </div>
+
               <div>
                 <Label>Departments</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-2">
@@ -585,6 +620,7 @@ const fetchPermissions = async (userId) => {
                 </div>
               </div>
             </div>
+
             <DialogFooter className="flex-col sm:flex-row gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
               <Button onClick={handleSubmit} disabled={loading} className="text-white rounded-xl w-full sm:w-auto" style={{ background: COLORS.emeraldGreen }}>
@@ -594,11 +630,13 @@ const fetchPermissions = async (userId) => {
           </DialogContent>
         </Dialog>
       </div>
+
       <div className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input placeholder="Search by name or email..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 rounded-xl" />
         </div>
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
           <TabsList className="w-full justify-start bg-transparent border-b border-slate-200 p-0">
             <TabsTrigger value="all">All ({users.length})</TabsTrigger>
@@ -607,6 +645,7 @@ const fetchPermissions = async (userId) => {
             <TabsTrigger value="staff">Staff ({users.filter(u => u.role === 'staff').length})</TabsTrigger>
             <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           </TabsList>
+
           {hasPermission("can_view_audit_logs") && (
             <TabsContent value="audit">
               {/* Fetch and render /audit-logs */}
@@ -614,6 +653,7 @@ const fetchPermissions = async (userId) => {
           )}
         </Tabs>
       </div>
+
       {activeTab !== 'audit' && (
         <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredUsers.length === 0 ? (
@@ -634,13 +674,14 @@ const fetchPermissions = async (userId) => {
                 currentUserId={user.id}
                 COLORS={COLORS}
                 isAdmin={isAdmin}
-                canEditUsers={canEditUsers} // ✅ ADD
-                canManagePermissions={canManagePermissions} // ✅ ADD
+                canEditUsers={canEditUsers}
+                canManagePermissions={canManagePermissions}
               />
             ))
           )}
         </motion.div>
       )}
+
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -649,6 +690,7 @@ const fetchPermissions = async (userId) => {
             </DialogTitle>
             <DialogDescription>Configure access for {selectedUserForPermissions?.full_name}</DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4 py-4">
             <Accordion type="single" collapsible className="w-full">
               <AccordionItem value="data-access">
@@ -677,6 +719,7 @@ const fetchPermissions = async (userId) => {
                   </div>
                 </AccordionContent>
               </AccordionItem>
+
               <AccordionItem value="staff-management">
                 <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><UsersIcon className="h-4 w-4" /> Staff Management</AccordionTrigger>
                 <AccordionContent>
@@ -706,7 +749,6 @@ const fetchPermissions = async (userId) => {
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="bg-slate-50 rounded-2xl p-4 space-y-4">
-
                     {[
                       { key: "view_other_tasks", label: "View Other Users' Tasks" },
                       { key: "view_other_attendance", label: "View Other Users' Attendance" },
@@ -747,7 +789,6 @@ const fetchPermissions = async (userId) => {
                         </div>
                       </div>
                     ))}
-
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -781,6 +822,7 @@ const fetchPermissions = async (userId) => {
                   </div>
                 </AccordionContent>
               </AccordionItem>
+
               <AccordionItem value="edit-permissions">
                 <AccordionTrigger className="font-semibold text-slate-700 flex items-center gap-2 text-sm"><Edit className="h-4 w-4" /> Editing Permissions</AccordionTrigger>
                 <AccordionContent>
@@ -806,9 +848,12 @@ const fetchPermissions = async (userId) => {
               </AccordionItem>
             </Accordion>
           </div>
+
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)} className="rounded-xl w-full sm:w-auto">Cancel</Button>
-            <Button onClick={handleSavePermissions} disabled={loading} className="text-white rounded-xl w-full sm:w-auto" style={{ background: COLORS.emeraldGreen }}>{loading ? 'Saving...' : 'Save Permissions'}</Button>
+            <Button onClick={handleSavePermissions} disabled={loading} className="text-white rounded-xl w-full sm:w-auto" style={{ background: COLORS.emeraldGreen }}>
+              {loading ? 'Saving...' : 'Save Permissions'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
