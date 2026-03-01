@@ -288,93 +288,11 @@ export default function Clients() {
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    setImportLoading(true);
     const reader = new FileReader();
     reader.onload = (e) => {
       const workbook = XLSX.read(e.target.result, { type: 'binary' });
-      if (workbook.SheetNames.includes('MasterData')) {
-        // Special handling for MDS data format (single company)
-        setImportLoading(true);
-        const masterSheet = workbook.Sheets['MasterData'];
-        const masterRows = XLSX.utils.sheet_to_json(masterSheet, { header: 1 });
-        const masterData = {};
-        masterRows.slice(1).forEach(row => {
-          if (row.length >= 2) {
-            const key = row[0].trim();
-            const value = row[1].trim();
-            masterData[key] = value;
-          }
-        });
-        // Fix email
-        if (masterData['Email Id']) {
-          masterData['Email Id'] = masterData['Email Id'].replace(/\[dot\]/g, '.').replace(/\[at\]/g, '@');
-        }
-        // Birthday (Date of Incorporation)
-        let birthday = null;
-        if (masterData['Date of Incorporation']) {
-          const parts = masterData['Date of Incorporation'].split('/');
-          if (parts.length === 3) {
-            birthday = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-          }
-        }
-        // Directors (contact persons)
-        const directorSheet = workbook.Sheets['Director Details'];
-        let contact_persons = [];
-        if (directorSheet) {
-          const directorData = XLSX.utils.sheet_to_json(directorSheet, {
-            header: ['srno', 'din', 'name', 'designation', 'category', 'appointment', 'cessation', 'signatory'],
-            range: 2 // Start from data rows (skipping title and headers)
-          });
-          contact_persons = directorData.map(d => ({
-            name: d.name?.trim() || '',
-            designation: d.designation?.trim() || '',
-            email: '',
-            phone: '',
-            birthday: null,
-            din: d.din?.trim() || ''
-          }));
-        }
-        // Client type detection
-        const client_type = detectClientTypeFromName(masterData['Company Name']);
-        // Services (default to ROC since it's from MDS)
-        const services = ['ROC'];
-        // Notes (compile relevant info)
-        const notes = `
-CIN: ${masterData['CIN'] || ''}
-Registered Address: ${masterData['Registered Address'] || ''}
-ROC Name: ${masterData['ROC Name'] || ''}
-Registration Number: ${masterData['Registration Number'] || ''}
-Authorised Capital (Rs): ${masterData['Authorised Capital (Rs)'] || ''}
-Paid up Capital (Rs): ${masterData['Paid up Capital (Rs)'] || ''}
-Date of last AGM: ${masterData['Date of last AGM'] || ''}
-Date of Balance Sheet: ${masterData['Date of Balance Sheet'] || ''}
-Company Status: ${masterData['Company Status'] || ''}
-        `.trim();
-        // Payload
-        const payload = {
-          company_name: masterData['Company Name']?.trim() || '',
-          client_type,
-          email: masterData['Email Id'] || '',
-          phone: '',
-          birthday,
-          services,
-          notes,
-          assigned_to: null,
-          contact_persons,
-          dsc_details: [],
-          status: 'active'
-        };
-        // Directly import
-        api.post('/clients', payload)
-          .then(() => {
-            toast.success('Client imported successfully from Master Data!');
-            fetchClients();
-            setImportLoading(false);
-          })
-          .catch(err => {
-            toast.error('Failed to import client: ' + (err.response?.data?.detail || err.message));
-            setImportLoading(false);
-          });
-      } else {
+     
         // Existing general Excel import logic
         const normalizeHeader = (header) => {
           if (!header) return '';
@@ -427,7 +345,7 @@ Company Status: ${masterData['Company Status'] || ''}
         ]);
         setPreviewData(combinedRows);
         setPreviewOpen(true);
-      }
+        setImportLoading(false);
     };
     reader.readAsBinaryString(file);
   };
@@ -1264,7 +1182,18 @@ Company Status: ${masterData['Company Status'] || ''}
               onClick={async () => {
                 setImportLoading(true);
                 let success = 0;
+
                 for (let row of previewData) {
+                  const exists = clients.find(c =>
+                    c.company_name?.toLowerCase().trim() ===
+                    row.company_name?.toLowerCase().trim()
+                  );
+
+                  if (exists) {
+                    console.log("Skipping duplicate:", row.company_name);
+                    continue;
+                  }
+
                   try {
                     await api.post('/clients', {
                       company_name: row.company_name?.trim(),
@@ -1280,11 +1209,13 @@ Company Status: ${masterData['Company Status'] || ''}
                       contact_persons: [],
                       dsc_details: []
                     });
+
                     success++;
                   } catch (err) {
                     console.error(err);
                   }
                 }
+
                 toast.success(`${success} clients imported successfully`);
                 fetchClients();
                 setPreviewOpen(false);
