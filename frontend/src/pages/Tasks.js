@@ -21,7 +21,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -29,7 +28,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Department categories for CA/CS firms
 const DEPARTMENTS = [
   { value: 'gst', label: 'GST' },
@@ -43,10 +41,8 @@ const DEPARTMENTS = [
   { value: 'dsc', label: 'DSC' },
   { value: 'other', label: 'OTHER' },
 ];
-
 // Predefined task categories
 const TASK_CATEGORIES = DEPARTMENTS;
-
 // Recurrence pattern options
 const RECURRENCE_PATTERNS = [
   { value: 'daily', label: 'Daily' },
@@ -54,7 +50,6 @@ const RECURRENCE_PATTERNS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
 ];
-
 // ==================== ENHANCED: CA/CS COMPLIANCE WORKFLOW TEMPLATES (14 Rich Templates) ====================
 const COMPLIANCE_WORKFLOWS = [
   {
@@ -240,7 +235,6 @@ const COMPLIANCE_WORKFLOWS = [
     frequency: "Annual"
   },
 ];
-
 // CLASSIC CORPORATE STATUS STYLES (To Do = Red, In Progress = Orange, Completed = Blue)
 const STATUS_STYLES = {
   pending: { bg: 'bg-red-50', text: 'text-red-700', label: 'To Do' },
@@ -271,7 +265,6 @@ const getStripeBg = (task, isOverdue) => {
   if (s === 'completed') return 'bg-blue-700';
   if (s === 'in_progress') return 'bg-orange-600';
   if (s === 'pending') return 'bg-red-600';
- 
   const p = (task.priority || '').toLowerCase().trim();
   if (p === 'critical') return 'bg-red-700';
   if (p === 'high') return 'bg-orange-600';
@@ -307,12 +300,9 @@ export default function Tasks() {
   const canModifyTask = (task) => {
     if (isAdmin) return true;
     return (
-      hasPermission("can_edit_tasks") &&
-      (
-        task.assigned_to === user?.id ||
-        task.sub_assignees?.includes(user?.id) ||
-        task.created_by === user?.id
-      )
+      task.assigned_to === user?.id ||
+      task.sub_assignees?.includes(user?.id) ||
+      task.created_by === user?.id
     );
   };
   const canAssignTasks = hasPermission("can_assign_tasks");
@@ -333,7 +323,6 @@ export default function Tasks() {
   const [openCommentTaskId, setOpenCommentTaskId] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
- 
   const location = useLocation();
   const filter = React.useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -360,20 +349,17 @@ export default function Tasks() {
     recurrence_interval: 1,
   });
   const fileInputRef = useRef(null);
-
   // NEW FRONTEND FEATURES FROM PREVIOUS UPDATE
   const [sortBy, setSortBy] = useState('due_date');
   const [sortDirection, setSortDirection] = useState('asc');
   const [showMyTasksOnly, setShowMyTasksOnly] = useState(false);
   const [activeFilters, setActiveFilters] = useState([]);
-
   // ==================== ENHANCED CA/CS COMPLIANCE WORKFLOW FEATURES ====================
   const [showWorkflowLibrary, setShowWorkflowLibrary] = useState(false);
   const [taskChecklists, setTaskChecklists] = useState({}); // local checklist state per task id
   const [workflowSearch, setWorkflowSearch] = useState('');
   const [workflowDeptFilter, setWorkflowDeptFilter] = useState('all');
   const [workflowFrequencyFilter, setWorkflowFrequencyFilter] = useState('all');
-
   const filteredWorkflows = COMPLIANCE_WORKFLOWS.filter(wf => {
     const matchesSearch = wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) ||
                          wf.title.toLowerCase().includes(workflowSearch.toLowerCase());
@@ -381,12 +367,10 @@ export default function Tasks() {
     const matchesFreq = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
     return matchesSearch && matchesDept && matchesFreq;
   });
-
   const applyComplianceWorkflow = (workflow) => {
     const today = new Date();
     const dueDate = new Date(today);
     dueDate.setDate(dueDate.getDate() + workflow.estimatedDays);
-
     setFormData({
       title: workflow.title,
       description: workflow.description,
@@ -408,7 +392,6 @@ export default function Tasks() {
     setWorkflowFrequencyFilter('all');
     toast.success(`✅ Loaded ${workflow.name} template (${workflow.estimatedHours} hrs)`);
   };
-
   // Parse description into checklist items (frontend only)
   const parseChecklist = (description) => {
     if (!description) return [];
@@ -418,7 +401,6 @@ export default function Tasks() {
       .filter(line => line.startsWith('-') || line.startsWith('•'))
       .map(line => line.replace(/^[-•]\s*/, '').trim());
   };
-
   const toggleChecklistItem = (taskId, index) => {
     setTaskChecklists(prev => {
       const current = prev[taskId] || [];
@@ -431,14 +413,12 @@ export default function Tasks() {
       return { ...prev, [taskId]: newChecked };
     });
   };
-
   const getChecklistProgress = (task) => {
     const checklistItems = parseChecklist(task.description);
     if (checklistItems.length === 0) return 0;
     const checked = taskChecklists[task.id] || [];
     return Math.round((checked.length / checklistItems.length) * 100);
   };
-
   useEffect(() => {
     fetchTasks();
     fetchClients();
@@ -651,11 +631,9 @@ export default function Tasks() {
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
-
   // NEW FRONTEND-ONLY FEATURES (from previous update)
   const displayTasks = React.useMemo(() => {
     let result = [...filteredTasks];
-
     if (showMyTasksOnly && user?.id) {
       result = result.filter(task =>
         task.assigned_to === user.id ||
@@ -663,7 +641,6 @@ export default function Tasks() {
         task.created_by === user.id
       );
     }
-
     result.sort((a, b) => {
       let comparison = 0;
       switch (sortBy) {
@@ -687,24 +664,20 @@ export default function Tasks() {
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
-
   const getRelativeDueDate = (dueDate) => {
     if (!dueDate) return '';
     const due = new Date(dueDate);
     const now = new Date();
     const diffTime = due.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 3600 * 24));
-
     if (diffDays < 0) return `Overdue ${Math.abs(diffDays)}d`;
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays <= 7) return `In ${diffDays}d`;
     return format(due, 'MMM dd');
   };
-
   const clearAllFilters = () => {
     setSearchQuery('');
     setFilterStatus('all');
@@ -716,7 +689,6 @@ export default function Tasks() {
     setSortDirection('asc');
     toast.success('All filters cleared');
   };
-
   const updateActiveFilters = () => {
     const pills = [];
     if (searchQuery) pills.push({ key: 'search', label: `Search: ${searchQuery}` });
@@ -730,11 +702,9 @@ export default function Tasks() {
     if (showMyTasksOnly) pills.push({ key: 'mytasks', label: 'My Tasks Only' });
     setActiveFilters(pills);
   };
-
   useEffect(() => {
     updateActiveFilters();
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly]);
-
   const removeFilter = (key) => {
     if (key === 'search') setSearchQuery('');
     if (key === 'status') setFilterStatus('all');
@@ -743,7 +713,6 @@ export default function Tasks() {
     if (key === 'assignee') setFilterAssignee('all');
     if (key === 'mytasks') setShowMyTasksOnly(false);
   };
-
   const handleDuplicateTask = async (task) => {
     try {
       const duplicateData = {
@@ -767,7 +736,6 @@ export default function Tasks() {
       toast.error('Failed to duplicate task');
     }
   };
-
   const stats = {
     total: tasks.length,
     todo: tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
@@ -846,7 +814,6 @@ export default function Tasks() {
             <Button variant="outline" size="sm" onClick={handleCsvUploadClick}>Upload CSV</Button>
             <Button variant="outline" size="sm" onClick={handleExportCsv}>Export CSV</Button>
             <Button variant="outline" size="sm" onClick={handleExportPdf}>Export PDF</Button>
-
             {/* ENHANCED: Compliance Workflows Button */}
             {canEditTasks && (
               <Button
@@ -859,7 +826,7 @@ export default function Tasks() {
                 CA/CS Templates
               </Button>
             )}
-           
+          
             {/* Notifications Bell - ENHANCED STYLING */}
             <Popover open={showNotifications} onOpenChange={setShowNotifications}>
               <PopoverTrigger asChild>
@@ -1235,7 +1202,6 @@ export default function Tasks() {
           </div>
         </CardContent>
       </Card>
-
       {/* Stats Bar */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border border-slate-200 hover:shadow-md transition-all duration-200 cursor-pointer group rounded-2xl" onClick={() => setFilterStatus('all')}>
@@ -1269,16 +1235,13 @@ export default function Tasks() {
           </CardContent>
         </Card>
       </motion.div>
-
 {/* Search + Filters + View Toggle */}
 <motion.div
   variants={itemVariants}
   className="flex items-center justify-between gap-3 flex-wrap w-full"
 >
-
   {/* LEFT SIDE: Search + Filters */}
   <div className="flex items-center gap-3 flex-wrap">
-
     {/* Search */}
     <div className="relative w-full sm:w-64">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1289,7 +1252,6 @@ export default function Tasks() {
         className="pl-10 bg-white rounded-2xl"
       />
     </div>
-
     {/* Status */}
     <Select value={filterStatus} onValueChange={setFilterStatus}>
       <SelectTrigger className="w-36 bg-white rounded-2xl">
@@ -1303,7 +1265,6 @@ export default function Tasks() {
         <SelectItem value="overdue">Overdue</SelectItem>
       </SelectContent>
     </Select>
-
     {/* Priority */}
     <Select value={filterPriority} onValueChange={setFilterPriority}>
       <SelectTrigger className="w-36 bg-white rounded-2xl">
@@ -1317,7 +1278,6 @@ export default function Tasks() {
         <SelectItem value="critical">Critical</SelectItem>
       </SelectContent>
     </Select>
-
     {/* Category */}
     <Select value={filterCategory} onValueChange={setFilterCategory}>
       <SelectTrigger className="w-36 bg-white rounded-2xl">
@@ -1332,7 +1292,6 @@ export default function Tasks() {
         ))}
       </SelectContent>
     </Select>
-
     {/* Assignee */}
     <Select value={filterAssignee} onValueChange={setFilterAssignee}>
       <SelectTrigger className="w-36 bg-white rounded-2xl">
@@ -1347,9 +1306,7 @@ export default function Tasks() {
         ))}
       </SelectContent>
     </Select>
-
   </div>
-
   {/* RIGHT SIDE: View Toggle */}
   <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm">
     <Button
@@ -1365,7 +1322,6 @@ export default function Tasks() {
       <List className="h-4 w-4 mr-1" />
       List
     </Button>
-
     <Button
       variant="ghost"
       size="sm"
@@ -1380,7 +1336,6 @@ export default function Tasks() {
       Board
     </Button>
   </div>
-
 </motion.div>
       {/* Active Filter Pills */}
       {activeFilters.length > 0 && (
@@ -1398,7 +1353,6 @@ export default function Tasks() {
           ))}
         </div>
       )}
-
       {/* Tasks Container */}
       <div className="overflow-y-auto max-h-[calc(100vh-340px)] pb-8">
         {viewMode === 'list' ? (
@@ -1459,6 +1413,11 @@ export default function Tasks() {
                               <User className="h-4 w-4" />
                               {getUserName(task.assigned_to)}
                             </span>
+{task.created_by && (
+ <span className="flex items-center gap-1 text-xs text-slate-400">
+ Assigned by: {getUserName(task.created_by)}
+ </span>
+)}
                             {task.due_date && (
                               <span className={`flex items-center gap-1 ${taskIsOverdue ? 'text-red-600 font-medium' : ''}`}>
                                 <Calendar className="h-4 w-4" />
@@ -1505,7 +1464,6 @@ export default function Tasks() {
                           )}
                         </div>
                       </div>
-
                       {/* ENHANCED: Interactive Checklist for Compliance Workflows */}
                       {checklistItems.length > 0 && (
                         <div className="pl-6 border-l-2 border-emerald-200 bg-emerald-50/50 rounded-xl p-3 text-sm">
@@ -1527,19 +1485,8 @@ export default function Tasks() {
                           </div>
                         </div>
                       )}
-
                       {/* Classic Corporate Status Tabs */}
-                      {(
-                        isAdmin ||
-                        (
-                          canEditTasks &&
-                          (
-                            task.assigned_to === user?.id ||
-                            task.sub_assignees?.includes(user?.id) ||
-                            task.created_by === user?.id
-                          )
-                        )
-                      ) && (
+                      {canModifyTask(task) && (
                         <div className="flex gap-2 pt-3 border-t border-slate-100">
                           <button
                             onClick={() => handleQuickStatusChange(task, 'pending')}
@@ -1662,7 +1609,6 @@ export default function Tasks() {
                             <h3 className="font-semibold text-slate-900 text-lg mb-3 line-clamp-2" style={{ color: COLORS.deepBlue }}>
                               {task.title}
                             </h3>
-
                             {/* ENHANCED Checklist Preview in Board View */}
                             {checklistItems.length > 0 && (
                               <div className="mb-4 text-xs bg-emerald-50 p-3 rounded-xl max-h-32 overflow-hidden">
@@ -1675,7 +1621,6 @@ export default function Tasks() {
                                 {checklistItems.length > 4 && <div className="text-emerald-600 mt-1">+{checklistItems.length - 4} more steps</div>}
                               </div>
                             )}
-
                             <div className="mt-auto space-y-1 text-xs text-slate-500">
                               {task.client_id && (
                                 <div className="flex items-center gap-2">
@@ -1687,6 +1632,11 @@ export default function Tasks() {
                                 <User className="h-4 w-4" />
                                 {getUserName(task.assigned_to)}
                               </div>
+{task.created_by && (
+ <div className="flex items-center gap-2 text-xs text-slate-400">
+ Assigned by: {getUserName(task.created_by)}
+ </div>
+)}
                               {task.due_date && (
                                 <div className={`flex items-center gap-2 ${taskIsOverdue ? 'text-red-600 font-medium' : ''}`}>
                                   <Calendar className="h-4 w-4" />
@@ -1731,11 +1681,7 @@ export default function Tasks() {
                               </button>
                             )}
                             {/* Corporate Status Tabs in Board View */}
-                            {(canEditTasks && (
-                              task.assigned_to === user?.id ||
-                              task.sub_assignees?.includes(user?.id) ||
-                              task.created_by === user?.id
-                            )) && (
+                            {canModifyTask(task) && (
                               <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-slate-100">
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'pending')}
@@ -1804,7 +1750,6 @@ export default function Tasks() {
           </motion.div>
         )}
       </div>
-
       {/* ENHANCED: Compliance Workflow Library Dialog */}
       <Dialog open={showWorkflowLibrary} onOpenChange={setShowWorkflowLibrary}>
         <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto">
@@ -1814,7 +1759,6 @@ export default function Tasks() {
               14 professionally curated statutory workflows for CA/CS practice. Click any template to auto-fill task with checklist, recurrence &amp; priority.
             </DialogDescription>
           </DialogHeader>
-
           {/* Enhanced Filters */}
           <div className="flex gap-4 sticky top-0 bg-white z-10 py-4 border-b">
             <div className="relative flex-1">
@@ -1850,7 +1794,6 @@ export default function Tasks() {
               </SelectContent>
             </Select>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6">
             {filteredWorkflows.map((wf) => {
               const previewChecklist = parseChecklist(wf.description).slice(0, 4);
@@ -1871,9 +1814,7 @@ export default function Tasks() {
                         <p className="text-xs text-slate-500 mt-1">{wf.frequency}</p>
                       </div>
                     </div>
-
                     <p className="text-sm text-slate-600 line-clamp-2 mb-4">{wf.title}</p>
-
                     {/* Checklist Preview */}
                     <div className="text-xs bg-slate-50 rounded-xl p-4 mb-5 border border-slate-100">
                       <div className="font-medium text-emerald-700 mb-2 flex items-center gap-1">
@@ -1888,7 +1829,6 @@ export default function Tasks() {
                         )}
                       </ul>
                     </div>
-
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 text-emerald-600">
                         <CalendarIcon className="h-4 w-4" />
@@ -1903,15 +1843,12 @@ export default function Tasks() {
               );
             })}
           </div>
-
           {filteredWorkflows.length === 0 && (
             <div className="text-center py-20 text-slate-400">No matching templates found</div>
           )}
-
           <p className="text-center text-xs text-slate-400 mt-2">All templates are 100% frontend-powered • Zero backend changes required</p>
         </DialogContent>
       </Dialog>
-
       <input
         type="file"
         accept=".csv"
