@@ -19,9 +19,13 @@ ADMIN_EMAIL = "csmanthandesai@gmail.com"
 # =========================================================
 
 def send_message(chat_id: int, text: str, keyboard=None):
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
     if keyboard:
         payload["reply_markup"] = keyboard
+
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
 
@@ -53,7 +57,7 @@ async def telegram_webhook(request: Request):
         chat_id = callback["message"]["chat"]["id"]
         clicked = callback["data"]
 
-        # remove loading spinner
+        # remove Telegram loading spinner
         requests.post(
             f"{TELEGRAM_API}/answerCallbackQuery",
             json={"callback_query_id": callback["id"]}
@@ -95,6 +99,7 @@ async def telegram_webhook(request: Request):
         # ===============================
         if clicked.startswith("assign_"):
             assignee = clicked.replace("assign_", "")
+
             data["assigned_to"] = None if assignee == "unassigned" else assignee
             data["sub_assignees"] = []
 
@@ -223,25 +228,32 @@ async def telegram_webhook(request: Request):
             return {"status": "pattern_selected"}
 
         # ===============================
-        # CONFIRM
+        # CONFIRM TASK CREATION
         # ===============================
         if clicked == "confirm_task":
             now = datetime.now(timezone.utc)
 
+            # Fetch user again to guarantee created_by
+            user = await db.users.find_one({"telegram_id": chat_id})
+
+            if not user:
+                return {"status": "user_not_found"}
+
             new_task = {
                 "id": str(uuid.uuid4()),
-                "title": data["title"],
+                "title": data.get("title"),
                 "description": data.get("description"),
                 "assigned_to": data.get("assigned_to"),
                 "sub_assignees": data.get("sub_assignees", []),
-                "priority": data.get("priority"),
-                "status": "pending",
-                "category": data.get("category"),
+                "priority": data.get("priority", "medium"),
+                "status": "pending",  # ALWAYS DEFAULT
+                "category": data.get("category", "other"),
                 "client_id": None,
                 "is_recurring": data.get("is_recurring", False),
                 "recurrence_pattern": data.get("recurrence_pattern"),
                 "recurrence_interval": data.get("recurrence_interval", 1),
                 "type": "task",
+                "created_by": user["id"],  # CRITICAL FIX
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat(),
                 "due_date": data.get("due_date")
@@ -266,6 +278,7 @@ async def telegram_webhook(request: Request):
 
     user = await db.users.find_one({"telegram_id": chat_id})
 
+    # LINK ADMIN IF NOT LINKED
     if not user:
         user = await db.users.find_one({"email": ADMIN_EMAIL})
         if user:
@@ -278,7 +291,7 @@ async def telegram_webhook(request: Request):
             send_message(chat_id, "❌ No account found.")
             return {"status": "no_user"}
 
-    # START
+    # START COMMAND
     if text == "/start":
         await db.telegram_conversations.update_one(
             {"telegram_id": chat_id},
@@ -296,15 +309,19 @@ async def telegram_webhook(request: Request):
     step = convo.get("step")
     data = convo.get("data", {})
 
+    # TITLE
     if step == "title":
         data["title"] = text
+
         await db.telegram_conversations.update_one(
             {"telegram_id": chat_id},
             {"$set": {"step": "description", "data": data}}
         )
+
         send_message(chat_id, "Enter Description (or type SKIP):")
         return {"status": "title_saved"}
 
+    # DESCRIPTION
     if step == "description":
         data["description"] = None if text.lower() == "skip" else text
 
@@ -329,10 +346,11 @@ async def telegram_webhook(request: Request):
 
         return {"status": "desc_saved"}
 
+    # DUE DATE
     if step == "due_date":
         try:
             due = datetime.fromisoformat(text)
-        except:
+        except Exception:
             send_message(chat_id, "Invalid format. Use YYYY-MM-DD")
             return {"status": "invalid_date"}
 
@@ -346,7 +364,7 @@ async def telegram_webhook(request: Request):
         summary = f"""
 Confirm Task:
 
-Title: {data['title']}
+Title: {data.get('title')}
 Department: {data.get('category')}
 Priority: {data.get('priority')}
 Recurring: {data.get('is_recurring')}
