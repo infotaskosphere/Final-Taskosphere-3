@@ -63,6 +63,8 @@ async def telegram_webhook(request: Request):
 
     message = payload["message"]
     chat_id = message["chat"]["id"]
+
+    print("CHAT ID:", chat_id)
     text = message.get("text", "").strip()
 
     # Find user linked with telegram
