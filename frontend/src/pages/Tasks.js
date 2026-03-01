@@ -1270,126 +1270,113 @@ export default function Tasks() {
         </Card>
       </motion.div>
 
-      {/* Search and Filters - ORIGINAL + NEW COMPLIANCE FEATURES */}
-      <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4 items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder="Search tasks..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-white rounded-2xl"
-          />
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-40 bg-white rounded-2xl">
-              <Filter className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">To Do</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="overdue">Overdue</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className="w-40 bg-white rounded-2xl">
-              <SelectValue placeholder="Priority" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Priorities</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className="w-40 bg-white rounded-2xl">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {TASK_CATEGORIES.map(cat => (
-                <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className="w-40 bg-white rounded-2xl">
-              <SelectValue placeholder="Assigned To" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Assignees</SelectItem>
-              {users.map(u => (
-                <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {/* Search + Filters + View Toggle - Single Line */}
+<motion.div
+  variants={itemVariants}
+  className="flex items-center gap-3 flex-wrap"
+>
 
-          {/* My Tasks Only Toggle */}
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-2xl border border-slate-200">
-            <Switch 
-              checked={showMyTasksOnly} 
-              onCheckedChange={setShowMyTasksOnly}
-            />
-            <span className="text-sm font-medium text-slate-600 whitespace-nowrap">My Tasks Only</span>
-          </div>
+  {/* 🔍 Search */}
+  <div className="relative w-64">
+    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+    <Input
+      placeholder="Search tasks..."
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+      className="pl-10 bg-white rounded-2xl"
+    />
+  </div>
 
-          {/* Sort By */}
-          <div className="flex items-center gap-2 bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-36 border-0 bg-transparent">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="due_date">Due Date</SelectItem>
-                <SelectItem value="priority">Priority</SelectItem>
-                <SelectItem value="title">Title</SelectItem>
-                <SelectItem value="status">Status</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-              className="h-9 px-2 rounded-none border-l border-slate-200"
-            >
-              {sortDirection === 'asc' ? '↑' : '↓'}
-            </Button>
-          </div>
+  {/* Status */}
+  <Select value={filterStatus} onValueChange={setFilterStatus}>
+    <SelectTrigger className="w-40 bg-white rounded-2xl">
+      <SelectValue placeholder="All Statuses" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="all">All Statuses</SelectItem>
+      <SelectItem value="pending">To Do</SelectItem>
+      <SelectItem value="in_progress">In Progress</SelectItem>
+      <SelectItem value="completed">Completed</SelectItem>
+      <SelectItem value="overdue">Overdue</SelectItem>
+    </SelectContent>
+  </Select>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={clearAllFilters}
-            className="rounded-2xl text-slate-500 hover:text-slate-700"
-          >
-            Clear Filters
-          </Button>
+  {/* Priority */}
+  <Select value={filterPriority} onValueChange={setFilterPriority}>
+    <SelectTrigger className="w-40 bg-white rounded-2xl">
+      <SelectValue placeholder="All Priorities" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="all">All Priorities</SelectItem>
+      <SelectItem value="low">Low</SelectItem>
+      <SelectItem value="medium">Medium</SelectItem>
+      <SelectItem value="high">High</SelectItem>
+      <SelectItem value="critical">Critical</SelectItem>
+    </SelectContent>
+  </Select>
 
-          <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm">
-            <Button
-              variant="ghost"
-              className={`rounded-xl font-medium transition-all ${viewMode === 'list' ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}
-              onClick={() => setViewMode('list')}
-            >
-              <List className="h-4 w-4 mr-2" /> List View
-            </Button>
-            <Button
-              variant="ghost"
-              className={`rounded-xl font-medium transition-all ${viewMode === 'board' ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}
-              onClick={() => setViewMode('board')}
-            >
-              <LayoutGrid className="h-4 w-4 mr-2" /> Board View
-            </Button>
-          </div>
-        </div>
-      </motion.div>
+  {/* Category */}
+  <Select value={filterCategory} onValueChange={setFilterCategory}>
+    <SelectTrigger className="w-40 bg-white rounded-2xl">
+      <SelectValue placeholder="All Categories" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="all">All Categories</SelectItem>
+      {TASK_CATEGORIES.map(cat => (
+        <SelectItem key={cat.value} value={cat.value}>
+          {cat.label}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
 
+  {/* Assignee */}
+  <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+    <SelectTrigger className="w-40 bg-white rounded-2xl">
+      <SelectValue placeholder="All Assignees" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="all">All Assignees</SelectItem>
+      {users.map(u => (
+        <SelectItem key={u.id} value={u.id}>
+          {u.full_name}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+
+  {/* View Toggle */}
+  <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm ml-auto">
+    <Button
+      variant="ghost"
+      size="sm"
+      className={`rounded-xl font-medium ${
+        viewMode === 'list'
+          ? 'bg-white shadow text-slate-800'
+          : 'text-slate-500'
+      }`}
+      onClick={() => setViewMode('list')}
+    >
+      <List className="h-4 w-4 mr-1" />
+      List
+    </Button>
+
+    <Button
+      variant="ghost"
+      size="sm"
+      className={`rounded-xl font-medium ${
+        viewMode === 'board'
+          ? 'bg-white shadow text-slate-800'
+          : 'text-slate-500'
+      }`}
+      onClick={() => setViewMode('board')}
+    >
+      <LayoutGrid className="h-4 w-4 mr-1" />
+      Board
+    </Button>
+  </div>
+
+</motion.div>
       {/* Active Filter Pills */}
       {activeFilters.length > 0 && (
         <div className="flex flex-wrap gap-2">
