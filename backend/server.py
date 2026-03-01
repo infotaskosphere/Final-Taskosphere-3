@@ -2083,47 +2083,28 @@ async def delete_due_date(
         raise HTTPException(status_code=404, detail="Due date not found")
     return {"message": "Due date deleted successfully"}
 # REPORTS ROUTES
-# Reports routes
+
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
-    user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role == "admin":
-        # Admin can view anyone
-        query = {"user_id": user_id} if user_id else {}
-    else:
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-        allowed = permissions.get("view_other_reports", [])
-        if user_id is None:
-            query = {"user_id": current_user.id}
-        elif user_id == current_user.id:
-            query = {"user_id": current_user.id}
-        elif user_id in allowed:
-            query = {"user_id": user_id}
-        else:
-            raise HTTPException(status_code=403, detail="Not authorized")
-    # Get activity logs
-    logs = await db.activity_logs.find(query, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
-    # Get user data
-    user_ids = list(set([log["user_id"] for log in logs]))
-    users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password": 0}).to_list(100)
-    user_map = {user["id"]: user for user in users}
-    # Calculate metrics
-    report_data = {}
-    for log in logs:
-        user_id = log["user_id"]
-        if user_id not in report_data:
-            report_data[user_id] = {
-                "user": user_map.get(user_id, {}),
-                "total_screen_time": 0,
-                "total_tasks_completed": 0,
-                "days_logged": 0
-            }
-        report_data[user_id]["total_screen_time"] += log.get("screen_time_minutes", 0)
-        report_data[user_id]["total_tasks_completed"] += log.get("tasks_completed", 0)
-        report_data[user_id]["days_logged"] += 1
-    return list(report_data.values())
+    query = {"user_id": current_user.id}
+
+    logs = await db.activity_logs.find(
+        query,
+        {"_id": 0}
+    ).sort("date", -1).limit(30).to_list(100)
+
+    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+
+    return {
+        "user_id": current_user.id,
+        "total_screen_time": total_screen_time,
+        "total_tasks_completed": total_tasks_completed,
+        "days_logged": len(logs)
+    }
+    
 @api_router.get("/reports/export")
 async def export_reports(
     format: str = "csv",
@@ -2134,25 +2115,32 @@ async def export_reports(
         if not permissions.get("can_download_reports", False):
             raise HTTPException(status_code=403, detail="Download not allowed")
     # Fetch all reports
-    reports = await get_efficiency_report(None, current_user)
-    if format == "csv":
-        output = StringIO()
-        writer = csv.DictWriter(output, fieldnames=["user_id", "user_name", "total_screen_time", "total_tasks_completed", "days_logged"])
-        writer.writeheader()
-        for report in reports:
-            writer.writerow({
-                "user_id": report["user"].get("id"),
-                "user_name": report["user"].get("full_name"),
-                "total_screen_time": report["total_screen_time"],
-                "total_tasks_completed": report["total_tasks_completed"],
-                "days_logged": report["days_logged"]
-            })
-        output.seek(0)
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=efficiency_report.csv"}
-        )
+report = await get_efficiency_report(current_user)
+
+if format == "csv":
+    output = StringIO()
+    writer = csv.writer(output)
+
+    # Header
+    writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
+
+    # Data row
+    writer.writerow([
+        report["user_id"],
+        report["total_screen_time"],
+        report["total_tasks_completed"],
+        report["days_logged"]
+    ])
+
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=efficiency_report.csv"
+        }
+    )
     elif format == "pdf":
         # Use FPDF
         pdf = FPDF()
