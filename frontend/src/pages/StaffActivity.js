@@ -184,15 +184,18 @@ export default function StaffActivity() {
   };
   const fetchUserTodos = async () => {
     try {
-      const res = await api.get(`/todos?user_id=${selectedUser}`);
-      setSelectedUserTodos(res.data);
-    } catch (error) {
-      console.error('Failed to fetch user todos:', error);
-      if (error.response && error.response.status === 404) {
-        setSelectedUserTodos([]);
-      } else {
-        toast.error('Failed to load to-do list');
+      let url = "/todos";
+
+      if (selectedUser !== "all") {
+        url += `?user_id=${selectedUser}`;
       }
+
+      const res = await api.get(url);
+      setSelectedUserTodos(res.data);
+
+    } catch (error) {
+      console.error("Failed to fetch user todos:", error);
+      toast.error("Failed to load to-do list");
     }
   };
   const fetchTaskAnalytics = async () => {
