@@ -658,6 +658,7 @@ async def create_audit_log(
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
+
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
     todo_data: TodoCreate,
@@ -670,16 +671,20 @@ async def create_todo(
 
     doc = todo.model_dump()
 
-    # Convert datetime fields properly
+    # Convert datetime fields to ISO string
     doc["created_at"] = doc["created_at"].isoformat()
     doc["updated_at"] = doc["updated_at"].isoformat()
 
     if doc.get("due_date"):
         doc["due_date"] = doc["due_date"].isoformat()
 
-    await db.todos.insert_one(doc)
+    result = await db.todos.insert_one(doc)
 
-    return todo
+    # Return proper id from Mongo
+    doc["id"] = str(result.inserted_id)
+
+    return doc
+    
 @api_router.get("/todos")
 async def get_todos(
     user_id: Optional[str] = None,
