@@ -665,14 +665,29 @@ async def create_audit_log(
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
 @api_router.get("/todos")
-async def get_todos(user_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    
-    if current_user.role == "admin" and user_id:
-        query = {"user_id": user_id}
+async def get_todos(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    # 🔒 If admin
+    if current_user.role == "admin":
+        if user_id:
+            query = {"user_id": user_id}
+        else:
+            query = {}  # return all todos
     else:
+        # 🔒 Non-admin can ONLY see their own
+        if user_id and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not allowed")
         query = {"user_id": current_user.id}
 
     todos = await db.todos.find(query).to_list(1000)
+
+    # Convert ObjectId safely
+    for t in todos:
+        t["id"] = str(t["_id"])
+        del t["_id"]
+
     return todos
 @api_router.get("/todos")
 async def get_my_todos(current_user: User = Depends(get_current_user)):
