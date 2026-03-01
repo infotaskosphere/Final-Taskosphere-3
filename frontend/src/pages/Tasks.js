@@ -80,7 +80,7 @@ const getStripeBg = (task, isOverdue) => {
   if (s === 'completed') return 'bg-blue-700';
   if (s === 'in_progress') return 'bg-orange-600';
   if (s === 'pending') return 'bg-red-600';
- 
+  
   const p = (task.priority || '').toLowerCase().trim();
   if (p === 'critical') return 'bg-red-700';
   if (p === 'high') return 'bg-orange-600';
@@ -91,18 +91,20 @@ const getStripeBg = (task, isOverdue) => {
 const DashboardStripCard = ({
   stripeColor,
   children,
+  isCompleted = false,
   className = "",
 }) => {
   return (
     <div
-      className={`relative rounded-2xl border border-slate-200 bg-white
-        hover:shadow-md hover:-translate-y-[1px]
-        transition-all duration-200 overflow-hidden group ${className}`}
+      className={`relative rounded-2xl border border-slate-200 bg-white/90 backdrop-blur-sm
+        transition-all duration-200 overflow-hidden group
+        ${isCompleted ? "opacity-80" : "hover:shadow-md hover:-translate-y-[1px]"}
+        ${className}`}
     >
       <div
         className={`absolute left-0 top-0 h-full w-[6px] rounded-l-2xl ${stripeColor}`}
       />
-      <div className="pl-6 pr-6 py-5">
+      <div className={`pl-6 pr-6 ${isCompleted ? "py-3" : "py-5"}`}>
         {children}
       </div>
     </div>
@@ -137,7 +139,8 @@ export default function Tasks() {
   const [showCommentsDialog, setShowCommentsDialog] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [newComment, setNewComment] = useState('');
- 
+  const [openCommentTaskId, setOpenCommentTaskId] = useState(null);
+  
   const location = useLocation();
   const filter = React.useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -418,7 +421,7 @@ export default function Tasks() {
   };
   return (
     <motion.div
-      className="space-y-6"
+      className="space-y-6 bg-slate-50 p-6 rounded-3xl"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -832,19 +835,29 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-340px)] pb-8">
         {viewMode === 'list' ? (
           <motion.div className="space-y-3" variants={containerVariants}>
-            {filteredTasks.map((task) => {
+            {filteredTasks.map((task, index) => {
               const taskIsOverdue = isOverdue(task);
-              const displayStatus = getDisplayStatus(task);
+              const displayStatus = getDisplayStatus({
+                ...task,
+                status: task.status || "pending",
+              });
               const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
               const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
               return (
                 <motion.div key={task.id} variants={itemVariants}>
-                  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
+                  <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)} isCompleted={task.status === "completed"}>
                     <div className="flex flex-col gap-4">
                       {/* Top Row */}
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <span className="font-semibold text-lg text-slate-900 truncate" style={{ color: COLORS.deepBlue }}>
+                          <span className="text-xs font-bold text-slate-400 w-6">
+                            #{index + 1}
+                          </span>
+                          <span className={`font-semibold truncate ${
+                            task.status === "completed"
+                              ? "text-base text-slate-500 line-through"
+                              : "text-lg text-slate-900"
+                          }`} style={{ color: COLORS.deepBlue }}>
                             {task.title}
                           </span>
                           <Badge className={`px-3 py-1 text-xs font-medium ${priorityStyle.bg} ${priorityStyle.text}`}>
@@ -858,99 +871,132 @@ export default function Tasks() {
                           )}
                         </div>
                         <div className="flex items-center gap-4">
- <div className="flex items-center gap-6 text-sm text-slate-500">
- {task.client_id && (
- <span className="flex items-center gap-1">
- <Building2 className="h-4 w-4" />
- {getClientName(task.client_id)}
- </span>
- )}
+                          <div className="flex items-center gap-6 text-sm text-slate-500">
+                            {task.client_id && (
+                              <span className="flex items-center gap-1">
+                                <Building2 className="h-4 w-4" />
+                                {getClientName(task.client_id)}
+                              </span>
+                            )}
 
- <span className="flex items-center gap-1">
- <User className="h-4 w-4" />
- {getUserName(task.assigned_to)}
- </span>
+                            <span className="flex items-center gap-1">
+                              <User className="h-4 w-4" />
+                              {getUserName(task.assigned_to)}
+                            </span>
 
- {task.due_date && (
- <span className="flex items-center gap-1">
- <Calendar className="h-4 w-4" />
- {format(new Date(task.due_date), 'MMM dd')}
- </span>
- )}
- </div>
+                            {task.due_date && (
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-4 w-4" />
+                                {format(new Date(task.due_date), 'MMM dd')}
+                              </span>
+                            )}
+                          </div>
 
- {canModifyTask(task) && (
- <button
- onClick={() => handleEdit(task)}
- className="p-2 rounded-xl hover:bg-blue-50 text-blue-600 transition"
- >
- <Edit className="h-4 w-4" />
- </button>
- )}
- {canModifyTask(task) && (
- <button
- onClick={() => { handleShowComments(task); }}
- className="p-2 rounded-xl hover:bg-indigo-50 text-indigo-600 transition"
- >
- <MessageSquare className="h-4 w-4" />
- </button>
- )}
- {canDeleteTasks && (
- <button
- onClick={() => handleDelete(task.id)}
- className="p-2 rounded-xl hover:bg-red-50 text-red-600 transition"
- >
- <Trash2 className="h-4 w-4" />
- </button>
- )}
-</div>
+                          {canModifyTask(task) && (
+                            <button
+                              onClick={() => handleEdit(task)}
+                              className="p-2 rounded-xl hover:bg-blue-50 text-blue-600 transition"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canModifyTask(task) && (
+                            <button
+                              onClick={() =>
+                                setOpenCommentTaskId(
+                                  openCommentTaskId === task.id ? null : task.id
+                                )
+                              }
+                              className="p-2 rounded-xl hover:bg-indigo-50 text-indigo-600 transition"
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDeleteTasks && (
+                            <button
+                              onClick={() => handleDelete(task.id)}
+                              className="p-2 rounded-xl hover:bg-red-50 text-red-600 transition"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                     
-                     {/* Classic Corporate Status Tabs - perfectly aligned with card */}
-{(
-  isAdmin ||
-  (
-    canEditTasks &&
-    (
-      task.assigned_to === user?.id ||
-      task.sub_assignees?.includes(user?.id) ||
-      task.created_by === user?.id
-    )
-  )
-) && (
-  <div className="flex gap-2 pt-3 border-t border-slate-100">
-    <button
-      onClick={() => handleQuickStatusChange(task, 'pending')}
-      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
-        task.status === 'pending'
-          ? 'bg-red-600 text-white border-red-600 shadow-sm'
-          : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-300'
-      }`}
-    >
-      To Do
-    </button>
-    <button
-      onClick={() => handleQuickStatusChange(task, 'in_progress')}
-      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
-        task.status === 'in_progress'
-          ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
-          : 'bg-white border-slate-200 text-slate-600 hover:bg-orange-50 hover:border-orange-300'
-      }`}
-    >
-      In Progress
-    </button>
-    <button
-      onClick={() => handleQuickStatusChange(task, 'completed')}
-      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
-        task.status === 'completed'
-          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-          : 'bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:border-blue-300'
-      }`}
-    >
-      Completed
-    </button>
-  </div>
-)}
+
+                      {/* Classic Corporate Status Tabs - perfectly aligned with card */}
+                      {(
+                        isAdmin ||
+                        (
+                          canEditTasks &&
+                          (
+                            task.assigned_to === user?.id ||
+                            task.sub_assignees?.includes(user?.id) ||
+                            task.created_by === user?.id
+                          )
+                        )
+                      ) && (
+                        <div className="flex gap-2 pt-3 border-t border-slate-100">
+                          <button
+                            onClick={() => handleQuickStatusChange(task, 'pending')}
+                            className={`flex-1 h-8 text-xs px-5 font-medium rounded-2xl border transition-all ${
+                              task.status === 'pending'
+                                ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-300'
+                            }`}
+                          >
+                            To Do
+                          </button>
+                          <button
+                            onClick={() => handleQuickStatusChange(task, 'in_progress')}
+                            className={`flex-1 h-8 text-xs px-5 font-medium rounded-2xl border transition-all ${
+                              task.status === 'in_progress'
+                                ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-orange-50 hover:border-orange-300'
+                            }`}
+                          >
+                            In Progress
+                          </button>
+                          <button
+                            onClick={() => handleQuickStatusChange(task, 'completed')}
+                            className={`flex-1 h-8 text-xs px-5 font-medium rounded-2xl border transition-all ${
+                              task.status === 'completed'
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:border-blue-300'
+                            }`}
+                          >
+                            Completed
+                          </button>
+                        </div>
+                      )}
+                      {openCommentTaskId === task.id && (
+                        <div className="mt-3 border-t pt-3 space-y-2">
+                          <div className="max-h-32 overflow-y-auto text-sm text-slate-600">
+                            {(comments[task.id] || []).map((comment, i) => (
+                              <div key={i} className="mb-2">
+                                <p>{comment.text}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Input
+                              value={newComment}
+                              onChange={(e) => setNewComment(e.target.value)}
+                              placeholder="Add comment..."
+                              className="h-8 text-sm"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setSelectedTask(task);
+                                handleAddComment();
+                              }}
+                            >
+                              Post
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </DashboardStripCard>
                 </motion.div>
@@ -976,13 +1022,16 @@ export default function Tasks() {
                 <div className="space-y-4 min-h-[300px]">
                   {filteredTasks
                     .filter((t) => t.status === col.status || (col.status === 'pending' && isOverdue(t)))
-                    .map((task) => {
+                    .map((task, index) => {
                       const taskIsOverdue = isOverdue(task);
-                      const displayStatus = getDisplayStatus(task);
+                      const displayStatus = getDisplayStatus({
+                        ...task,
+                        status: task.status || "pending",
+                      });
                       const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                       const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
                       return (
-                        <DashboardStripCard key={task.id} stripeColor={getStripeBg(task, taskIsOverdue)}>
+                        <DashboardStripCard key={task.id} stripeColor={getStripeBg(task, taskIsOverdue)} isCompleted={task.status === "completed"}>
                           <div className="flex flex-col h-full">
                             <div className="flex items-center gap-3 mb-4">
                               <Badge className={`px-3 py-1 text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}>
@@ -995,10 +1044,13 @@ export default function Tasks() {
                                 <Badge className="px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700">Recurring</Badge>
                               )}
                             </div>
+                            <span className="text-xs font-bold text-slate-400">
+                              #{index + 1}
+                            </span>
                             <h3 className="font-semibold text-slate-900 text-lg mb-3 line-clamp-2" style={{ color: COLORS.deepBlue }}>
                               {task.title}
                             </h3>
-                            {task.description && (
+                            {task.description && task.status !== "completed" && (
                               <p className="text-sm text-slate-600 mb-6 line-clamp-3">{task.description}</p>
                             )}
                             <div className="mt-auto space-y-1 text-xs text-slate-500">
@@ -1019,30 +1071,34 @@ export default function Tasks() {
                                 </div>
                               )}
                             </div>
-{canModifyTask(task) && (
- <button
- onClick={() => handleEdit(task)}
- className="mt-4 w-full p-2 rounded-xl border border-blue-200 text-blue-600 hover:bg-blue-50 text-xs transition"
- >
- Edit Task
- </button>
-)}
-{canModifyTask(task) && (
- <button
- onClick={() => { handleShowComments(task); }}
- className="mt-4 w-full p-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-xs transition"
- >
- Comments
- </button>
-)}
-{canDeleteTasks && (
- <button
- onClick={() => handleDelete(task.id)}
- className="mt-4 w-full p-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs transition"
- >
- Delete Task
- </button>
-)}
+                            {canModifyTask(task) && (
+                              <button
+                                onClick={() => handleEdit(task)}
+                                className="mt-4 w-full p-2 rounded-xl border border-blue-200 text-blue-600 hover:bg-blue-50 text-xs transition"
+                              >
+                                Edit Task
+                              </button>
+                            )}
+                            {canModifyTask(task) && (
+                              <button
+                                onClick={() =>
+                                  setOpenCommentTaskId(
+                                    openCommentTaskId === task.id ? null : task.id
+                                  )
+                                }
+                                className="mt-4 w-full p-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-xs transition"
+                              >
+                                Comments
+                              </button>
+                            )}
+                            {canDeleteTasks && (
+                              <button
+                                onClick={() => handleDelete(task.id)}
+                                className="mt-4 w-full p-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs transition"
+                              >
+                                Delete Task
+                              </button>
+                            )}
                             {/* Corporate Status Tabs in Board View - aligned perfectly */}
                             {(canEditTasks && (
                               task.assigned_to === user?.id ||
@@ -1052,7 +1108,7 @@ export default function Tasks() {
                               <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-slate-100">
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'pending')}
-                                  className={`h-9 text-xs font-medium rounded-2xl border transition-all ${task.status === 'pending'
+                                  className={`h-8 text-xs font-medium rounded-2xl border transition-all ${task.status === 'pending'
                                     ? 'bg-red-600 text-white border-red-600 shadow-sm'
                                     : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-300'
                                   }`}
@@ -1061,7 +1117,7 @@ export default function Tasks() {
                                 </button>
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                                  className={`h-9 text-xs font-medium rounded-2xl border transition-all ${task.status === 'in_progress'
+                                  className={`h-8 text-xs font-medium rounded-2xl border transition-all ${task.status === 'in_progress'
                                     ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
                                     : 'bg-white border-slate-200 text-slate-600 hover:bg-orange-50 hover:border-orange-300'
                                   }`}
@@ -1070,13 +1126,42 @@ export default function Tasks() {
                                 </button>
                                 <button
                                   onClick={() => handleQuickStatusChange(task, 'completed')}
-                                  className={`h-9 text-xs font-medium rounded-2xl border transition-all ${task.status === 'completed'
+                                  className={`h-8 text-xs font-medium rounded-2xl border transition-all ${task.status === 'completed'
                                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                                     : 'bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:border-blue-300'
                                   }`}
                                 >
                                   Completed
                                 </button>
+                              </div>
+                            )}
+                            {openCommentTaskId === task.id && (
+                              <div className="mt-3 border-t pt-3 space-y-2">
+                                <div className="max-h-32 overflow-y-auto text-sm text-slate-600">
+                                  {(comments[task.id] || []).map((comment, i) => (
+                                    <div key={i} className="mb-2">
+                                      <p>{comment.text}</p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <Input
+                                    value={newComment}
+                                    onChange={(e) => setNewComment(e.target.value)}
+                                    placeholder="Add comment..."
+                                    className="h-8 text-sm"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedTask(task);
+                                      handleAddComment();
+                                    }}
+                                  >
+                                    Post
+                                  </Button>
+                                </div>
                               </div>
                             )}
                           </div>
