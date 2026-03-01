@@ -2310,6 +2310,49 @@ async def export_performance_rankings_pdf(
     )
 
 # CLIENT ROUTES
+@api_router.post("/clients/import-master-preview")
+async def import_master_data_preview(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload Excel Master Data (multiple sheets)
+    Parse and return structured JSON for preview (NO DB INSERT)
+    """
+
+    filename = file.filename.lower()
+
+    if not filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files supported")
+
+    try:
+        content = await file.read()
+        excel = pd.ExcelFile(BytesIO(content))
+
+        parsed_data = {}
+
+        # 🔥 READ ALL SHEETS
+        for sheet_name in excel.sheet_names:
+            df = pd.read_excel(excel, sheet_name=sheet_name)
+            df = df.fillna("")
+            parsed_data[sheet_name] = df.to_dict(orient="records")
+
+        # OPTIONAL: Try auto-detecting main client sheet
+        client_sheet = None
+        for name in excel.sheet_names:
+            if "client" in name.lower() or "master" in name.lower():
+                client_sheet = name
+                break
+
+        return {
+            "message": "Master data parsed successfully",
+            "sheets_found": excel.sheet_names,
+            "auto_detected_client_sheet": client_sheet,
+            "data": parsed_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel parsing failed: {str(e)}")
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
     client = Client(**client_data.model_dump(), created_by=current_user.id)
