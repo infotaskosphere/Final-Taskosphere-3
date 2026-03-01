@@ -2086,12 +2086,36 @@ async def delete_due_date(
 
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
+    user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    query = {"user_id": current_user.id}
+    """
+    Access Rules:
+    - Everyone can view their own report
+    - Admin can view anyone
+    - Staff/Manager need can_view_reports permission to view others
+    """
 
+    # Default to own report
+    target_user_id = user_id or current_user.id
+
+    # 🔐 Access Control
+    if target_user_id != current_user.id:
+        if current_user.role != "admin":
+            permissions = (
+                current_user.permissions.model_dump()
+                if current_user.permissions
+                else {}
+            )
+            if not permissions.get("can_view_reports", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorized to view other users' reports"
+                )
+
+    # Fetch logs
     logs = await db.activity_logs.find(
-        query,
+        {"user_id": target_user_id},
         {"_id": 0}
     ).sort("date", -1).limit(30).to_list(100)
 
@@ -2099,7 +2123,7 @@ async def get_efficiency_report(
     total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
 
     return {
-        "user_id": current_user.id,
+        "user_id": target_user_id,
         "total_screen_time": total_screen_time,
         "total_tasks_completed": total_tasks_completed,
         "days_logged": len(logs)
@@ -2108,67 +2132,98 @@ async def get_efficiency_report(
 @api_router.get("/reports/export")
 async def export_reports(
     format: str = "csv",
+    user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "admin":
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-        if not permissions.get("can_download_reports", False):
-            raise HTTPException(status_code=403, detail="Download not allowed")
-    # Fetch all reports
-report = await get_efficiency_report(current_user)
+    """
+    Access Rules:
+    - Everyone can export their own report
+    - Admin can export anyone
+    - Staff/Manager need can_view_reports permission for others
+    """
 
-if format == "csv":
-    output = StringIO()
-    writer = csv.writer(output)
+    # Default to own report
+    target_user_id = user_id or current_user.id
 
-    # Header
-    writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
+    # 🔐 Access Control
+    if target_user_id != current_user.id:
+        if current_user.role != "admin":
+            permissions = (
+                current_user.permissions.model_dump()
+                if current_user.permissions
+                else {}
+            )
+            if not permissions.get("can_view_reports", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorized to access other users' reports"
+                )
 
-    # Data row
-    writer.writerow([
-        report["user_id"],
-        report["total_screen_time"],
-        report["total_tasks_completed"],
-        report["days_logged"]
-    ])
+    # Fetch logs
+    logs = await db.activity_logs.find(
+        {"user_id": target_user_id},
+        {"_id": 0}
+    ).to_list(100)
 
-    output.seek(0)
+    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
 
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": "attachment; filename=efficiency_report.csv"
-        }
-    )
+    report = {
+        "user_id": target_user_id,
+        "total_screen_time": total_screen_time,
+        "total_tasks_completed": total_tasks_completed,
+        "days_logged": len(logs)
+    }
+
+    # ================= CSV =================
+    if format == "csv":
+        output = StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
+        writer.writerow([
+            report["user_id"],
+            report["total_screen_time"],
+            report["total_tasks_completed"],
+            report["days_logged"]
+        ])
+
+        output.seek(0)
+
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"
+            }
+        )
+
+    # ================= PDF =================
     elif format == "pdf":
-        # Use FPDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
+
         pdf.cell(200, 10, txt="Efficiency Report", ln=1, align="C")
-        # Headers
-        pdf.cell(40, 10, "User ID", 1)
-        pdf.cell(50, 10, "User Name", 1)
-        pdf.cell(40, 10, "Screen Time", 1)
-        pdf.cell(40, 10, "Tasks Completed", 1)
-        pdf.cell(30, 10, "Days Logged", 1)
-        pdf.ln()
-        for report in reports:
-            pdf.cell(40, 10, str(report["user"].get("id")), 1)
-            pdf.cell(50, 10, str(report["user"].get("full_name")), 1)
-            pdf.cell(40, 10, str(report["total_screen_time"]), 1)
-            pdf.cell(40, 10, str(report["total_tasks_completed"]), 1)
-            pdf.cell(30, 10, str(report["days_logged"]), 1)
-            pdf.ln()
+        pdf.ln(10)
+
+        pdf.multi_cell(0, 8, f"User ID: {report['user_id']}")
+        pdf.multi_cell(0, 8, f"Screen Time: {report['total_screen_time']} minutes")
+        pdf.multi_cell(0, 8, f"Tasks Completed: {report['total_tasks_completed']}")
+        pdf.multi_cell(0, 8, f"Days Logged: {report['days_logged']}")
+
         pdf_output = BytesIO()
         pdf_output.write(pdf.output(dest='S').encode('latin1'))
         pdf_output.seek(0)
+
         return StreamingResponse(
             pdf_output,
             media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=efficiency_report.pdf"}
+            headers={
+                "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"
+            }
         )
+
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
 # ====================== PERFORMANCE RANKINGS + PDF EXPORT (NEW - added here, no original line touched) ======================
