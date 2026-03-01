@@ -167,7 +167,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://final-tasksphere-backend.onrender.com",
+        "https://final-taskosphere-backend.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
