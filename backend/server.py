@@ -1,6 +1,7 @@
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import get_current_user, create_access_token
+from backend.telegram import router as telegram_router
 from typing import Optional
 from backend.dependencies import create_access_token
 from datetime import date
@@ -2979,5 +2980,6 @@ async def auto_daily_reminder(request, call_next):
     response = await call_next(request)
     return response
 # Api Router
+api_router.include_router(telegram_router)
 api_router.include_router(notification_router)
 app.include_router(api_router)
