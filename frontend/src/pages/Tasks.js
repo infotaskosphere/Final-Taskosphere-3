@@ -121,6 +121,20 @@ const DashboardStripCard = ({
 
 export default function Tasks() {
   const { user, hasPermission } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  const canModifyTask = (task) => {
+    if (isAdmin) return true;
+
+    return (
+      hasPermission("can_edit_tasks") &&
+      (
+        task.assigned_to === user?.id ||
+        task.sub_assignees?.includes(user?.id) ||
+        task.created_by === user?.id
+      )  
+    );
+  };
   const canAssignTasks = hasPermission("can_assign_tasks");
   const canEditTasks = hasPermission("can_edit_tasks");
   const canDeleteTasks = hasPermission("can_delete_data");
@@ -881,42 +895,54 @@ export default function Tasks() {
                         </div>
                       </div>
 
-                      {/* Classic Corporate Status Tabs - perfectly aligned with card */}
-                      {(canEditTasks && (
-                        task.assigned_to === user?.id ||
-                        task.sub_assignees?.includes(user?.id) ||
-                        task.created_by === user?.id
-                      )) && (
-                        <div className="flex gap-2 pt-3 border-t border-slate-100">
-                          <button
-                            onClick={() => handleQuickStatusChange(task, 'pending')}
-                            className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${task.status === 'pending'
-                              ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-300'
-                            }`}
-                          >
-                            To Do
-                          </button>
-                          <button
-                            onClick={() => handleQuickStatusChange(task, 'in_progress')}
-                            className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${task.status === 'in_progress'
-                              ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-orange-50 hover:border-orange-300'
-                            }`}
-                          >
-                            In Progress
-                          </button>
-                          <button
-                            onClick={() => handleQuickStatusChange(task, 'completed')}
-                            className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${task.status === 'completed'
-                              ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:border-blue-300'
-                            }`}
-                          >
-                            Completed
-                          </button>
-                        </div>
-                      )}
+                      
+                     {/* Classic Corporate Status Tabs - perfectly aligned with card */}
+{(
+  user?.role === "admin" ||
+  (
+    canEditTasks &&
+    (
+      task.assigned_to === user?.id ||
+      task.sub_assignees?.includes(user?.id) ||
+      task.created_by === user?.id
+    )
+  )
+) && (
+  <div className="flex gap-2 pt-3 border-t border-slate-100">
+    <button
+      onClick={() => handleQuickStatusChange(task, 'pending')}
+      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
+        task.status === 'pending'
+          ? 'bg-red-600 text-white border-red-600 shadow-sm'
+          : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-300'
+      }`}
+    >
+      To Do
+    </button>
+
+    <button
+      onClick={() => handleQuickStatusChange(task, 'in_progress')}
+      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
+        task.status === 'in_progress'
+          ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
+          : 'bg-white border-slate-200 text-slate-600 hover:bg-orange-50 hover:border-orange-300'
+      }`}
+    >
+      In Progress
+    </button>
+
+    <button
+      onClick={() => handleQuickStatusChange(task, 'completed')}
+      className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
+        task.status === 'completed'
+          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+          : 'bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:border-blue-300'
+      }`}
+    >
+      Completed
+    </button>
+  </div>
+)}
                     </div>
                   </DashboardStripCard>
                 </motion.div>
