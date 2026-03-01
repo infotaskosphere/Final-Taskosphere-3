@@ -2621,7 +2621,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     pending_tasks = len([t for t in tasks if t["status"] == "pending"])
     overdue_tasks = 0
     for task in tasks:
-        for task in tasks:
         if task.get("due_date") and task["status"] != "completed":
             due_date = (
                 datetime.fromisoformat(task["due_date"])
