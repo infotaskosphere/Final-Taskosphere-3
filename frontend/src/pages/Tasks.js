@@ -14,14 +14,13 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Search, Calendar, Building2, User, LayoutGrid, List, Filter, Circle, ArrowRight, Check, Repeat } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Calendar, Building2, User, LayoutGrid, List, Filter, Circle, ArrowRight, Check, Repeat, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -29,7 +28,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Department categories for CA/CS firms
 const DEPARTMENTS = [
   { value: 'gst', label: 'GST' },
@@ -43,10 +41,8 @@ const DEPARTMENTS = [
   { value: 'dsc', label: 'DSC' },
   { value: 'other', label: 'OTHER' },
 ];
-
 // Predefined task categories
 const TASK_CATEGORIES = DEPARTMENTS;
-
 // Recurrence pattern options
 const RECURRENCE_PATTERNS = [
   { value: 'daily', label: 'Daily' },
@@ -54,7 +50,6 @@ const RECURRENCE_PATTERNS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
 ];
-
 // CLASSIC CORPORATE STATUS STYLES (To Do = Red, In Progress = Orange, Completed = Blue)
 const STATUS_STYLES = {
   pending: { bg: 'bg-red-50', text: 'text-red-700', label: 'To Do' },
@@ -62,7 +57,6 @@ const STATUS_STYLES = {
   completed: { bg: 'bg-blue-50', text: 'text-blue-700', label: 'Completed' },
   overdue: { bg: 'bg-red-100', text: 'text-red-700', label: 'Overdue' },
 };
-
 // Priority colors (kept professional)
 const PRIORITY_STYLES = {
   low: { bg: 'bg-green-50', text: 'text-green-600', label: 'LOW' },
@@ -70,18 +64,15 @@ const PRIORITY_STYLES = {
   high: { bg: 'bg-orange-50', text: 'text-orange-700', label: 'HIGH' },
   critical: { bg: 'bg-red-50', text: 'text-red-700', label: 'CRITICAL' },
 };
-
 // Animation variants
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 // STRIPE COLOR LOGIC - matches new corporate status colours
 const getStripeBg = (task, isOverdue) => {
   const s = (task.status || '').toLowerCase().trim();
@@ -89,7 +80,7 @@ const getStripeBg = (task, isOverdue) => {
   if (s === 'completed') return 'bg-blue-700';
   if (s === 'in_progress') return 'bg-orange-600';
   if (s === 'pending') return 'bg-red-600';
-  
+ 
   const p = (task.priority || '').toLowerCase().trim();
   if (p === 'critical') return 'bg-red-700';
   if (p === 'high') return 'bg-orange-600';
@@ -97,7 +88,6 @@ const getStripeBg = (task, isOverdue) => {
   if (p === 'low') return 'bg-emerald-600';
   return 'bg-slate-400';
 };
-
 const DashboardStripCard = ({
   stripeColor,
   children,
@@ -118,28 +108,24 @@ const DashboardStripCard = ({
     </div>
   );
 };
-
 export default function Tasks() {
   const { user, hasPermission } = useAuth();
   const isAdmin = user?.role === "admin";
-
   const canModifyTask = (task) => {
     if (isAdmin) return true;
-
     return (
       hasPermission("can_edit_tasks") &&
       (
         task.assigned_to === user?.id ||
         task.sub_assignees?.includes(user?.id) ||
         task.created_by === user?.id
-      )  
+      )
     );
   };
   const canAssignTasks = hasPermission("can_assign_tasks");
   const canEditTasks = hasPermission("can_edit_tasks");
-  const canDeleteTasks = hasPermission("can_delete_data");
+  const canDeleteTasks = isAdmin || hasPermission("can_delete_data");
   const navigate = useNavigate();
-
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
@@ -147,21 +133,22 @@ export default function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('list');
-  
+  const [comments, setComments] = useState({});
+  const [showCommentsDialog, setShowCommentsDialog] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [newComment, setNewComment] = useState('');
+ 
   const location = useLocation();
-
   const filter = React.useMemo(() => {
     const params = new URLSearchParams(location.search);
     return params.get("filter");
   }, [location.search]);
-
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterAssignee, setFilterAssignee] = useState('all');
-
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -176,9 +163,7 @@ export default function Tasks() {
     recurrence_pattern: 'monthly',
     recurrence_interval: 1,
   });
-
   const fileInputRef = useRef(null);
-
   useEffect(() => {
     fetchTasks();
     fetchClients();
@@ -187,7 +172,6 @@ export default function Tasks() {
     }
     fetchUsers();
   }, [user]);
-
   const fetchTasks = async () => {
     try {
       const response = await api.get('/tasks');
@@ -196,7 +180,6 @@ export default function Tasks() {
       toast.error('Failed to fetch tasks');
     }
   };
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -205,7 +188,6 @@ export default function Tasks() {
       console.error('Failed to fetch users');
     }
   };
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -214,7 +196,14 @@ export default function Tasks() {
       console.error('Failed to fetch clients');
     }
   };
-
+  const fetchComments = async (taskId) => {
+    try {
+      const response = await api.get(`/tasks/${taskId}/comments`);
+      setComments(prev => ({...prev, [taskId]: response.data}));
+    } catch (error) {
+      toast.error('Failed to fetch comments');
+    }
+  };
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -242,7 +231,6 @@ export default function Tasks() {
       setLoading(false);
     }
   };
-
   const handleEdit = (task) => {
     setEditingTask(task);
     setFormData({
@@ -261,7 +249,6 @@ export default function Tasks() {
     });
     setDialogOpen(true);
   };
-
   const handleDelete = async (taskId) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
     try {
@@ -272,7 +259,6 @@ export default function Tasks() {
       toast.error('Failed to delete task');
     }
   };
-
   const handleQuickStatusChange = async (task, newStatus) => {
     try {
       const taskData = {
@@ -296,7 +282,22 @@ export default function Tasks() {
       toast.error('Failed to update task status');
     }
   };
-
+  const handleShowComments = (task) => {
+    setSelectedTask(task);
+    fetchComments(task.id);
+    setShowCommentsDialog(true);
+  };
+  const handleAddComment = async () => {
+    if (!newComment.trim()) return;
+    try {
+      await api.post(`/tasks/${selectedTask.id}/comments`, { text: newComment });
+      setNewComment('');
+      fetchComments(selectedTask.id);
+      toast.success('Comment added!');
+    } catch (error) {
+      toast.error('Failed to add comment');
+    }
+  };
   const resetForm = () => {
     setFormData({
       title: '',
@@ -314,7 +315,6 @@ export default function Tasks() {
     });
     setEditingTask(null);
   };
-
   const toggleSubAssignee = (userId) => {
     setFormData(prev => {
       const isSelected = prev.sub_assignees.includes(userId);
@@ -325,33 +325,27 @@ export default function Tasks() {
       }
     });
   };
-
   const getUserName = (userId) => {
     const foundUser = users.find(u => u.id === userId);
     return foundUser?.full_name || 'Unassigned';
   };
-
   const getClientName = (clientId) => {
     const client = clients.find(c => c.id === clientId);
     return client?.company_name || 'No Client';
   };
-
   const getCategoryLabel = (value) => {
     const cat = TASK_CATEGORIES.find(c => c.value === value);
     return cat ? cat.label : value || 'Other';
   };
-
   const isOverdue = (task) => {
     if (task.status === 'completed') return false;
     if (!task.due_date) return false;
     return new Date(task.due_date) < new Date();
   };
-
   const getDisplayStatus = (task) => {
     if (isOverdue(task)) return 'overdue';
     return task.status;
   };
-
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -361,7 +355,6 @@ export default function Tasks() {
     const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
-
   const stats = {
     total: tasks.length,
     todo: tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
@@ -369,11 +362,9 @@ export default function Tasks() {
     completed: tasks.filter(t => t.status === 'completed').length,
     overdue: tasks.filter(t => isOverdue(t)).length,
   };
-
   const handleCsvUploadClick = () => {
     fileInputRef.current.click();
   };
-
   const handleCsvUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -390,7 +381,6 @@ export default function Tasks() {
       }
     });
   };
-
   const handleExportCsv = () => {
     const csvData = tasks.map(task => ({
       title: task.title,
@@ -412,7 +402,6 @@ export default function Tasks() {
     link.click();
     document.body.removeChild(link);
   };
-
   const handleExportPdf = () => {
     const doc = new jsPDF();
     doc.autoTable({
@@ -427,7 +416,6 @@ export default function Tasks() {
     });
     doc.save('tasks.pdf');
   };
-
   return (
     <motion.div
       className="space-y-6"
@@ -444,7 +432,6 @@ export default function Tasks() {
             <Button variant="outline" size="sm" onClick={handleCsvUploadClick}>Upload CSV</Button>
             <Button variant="outline" size="sm" onClick={handleExportCsv}>Export CSV</Button>
             <Button variant="outline" size="sm" onClick={handleExportPdf}>Export PDF</Button>
-
             {canEditTasks && (
               <Dialog open={dialogOpen} onOpenChange={(open) => {
                 setDialogOpen(open);
@@ -459,7 +446,6 @@ export default function Tasks() {
                     New Task
                   </Button>
                 </DialogTrigger>
-
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle className="font-outfit text-2xl" style={{ color: COLORS.deepBlue }}>
@@ -732,7 +718,6 @@ export default function Tasks() {
           </div>
         </CardContent>
       </Card>
-
       {/* Stats Bar */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border border-slate-200 hover:shadow-md transition-all duration-200 cursor-pointer group rounded-2xl" onClick={() => setFilterStatus('all')}>
@@ -766,7 +751,6 @@ export default function Tasks() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Search and Filters */}
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4 items-center">
         <div className="relative flex-1 max-w-md">
@@ -844,7 +828,6 @@ export default function Tasks() {
           </div>
         </div>
       </motion.div>
-
       {/* Tasks Container */}
       <div className="overflow-y-auto max-h-[calc(100vh-340px)] pb-8">
         {viewMode === 'list' ? (
@@ -854,7 +837,6 @@ export default function Tasks() {
               const displayStatus = getDisplayStatus(task);
               const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
               const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-
               return (
                 <motion.div key={task.id} variants={itemVariants}>
                   <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)}>
@@ -875,30 +857,58 @@ export default function Tasks() {
                             <Badge className="px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700">Recurring</Badge>
                           )}
                         </div>
-                        <div className="flex items-center gap-6 text-sm text-slate-500">
-                          {task.client_id && (
-                            <span className="flex items-center gap-1">
-                              <Building2 className="h-4 w-4" />
-                              {getClientName(task.client_id)}
-                            </span>
-                          )}
-                          <span className="flex items-center gap-1">
-                            <User className="h-4 w-4" />
-                            {getUserName(task.assigned_to)}
-                          </span>
-                          {task.due_date && (
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
-                              {format(new Date(task.due_date), 'MMM dd')}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                        <div className="flex items-center gap-4">
+ <div className="flex items-center gap-6 text-sm text-slate-500">
+ {task.client_id && (
+ <span className="flex items-center gap-1">
+ <Building2 className="h-4 w-4" />
+ {getClientName(task.client_id)}
+ </span>
+ )}
 
-                      
+ <span className="flex items-center gap-1">
+ <User className="h-4 w-4" />
+ {getUserName(task.assigned_to)}
+ </span>
+
+ {task.due_date && (
+ <span className="flex items-center gap-1">
+ <Calendar className="h-4 w-4" />
+ {format(new Date(task.due_date), 'MMM dd')}
+ </span>
+ )}
+ </div>
+
+ {canModifyTask(task) && (
+ <button
+ onClick={() => handleEdit(task)}
+ className="p-2 rounded-xl hover:bg-blue-50 text-blue-600 transition"
+ >
+ <Edit className="h-4 w-4" />
+ </button>
+ )}
+ {canModifyTask(task) && (
+ <button
+ onClick={() => { handleShowComments(task); }}
+ className="p-2 rounded-xl hover:bg-indigo-50 text-indigo-600 transition"
+ >
+ <MessageSquare className="h-4 w-4" />
+ </button>
+ )}
+ {canDeleteTasks && (
+ <button
+ onClick={() => handleDelete(task.id)}
+ className="p-2 rounded-xl hover:bg-red-50 text-red-600 transition"
+ >
+ <Trash2 className="h-4 w-4" />
+ </button>
+ )}
+</div>
+                      </div>
+                     
                      {/* Classic Corporate Status Tabs - perfectly aligned with card */}
 {(
-  user?.role === "admin" ||
+  isAdmin ||
   (
     canEditTasks &&
     (
@@ -919,7 +929,6 @@ export default function Tasks() {
     >
       To Do
     </button>
-
     <button
       onClick={() => handleQuickStatusChange(task, 'in_progress')}
       className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
@@ -930,7 +939,6 @@ export default function Tasks() {
     >
       In Progress
     </button>
-
     <button
       onClick={() => handleQuickStatusChange(task, 'completed')}
       className={`flex-1 h-9 px-5 text-sm font-medium rounded-2xl border transition-all ${
@@ -973,7 +981,6 @@ export default function Tasks() {
                       const displayStatus = getDisplayStatus(task);
                       const statusStyle = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
                       const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
-
                       return (
                         <DashboardStripCard key={task.id} stripeColor={getStripeBg(task, taskIsOverdue)}>
                           <div className="flex flex-col h-full">
@@ -988,15 +995,12 @@ export default function Tasks() {
                                 <Badge className="px-3 py-1 text-xs font-medium bg-purple-100 text-purple-700">Recurring</Badge>
                               )}
                             </div>
-
                             <h3 className="font-semibold text-slate-900 text-lg mb-3 line-clamp-2" style={{ color: COLORS.deepBlue }}>
                               {task.title}
                             </h3>
-
                             {task.description && (
                               <p className="text-sm text-slate-600 mb-6 line-clamp-3">{task.description}</p>
                             )}
-
                             <div className="mt-auto space-y-1 text-xs text-slate-500">
                               {task.client_id && (
                                 <div className="flex items-center gap-2">
@@ -1015,7 +1019,30 @@ export default function Tasks() {
                                 </div>
                               )}
                             </div>
-
+{canModifyTask(task) && (
+ <button
+ onClick={() => handleEdit(task)}
+ className="mt-4 w-full p-2 rounded-xl border border-blue-200 text-blue-600 hover:bg-blue-50 text-xs transition"
+ >
+ Edit Task
+ </button>
+)}
+{canModifyTask(task) && (
+ <button
+ onClick={() => { handleShowComments(task); }}
+ className="mt-4 w-full p-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-xs transition"
+ >
+ Comments
+ </button>
+)}
+{canDeleteTasks && (
+ <button
+ onClick={() => handleDelete(task.id)}
+ className="mt-4 w-full p-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs transition"
+ >
+ Delete Task
+ </button>
+)}
                             {/* Corporate Status Tabs in Board View - aligned perfectly */}
                             {(canEditTasks && (
                               task.assigned_to === user?.id ||
@@ -1062,7 +1089,6 @@ export default function Tasks() {
           </motion.div>
         )}
       </div>
-
       <input
         type="file"
         accept=".csv"
@@ -1070,6 +1096,27 @@ export default function Tasks() {
         style={{ display: 'none' }}
         onChange={handleCsvUpload}
       />
+      <Dialog open={showCommentsDialog} onOpenChange={setShowCommentsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Comments for {selectedTask?.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {(comments[selectedTask?.id] || []).map((comment, index) => (
+              <div key={index} className="border-b pb-2">
+                <p>{comment.text}</p>
+                <small>By {getUserName(comment.user_id)} on {format(new Date(comment.created_at), 'MMM dd, yyyy hh:mm a')}</small>
+              </div>
+            ))}
+            <Input
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Add a comment..."
+            />
+            <Button onClick={handleAddComment}>Post Comment</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
