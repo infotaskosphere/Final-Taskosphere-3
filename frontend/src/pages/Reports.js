@@ -93,7 +93,7 @@ export default function Reports() {
         api.get('/dashboard/stats'),
         api.get('/tasks'),
       ]);
-      setReportData(reportsRes.data);
+      setReportData(Array.isArray(reportsRes.data) ? reportsRes.data : reportsRes.data ? [reportsRes.data] : []);
       setDashboardStats(statsRes.data);
       setTasks(tasksRes.data);
     } catch (error) {
