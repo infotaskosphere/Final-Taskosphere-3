@@ -2621,10 +2621,21 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     pending_tasks = len([t for t in tasks if t["status"] == "pending"])
     overdue_tasks = 0
     for task in tasks:
+        for task in tasks:
         if task.get("due_date") and task["status"] != "completed":
-            due_date = datetime.fromisoformat(task["due_date"]) if isinstance(task["due_date"], str) else task["due_date"]
+            due_date = (
+                datetime.fromisoformat(task["due_date"])
+                if isinstance(task["due_date"], str)
+                else task["due_date"]
+            )
+
+        # ✅ Make due_date timezone aware (UTC)
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+
             if due_date < now:
                 overdue_tasks += 1
+                
     # DSC statistics
     dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
     total_dsc = len(dsc_list)
