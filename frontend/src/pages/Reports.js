@@ -49,8 +49,7 @@ const itemVariants = {
 export default function Reports() {
   const { user, hasPermission } = useAuth();
   const canViewReports = hasPermission("can_view_reports");
-  const canViewAllReports = hasPermission("can_view_all_reports");
-  const canViewSelectedReports = hasPermission("can_view_selected_reports");
+  const canViewReports = hasPermission("can_view_reports");
   const canDownloadReports = hasPermission("can_download_reports");
 
   const isAdmin = user?.role === "admin";
@@ -85,23 +84,46 @@ export default function Reports() {
     };
     fetchStarPerformers();
   }, [rankingPeriod]);
+const fetchAllData = async () => {
+  try {
+    const reportRequests = [];
 
-  const fetchAllData = async () => {
-    try {
-      const [reportsRes, statsRes, tasksRes] = await Promise.all([
-        api.get('/reports/efficiency'),
-        api.get('/dashboard/stats'),
-        api.get('/tasks'),
-      ]);
-      setReportData(Array.isArray(reportsRes.data) ? reportsRes.data : reportsRes.data ? [reportsRes.data] : []);
-      setDashboardStats(statsRes.data);
-      setTasks(tasksRes.data);
-    } catch (error) {
-      toast.error('Failed to fetch reports');
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Always fetch own report
+    reportRequests.push(api.get('/reports/efficiency'));
+
+    // Fetch cross-user reports (if any)
+    const allowedUsers = user?.permissions?.view_other_reports || [];
+
+    allowedUsers.forEach((id) => {
+      reportRequests.push(
+        api.get('/reports/efficiency', {
+          params: { user_id: id }
+        })
+      );
+    });
+
+    const reportResponses = await Promise.all(reportRequests);
+
+    const combinedReports = reportResponses
+      .map(res => res.data)
+      .filter(Boolean);
+
+    setReportData(combinedReports);
+
+    const [statsRes, tasksRes] = await Promise.all([
+      api.get('/dashboard/stats'),
+      api.get('/tasks'),
+    ]);
+
+    setDashboardStats(statsRes.data);
+    setTasks(tasksRes.data);
+
+  } catch (error) {
+    toast.error('Failed to fetch reports');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const formatTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
@@ -251,61 +273,63 @@ export default function Reports() {
     document.body.removeChild(link);
   };
 
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    doc.text('Efficiency Reports', 10, 10);
-    const tableData = filteredReportData.map(item => [
-      item.user?.full_name || 'Unknown',
-      item.total_tasks_completed,
-      item.total_screen_time
-    ]);
-    doc.autoTable({
-      head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
-      body: tableData,
-      startY: 20,
-    });
-    doc.save('efficiency_reports.pdf');
-  };
+const handleExportPDF = () => {
+  const doc = new jsPDF();
+  doc.text('Efficiency Reports', 10, 10);
 
-  const filteredReportData = (() => {
-    if (!canViewAllReports && !canViewSelectedReports && !isAdmin) {
-      // Normal user → backend should already return only their data
-      return reportData;
-    }
+  const tableData = filteredReportData.map(item => [
+    item.user?.full_name || 'Unknown',
+    item.total_tasks_completed || 0,
+    item.total_screen_time || 0
+  ]);
 
-    if (selectedUserId === "all") {
-      return reportData;
-    }
+  doc.autoTable({
+    head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
+    body: tableData,
+    startY: 20,
+  });
 
-    return reportData.filter(r => r.user?._id === selectedUserId);
-  })();
+  doc.save('efficiency_reports.pdf');
+};
 
-  const uniqueUsers = Array.from(new Map(reportData.map(r => [r.user?._id, r.user])).values());
+const filteredReportData =
+  selectedUserId === "all"
+    ? reportData
+    : reportData.filter(r => r.user?.id === selectedUserId);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: '#0D3B66' }}></div>
-      </div>
-    );
-  }
+const uniqueUsers = Array.from(
+  new Map(reportData.map(r => [r.user?.id, r.user])).values()
+);
 
-  if (!canViewReports) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-slate-500">You do not have permission to view reports.</p>
-      </div>
-    );
-  }
-
+if (loading) {
   return (
-    <motion.div
-      className="space-y-8"
-      data-testid="reports-page"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
+    <div className="flex items-center justify-center h-64">
+      <div
+        className="animate-spin rounded-full h-8 w-8 border-b-2"
+        style={{ borderColor: '#0D3B66' }}
+      />
+    </div>
+  );
+}
+
+if (!canViewReports) {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <p className="text-slate-500">
+        You do not have permission to view reports.
+      </p>
+    </div>
+  );
+}
+
+return (
+  <motion.div
+    className="space-y-8"
+    data-testid="reports-page"
+    variants={containerVariants}
+    initial="hidden"
+    animate="visible"
+  >
       {/* Header */}
       <motion.div variants={itemVariants} className="flex justify-between items-start">
         <div>
@@ -324,7 +348,7 @@ export default function Reports() {
         )}
       </motion.div>
 
-      {(isAdmin || canViewAllReports || canViewSelectedReports) && (
+      {(isAdmin || user?.permissions?.view_other_reports?.length > 0) && (
         <div className="mb-4">
           <select
             value={selectedUserId}
