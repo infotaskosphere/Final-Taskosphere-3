@@ -1,39 +1,46 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional, Dict
 from datetime import datetime, timezone
+from typing import Optional
 import os
 import uuid
 import requests
 
-from backend.dependencies import get_current_user, check_permission
+from backend.dependencies import check_permission
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
 
-# =========================================
-# ENV
-# =========================================
+# =========================================================
+# ENV CONFIG
+# =========================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 if not TELEGRAM_TOKEN:
     raise Exception("TELEGRAM_BOT_TOKEN not configured")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# =========================================
+# Your admin email for first-time auto linking
+ADMIN_EMAIL = "csmanthandesai@gmail.com"
+
+
+# =========================================================
 # MODELS
-# =========================================
+# =========================================================
 
 class TelegramSendRequest(BaseModel):
     user_id: str
     message: str
 
+
 class TelegramBroadcastRequest(BaseModel):
     message: str
 
-# =========================================
-# HELPER: SEND MESSAGE
-# =========================================
+
+# =========================================================
+# HELPER: SEND TELEGRAM MESSAGE
+# =========================================================
 
 def send_telegram_message(chat_id: int, text: str):
     try:
@@ -48,9 +55,10 @@ def send_telegram_message(chat_id: int, text: str):
     except Exception as e:
         print("Telegram send error:", e)
 
-# =========================================
-# WEBHOOK (BOT ENTRY POINT)
-# =========================================
+
+# =========================================================
+# WEBHOOK
+# =========================================================
 
 @router.post("/webhook")
 async def telegram_webhook(request: Request):
@@ -63,21 +71,46 @@ async def telegram_webhook(request: Request):
 
     message = payload["message"]
     chat_id = message["chat"]["id"]
-
-    print("CHAT ID:", chat_id)
     text = message.get("text", "").strip()
 
-    # Find user linked with telegram
+    print("CHAT ID:", chat_id)
+
+    # =====================================================
+    # FIND USER BY TELEGRAM ID
+    # =====================================================
+
     user = await db.users.find_one({"telegram_id": chat_id})
 
-    if not user:
-        send_telegram_message(chat_id, "❌ Your Telegram is not linked with Taskosphere.")
-        return {"status": "user_not_found"}
+    # =====================================================
+    # AUTO LINK IF NOT LINKED (FIRST TIME SETUP)
+    # =====================================================
 
-    # Get existing conversation
+    if not user:
+        user = await db.users.find_one({"email": ADMIN_EMAIL})
+
+        if user:
+            await db.users.update_one(
+                {"email": ADMIN_EMAIL},
+                {"$set": {"telegram_id": chat_id}}
+            )
+
+            user = await db.users.find_one({"telegram_id": chat_id})
+
+            send_telegram_message(chat_id, "✅ Telegram linked successfully!")
+        else:
+            send_telegram_message(chat_id, "❌ No matching account found.")
+            return {"status": "user_not_found"}
+
+    # =====================================================
+    # GET EXISTING CONVERSATION
+    # =====================================================
+
     convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
 
+    # =====================================================
     # START COMMAND
+    # =====================================================
+
     if text == "/start":
         await db.telegram_conversations.update_one(
             {"telegram_id": chat_id},
@@ -95,7 +128,10 @@ async def telegram_webhook(request: Request):
         send_telegram_message(chat_id, "📝 Let's create a new task.\n\nEnter Task Title:")
         return {"status": "started"}
 
-    # If no conversation active
+    # =====================================================
+    # NO ACTIVE CONVERSATION
+    # =====================================================
+
     if not convo:
         send_telegram_message(chat_id, "Send /start to create a task.")
         return {"status": "no_conversation"}
@@ -103,9 +139,10 @@ async def telegram_webhook(request: Request):
     step = convo.get("step")
     data = convo.get("data", {})
 
-    # =====================================
+    # =====================================================
     # STEP 1 — TITLE
-    # =====================================
+    # =====================================================
+
     if step == "title":
         data["title"] = text
 
@@ -117,9 +154,10 @@ async def telegram_webhook(request: Request):
         send_telegram_message(chat_id, "Enter Task Description:")
         return {"status": "title_saved"}
 
-    # =====================================
+    # =====================================================
     # STEP 2 — DESCRIPTION
-    # =====================================
+    # =====================================================
+
     if step == "description":
         data["description"] = text
 
@@ -131,9 +169,10 @@ async def telegram_webhook(request: Request):
         send_telegram_message(chat_id, "Enter Priority (low / medium / high):")
         return {"status": "description_saved"}
 
-    # =====================================
+    # =====================================================
     # STEP 3 — PRIORITY
-    # =====================================
+    # =====================================================
+
     if step == "priority":
         data["priority"] = text.lower()
 
@@ -145,11 +184,11 @@ async def telegram_webhook(request: Request):
         send_telegram_message(chat_id, "Enter Due Date (YYYY-MM-DD):")
         return {"status": "priority_saved"}
 
-    # =====================================
+    # =====================================================
     # STEP 4 — DUE DATE & CREATE TASK
-    # =====================================
-    if step == "due_date":
+    # =====================================================
 
+    if step == "due_date":
         try:
             due_date = datetime.fromisoformat(text)
         except:
@@ -180,18 +219,17 @@ async def telegram_webhook(request: Request):
 
         await db.tasks.insert_one(new_task)
 
-        # Delete conversation
         await db.telegram_conversations.delete_one({"telegram_id": chat_id})
 
         send_telegram_message(chat_id, "✅ Task created successfully!")
-
         return {"status": "task_created"}
 
     return {"status": "unknown_step"}
 
-# =========================================
-# SEND MESSAGE TO USER (ADMIN)
-# =========================================
+
+# =========================================================
+# ADMIN: SEND MESSAGE TO USER
+# =========================================================
 
 @router.post("/send")
 async def send_message_to_user(
@@ -217,9 +255,10 @@ async def send_message_to_user(
 
     return {"message": "Telegram message sent successfully"}
 
-# =========================================
-# BROADCAST MESSAGE (ADMIN)
-# =========================================
+
+# =========================================================
+# ADMIN: BROADCAST
+# =========================================================
 
 @router.post("/broadcast")
 async def broadcast_message(
@@ -240,20 +279,3 @@ async def broadcast_message(
         count += 1
 
     return {"message": f"Broadcast sent to {count} users"}
-
-# =========================================
-# GET TELEGRAM LOGS
-# =========================================
-
-@router.get("/logs")
-async def get_telegram_logs(
-    current_user = Depends(check_permission("can_manage_users"))
-):
-    from backend.server import db
-
-    logs = await db.telegram_logs.find(
-        {},
-        {"_id": 0}
-    ).sort("timestamp", -1).to_list(1000)
-
-    return logs
