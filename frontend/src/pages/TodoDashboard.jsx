@@ -141,14 +141,14 @@ export default function TodoDashboard() {
   const renderTodoCard = (todo) => {
     const isOwner = todo.user_id === user?.id;
     const canModify = isAdmin || isOwner;
-    const isPromoting = promotingId === todo._id;
+    const isPromoting = promotingId === todo.id;
 
     const isOverdue =
       todo.due_date && new Date(todo.due_date) < new Date();
 
     return (
       <div
-        key={todo._id}
+        key={todo.id}
         className={`bg-white shadow rounded-2xl p-5 flex justify-between items-center ${
           isOverdue ? "border border-red-400 bg-red-50" : ""
         }`}
@@ -177,7 +177,7 @@ export default function TodoDashboard() {
         {canModify && (
           <div className="flex gap-2">
             <button
-              onClick={() => promoteTodo.mutate(todo._id)}
+              onClick={() => promoteTodo.mutate(todo.id)}
               disabled={isPromoting}
               className="bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition disabled:opacity-50"
             >
@@ -185,7 +185,7 @@ export default function TodoDashboard() {
             </button>
 
             <button
-              onClick={() => deleteTodo.mutate(todo._id)}
+              onClick={() => deleteTodo.mutate(todo.id)}
               className="bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition"
             >
               Delete
