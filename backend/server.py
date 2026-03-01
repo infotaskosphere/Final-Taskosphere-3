@@ -658,6 +658,28 @@ async def create_audit_log(
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
+@api_router.post("/todos", response_model=Todo)
+async def create_todo(
+    todo_data: TodoCreate,
+    current_user: User = Depends(get_current_user)
+):
+    todo = Todo(
+        user_id=current_user.id,
+        **todo_data.model_dump()
+    )
+
+    doc = todo.model_dump()
+
+    # Convert datetime fields properly
+    doc["created_at"] = doc["created_at"].isoformat()
+    doc["updated_at"] = doc["updated_at"].isoformat()
+
+    if doc.get("due_date"):
+        doc["due_date"] = doc["due_date"].isoformat()
+
+    await db.todos.insert_one(doc)
+
+    return todo
 @api_router.get("/todos")
 async def get_todos(
     user_id: Optional[str] = None,
