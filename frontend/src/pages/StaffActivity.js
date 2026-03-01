@@ -184,7 +184,7 @@ export default function StaffActivity() {
   };
   const fetchUserTodos = async () => {
     try {
-      const res = await api.get(`/todos/${selectedUser}`);
+      const res = await api.get(`/todos`);
       setSelectedUserTodos(res.data);
     } catch (error) {
       console.error('Failed to fetch user todos:', error);
