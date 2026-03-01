@@ -853,10 +853,10 @@ export default function StaffActivity() {
                 {(selectedUserTodos || []).map((todo) => (
                   <div
                     key={todo.id}
-                    className={`flex items-center p-3 rounded-xl border ${todo.completed ? 'bg-green-50' : 'bg-slate-50'}`}
+                    className={`flex items-center p-3 rounded-xl border ${todo.is_completed ? 'bg-green-50' : 'bg-slate-50'}`}
                   >
-                    <CheckSquare className={`h-5 w-5 mr-3 ${todo.completed ? 'text-green-500' : 'text-slate-400'}`} />
-                    <span className={todo.completed ? 'line-through text-slate-500' : ''}>
+                    <CheckSquare className={`h-5 w-5 mr-3 ${todo.is_completed ? 'text-green-500' : 'text-slate-400'}`} />
+                    <span className={todo.is_completed ? 'line-through text-slate-500' : ''}>
                       {todo.title}
                     </span>
                   </div>
