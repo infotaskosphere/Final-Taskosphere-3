@@ -1270,83 +1270,88 @@ export default function Tasks() {
         </Card>
       </motion.div>
 
-      {/* Search + Filters + View Toggle - Single Line */}
+{/* Search + Filters + View Toggle */}
 <motion.div
   variants={itemVariants}
-  className="flex items-center gap-3 flex-wrap"
+  className="flex items-center justify-between gap-3 flex-wrap w-full"
 >
 
-  {/* 🔍 Search */}
-  <div className="relative w-64">
-    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-    <Input
-      placeholder="Search tasks..."
-      value={searchQuery}
-      onChange={(e) => setSearchQuery(e.target.value)}
-      className="pl-10 bg-white rounded-2xl"
-    />
+  {/* LEFT SIDE: Search + Filters */}
+  <div className="flex items-center gap-3 flex-wrap">
+
+    {/* Search */}
+    <div className="relative w-full sm:w-64">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+      <Input
+        placeholder="Search tasks..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="pl-10 bg-white rounded-2xl"
+      />
+    </div>
+
+    {/* Status */}
+    <Select value={filterStatus} onValueChange={setFilterStatus}>
+      <SelectTrigger className="w-36 bg-white rounded-2xl">
+        <SelectValue placeholder="All Statuses" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Statuses</SelectItem>
+        <SelectItem value="pending">To Do</SelectItem>
+        <SelectItem value="in_progress">In Progress</SelectItem>
+        <SelectItem value="completed">Completed</SelectItem>
+        <SelectItem value="overdue">Overdue</SelectItem>
+      </SelectContent>
+    </Select>
+
+    {/* Priority */}
+    <Select value={filterPriority} onValueChange={setFilterPriority}>
+      <SelectTrigger className="w-36 bg-white rounded-2xl">
+        <SelectValue placeholder="All Priorities" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Priorities</SelectItem>
+        <SelectItem value="low">Low</SelectItem>
+        <SelectItem value="medium">Medium</SelectItem>
+        <SelectItem value="high">High</SelectItem>
+        <SelectItem value="critical">Critical</SelectItem>
+      </SelectContent>
+    </Select>
+
+    {/* Category */}
+    <Select value={filterCategory} onValueChange={setFilterCategory}>
+      <SelectTrigger className="w-36 bg-white rounded-2xl">
+        <SelectValue placeholder="All Categories" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Categories</SelectItem>
+        {TASK_CATEGORIES.map(cat => (
+          <SelectItem key={cat.value} value={cat.value}>
+            {cat.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+
+    {/* Assignee */}
+    <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+      <SelectTrigger className="w-36 bg-white rounded-2xl">
+        <SelectValue placeholder="All Assignees" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Assignees</SelectItem>
+        {users.map(u => (
+          <SelectItem key={u.id} value={u.id}>
+            {u.full_name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+
   </div>
 
-  {/* Status */}
-  <Select value={filterStatus} onValueChange={setFilterStatus}>
-    <SelectTrigger className="w-40 bg-white rounded-2xl">
-      <SelectValue placeholder="All Statuses" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="all">All Statuses</SelectItem>
-      <SelectItem value="pending">To Do</SelectItem>
-      <SelectItem value="in_progress">In Progress</SelectItem>
-      <SelectItem value="completed">Completed</SelectItem>
-      <SelectItem value="overdue">Overdue</SelectItem>
-    </SelectContent>
-  </Select>
-
-  {/* Priority */}
-  <Select value={filterPriority} onValueChange={setFilterPriority}>
-    <SelectTrigger className="w-40 bg-white rounded-2xl">
-      <SelectValue placeholder="All Priorities" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="all">All Priorities</SelectItem>
-      <SelectItem value="low">Low</SelectItem>
-      <SelectItem value="medium">Medium</SelectItem>
-      <SelectItem value="high">High</SelectItem>
-      <SelectItem value="critical">Critical</SelectItem>
-    </SelectContent>
-  </Select>
-
-  {/* Category */}
-  <Select value={filterCategory} onValueChange={setFilterCategory}>
-    <SelectTrigger className="w-40 bg-white rounded-2xl">
-      <SelectValue placeholder="All Categories" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="all">All Categories</SelectItem>
-      {TASK_CATEGORIES.map(cat => (
-        <SelectItem key={cat.value} value={cat.value}>
-          {cat.label}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-
-  {/* Assignee */}
-  <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-    <SelectTrigger className="w-40 bg-white rounded-2xl">
-      <SelectValue placeholder="All Assignees" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="all">All Assignees</SelectItem>
-      {users.map(u => (
-        <SelectItem key={u.id} value={u.id}>
-          {u.full_name}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-
-  {/* View Toggle */}
-  <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm ml-auto">
+  {/* RIGHT SIDE: View Toggle */}
+  <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm">
     <Button
       variant="ghost"
       size="sm"
