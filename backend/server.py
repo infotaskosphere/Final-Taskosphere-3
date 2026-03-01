@@ -2107,7 +2107,7 @@ async def get_efficiency_report(
                 if current_user.permissions
                 else {}
             )
-            if not permissions.get("can_view_reports", False):
+            if target_user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to view other users' reports"
@@ -2153,7 +2153,9 @@ async def export_reports(
                 if current_user.permissions
                 else {}
             )
-            if not permissions.get("can_view_reports", False):
+            allowed_users = permissions.get("view_other_reports", [])
+            
+            if target_user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to access other users' reports"
