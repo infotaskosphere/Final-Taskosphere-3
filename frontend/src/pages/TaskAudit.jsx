@@ -6,14 +6,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { format } from "date-fns";
 
 export default function TaskAudit() {
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState("ALL");
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ["taskAuditLogs", filter],
     queryFn: async () => {
       const url = filter
-        ? `/audit-logs?module=task&action=${filter}`
         : `/audit-logs?module=task`;
+        ? `/audit-logs?module=task&action=${filter}`
       const res = await api.get(url);
       return res.data;
     },
@@ -32,7 +32,7 @@ export default function TaskAudit() {
               <SelectValue placeholder="Filter actions" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All</SelectItem>
+              <SelectItem value="ALL">All</SelectItem>
               <SelectItem value="DELETE_TASK">Deleted</SelectItem>
               <SelectItem value="TASK_STATUS_CHANGED">Status Changed</SelectItem>
               <SelectItem value="TASK_COMPLETED">Completed</SelectItem>
