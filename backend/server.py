@@ -45,6 +45,14 @@ APPROVED_OFFICE_IPS = [
 india_tz = pytz.timezone("Asia/Kolkata")
 import requests
 # Added missing helper functions (required by the original code - they are called but were never defined)
+def convert_objectids(obj):
+    if isinstance(obj, list):
+        return [convert_objectids(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: convert_objectids(v) for k, v in obj.items()}
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    return obj
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine formula - distance in meters (original code uses this for geo-fencing)"""
     R = 6371000 # Earth radius in meters
@@ -2995,13 +3003,16 @@ async def get_audit_logs(
         {"_id": 0}
     ).sort("timestamp", -1).to_list(2000)
     # Convert timestamp string to datetime if needed
+    logs = convert_objectids(logs)
     for log in logs:
         if isinstance(log.get("timestamp"), str):
             try:
                 log["timestamp"] = datetime.fromisoformat(log["timestamp"])
             except:
                 pass
+    
     return logs
+    
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
     tasks = await db.tasks.find(
