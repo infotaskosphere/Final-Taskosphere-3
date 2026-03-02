@@ -1317,74 +1317,94 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
     if task.get("due_date") and isinstance(task["due_date"], str):
         task["due_date"] = datetime.fromisoformat(task["due_date"])
     return Task(**task)
+    
 @api_router.patch("/tasks/{task_id}", response_model=Task)
 async def patch_task(
     task_id: str,
     updates: dict,
     current_user: User = Depends(check_permission("can_edit_tasks"))
 ):
-    existing_task = await db.tasks.find_one({"id": task_id})
+    existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if updates.get("status") == "completed":
-        updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    old_status = existing_task.get("status")
+    new_status = updates.get("status")
+
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    if new_status == "completed":
+        updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
     await db.tasks.update_one(
         {"id": task_id},
         {"$set": updates}
     )
-    await create_audit_log(
-        current_user,
-        action="UPDATE_TASK",
-        module="task",
-        record_id=task_id,
-        old_data=existing_task,
-        new_data=updates
+
+    assigned_user = await db.users.find_one(
+        {"id": existing_task.get("assigned_to")},
+        {"_id": 0}
     )
+    assigned_name = assigned_user["full_name"] if assigned_user else "Unknown"
+
+    if new_status and old_status != new_status:
+
+        action_type = (
+            "TASK_COMPLETED"
+            if new_status == "completed"
+            else "TASK_STATUS_CHANGED"
+        )
+
+        await create_audit_log(
+            current_user=current_user,
+            action=action_type,
+            module="task",
+            record_id=task_id,
+            old_data={
+                "task_title": existing_task.get("title"),
+                "status": old_status,
+                "assigned_to_name": assigned_name
+            },
+            new_data={
+                "status": new_status
+            }
+        )
+
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     return Task(**updated_task)
-@api_router.put("/tasks/{task_id}", response_model=Task)
-async def update_task(task_id: str, task_data: TaskCreate, current_user: User = Depends(check_permission("can_edit_tasks"))):
-    existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Task not found")
-    update_data = task_data.model_dump()
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    if update_data.get("due_date"):
-        update_data["due_date"] = update_data["due_date"].isoformat()
-    await db.tasks.update_one({"id": task_id}, {"$set": update_data})
-    await create_audit_log(
-        current_user,
-        action="UPDATE_TASK",
-        module="task",
-        record_id=task_id,
-        old_data=existing,
-        new_data=update_data
-    )
-    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    if isinstance(updated["created_at"], str):
-        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
-    if isinstance(updated["updated_at"], str):
-        updated["updated_at"] = datetime.fromisoformat(updated["updated_at"])
-    if updated.get("due_date") and isinstance(updated["due_date"], str):
-        updated["due_date"] = datetime.fromisoformat(updated["due_date"])
-    return Task(**updated)
+
+
 @api_router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, current_user: User = Depends(check_permission("can_edit_tasks"))):
+async def delete_task(
+    task_id: str,
+    current_user: User = Depends(check_permission("can_edit_tasks"))
+):
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    assigned_user = await db.users.find_one(
+        {"id": existing.get("assigned_to")},
+        {"_id": 0}
+    )
+    assigned_name = assigned_user["full_name"] if assigned_user else "Unknown"
+
     await create_audit_log(
-        current_user,
+        current_user=current_user,
         action="DELETE_TASK",
         module="task",
         record_id=task_id,
-        old_data=existing
+        old_data={
+            "task_title": existing.get("title"),
+            "assigned_to_name": assigned_name,
+            "status": existing.get("status")
+        }
     )
-    result = await db.tasks.delete_one({"id": task_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
+
+    await db.tasks.delete_one({"id": task_id})
+
     return {"message": "Task deleted successfully"}
+
 @api_router.get("/tasks/{task_id}/export-log-pdf")
 async def export_task_log_pdf(
     task_id: str,
