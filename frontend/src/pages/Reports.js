@@ -189,14 +189,19 @@ export default function Reports() {
       }
       return [];
     } else {
-      return starPerformers.slice(0, 5).map((member, index) => ({
-        name: member.user_name?.split(' ')[0] || 'User',
-        tasks: Math.round(Number(member.overall_score) || 0),
-        hours: Math.round(Number(member.total_hours) || 0),
-        fill: COLORS[index % COLORS.length],
-      }));
-    }
-  };
+return (starPerformers || [])
+  .slice(0, 5)
+  .map((member, index) => {
+    const score = Number(member?.overall_score);
+    const hours = Number(member?.total_hours);
+
+    return {
+      name: member?.user_name?.split(' ')[0] || 'User',
+      tasks: Number.isFinite(score) ? Math.round(score) : 0,
+      hours: Number.isFinite(hours) ? Math.round(hours) : 0,
+      fill: COLORS[index % COLORS.length],
+    };
+  });
 
   const getStartOfDay = (date) => {
     const d = new Date(date);
