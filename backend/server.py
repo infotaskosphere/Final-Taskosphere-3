@@ -915,7 +915,7 @@ async def login(credentials: UserLogin):
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
-    if isinstance(user["created_at"], str):
+    if "created_at" in user and isinstance(user["created_at"], str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
     access_token = create_access_token({"sub": user_obj.id})
@@ -1146,11 +1146,11 @@ async def get_top_performers_data(
     return performers
  
 # User routes
-@api_router.get("/users", response_model=List[User])
+@api_router.get("/users")
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     for user in users:
-        if isinstance(user["created_at"], str):
+        if "created_at" in user and isinstance(user["created_at"], str):
             user["created_at"] = datetime.fromisoformat(user["created_at"])
     return sanitize_user_data(users, current_user)
 @api_router.put("/users/{user_id}", response_model=User)
