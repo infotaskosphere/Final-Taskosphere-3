@@ -1353,6 +1353,7 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
     return Task(**task)
+
 # =========================================================
 # PATCH TASK (SECURE EDITING)
 # =========================================================
@@ -1360,33 +1361,103 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
 async def patch_task(
     task_id: str,
     updates: dict,
-    current_user: User = Depends(check_permission("can_edit_tasks"))
+    current_user: User = Depends(get_current_user)
 ):
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    permissions = current_user.permissions or {}
-    if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
-        allowed_users = permissions.get("view_other_tasks", [])
-        if (
-            existing_task.get("assigned_to") != current_user.id
-            and existing_task.get("assigned_to") not in allowed_users
-        ):
-            raise HTTPException(status_code=403, detail="Not authorized")
+    # 🔒 LOGIC: Only Admin, Creator, or Assignees can change status/details
+    is_authorized = (
+        current_user.role == "admin" or
+        existing_task.get("created_by") == current_user.id or
+        existing_task.get("assigned_to") == current_user.id or
+        current_user.id in existing_task.get("sub_assignees", [])
+    )
+
+    if not is_authorized:
+        raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
 
     old_data = existing_task.copy()
-
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
-
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
 
+    # Keep your existing audit log logic
+    await create_audit_log(
+        current_user=current_user,
+        action="TASK_STATUS_CHANGED" if "status" in updates else "UPDATE_TASK",
+        module="task",
+        record_id=task_id,
+        old_data=old_data,
+        new_data=updates
+    )
+    return Task(**updated_task)
+# =========================================================
+# DELETE TASK (RESTRICTED)
+# =========================================================
+@api_router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # 🔒 LOGIC: Admin always can. Others only if "can_edit_tasks" permission is true.
+    is_admin = current_user.role == "admin"
+    user_perms = current_user.permissions.model_dump() if current_user.permissions else {}
+    has_delete_perm = user_perms.get("can_edit_tasks", False) 
+
+    if not (is_admin or has_delete_perm):
+        raise HTTPException(status_code=403, detail="Only Admin or permitted staff can delete tasks.")
+
+    await db.tasks.delete_one({"id": task_id})
+    await create_audit_log(current_user, "DELETE_TASK", "task", task_id, existing)
+    return {"message": "Task deleted successfully"}
+
+# =========================================================
+# COMMENT ON TASK (SECURE)
+# =========================================================
+@api_router.post("/tasks/{task_id}/comments")
+async def add_task_comment(
+    task_id: str,
+    comment_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    # 🔒 involved parties check
+    is_involved = (
+        current_user.role == "admin" or
+        task.get("created_by") == current_user.id or
+        task.get("assigned_to") == current_user.id or
+        current_user.id in task.get("sub_assignees", [])
+    )
+
+    if not is_involved:
+        raise HTTPException(403, "You can only comment on tasks you are involved in.")
+
+    comment = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.id,
+        "user_name": current_user.full_name,
+        "text": comment_data.get("text"),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.tasks.update_one({"id": task_id}, {"$push": {"comments": comment}})
+    return comment
+    #=============================================
     # 🔥 AUDIT LOGGING
+    #=============================================
     if "status" in updates and old_data.get("status") != updates.get("status"):
         await create_audit_log(
             current_user=current_user,
