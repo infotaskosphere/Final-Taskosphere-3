@@ -280,15 +280,22 @@ const DashboardStripCard = ({
 }) => {
   return (
     <div
-      className={`relative rounded-2xl border border-slate-200 bg-white/90 backdrop-blur-sm
-        transition-all duration-200 overflow-hidden group
-        ${isCompleted ? "opacity-80" : "hover:shadow-md hover:-translate-y-[1px]"}
+      className={`relative rounded-2xl border transition-all duration-300 ease-in-out overflow-hidden group
+        ${
+          isCompleted
+            ? "bg-slate-50 border-slate-200 opacity-75 scale-[0.985]"
+            : "bg-white/90 backdrop-blur-sm border-slate-200 hover:shadow-md hover:-translate-y-[1px]"
+        }
         ${className}`}
     >
       <div
         className={`absolute left-0 top-0 h-full w-[6px] rounded-l-2xl ${stripeColor}`}
       />
-      <div className={`pl-6 pr-6 ${isCompleted ? "py-3" : "py-5"}`}>
+      <div
+        className={`pl-6 pr-6 transition-all duration-300 ${
+          isCompleted ? "py-2" : "py-5"
+        }`}
+      >
         {children}
       </div>
     </div>
@@ -1371,18 +1378,24 @@ export default function Tasks() {
               return (
                 <motion.div key={task.id} variants={itemVariants}>
                   <DashboardStripCard stripeColor={getStripeBg(task, taskIsOverdue)} isCompleted={task.status === "completed"}>
-                    <div className="flex flex-col gap-4">
+                    <div className={`flex flex-col transition-all duration-300 ${
+                      task.status === "completed" ? "gap-1" : "gap-4"
+                    }`}>
                       {/* Top Row */}
-                      <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className={`flex flex-wrap items-center justify-between transition-all duration-300 ${
+                        task.status === "completed" ? "gap-1" : "gap-3"
+                    }`}>
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <span className="text-xs font-bold text-slate-400 w-6">
                             #{index + 1}
                           </span>
-                          <span className={`font-semibold truncate ${
-                            task.status === "completed"
-                              ? "text-base text-slate-500 line-through"
-                              : "text-lg text-slate-900"
-                          }`} style={{ color: COLORS.deepBlue }}>
+                          <span
+                            className={`font-semibold truncate transition-all duration-300 ${
+                              task.status === "completed"
+                                ? "text-sm text-slate-400 line-through"
+                                : "text-lg text-slate-900"
+                            }`}
+                          >
                             {task.title}
                           </span>
                           <Badge className={`px-3 py-1 text-xs font-medium ${priorityStyle.bg} ${priorityStyle.text}`}>
@@ -1465,7 +1478,7 @@ export default function Tasks() {
                         </div>
                       </div>
                       {/* ENHANCED: Interactive Checklist for Compliance Workflows */}
-                      {checklistItems.length > 0 && (
+                      {task.status !== "completed" && checklistItems.length > 0 && (
                         <div className="pl-6 border-l-2 border-emerald-200 bg-emerald-50/50 rounded-xl p-3 text-sm">
                           <div className="font-medium text-emerald-700 mb-2 flex items-center gap-2">
                             <Check className="h-4 w-4" /> Compliance Checklist • {progress}% Complete
@@ -1486,7 +1499,7 @@ export default function Tasks() {
                         </div>
                       )}
                       {/* Classic Corporate Status Tabs */}
-                      {canModifyTask(task) && (
+                      {task.status !== "completed" && canModifyTask(task) && (
                         <div className="flex gap-2 pt-3 border-t border-slate-100">
                           <button
                             onClick={() => handleQuickStatusChange(task, 'pending')}
@@ -1520,7 +1533,7 @@ export default function Tasks() {
                           </button>
                         </div>
                       )}
-                      {openCommentTaskId === task.id && (
+                      {task.status !== "completed" && openCommentTaskId === task.id && (
                         <div className="mt-3 border-t pt-3 space-y-2">
                           <div className="max-h-32 overflow-y-auto text-sm text-slate-600">
                             {(comments[task.id] || []).map((comment, i) => (
@@ -1586,7 +1599,9 @@ export default function Tasks() {
                       const progress = getChecklistProgress(task);
                       return (
                         <DashboardStripCard key={task.id} stripeColor={getStripeBg(task, taskIsOverdue)} isCompleted={task.status === "completed"}>
-                          <div className="flex flex-col h-full">
+                          <div className={`flex flex-col transition-all duration-300 ${
+                            task.status === "completed" ? "gap-2" : "gap-4"
+                          }`}>
                             <div className="flex items-center gap-3 mb-4">
                               <Badge className={`px-3 py-1 text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}>
                                 {statusStyle.label}
@@ -1606,7 +1621,13 @@ export default function Tasks() {
                             <span className="text-xs font-bold text-slate-400">
                               #{index + 1}
                             </span>
-                            <h3 className="font-semibold text-slate-900 text-lg mb-3 line-clamp-2" style={{ color: COLORS.deepBlue }}>
+                            <h3
+                              className={`font-semibold transition-all duration-300 ${
+                                task.status === "completed"
+                                  ? "text-sm text-slate-400 line-through"
+                                  : "text-lg text-slate-900"
+                              }`}
+                            >
                               {task.title}
                             </h3>
                             {/* ENHANCED Checklist Preview in Board View */}
