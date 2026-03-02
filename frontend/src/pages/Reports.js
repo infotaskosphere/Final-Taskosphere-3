@@ -191,8 +191,8 @@ export default function Reports() {
     } else {
       return starPerformers.slice(0, 5).map((member, index) => ({
         name: member.user_name?.split(' ')[0] || 'User',
-        tasks: Math.round(member.overall_score),
-        hours: Math.round(member.total_hours || 0),
+        tasks: Math.round(Number(member.overall_score) || 0),
+        hours: Math.round(Number(member.total_hours) || 0),
         fill: COLORS[index % COLORS.length],
       }));
     }
