@@ -831,6 +831,7 @@ async def update_todo(
         {"$set": updates}
     )
     return {"message": "Todo updated successfully"}
+    
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -839,12 +840,15 @@ async def register(
     # 🔒 Admin Only
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
+
     # 🔎 Check existing email
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+
     # 🔐 Hash password
     hashed_password = get_password_hash(user_data.password)
+
     # 🎯 Default Permissions
     default_permissions = {
         "can_view_all_tasks": False,
@@ -875,33 +879,36 @@ async def register(
         "view_other_activity": [],
         "can_edit_clients": False
     }
-    # 🧱 Build User Object (MATCHES FRONTEND)
-user_id = str(uuid.uuid4())
 
-user = User(
-    id=user_id,
-    email=user_data.email,
-    full_name=user_data.full_name,
-    role=user_data.role,
-    password=hashed_password,
-    departments=user_data.departments,
-    phone=user_data.phone,
-    birthday=user_data.birthday,
-    permissions=default_permissions
-)
+    # 🧱 Build User Object
+    user_id = str(uuid.uuid4())
 
-doc = user.model_dump()
-doc["created_at"] = doc["created_at"].isoformat()
+    user = User(
+        id=user_id,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        role=user_data.role,
+        password=hashed_password,
+        departments=user_data.departments,
+        phone=user_data.phone,
+        birthday=user_data.birthday,
+        telegram_id=user_data.telegram_id,
+        permissions=default_permissions
+    )
 
-await db.users.insert_one(doc)
+    doc = user.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
 
-access_token = create_access_token({"sub": user_id})
+    await db.users.insert_one(doc)
 
-return {
-    "access_token": access_token,
-    "token_type": "bearer",
-    "user": user
-}
+    access_token = create_access_token({"sub": user_id})
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
+    
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email})
