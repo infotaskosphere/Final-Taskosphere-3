@@ -437,6 +437,20 @@ class ClientBase(BaseModel):
         if len(v) < 3:
             raise ValueError('Company name must be at least 3 characters long')
         return v
+class MasterClientForm(BaseModel):
+    """Expanded model to capture ALL details from the sheet and form"""
+    company_name: str
+    client_type: str  # pvt_ltd, llp, proprietor, etc.
+    email: EmailStr
+    phone: str
+    date_of_incorporation: Optional[date] = None
+    gst_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    tan_number: Optional[str] = None
+    assigned_to: Optional[str] = None  # Personnel ID
+    services: List[str] = []
+    contact_persons: List[ContactPerson] = []
+    notes: Optional[str] = None
 class ClientCreate(ClientBase):
     pass
 class Client(ClientBase):
@@ -2546,42 +2560,137 @@ async def get_performance_rankings(
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
     return rankings
    
-# CLIENT ROUTES
-@api_router.post("/clients/import-master-preview")
+
+# ==============================================================
+# INTEGRATED MASTER DATA SYSTEM & CLIENT ROUTES (PREVIEW & SYNC)
+# ==============================================================
+
+@api_router.post("/master/import-master-preview")
 async def import_master_data_preview(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload Excel Master Data (multiple sheets)
-    Parse and return structured JSON for preview (NO DB INSERT)
+    STEP 1: The 'Scan' Logic.
+    Parses the multi-sheet reference Excel and returns a JSON blueprint for UI review.
+    Does NOT modify the database.
     """
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Administrative clearance required for Master Data access.")
+
     filename = file.filename.lower()
     if not filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Only Excel files supported")
+        raise HTTPException(status_code=400, detail="Deployment failed: Only Excel formats (.xlsx, .xls) supported.")
+
     try:
         content = await file.read()
         excel = pd.ExcelFile(BytesIO(content))
-        parsed_data = {}
-        # 🔥 READ ALL SHEETS
+        
+        # Deep telemetry of all sheets in the reference file
+        parsed_blueprint = {}
+        total_vectors = 0
+
         for sheet_name in excel.sheet_names:
             df = pd.read_excel(excel, sheet_name=sheet_name)
+            # Standardize: replace NaN with empty strings for JSON compatibility
             df = df.fillna("")
-            parsed_data[sheet_name] = df.to_dict(orient="records")
-        # OPTIONAL: Try auto-detecting main client sheet
-        client_sheet = None
-        for name in excel.sheet_names:
-            if "client" in name.lower() or "master" in name.lower():
-                client_sheet = name
-                break
+            records = df.to_dict(orient="records")
+            parsed_blueprint[sheet_name] = records
+            total_vectors += len(records)
+
         return {
-            "message": "Master data parsed successfully",
+            "status": "Ready for Audit",
+            "message": f"Detected {len(excel.sheet_names)} operational layers with {total_vectors} vectors.",
             "sheets_found": excel.sheet_names,
-            "auto_detected_client_sheet": client_sheet,
-            "data": parsed_data
+            "data": parsed_blueprint
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Excel parsing failed: {str(e)}")
+        logger.error(f"Blueprint Error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Excel parse failure: {str(e)}")
+
+
+@api_router.post("/master/sync-sheets")
+async def sync_master_sheets(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    STEP 2: The 'Commit' Logic.
+    Iterates through ALL sheets and synchronizes them with permanent database collections.
+    """
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Master Data clearance level 5 required.")
+
+    try:
+        content = await file.read()
+        excel = pd.ExcelFile(BytesIO(content))
+        
+        sync_results = {"clients": 0, "compliance": 0, "staff": 0}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        
+        for sheet in excel.sheet_names:
+            df = pd.read_excel(excel, sheet_name=sheet).fillna("")
+            records = df.to_dict(orient="records")
+            sheet_type = sheet.lower()
+            
+            # Layer A: Client Registry Vectors
+            if "client" in sheet_type:
+                for rec in records:
+                    # Upsert logic based on Company Name to prevent duplicates
+                    await db.clients.update_one(
+                        {"company_name": str(rec.get("company_name", "")).strip()},
+                        {
+                            "$set": {
+                                **rec,
+                                "id": str(uuid.uuid4()) if "id" not in rec else rec["id"],
+                                "created_by": current_user.id,
+                                "updated_at": now_iso
+                            }
+                        },
+                        upsert=True
+                    )
+                    sync_results["clients"] += 1
+            
+            # Layer B: Compliance (Due Dates/Reminders) Vectors
+            elif "due" in sheet_type or "compliance" in sheet_type:
+                for rec in records:
+                    await db.due_dates.insert_one({
+                        **rec,
+                        "id": str(uuid.uuid4()),
+                        "created_by": current_user.id,
+                        "created_at": now_iso,
+                        "status": "pending"
+                    })
+                    sync_results["compliance"] += 1
+
+            # Layer C: Personnel (Staff/Users) Vectors
+            elif "staff" in sheet_type or "user" in sheet_type:
+                for rec in records:
+                    # Logic: Create shell users for the organization
+                    await db.users.update_one(
+                        {"email": rec.get("email")},
+                        {"$set": {**rec, "id": str(uuid.uuid4()), "is_active": True}},
+                        upsert=True
+                    )
+                    sync_results["staff"] += 1
+
+        # LOG THE DATA MUTATION
+        await create_audit_log(
+            current_user=current_user,
+            action="GLOBAL_MASTER_SYNC",
+            module="master_data",
+            record_id="multi_sheet_payload",
+            new_data=sync_results
+        )
+
+        return {
+            "message": "Global Master Sync Successfully Executed",
+            "telemetry": sync_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Sync Failure: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
     client = Client(**client_data.model_dump(), created_by=current_user.id)
