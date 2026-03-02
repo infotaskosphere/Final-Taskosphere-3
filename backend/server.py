@@ -516,6 +516,17 @@ class AuditLog(BaseModel):
     old_data: Optional[dict] = None
     new_data: Optional[dict] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+class UserCreate(BaseModel):
+    email: str
+    full_name: str
+    password: str
+    role: str = "staff"
+    departments: List[str] = []
+    phone: Optional[str] = None
+    birthday: Optional[date] = None
+    telegram_id: Optional[int] = None
+    permissions: Dict[str, Any] = {}
+    
 # ROUTER
 api_router = APIRouter(prefix="/api")
 # HELPERS
