@@ -1,4 +1,4 @@
-from starlette.middleware.gzip import GZipMiddleware  # Corrected from fastapi to starlette
+from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to starlette
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
@@ -18,7 +18,7 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, Backgrou
 from backend.notifications import router as notification_router, create_notification
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware  # Corrected from fastapi to starlette
+from starlette.middleware.cors import CORSMiddleware # Corrected from fastapi to starlette
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from pathlib import Path
@@ -157,7 +157,7 @@ async def create_indexes():
     )
 # ✅ STEP 1 — ADD UNIQUE INDEX (VERY IMPORTANT)
     await db.clients.create_index(
-        [("user_id", 1), ("company_name", 1)],
+        [("created_by", 1), ("company_name", 1)],
         unique=True
     )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -230,21 +230,18 @@ class User(BaseModel):
     full_name: str
     role: str = "staff"
     password: str
-
     departments: List[str] = []
-
     phone: Optional[str] = None
     birthday: Optional[date] = None
-
     profile_picture: Optional[str] = None
-
     punch_in_time: Optional[str] = None
     grace_time: Optional[str] = None
     punch_out_time: Optional[str] = None
     telegram_id: Optional[int] = None
     permissions: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+    is_active: bool = True
+   
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -659,7 +656,6 @@ async def create_audit_log(
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
-
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
     todo_data: TodoCreate,
@@ -669,23 +665,17 @@ async def create_todo(
         user_id=current_user.id,
         **todo_data.model_dump()
     )
-
     doc = todo.model_dump()
-
     # Convert datetime fields to ISO string
     doc["created_at"] = doc["created_at"].isoformat()
     doc["updated_at"] = doc["updated_at"].isoformat()
-
     if doc.get("due_date"):
         doc["due_date"] = doc["due_date"].isoformat()
-
     result = await db.todos.insert_one(doc)
-
     # Return proper id from Mongo
     doc["id"] = str(result.inserted_id)
-
     return doc
-    
+   
 @api_router.get("/todos")
 async def get_todos(
     user_id: Optional[str] = None,
@@ -737,24 +727,19 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
             permissions = current_user.permissions.model_dump()
         else:
             permissions = {}
-
         allowed_users = permissions.get("view_other_todos", [])
-
         # Always ensure list
         if not isinstance(allowed_users, list):
             allowed_users = []
-
         todos = await db.todos.find({
             "$or": [
                 {"user_id": current_user.id},
                 {"user_id": {"$in": allowed_users}}
             ]
         }).to_list(2000)
-
         # Convert ObjectId safely
         for todo in todos:
             todo["_id"] = str(todo["_id"])
-
         return {
             "role": "staff",
             "todos": todos
@@ -793,7 +778,6 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
     await db.tasks.insert_one(new_task)
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo promoted to task successfully"}
- 
 # Delete Todo Route
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
@@ -811,7 +795,6 @@ async def delete_todo(
         raise HTTPException(status_code=403, detail="Not authorized")
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Todo deleted successfully"}
- 
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
     todo_id: str,
@@ -822,27 +805,19 @@ async def update_todo(
         todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
     except:
         raise HTTPException(status_code=400, detail="Invalid Todo ID")
-
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
-
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-
     now = datetime.now(timezone.utc)
-
     if updates.get("is_completed") is True:
         updates["completed_at"] = now
-
     updates["updated_at"] = now
-
     await db.todos.update_one(
         {"_id": ObjectId(todo_id)},
         {"$set": updates}
     )
-
     return {"message": "Todo updated successfully"}
- 
 @api_router.post("/auth/register", response_model=Token)
 async def register(
     user_data: UserCreate,
@@ -851,15 +826,12 @@ async def register(
     # 🔒 Admin Only
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-
     # 🔎 Check existing email
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-
     # 🔐 Hash password
     hashed_password = get_password_hash(user_data.password)
-
     # 🎯 Default Permissions
     default_permissions = {
         "can_view_all_tasks": False,
@@ -890,34 +862,25 @@ async def register(
         "view_other_activity": [],
         "can_edit_clients": False
     }
-
     # 🧱 Build User Object (MATCHES FRONTEND)
     user = User(
         email=user_data.email,
         full_name=user_data.full_name,
-        role=user_data.role,  # ✅ Now respects frontend role
+        role=user_data.role, # ✅ Now respects frontend role
         departments=user_data.departments,
-
         phone=user_data.phone,
         birthday=user_data.birthday,
-
         profile_picture=user_data.profile_picture,
-
         punch_in_time=user_data.punch_in_time,
         grace_time=user_data.grace_time,
         punch_out_time=user_data.punch_out_time,
-
         permissions=default_permissions
     )
-
     doc = user.model_dump()
     doc["password"] = hashed_password
     doc["created_at"] = doc["created_at"].isoformat()
-
     await db.users.insert_one(doc)
-
     access_token = create_access_token({"sub": user.id})
-
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -960,13 +923,11 @@ def get_real_client_ip(request: Request):
     if x_forwarded_for:
         # First IP is the real client IP
         return x_forwarded_for.split(",")[0].strip()
-
     # 2️⃣ Fallback
     if request.client:
         return request.client.host
-
     return None
-    
+   
 @api_router.post("/attendance")
 async def record_attendance(
     data: dict,
@@ -1101,7 +1062,7 @@ async def record_attendance(
         return Attendance(**updated)
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
-        
+       
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
     period: str = "monthly",
@@ -1160,7 +1121,7 @@ async def get_top_performers_data(
     for idx, p in enumerate(performers):
         p["rank"] = idx + 1
     return performers
-  
+ 
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
@@ -1227,16 +1188,12 @@ async def create_task(
     current_user: User = Depends(get_current_user)
 ):
     task = Task(**task_data.model_dump(), created_by=current_user.id)
-
     doc = task.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
     doc["updated_at"] = doc["updated_at"].isoformat()
-
     if doc.get("due_date"):
         doc["due_date"] = doc["due_date"].isoformat()
-
     await db.tasks.insert_one(doc)
-
     # Notify assigned user
     if task.assigned_to and task.assigned_to != current_user.id:
         await create_notification(
@@ -1244,53 +1201,39 @@ async def create_task(
             title="New Task Assigned",
             message=f"You have been assigned task '{task.title}'"
         )
-
     return task
-
-
 # =========================================================
 # BULK CREATE TASKS
 # =========================================================
-
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
     payload: BulkTaskCreate,
     current_user: User = Depends(get_current_user)
 ):
     created_tasks = []
-
     for task_data in payload.tasks:
         task_dict = task_data.dict()
-
         task_dict["id"] = str(uuid.uuid4())
         task_dict["created_by"] = current_user.id
         task_dict["created_at"] = datetime.now(timezone.utc).isoformat()
         task_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
-
         if task_dict.get("due_date"):
             task_dict["due_date"] = task_dict["due_date"].isoformat()
-
         await db.tasks.insert_one(task_dict)
-
         if task_dict.get("assigned_to") and task_dict["assigned_to"] != current_user.id:
             await create_notification(
                 user_id=task_dict["assigned_to"],
                 title="New Task Assigned",
                 message=f"You have been assigned task '{task_dict['title']}'"
             )
-
         created_tasks.append(task_dict)
-
     return {
         "message": "Tasks created successfully",
         "count": len(created_tasks)
     }
-
-
 # =========================================================
 # IMPORT TASKS FROM CSV
 # =========================================================
-
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
     file: UploadFile = File(...),
@@ -1298,13 +1241,10 @@ async def import_tasks_from_csv(
 ):
     if file.content_type != "text/csv":
         raise HTTPException(400, "Invalid file type")
-
     content = await file.read()
     content_str = content.decode("utf-8")
-
     csv_reader = csv.DictReader(StringIO(content_str))
     tasks = []
-
     for row in csv_reader:
         task_data = TaskCreate(
             title=row.get("title", ""),
@@ -1321,29 +1261,21 @@ async def import_tasks_from_csv(
             recurrence_interval=int(row.get("recurrence_interval", 1))
         )
         tasks.append(task_data)
-
     payload = BulkTaskCreate(tasks=tasks)
     return await create_tasks_bulk(payload, current_user)
-
-
 # =========================================================
 # GET TASKS (WITH CROSS-USER SUPPORT)
 # =========================================================
-
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
-
     permissions = current_user.permissions or {}
     query = {"type": {"$ne": "todo"}}
-
     # Admin → all
     if current_user.role == "admin":
         pass
-
     # Global permission → all
     elif permissions.get("can_view_all_tasks", False):
         pass
-
     # Cross-user
     else:
         allowed_users = permissions.get("view_other_tasks", [])
@@ -1351,9 +1283,7 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
             {"assigned_to": current_user.id},
             {"assigned_to": {"$in": allowed_users}}
         ]
-
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
-
     # Map user names
     user_ids = {
         task.get("assigned_to")
@@ -1362,14 +1292,11 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
         task.get("created_by")
         for task in tasks if task.get("created_by")
     }
-
     users = await db.users.find(
         {"id": {"$in": list(user_ids)}},
         {"_id": 0, "password": 0}
     ).to_list(1000)
-
     user_map = {u["id"]: u["full_name"] for u in users}
-
     for task in tasks:
         if isinstance(task.get("created_at"), str):
             task["created_at"] = datetime.fromisoformat(task["created_at"])
@@ -1377,43 +1304,30 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
             task["updated_at"] = datetime.fromisoformat(task["updated_at"])
         if task.get("due_date") and isinstance(task["due_date"], str):
             task["due_date"] = datetime.fromisoformat(task["due_date"])
-
         task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
         task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
-
     return tasks
-
-
 # =========================================================
 # GET SINGLE TASK (SECURE)
 # =========================================================
-
 @api_router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str, current_user: User = Depends(get_current_user)):
-
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
     permissions = current_user.permissions or {}
-
     if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
         allowed_users = permissions.get("view_other_tasks", [])
-
         if (
             task.get("assigned_to") != current_user.id
             and task.get("assigned_to") not in allowed_users
             and current_user.id not in task.get("sub_assignees", [])
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
-
     return Task(**task)
-
-
 # =========================================================
 # PATCH TASK (SECURE EDITING)
 # =========================================================
-
 @api_router.patch("/tasks/{task_id}", response_model=Task)
 async def patch_task(
     task_id: str,
@@ -1423,33 +1337,23 @@ async def patch_task(
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
-
     permissions = current_user.permissions or {}
-
     if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
         allowed_users = permissions.get("view_other_tasks", [])
-
         if (
             existing_task.get("assigned_to") != current_user.id
             and existing_task.get("assigned_to") not in allowed_users
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
-
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(timezone.utc).isoformat()
-
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
-
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     return Task(**updated_task)
-
-
 # =========================================================
 # DELETE TASK (SECURE)
 # =========================================================
-
 @api_router.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,
@@ -1458,26 +1362,19 @@ async def delete_task(
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Task not found")
-
     permissions = current_user.permissions or {}
-
     if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
         allowed_users = permissions.get("view_other_tasks", [])
-
         if (
             existing.get("assigned_to") != current_user.id
             and existing.get("assigned_to") not in allowed_users
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
-
     await db.tasks.delete_one({"id": task_id})
     return {"message": "Task deleted successfully"}
-
-
 # =========================================================
 # EXPORT TASK AUDIT LOG PDF
 # =========================================================
-
 @api_router.get("/tasks/{task_id}/export-log-pdf")
 async def export_task_log_pdf(
     task_id: str,
@@ -1486,52 +1383,40 @@ async def export_task_log_pdf(
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
     logs = await db.audit_logs.find(
         {"module": "task", "record_id": task_id},
         {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
-
     if not logs:
         raise HTTPException(status_code=404, detail="No audit logs found")
-
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-
     pdf.cell(200, 10, txt="Task Lifecycle Report", ln=True, align="C")
     pdf.ln(5)
-
     pdf.multi_cell(0, 8, f"Title: {task.get('title')}")
     pdf.multi_cell(0, 8, f"Description: {task.get('description')}")
     pdf.multi_cell(0, 8, f"Assigned To: {task.get('assigned_to')}")
     pdf.multi_cell(0, 8, f"Created By: {task.get('created_by')}")
     pdf.multi_cell(0, 8, f"Created At: {task.get('created_at')}")
-
     pdf.ln(5)
     pdf.cell(200, 10, txt="Timeline:", ln=True)
     pdf.ln(5)
-
     for log in logs:
         timestamp = log.get("timestamp")
         if isinstance(timestamp, datetime):
             timestamp = timestamp.isoformat()
-
         pdf.multi_cell(
             0,
             8,
             f"{timestamp} - {log.get('action')} by {log.get('user_name')}"
         )
-
         if log.get("old_data"):
             pdf.multi_cell(0, 8, f"Details: {log.get('old_data')}")
-
         pdf.ln(3)
-
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
-
     return StreamingResponse(
         output,
         media_type="application/pdf",
@@ -1741,7 +1626,7 @@ async def update_dsc_movement(
         new_data={"movement_log": movement_log}
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-    
+   
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
@@ -1913,7 +1798,12 @@ async def get_attendance_history(
         if user_id:
             query["user_id"] = user_id
     else:
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if isinstance(current_user.permissions, dict):
+            permissions = current_user.permissions
+        elif current_user.permissions:
+            permissions = current_user.permissions.model_dump()
+        else:
+            permissions = {}
         allowed = permissions.get("view_other_attendance", [])
         if user_id is None:
             query["user_id"] = current_user.id
@@ -1980,7 +1870,12 @@ async def get_staff_attendance_report(
     current_user: User = Depends(get_current_user)
 ):
     if current_user.role != "admin":
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if isinstance(current_user.permissions, dict):
+            permissions = current_user.permissions
+        elif current_user.permissions:
+            permissions = current_user.permissions.model_dump()
+        else:
+            permissions = {}
         if not permissions.get("can_view_attendance"):
             raise HTTPException(status_code=403, detail="Not allowed")
     now = datetime.now(timezone.utc)
@@ -2189,7 +2084,6 @@ async def delete_due_date(
         raise HTTPException(status_code=404, detail="Due date not found")
     return {"message": "Due date deleted successfully"}
 # REPORTS ROUTES
-
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
     user_id: Optional[str] = None,
@@ -2201,40 +2095,39 @@ async def get_efficiency_report(
     - Admin can view anyone
     - Staff/Manager need can_view_reports permission to view others
     """
-
     # Default to own report
     target_user_id = user_id or current_user.id
-
     # 🔐 Access Control
     if target_user_id != current_user.id:
         if current_user.role != "admin":
-            permissions = (
-                current_user.permissions.model_dump()
-                if current_user.permissions
-                else {}
-            )
+            if isinstance(current_user.permissions, dict):
+                permissions = current_user.permissions
+            elif current_user.permissions:
+                permissions = current_user.permissions.model_dump()
+            else:
+                permissions = {}
+
+            allowed_users = permissions.get("view_other_reports", [])
+
             if target_user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to view other users' reports"
                 )
-
     # Fetch logs
     logs = await db.activity_logs.find(
         {"user_id": target_user_id},
         {"_id": 0}
     ).sort("date", -1).limit(30).to_list(100)
-
     total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
     total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
-
     return {
         "user_id": target_user_id,
         "total_screen_time": total_screen_time,
         "total_tasks_completed": total_tasks_completed,
         "days_logged": len(logs)
     }
-    
+   
 @api_router.get("/reports/export")
 async def export_reports(
     format: str = "csv",
@@ -2247,10 +2140,8 @@ async def export_reports(
     - Admin can export anyone
     - Staff/Manager need can_view_reports permission for others
     """
-
     # Default to own report
     target_user_id = user_id or current_user.id
-
     # 🔐 Access Control
     if target_user_id != current_user.id:
         if current_user.role != "admin":
@@ -2260,34 +2151,29 @@ async def export_reports(
                 else {}
             )
             allowed_users = permissions.get("view_other_reports", [])
-            
+           
             if target_user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to access other users' reports"
                 )
-
     # Fetch logs
     logs = await db.activity_logs.find(
         {"user_id": target_user_id},
         {"_id": 0}
     ).to_list(100)
-
     total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
     total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
-
     report = {
         "user_id": target_user_id,
         "total_screen_time": total_screen_time,
         "total_tasks_completed": total_tasks_completed,
         "days_logged": len(logs)
     }
-
     # ================= CSV =================
     if format == "csv":
         output = StringIO()
         writer = csv.writer(output)
-
         writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
         writer.writerow([
             report["user_id"],
@@ -2295,9 +2181,7 @@ async def export_reports(
             report["total_tasks_completed"],
             report["days_logged"]
         ])
-
         output.seek(0)
-
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
@@ -2305,25 +2189,20 @@ async def export_reports(
                 "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"
             }
         )
-
     # ================= PDF =================
     elif format == "pdf":
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-
         pdf.cell(200, 10, txt="Efficiency Report", ln=1, align="C")
         pdf.ln(10)
-
         pdf.multi_cell(0, 8, f"User ID: {report['user_id']}")
         pdf.multi_cell(0, 8, f"Screen Time: {report['total_screen_time']} minutes")
         pdf.multi_cell(0, 8, f"Tasks Completed: {report['total_tasks_completed']}")
         pdf.multi_cell(0, 8, f"Days Logged: {report['days_logged']}")
-
         pdf_output = BytesIO()
         pdf_output.write(pdf.output(dest='S').encode('latin1'))
         pdf_output.seek(0)
-
         return StreamingResponse(
             pdf_output,
             media_type="application/pdf",
@@ -2331,10 +2210,9 @@ async def export_reports(
                 "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"
             }
         )
-
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
-        
+       
 # ====================== PERFORMANCE RANKINGS + PDF EXPORT (NEW - added here, no original line touched) ======================
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
@@ -2342,11 +2220,9 @@ async def get_performance_rankings(
     current_user: User = Depends(get_current_user)
 ):
     global rankings_cache, rankings_cache_time
-    
+   
     """⭐ Star & 🏆 Top Performer Rankings (cached 5 min)"""
-
     cache_key = f"rankings_{period}"
-
     # ✅ Safe timezone-aware cache check
     if (
         cache_key in rankings_cache and
@@ -2354,41 +2230,32 @@ async def get_performance_rankings(
         (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
     ):
         return rankings_cache[cache_key]
-
     now = datetime.now(timezone.utc)
-
     # ----------------------------
     # Date range setup
     # ----------------------------
     if period == "weekly":
         start_date = now - timedelta(days=7)
         expected_working_days = 5
-
     elif period == "monthly":
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         expected_working_days = 22
-
-    else:  # all_time
+    else: # all_time
         start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
         months = max((now - start_date).days // 30, 1)
         expected_working_days = max(22, months * 22)
-
     end_date_str = now.strftime("%Y-%m-%d")
     start_date_str = start_date.strftime("%Y-%m-%d")
-
     users = await db.users.find(
         {"role": {"$ne": "admin"}},
         {"id": 1, "full_name": 1, "profile_picture": 1}
     ).to_list(100)
-
     rankings = []
-
     # ============================================================
     # LOOP THROUGH USERS
     # ============================================================
     for user in users:
         uid = user["id"]
-
         # ----------------------------
         # Attendance %
         # ----------------------------
@@ -2399,23 +2266,18 @@ async def get_performance_rankings(
             },
             {"_id": 0, "duration_minutes": 1, "is_late": 1}
         ).to_list(1000)
-
         days_present = len(att_records)
         total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
         total_hours = round(total_minutes / 60, 1)
-
         attendance_percent = round(
             (days_present / expected_working_days) * 100,
             1
         ) if expected_working_days else 0
-
         timely_days = len([r for r in att_records if not r.get("is_late", False)])
-
         timely_punchin_percent = round(
             (timely_days / days_present) * 100,
             1
         ) if days_present else 0
-
         # ----------------------------
         # Tasks %
         # ✅ FIXED: datetime comparison (no isoformat)
@@ -2424,7 +2286,6 @@ async def get_performance_rankings(
             "assigned_to": uid,
             "created_at": {"$gte": start_date}
         })
-
         completed_tasks = await db.tasks.count_documents({
             "assigned_to": uid,
             "status": "completed",
@@ -2433,20 +2294,16 @@ async def get_performance_rankings(
                 {"updated_at": {"$gte": start_date}}
             ]
         })
-
         completed_todos = await db.todos.count_documents({
             "user_id": uid,
             "is_completed": True,
             "completed_at": {"$gte": start_date}
         })
-
         total_completed = completed_tasks + completed_todos
-
         task_completion_percent = round(
             (total_completed / tasks_assigned) * 100,
             1
         ) if tasks_assigned else 0
-
         # ----------------------------
         # To-Do On-Time %
         # ----------------------------
@@ -2454,26 +2311,21 @@ async def get_performance_rankings(
             "user_id": uid,
             "created_at": {"$gte": start_date}
         }).to_list(500)
-
         completed_ontime = 0
-
         for t in todos:
             if t.get("is_completed"):
                 due = t.get("due_date")
                 completed_at = t.get("completed_at")
                 if due and completed_at and completed_at <= due:
                     completed_ontime += 1
-
         todo_ontime_percent = round(
             (completed_ontime / len(todos)) * 100,
             1
         ) if todos else 0
-
         # ----------------------------
         # Overall Score (SAFE)
         # ----------------------------
         safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
-
         score = (
             float(attendance_percent or 0) * 0.25 +
             safe_hours_ratio * 100 * 0.20 +
@@ -2481,9 +2333,7 @@ async def get_performance_rankings(
             float(todo_ontime_percent or 0) * 0.15 +
             float(timely_punchin_percent or 0) * 0.15
         )
-
         overall_score = round(min(score, 100), 1)
-
         # ----------------------------
         # Badge
         # ----------------------------
@@ -2493,7 +2343,6 @@ async def get_performance_rankings(
             badge = "🏆 Top Performer"
         else:
             badge = "Good Performer"
-
         # ----------------------------
         # SAFE structured return
         # ----------------------------
@@ -2511,23 +2360,19 @@ async def get_performance_rankings(
                 badge=str(badge)
             )
         )
-
     # ----------------------------
     # Sort + Rank
     # ----------------------------
     rankings.sort(key=lambda x: x.overall_score, reverse=True)
-
     for i, r in enumerate(rankings):
         r.rank = i + 1
-
     # ----------------------------
     # Cache result safely
     # ----------------------------
     rankings_cache[cache_key] = rankings
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
-
     return rankings
-    
+   
 # CLIENT ROUTES
 @api_router.post("/clients/import-master-preview")
 async def import_master_data_preview(
@@ -2805,10 +2650,18 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     # Task statistics
     task_query = {}
     if current_user.role != "admin":
-        permissions = current_user.permissions.model_dump() if current_user.permissions else {}
+        if isinstance(current_user.permissions, dict):
+            permissions = current_user.permissions
+        elif current_user.permissions:
+            permissions = current_user.permissions.model_dump()
+        else:
+            permissions = {}
+
         if not permissions.get("can_view_all_tasks", False):
+            allowed_users = permissions.get("view_other_tasks", [])
             task_query["$or"] = [
                 {"assigned_to": current_user.id},
+                {"assigned_to": {"$in": allowed_users}},
                 {"sub_assignees": current_user.id},
                 {"created_by": current_user.id}
             ]
@@ -2824,14 +2677,12 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 if isinstance(task["due_date"], str)
                 else task["due_date"]
             )
-
         # ✅ Make due_date timezone aware (UTC)
             if due_date.tzinfo is None:
                 due_date = due_date.replace(tzinfo=timezone.utc)
-
             if due_date < now:
                 overdue_tasks += 1
-                
+               
     # DSC statistics
     dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
     total_dsc = len(dsc_list)
@@ -3089,46 +2940,37 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_failed": failed_emails
     }
 # AUDIT LOGS ROUTE
-
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     module: Optional[str] = None,
     record_id: Optional[str] = None,
-    action: Optional[str] = None,   # ✅ ADD THIS
+    action: Optional[str] = None, # ✅ ADD THIS
     current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
     """
     Fetch audit logs with optional filtering
     """
-
     query = {}
-
     if module:
         query["module"] = module
-
     if record_id:
         query["record_id"] = record_id
-
     # ✅ HANDLE FILTER
     if action and action != "ALL":
         query["action"] = action
-
     logs = await db.audit_logs.find(
         query,
         {"_id": 0}
     ).sort("timestamp", -1).to_list(2000)
-
     logs = convert_objectids(logs)
-
     for log in logs:
         if isinstance(log.get("timestamp"), str):
             try:
                 log["timestamp"] = datetime.fromisoformat(log["timestamp"])
             except:
                 pass
-
     return logs
-    
+   
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
     tasks = await db.tasks.find(
