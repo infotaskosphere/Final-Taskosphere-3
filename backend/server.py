@@ -231,7 +231,7 @@ class User(BaseModel):
     email: str
     full_name: str
     role: str = "staff"
-    password: str
+    password: Optional[str] = None
     departments: List[str] = []
     phone: Optional[str] = None
     birthday: Optional[date] = None
@@ -929,7 +929,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "full_name": current_user.full_name,
         "role": current_user.role,
         "profile_picture": current_user.profile_picture,
-        "permissions": current_user.permissions.model_dump() if current_user.permissions else None,
+        "permissions": current_user.permissions or {},
         "departments": current_user.departments,
         # ───────────────────────────────────────────────────────────────
         # These are the two fields you need for per-user late calculation
