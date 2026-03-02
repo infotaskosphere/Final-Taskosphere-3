@@ -1,5 +1,6 @@
 from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to starlette
 from pydantic import BaseModel, EmailStr
+from typing import List, Optional, Dict, Any
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
 from typing import Optional
