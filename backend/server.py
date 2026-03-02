@@ -1,5 +1,8 @@
 from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to starlette
+from fpdf import FPDF
+from io import BytesIO
 from pydantic import BaseModel, EmailStr
+from backend.audit import create_audit_log
 from typing import List, Optional, Dict, Any
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
@@ -1409,44 +1412,114 @@ async def export_task_log_pdf(
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     logs = await db.audit_logs.find(
         {"module": "task", "record_id": task_id},
         {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
+
     if not logs:
         raise HTTPException(status_code=404, detail="No audit logs found")
+
     pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Task Lifecycle Report", ln=True, align="C")
+
+    # ───────────────── HEADER ─────────────────
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Task Lifecycle Report", ln=True, align="C")
     pdf.ln(5)
-    pdf.multi_cell(0, 8, f"Title: {task.get('title')}")
-    pdf.multi_cell(0, 8, f"Description: {task.get('description')}")
-    pdf.multi_cell(0, 8, f"Assigned To: {task.get('assigned_to')}")
-    pdf.multi_cell(0, 8, f"Created By: {task.get('created_by')}")
-    pdf.multi_cell(0, 8, f"Created At: {task.get('created_at')}")
-    pdf.ln(5)
-    pdf.cell(200, 10, txt="Timeline:", ln=True)
-    pdf.ln(5)
+
+    # ───────────────── TASK SUMMARY ─────────────────
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, "Task Information", ln=True)
+    pdf.ln(3)
+
+    pdf.set_font("Arial", size=11)
+    pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}")
+    pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}")
+    pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}")
+    pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}")
+    pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}")
+    pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}")
+    pdf.ln(8)
+
+    # ───────────────── TIMELINE ─────────────────
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, "Activity Timeline", ln=True)
+    pdf.ln(4)
+
+    pdf.set_font("Arial", size=10)
+
     for log in logs:
         timestamp = log.get("timestamp")
         if isinstance(timestamp, datetime):
-            timestamp = timestamp.isoformat()
-        pdf.multi_cell(
-            0,
-            8,
-            f"{timestamp} - {log.get('action')} by {log.get('user_name')}"
-        )
-        if log.get("old_data"):
-            pdf.multi_cell(0, 8, f"Details: {log.get('old_data')}")
+            timestamp = timestamp.strftime("%b %d, %Y %I:%M %p")
+
+        action = log.get("action", "UNKNOWN")
+        user = log.get("user_name", "Unknown User")
+
+        pdf.set_font("Arial", "B", 10)
+        pdf.multi_cell(0, 6, f"{timestamp} — {action.replace('_', ' ').title()} by {user}")
+
+        pdf.set_font("Arial", size=10)
+
+        # ───── Handle different actions cleanly ─────
+
+        if action == "TASK_STATUS_CHANGED":
+            old_status = log.get("old_data", {}).get("status", "-")
+            new_status = log.get("new_data", {}).get("status", "-")
+
+            pdf.multi_cell(0, 6, f"   Status changed: {old_status} → {new_status}")
+
+        elif action == "TASK_COMPLETED":
+            pdf.multi_cell(0, 6, "   Task marked as completed.")
+
+        elif action == "DELETE_TASK":
+            pdf.multi_cell(0, 6, "   Task was deleted.")
+
+        elif action == "CREATE_TASK":
+            pdf.multi_cell(0, 6, "   Task was created.")
+
+        elif action == "UPDATE_TASK":
+            pdf.multi_cell(0, 6, "   Task details updated.")
+
+        # Optional: Show detailed diff if available
+        if log.get("old_data") and log.get("new_data"):
+            old_data = log.get("old_data")
+            new_data = log.get("new_data")
+
+            for key in new_data:
+                old_val = old_data.get(key)
+                new_val = new_data.get(key)
+                if old_val != new_val:
+                    pdf.multi_cell(
+                        0,
+                        6,
+                        f"   {key.replace('_',' ').title()}: {old_val} → {new_val}"
+                    )
+
         pdf.ln(3)
+
+    # ───────────────── FOOTER INFO ─────────────────
+    pdf.ln(5)
+    pdf.set_font("Arial", "I", 8)
+    pdf.multi_cell(
+        0,
+        5,
+        f"Generated on {datetime.utcnow().strftime('%b %d, %Y %I:%M %p')} UTC"
+    )
+
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
+
     return StreamingResponse(
         output,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=task_log_{task_id}.pdf"}
+        headers={
+            "Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"
+        }
     )
 # Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
