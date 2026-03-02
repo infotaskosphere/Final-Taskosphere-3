@@ -732,22 +732,29 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     # STAFF VIEW (OWN + ALLOWED)
     # =========================
     else:
-    # Safely extract allowed users for cross-user todo viewing
-        permissions = getattr(current_user, "permissions", {}) or {}
+        # Safely extract permissions
+        if current_user.permissions:
+            permissions = current_user.permissions.model_dump()
+        else:
+            permissions = {}
+
         allowed_users = permissions.get("view_other_todos", [])
-    # Ensure it's always a list (extra safety)
+
+        # Always ensure list
         if not isinstance(allowed_users, list):
             allowed_users = []
-    # Fetch own todos + permitted users' todos
+
         todos = await db.todos.find({
             "$or": [
                 {"user_id": current_user.id},
                 {"user_id": {"$in": allowed_users}}
             ]
         }).to_list(2000)
-    # Convert ObjectId to string
+
+        # Convert ObjectId safely
         for todo in todos:
             todo["_id"] = str(todo["_id"])
+
         return {
             "role": "staff",
             "todos": todos
