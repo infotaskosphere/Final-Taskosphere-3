@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
 from typing import Optional
+from typing import Dict, Any
 from datetime import date
 import pytz
 import logging
