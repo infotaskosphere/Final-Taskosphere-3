@@ -1230,6 +1230,17 @@ async def create_task(
             message=f"You have been assigned task '{task.title}'"
         )
     return task
+@api_router.get("/tasks/{task_id}/comments")
+async def get_task_comments(
+    task_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    comments = task.get("comments", [])
+    return comments
 # =========================================================
 # BULK CREATE TASKS
 # =========================================================
