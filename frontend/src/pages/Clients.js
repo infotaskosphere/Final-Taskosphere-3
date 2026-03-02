@@ -22,6 +22,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid } from 'react-window';
+
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -30,10 +31,12 @@ const CLIENT_TYPES = [
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
 ];
+
 const SERVICES = [
   'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
+
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
@@ -236,54 +239,25 @@ export default function Clients() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-  const handleImportCSV = (event) => {
+  // ALIGNED WITH BACKEND /clients/import (server-side validation + contact handling)
+  const handleImportCSV = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     setImportLoading(true);
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        let count = 0;
-        for (let row of results.data) {
-          if (!row.company_name || !row.email || !row.phone) {
-            console.warn("Skipping invalid row:", row);
-            continue;
-          }
-          try {
-            await api.post('/clients', {
-              company_name: row.company_name?.trim(),
-              client_type: [
-                'proprietor','pvt_ltd','llp','partnership','huf','trust','other'
-              ].includes(row.client_type) ? row.client_type : 'proprietor',
-              email: row.email?.trim(),
-              phone: row.phone?.replace(/\D/g, ""),
-              birthday: row.birthday || null,
-              services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-              notes: null,
-              assigned_to: null,
-              contact_persons: [{
-                name: row.contact_name_1 || "",
-                designation: row.contact_designation_1 || null,
-                email: row.contact_email_1?.trim() || null,
-                phone: row.contact_phone_1 ? row.contact_phone_1.replace(/\D/g, "") : null,
-                birthday: null,
-                din: null
-              }],
-              dsc_details: []
-            });
-            count++;
-          } catch (e) { console.error("Import error:", e.response?.data || e); }
-        }
-        setImportLoading(false);
-        if (count > 0) { toast.success(`${count} clients imported!`); fetchClients(); }
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      },
-      error: (err) => {
-        console.error(err);
-        setImportLoading(false);
-      }
-    });
+    const formDataUpload = new FormData();
+    formDataUpload.append('file', file);
+    try {
+      const response = await api.post('/clients/import', formDataUpload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success(response.data.message || `${response.data.clients_created || 0} clients imported!`);
+      fetchClients();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Import failed');
+    } finally {
+      setImportLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
@@ -292,7 +266,7 @@ export default function Clients() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const workbook = XLSX.read(e.target.result, { type: 'binary' });
-     
+    
         // Existing general Excel import logic
         const normalizeHeader = (header) => {
           if (!header) return '';
@@ -349,7 +323,7 @@ export default function Clients() {
     };
     reader.readAsBinaryString(file);
   };
-  // UPDATED handleSubmit with Advanced Validation
+  // UPDATED handleSubmit with Advanced Validation + CLEANED DSC
   const handleSubmit = async (e) => {
     e.preventDefault();
     const isValid = validateForm();
@@ -376,6 +350,14 @@ export default function Clients() {
         birthday: safeDate(cp.birthday),
         din: cp.din?.trim() || null
       }));
+      // CLEAN DSC DETAILS (aligned with backend ClientDSC)
+      const cleanedDSC = formData.dsc_details.map(dsc => ({
+        certificate_number: dsc.certificate_number?.trim() || "",
+        holder_name: dsc.holder_name?.trim() || "",
+        issue_date: safeDate(dsc.issue_date),
+        expiry_date: safeDate(dsc.expiry_date),
+        notes: dsc.notes?.trim() || null
+      }));
       // Construct backend-safe payload
       const payload = {
         company_name: formData.company_name.trim(),
@@ -386,9 +368,9 @@ export default function Clients() {
         services: finalServices,
         notes: formData.notes?.trim() || null,
         assigned_to: formData.assigned_to === "unassigned" ? null : formData.assigned_to,
-        status: formData.status, // ← FIXED: was missing
+        status: formData.status,
         contact_persons: cleanedContacts,
-        dsc_details: formData.dsc_details || []
+        dsc_details: cleanedDSC
       };
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
@@ -415,9 +397,13 @@ export default function Clients() {
         din: cp?.din || ''
       })) || [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
+      dsc_details: client?.dsc_details?.map(d => ({
+        ...d,
+        issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '',
+        expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '',
+      })) || [],
       status: client?.status || 'active',
       assigned_to: client?.assigned_to || 'unassigned',
-      dsc_details: client?.dsc_details || []
     });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
@@ -866,6 +852,91 @@ export default function Clients() {
                       ))}
                     </div>
                   </div>
+                  {/* DSC DETAILS - ALIGNED WITH BACKEND ClientDSC */}
+                  <div className="bg-white border border-slate-100 rounded-3xl p-8">
+                    <div className="flex justify-between items-end mb-6">
+                      <div>
+                        <h3 className="text-xl font-semibold text-slate-900">DSC Details</h3>
+                        <p className="text-sm text-slate-500 mt-1">Digital Signature Certificates linked to this client</p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={addDSC}
+                        variant="outline"
+                        className="rounded-2xl h-10"
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add DSC
+                      </Button>
+                    </div>
+                    <div className="space-y-6">
+                      {formData.dsc_details.map((dsc, idx) => (
+                        <div
+                          key={idx}
+                          className="p-7 border border-slate-200 rounded-3xl bg-white relative shadow-sm"
+                        >
+                          <div className="flex justify-between items-center mb-6">
+                            <span className="font-semibold text-slate-800">DSC #{idx + 1}</span>
+                            {formData.dsc_details.length > 1 && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => removeDSC(idx)}
+                                className="text-slate-400 hover:text-red-600 h-8 w-8"
+                              >
+                                <Trash className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                              <Label className="text-xs uppercase tracking-widest text-slate-500">Certificate Number</Label>
+                              <Input
+                                value={dsc.certificate_number}
+                                onChange={e => updateDSC(idx, 'certificate_number', e.target.value)}
+                                className="h-11 rounded-2xl"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs uppercase tracking-widest text-slate-500">Holder Name</Label>
+                              <Input
+                                value={dsc.holder_name}
+                                onChange={e => updateDSC(idx, 'holder_name', e.target.value)}
+                                className="h-11 rounded-2xl"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs uppercase tracking-widest text-slate-500">Issue Date</Label>
+                              <Input
+                                type="date"
+                                value={dsc.issue_date || ''}
+                                onChange={e => updateDSC(idx, 'issue_date', e.target.value)}
+                                className="h-11 rounded-2xl"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs uppercase tracking-widest text-slate-500">Expiry Date</Label>
+                              <Input
+                                type="date"
+                                value={dsc.expiry_date || ''}
+                                onChange={e => updateDSC(idx, 'expiry_date', e.target.value)}
+                                className="h-11 rounded-2xl"
+                              />
+                            </div>
+                            <div className="md:col-span-2 space-y-2">
+                              <Label className="text-xs uppercase tracking-widest text-slate-500">Notes</Label>
+                              <Textarea
+                                value={dsc.notes || ''}
+                                onChange={e => updateDSC(idx, 'notes', e.target.value)}
+                                className="min-h-[80px] rounded-2xl"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   {/* Services */}
                   <div className="space-y-4">
                     <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Services Offered</Label>
@@ -1182,18 +1253,15 @@ export default function Clients() {
               onClick={async () => {
                 setImportLoading(true);
                 let success = 0;
-
                 for (let row of previewData) {
                   const exists = clients.find(c =>
                     c.company_name?.toLowerCase().trim() ===
                     row.company_name?.toLowerCase().trim()
                   );
-
                   if (exists) {
                     console.log("Skipping duplicate:", row.company_name);
                     continue;
                   }
-
                   try {
                     await api.post('/clients', {
                       company_name: row.company_name?.trim(),
@@ -1209,13 +1277,11 @@ export default function Clients() {
                       contact_persons: [],
                       dsc_details: []
                     });
-
                     success++;
                   } catch (err) {
                     console.error(err);
                   }
                 }
-
                 toast.success(`${success} clients imported successfully`);
                 fetchClients();
                 setPreviewOpen(false);
