@@ -347,6 +347,14 @@ export default function StaffActivity() {
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
+const refreshData = async () => {
+   try {
+      await fetchStaffActivity();  // or your real fetch function
+   } catch (error) {
+      console.error("Error refreshing data", error);
+   }
+};
+
   const formatMinutes = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
