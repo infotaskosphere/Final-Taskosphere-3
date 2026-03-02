@@ -259,7 +259,7 @@ export default function Dashboard() {
     fetchRankings();
   }, [rankingPeriod]);
 
-  // ── Mutations ───────────────────────────────────────────────────────────────
+  // ── Mutations 
   const createTodo = useMutation({
     mutationFn: data => api.post("/todos", data),
     onSuccess: () => {
@@ -270,7 +270,7 @@ export default function Dashboard() {
   });
 
   const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => api.put(`/todos/${id}`, { status }),
+    mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: newStatus === "completed" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
   });
 
