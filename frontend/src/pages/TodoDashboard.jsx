@@ -1,22 +1,23 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { ArrowUpRight, ArrowRight, ArrowDown } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import axios from "axios";
 import { useAuth } from "@/contexts/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  CheckCircle2, 
-  Trash2, 
-  Zap, 
-  Clock, 
-  User as UserIcon, 
-  Filter, 
-  Plus, 
+import {
+  ArrowUpRight,
+  ArrowRight,
+  ArrowDown,
+  CheckCircle2,
+  Trash2,
+  Zap,
+  Clock,
+  User as UserIcon,
+  Filter,
+  Plus,
   AlertTriangle,
   BrainCircuit,
   Sparkles,
-  ArrowRight,
   LayoutList,
   History,
   Target,
