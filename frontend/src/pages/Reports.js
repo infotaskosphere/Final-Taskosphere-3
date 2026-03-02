@@ -176,33 +176,34 @@ export default function Reports() {
   };
 
   // Employee Performance / Star Performers
-  const getEmployeePerformanceData = () => {
-    if (!isAdmin) {
-      if (filteredReportData.length > 0) {
-        const item = filteredReportData[0];
-        return [{
-          name: 'You',
-          tasks: item.total_tasks_completed,
-          hours: Math.round(item.total_screen_time / 60),
-          fill: COLORS[0],
-        }];
-      }
-      return [];
-    } else {
-return (starPerformers || [])
-  .slice(0, 5)
-  .map((member, index) => {
-    const score = Number(member?.overall_score);
-    const hours = Number(member?.total_hours);
+ const getEmployeePerformanceData = () => {
+  if (!isAdmin) {
+    if (filteredReportData.length > 0) {
+      const item = filteredReportData[0];
+      return [{
+        name: 'You',
+        tasks: item.total_tasks_completed,
+        hours: Math.round(item.total_screen_time / 60),
+        fill: COLORS[0],
+      }];
+    }
+    return [];
+  }
 
-    return {
-      name: member?.user_name?.split(' ')[0] || 'User',
-      tasks: Number.isFinite(score) ? Math.round(score) : 0,
-      hours: Number.isFinite(hours) ? Math.round(hours) : 0,
-      fill: COLORS[index % COLORS.length],
-    };
-  });
+  return (starPerformers || [])
+    .slice(0, 5)
+    .map((member, index) => {
+      const score = Number(member?.overall_score);
+      const hours = Number(member?.total_hours);
 
+      return {
+        name: member?.user_name?.split(' ')[0] || 'User',
+        tasks: Number.isFinite(score) ? Math.round(score) : 0,
+        hours: Number.isFinite(hours) ? Math.round(hours) : 0,
+        fill: COLORS[index % COLORS.length],
+      };
+    });
+};
   const getStartOfDay = (date) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
