@@ -1,14 +1,20 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 
 export default function TaskAudit() {
+  const [filter, setFilter] = useState("");
+
   const { data: logs = [], isLoading } = useQuery({
-    queryKey: ["taskAuditLogs"],
+    queryKey: ["taskAuditLogs", filter],
     queryFn: async () => {
-      const res = await api.get("/audit-logs?module=task");
+      const url = filter
+        ? `/audit-logs?module=task&action=${filter}`
+        : `/audit-logs?module=task`;
+      const res = await api.get(url);
       return res.data;
     },
   });
@@ -18,9 +24,22 @@ export default function TaskAudit() {
   return (
     <div className="p-6 space-y-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Task Audit Log</CardTitle>
+
+          <Select onValueChange={setFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter actions" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All</SelectItem>
+              <SelectItem value="DELETE_TASK">Deleted</SelectItem>
+              <SelectItem value="TASK_STATUS_CHANGED">Status Changed</SelectItem>
+              <SelectItem value="TASK_COMPLETED">Completed</SelectItem>
+            </SelectContent>
+          </Select>
         </CardHeader>
+
         <CardContent>
           <div className="space-y-4">
             {logs.length === 0 && (
@@ -30,17 +49,68 @@ export default function TaskAudit() {
             {logs.map((log, index) => (
               <div
                 key={index}
-                className="p-4 border rounded-xl bg-slate-50"
+                className="p-4 border rounded-xl bg-slate-50 space-y-2"
               >
-                <p className="text-sm font-medium">
-                  {log.user_name} performed <b>{log.action}</b>
-                </p>
+                {/* DELETE */}
+                {log.action === "DELETE_TASK" && (
+                  <>
+                    <p className="text-sm font-medium">
+                      <b>{log.user_name}</b> deleted task
+                    </p>
+                    <p className="text-sm">
+                      <b>{log.old_data?.task_title}</b>
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Assigned to: {log.old_data?.assigned_to_name || "-"}
+                    </p>
+                  </>
+                )}
 
-                <p className="text-xs text-slate-600 mt-1">
-                  Task ID: {log.record_id}
-                </p>
+                {/* STATUS CHANGE */}
+                {log.action === "TASK_STATUS_CHANGED" && (
+                  <>
+                    <p className="text-sm font-medium">
+                      <b>{log.user_name}</b> changed status
+                    </p>
+                    <p className="text-sm">
+                      <b>{log.old_data?.task_title}</b>
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      From: {log.old_data?.status}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      To: {log.new_data?.status}
+                    </p>
+                  </>
+                )}
 
-                <p className="text-xs text-slate-400 mt-1">
+                {/* COMPLETED */}
+                {log.action === "TASK_COMPLETED" && (
+                  <>
+                    <p className="text-sm font-medium">
+                      <b>{log.user_name}</b> completed task
+                    </p>
+                    <p className="text-sm">
+                      <b>{log.old_data?.task_title}</b>
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Assigned to: {log.old_data?.assigned_to_name}
+                    </p>
+                  </>
+                )}
+
+                {/* Fallback */}
+                {![
+                  "DELETE_TASK",
+                  "TASK_STATUS_CHANGED",
+                  "TASK_COMPLETED",
+                ].includes(log.action) && (
+                  <p className="text-sm font-medium">
+                    {log.user_name} performed {log.action}
+                  </p>
+                )}
+
+                <p className="text-xs text-slate-400">
                   {format(new Date(log.timestamp), "MMM d, yyyy • hh:mm a")}
                 </p>
               </div>
