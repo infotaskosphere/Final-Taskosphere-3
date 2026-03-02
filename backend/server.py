@@ -2,7 +2,7 @@ from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to
 from fpdf import FPDF
 from io import BytesIO
 from pydantic import BaseModel, EmailStr
-from backend.audit import create_audit_log
+from .taskaudit import create_audit_log
 from typing import List, Optional, Dict, Any
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
