@@ -3011,33 +3011,44 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_failed": failed_emails
     }
 # AUDIT LOGS ROUTE
+
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     module: Optional[str] = None,
     record_id: Optional[str] = None,
+    action: Optional[str] = None,   # ✅ ADD THIS
     current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
     """
     Fetch audit logs with optional filtering
     """
+
     query = {}
+
     if module:
         query["module"] = module
+
     if record_id:
         query["record_id"] = record_id
+
+    # ✅ HANDLE FILTER
+    if action and action != "ALL":
+        query["action"] = action
+
     logs = await db.audit_logs.find(
         query,
         {"_id": 0}
     ).sort("timestamp", -1).to_list(2000)
-    # Convert timestamp string to datetime if needed
+
     logs = convert_objectids(logs)
+
     for log in logs:
         if isinstance(log.get("timestamp"), str):
             try:
                 log["timestamp"] = datetime.fromisoformat(log["timestamp"])
             except:
                 pass
-    
+
     return logs
     
 # INTERNAL FUNCTION FOR AUTO REMINDER
