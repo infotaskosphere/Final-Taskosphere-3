@@ -124,10 +124,10 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
               whileTap={{ scale: 0.92, transition: springPhysics.button }}
               type="button"
               onClick={(e) => {
-                e.stopPropagation();
+                if (e.target.closest('button')) return;
                 onUpdateStatus?.(task.id, 'in_progress');
               }}
-              disabled={isInProgress || isCompleted}
+              disabled={isCompleted}
               className={`w-28 text-center py-1 text-xs font-medium rounded-full transition ${
                 isInProgress
                   ? 'bg-blue-600 text-white shadow'
@@ -297,23 +297,31 @@ export default function Dashboard() {
     setNewTodo("");
     setSelectedDueDate(undefined);
   };
-  const updateAssignedTaskStatus = (taskId, newStatus) => {
-    updateTaskMutation.mutate({
-      id: taskId,
-      data: {
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      },
-    }, {
-      onSuccess: () => {
-        toast.success(`Task marked as ${newStatus === 'completed' ? 'Done' : 'In Progress'}!`);
-      },
-      onError: (error) => {
-        console.error('Failed to update task status:', error);
-        toast.error('Failed to update task');
-      }
-    });
-  };
+const updateAssignedTaskStatus = (taskId, newStatus) => {
+  updateTaskMutation.mutate({
+    id: taskId,
+    data: {
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    },
+  }, {
+    onSuccess: () => {
+      toast.success(
+        newStatus === 'completed'
+          ? 'Task marked as Completed!'
+          : 'Task marked as In Progress!'
+      );
+
+      // ✅ ADD THIS — VERY IMPORTANT
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+    },
+    onError: (error) => {
+      console.error('Failed to update task status:', error);
+      toast.error('Failed to update task');
+    }
+  });
+};
   const handleToggleTodo = (id) => {
     const todo = todosRaw.find((t) => t.id === id);
     if (!todo) return;
@@ -833,7 +841,8 @@ export default function Dashboard() {
               {tasksAssignedToMe.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-3xl">No tasks assigned to you yet</div>
               ) : (
-                <div className="space-y-4 max-h-[360px] overflow-y-auto pr-2">
+                <CardContent className="p-6">
+                  <div className="space-y-4 h-[360px] overflow-y-auto pr-2">
                   <AnimatePresence>
                     {tasksAssignedToMe.map((task) => (
                       <TaskStrip
@@ -879,7 +888,7 @@ export default function Dashboard() {
               {tasksAssignedByMe.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-3xl">You haven't assigned any tasks yet</div>
               ) : (
-                <div className="space-y-4 max-h-[360px] overflow-y-auto pr-2">
+                <div className="space-y-4 h-[360px] overflow-y-auto pr-2">
                   <AnimatePresence>
                     {tasksAssignedByMe.map((task) => (
                       <TaskStrip
