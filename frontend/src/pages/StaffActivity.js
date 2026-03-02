@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button"
-import { XCircle, AlertCircle, CheckCircle2 } from "lucide-react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -20,6 +19,9 @@ import {
   AreaChart, Area, ComposedChart
 } from 'recharts';
 import {
+  XCircle,
+  AlertCircle,
+  CheckCircle2,
   Monitor,
   Clock,
   User,
@@ -32,7 +34,6 @@ import {
   CheckSquare,
   Briefcase,
   PieChart as PieIcon,
-  AlertCircle,
   LogIn,
   LogOut,
   ChevronLeft,
