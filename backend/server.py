@@ -2,7 +2,6 @@ from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to
 from fpdf import FPDF
 from io import BytesIO
 from pydantic import BaseModel, EmailStr
-from .taskaudit import create_audit_log
 from typing import List, Optional, Dict, Any
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
@@ -1366,6 +1365,7 @@ async def patch_task(
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     permissions = current_user.permissions or {}
     if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
         allowed_users = permissions.get("view_other_tasks", [])
@@ -1374,11 +1374,38 @@ async def patch_task(
             and existing_task.get("assigned_to") not in allowed_users
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
+
+    old_data = existing_task.copy()
+
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
+
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+
+    # 🔥 AUDIT LOGGING
+    if "status" in updates and old_data.get("status") != updates.get("status"):
+        await create_audit_log(
+            current_user=current_user,
+            action="TASK_STATUS_CHANGED",
+            module="task",
+            record_id=task_id,
+            old_data={"status": old_data.get("status")},
+            new_data={"status": updates.get("status")}
+        )
+    else:
+        await create_audit_log(
+            current_user=current_user,
+            action="UPDATE_TASK",
+            module="task",
+            record_id=task_id,
+            old_data=old_data,
+            new_data=updates
+        )
+
     return Task(**updated_task)
 # =========================================================
 # DELETE TASK (SECURE)
@@ -1391,6 +1418,7 @@ async def delete_task(
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Task not found")
+
     permissions = current_user.permissions or {}
     if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
         allowed_users = permissions.get("view_other_tasks", [])
@@ -1399,7 +1427,18 @@ async def delete_task(
             and existing.get("assigned_to") not in allowed_users
         ):
             raise HTTPException(status_code=403, detail="Not authorized")
+
     await db.tasks.delete_one({"id": task_id})
+
+    # 🔥 AUDIT LOG FOR DELETE
+    await create_audit_log(
+        current_user=current_user,
+        action="DELETE_TASK",
+        module="task",
+        record_id=task_id,
+        old_data=existing
+    )
+
     return {"message": "Task deleted successfully"}
 # =========================================================
 # EXPORT TASK AUDIT LOG PDF
