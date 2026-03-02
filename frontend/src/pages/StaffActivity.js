@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import { XCircle, AlertCircle, CheckCircle2 } from "lucide-react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
