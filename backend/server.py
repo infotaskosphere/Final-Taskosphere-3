@@ -20,7 +20,7 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, Backgrou
 from backend.notifications import router as notification_router, create_notification
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware # Corrected from fastapi to starlette
+from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from pathlib import Path
@@ -113,7 +113,7 @@ rankings_cache_time = {}
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
         # Admin override
-        if current_user.role == "admin":
+        if current_user.role.lower() == "admin":
             return current_user
         # Safely extract permissions (handle both dict and model)
         permissions = current_user.permissions
@@ -876,29 +876,32 @@ async def register(
         "can_edit_clients": False
     }
     # 🧱 Build User Object (MATCHES FRONTEND)
-    user = User(
-        email=user_data.email,
-        full_name=user_data.full_name,
-        role=user_data.role, # ✅ Now respects frontend role
-        departments=user_data.departments,
-        phone=user_data.phone,
-        birthday=user_data.birthday,
-        profile_picture=user_data.profile_picture,
-        punch_in_time=user_data.punch_in_time,
-        grace_time=user_data.grace_time,
-        punch_out_time=user_data.punch_out_time,
-        permissions=default_permissions
-    )
-    doc = user.model_dump()
-    doc["password"] = hashed_password
-    doc["created_at"] = doc["created_at"].isoformat()
-    await db.users.insert_one(doc)
-    access_token = create_access_token({"sub": user.id})
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+user_id = str(uuid.uuid4())
+
+user = User(
+    id=user_id,
+    email=user_data.email,
+    full_name=user_data.full_name,
+    role=user_data.role,
+    password=hashed_password,
+    departments=user_data.departments,
+    phone=user_data.phone,
+    birthday=user_data.birthday,
+    permissions=default_permissions
+)
+
+doc = user.model_dump()
+doc["created_at"] = doc["created_at"].isoformat()
+
+await db.users.insert_one(doc)
+
+access_token = create_access_token({"sub": user_id})
+
+return {
+    "access_token": access_token,
+    "token_type": "bearer",
+    "user": user
+}
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email})
@@ -1138,8 +1141,6 @@ async def get_top_performers_data(
 # User routes
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     for user in users:
         if isinstance(user["created_at"], str):
