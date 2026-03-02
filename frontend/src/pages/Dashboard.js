@@ -317,20 +317,18 @@ export default function Dashboard() {
       },
       {
         onSuccess: () => {
-          toast.success(
-            newStatus === 'completed' ? 'Task completed!' : 'Task in progress!'
-          );
+          toast.success(newStatus === 'completed' ? 'Task completed!' : 'Task in progress!');
           queryClient.invalidateQueries({ queryKey: ['tasks'] });
           queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
         },
         onError: (err) => {
-          console.error(err);
-          toast.error('Failed to update task');
+          // This will help you see if it's still a 405 (Method) or 403 (Permission) error
+          console.error("Update Error:", err);
+          toast.error(err.response?.data?.detail || 'Failed to update task');
         },
       }
     );
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
