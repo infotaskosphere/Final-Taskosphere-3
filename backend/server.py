@@ -98,6 +98,8 @@ security = HTTPBearer()
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+rankings_cache = {}
+rankings_cache_time = {}
 def check_permission(permission_name: str):
     def dependency(current_user: User = Depends(get_current_user)):
         # Admin override
@@ -2226,6 +2228,8 @@ async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
     current_user: User = Depends(get_current_user)
 ):
+    global rankings_cache, rankings_cache_time
+    
     """⭐ Star & 🏆 Top Performer Rankings (cached 5 min)"""
 
     cache_key = f"rankings_{period}"
