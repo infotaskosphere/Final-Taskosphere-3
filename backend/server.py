@@ -1,15 +1,14 @@
-from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import GZipMiddleware  # Corrected from fastapi to starlette
 from pydantic import BaseModel, EmailStr
 from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
 from typing import Optional
-from backend.dependencies import create_access_token
 from datetime import date
 import pytz
 import logging
 import smtplib
 import pandas as pd
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from fastapi import Request
 from dateutil import parser
@@ -19,12 +18,12 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, Backgrou
 from backend.notifications import router as notification_router, create_notification
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.cors import CORSMiddleware  # Corrected from fastapi to starlette
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from pathlib import Path
-from typing import List, Optional, Dict
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, ValidationError
+from typing import List, Dict
+from pydantic import Field, ConfigDict, field_validator, ValidationError
 import uuid
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -33,16 +32,8 @@ from sendgrid.helpers.mail import Mail
 import csv
 from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
-from fastapi import HTTPException, Depends
-from bson import ObjectId
-from datetime import datetime, timezone
-import uuid
-from fpdf import FPDF
 from math import radians, sin, cos, sqrt, atan2
-from datetime import datetime, timedelta, timezone
-import re # ← Added for phone validation
-rankings_cache = {}
-rankings_cache_time = {}
+import re
 import openpyxl
 from openpyxl import load_workbook
 OFFICE_LAT = 21.1652
