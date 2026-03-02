@@ -797,16 +797,16 @@ async def delete_todo(
     todo_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
-    except:
-        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+    todo = await db.todos.find_one({"_id": todo_id})
+
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
-    # Only owner or admin can delete
+
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    await db.todos.delete_one({"_id": ObjectId(todo_id)})
+
+    await db.todos.delete_one({"_id": todo_id})
+
     return {"message": "Todo deleted successfully"}
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
