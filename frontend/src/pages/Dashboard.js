@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import RoleGuard from "@/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { cn } from "@/lib/utils";
 import { useTasks, useUpdateTask } from "@/hooks/useTasks";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useDashboardStats,
   useUpcomingDueDates,
