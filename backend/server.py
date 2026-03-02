@@ -240,7 +240,7 @@ class User(BaseModel):
     grace_time: Optional[str] = None
     punch_out_time: Optional[str] = None
     telegram_id: Optional[int] = None
-    permissions: Dict[str, Any] = {}
+    permissions: UserPermissions = Field(default_factory=UserPermissions)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
    
