@@ -41,6 +41,7 @@ import {
 } from "@/hooks/useDashboard";
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuery, useMutation } from "@tanstack/react-query";
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -54,11 +55,11 @@ const COLORS = {
 // ── CSS Custom Properties + Spring Physics Tuning (2026 SaaS Standard) ───────
 // Add these to your global.css for live tuning without code change
 const springPhysics = {
-  card:  { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
-  lift:  { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
+  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
+  lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
   button:{ type: "spring", stiffness: 400, damping: 28 },
-  icon:  { type: "spring", stiffness: 450, damping: 25 },
-  tap:   { type: "spring", stiffness: 500, damping: 30 }
+  icon: { type: "spring", stiffness: 450, damping: 25 },
+  tap: { type: "spring", stiffness: 500, damping: 30 }
 };
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ const getPriorityStripeClass = (priority) => {
   if (p === 'low') return 'border-l-8 border-l-blue-500';
   return 'border-l-8 border-l-slate-300';
 };
+
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
@@ -103,7 +105,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
       `}
       onClick={(e) => {
         e.stopPropagation();
-        navigate(`/tasks?filter=assigned-to-me&taskId=${task.id}`); // Enhanced: always opens detail view
+        navigate(`/tasks?filter=assigned-to-me&taskId=${task.id}`);
       }}
     >
       {/* Title + Capsules */}
@@ -177,6 +179,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
     </motion.div>
   );
 }
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -193,6 +196,7 @@ export default function Dashboard() {
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
   const queryClient = useQueryClient();
+
   // Dedicated Todos Query (separate from tasks)
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos"],
@@ -201,6 +205,7 @@ export default function Dashboard() {
       return res.data;
     },
   });
+
   const tasksAssignedToMe = useMemo(() => {
     return tasks
       .filter(
@@ -210,6 +215,7 @@ export default function Dashboard() {
       )
       .slice(0, 6);
   }, [tasks, user]);
+
   const tasksAssignedByMe = useMemo(() => {
     return tasks
       .filter(
@@ -219,15 +225,18 @@ export default function Dashboard() {
       )
       .slice(0, 6);
   }, [tasks, user]);
+
   const todos = useMemo(() => {
     return todosRaw.map((todo) => ({
       ...todo,
       completed: todo.status === "completed",
     }));
   }, [todosRaw]);
+
   const recentTasks = useMemo(() => {
     return tasks.slice(0, 5);
   }, [tasks]);
+
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) {
@@ -239,6 +248,7 @@ export default function Dashboard() {
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // UPDATED: Fetch Star Performers from NEW backend endpoint (no original lines deleted)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +269,7 @@ export default function Dashboard() {
     }
     fetchRankings();
   }, [rankingPeriod]);
+
   // Create Todo
   const createTodo = useMutation({
     mutationFn: (data) => api.post("/todos", data),
@@ -268,6 +279,7 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to add todo"),
   });
+
   // Update Todo
   const updateTodo = useMutation({
     mutationFn: ({ id, status }) =>
@@ -275,6 +287,7 @@ export default function Dashboard() {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["todos"] }),
   });
+
   // Delete Todo
   const deleteTodo = useMutation({
     mutationFn: (id) => api.delete(`/todos/${id}`),
@@ -284,6 +297,7 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to delete todo"),
   });
+
   const addTodo = () => {
     if (!newTodo.trim()) return;
     const todoPayload = {
@@ -297,31 +311,33 @@ export default function Dashboard() {
     setNewTodo("");
     setSelectedDueDate(undefined);
   };
-const updateAssignedTaskStatus = (taskId, newStatus) => {
-  updateTaskMutation.mutate({
-    id: taskId,
-    data: {
-      status: newStatus,
-      updated_at: new Date().toISOString()
-    },
-  }, {
-    onSuccess: () => {
-      toast.success(
-        newStatus === 'completed'
-          ? 'Task marked as Completed!'
-          : 'Task marked as In Progress!'
-      );
 
-      // ✅ ADD THIS — VERY IMPORTANT
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-    },
-    onError: (error) => {
-      console.error('Failed to update task status:', error);
-      toast.error('Failed to update task');
-    }
-  });
-};
+  const updateAssignedTaskStatus = (taskId, newStatus) => {
+    updateTaskMutation.mutate({
+      id: taskId,
+      data: {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      },
+    }, {
+      onSuccess: () => {
+        toast.success(
+          newStatus === 'completed'
+            ? 'Task marked as Completed!'
+            : 'Task marked as In Progress!'
+        );
+
+        // ✅ ADD THIS — VERY IMPORTANT
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      },
+      onError: (error) => {
+        console.error('Failed to update task status:', error);
+        toast.error('Failed to update task');
+      }
+    });
+  };
+
   const handleToggleTodo = (id) => {
     const todo = todosRaw.find((t) => t.id === id);
     if (!todo) return;
@@ -329,9 +345,11 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
       todo.status === "completed" ? "pending" : "completed";
     updateTodo.mutate({ id, status: newStatus });
   };
+
   const handleDeleteTodo = (id) => {
     deleteTodo.mutate(id);
   };
+
   const handlePunchAction = async (action) => {
     try {
       setLoading(true);
@@ -345,6 +363,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
     }
     navigate('/attendance');
   };
+
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -353,6 +372,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
     };
     return styles[status] || styles.pending;
   };
+
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -361,6 +381,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
     };
     return styles[priority] || styles.medium;
   };
+
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) {
       return {
@@ -396,21 +417,27 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
       text: 'text-yellow-600'
     };
   };
+
   // ── New helper for overdue check ───────────────────────────────────────────
   const isOverdue = (dueDate) => {
     if (!dueDate) return false;
     return new Date(dueDate) < new Date();
   };
   // ────────────────────────────────────────────────────────────────────────────
+
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats?.completed_tasks / stats?.total_tasks) * 100)
     : 0;
+
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) => prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
+
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
+
   const [defaultGroup, setDefaultGroup] = useState(null);
+
   // ─────────────────────────────────────────────────────────────────────────────
   // REFACTORED STAR PERFORMERS DISPLAY (clean, modern, using exact backend fields)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -484,6 +511,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
       </motion.div>
     );
   });
+
   return (
     <motion.div
       className="space-y-6"
@@ -535,6 +563,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Key Metrics Row - Premium Compact Grid */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4" variants={itemVariants}>
         {/* Total Tasks Card */}
@@ -562,6 +591,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         {/* Overdue Tasks Card */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
@@ -587,6 +617,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         {/* Completion Rate Card */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
@@ -612,6 +643,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         {/* DSC Alerts Card */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
@@ -640,6 +672,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         {/* Today's Attendance Card */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
@@ -666,6 +699,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
           </CardContent>
         </motion.div>
       </motion.div>
+
       {/* Recent Tasks + Upcoming Deadlines + Attendance - Elegant 3-column */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-4" variants={itemVariants}>
         {/* Recent Tasks - Reduced height */}
@@ -698,7 +732,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
                         exit="exit"
                         whileHover={{ y: -2, transition: springPhysics.card }}
                         className={`py-3 px-4 rounded-2xl border cursor-pointer hover:shadow-md hover:border-blue-300 transition ${priorityStyle.bg} ${priorityStyle.border}`}
-                        onClick={() => navigate('/tasks')} // Enhanced: goes to full task list
+                        onClick={() => navigate('/tasks')}
                       >
                         <div className="flex items-center justify-between mb-1">
                           <p className="font-medium text-sm text-slate-900 truncate">{task.title || 'Untitled Task'}</p>
@@ -716,6 +750,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             )}
           </CardContent>
         </Card>
+
         {/* Upcoming Deadlines - Compact */}
         <Card className="border border-slate-100 shadow-sm rounded-3xl overflow-hidden" data-testid="upcoming-duedates-card">
           <CardHeader className="pb-4 border-b border-slate-100 px-6">
@@ -763,6 +798,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             )}
           </CardContent>
         </Card>
+
         {/* Attendance Card - Compact */}
         <Card className="border border-slate-100 shadow-sm rounded-3xl overflow-hidden" data-testid="attendance-card">
           <CardHeader className="pb-4 border-b border-slate-100 px-6">
@@ -809,6 +845,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Tasks Assigned – Two Column Layout - Premium + Enhanced Navigation */}
       {showTaskSection && (
         <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -841,8 +878,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
               {tasksAssignedToMe.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-slate-400 border border-dashed border-slate-200 rounded-3xl">No tasks assigned to you yet</div>
               ) : (
-                <CardContent className="p-6">
-                  <div className="space-y-4 h-[360px] overflow-y-auto pr-2">
+                <div className="space-y-4 h-[360px] overflow-y-auto pr-2">
                   <AnimatePresence>
                     {tasksAssignedToMe.map((task) => (
                       <TaskStrip
@@ -859,6 +895,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
               )}
             </CardContent>
           </Card>
+
           {/* Tasks Assigned by Me - Enhanced Navigation */}
           <Card 
             onClick={() => navigate('/tasks?filter=assigned-by-me')} 
@@ -907,6 +944,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
           </Card>
         </motion.div>
       )}
+
       {/* Star Performers + My To-Do List - Premium Two Column */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="border border-slate-100 shadow-sm rounded-3xl overflow-hidden" data-testid="staff-ranking-card">
@@ -945,6 +983,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             )}
           </CardContent>
         </Card>
+
         <Card className="border border-slate-100 shadow-sm rounded-3xl overflow-hidden" data-testid="todo-list-card">
           <CardHeader className="pb-4 border-b border-slate-100 px-6">
             <div className="flex items-center justify-between">
@@ -1009,6 +1048,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Quick Access Row - Premium Compact */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
         <motion.div
@@ -1027,6 +1067,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
           whileTap={{ scale: 0.985, transition: springPhysics.tap }}
@@ -1043,6 +1084,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         <motion.div
           whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
           whileTap={{ scale: 0.985, transition: springPhysics.tap }}
@@ -1059,6 +1101,7 @@ const updateAssignedTaskStatus = (taskId, newStatus) => {
             </div>
           </CardContent>
         </motion.div>
+
         {user?.role === 'admin' && (
           <motion.div
             whileHover={{ y: -5, scale: 1.01, transition: springPhysics.card }}
