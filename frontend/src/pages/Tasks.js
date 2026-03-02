@@ -496,7 +496,7 @@ export default function Tasks() {
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       };
       if (editingTask) {
-        await api.put(`/tasks/${editingTask.id}`, taskData);
+        await api.patch(`/tasks/${editingTask.id}`, taskData);
         toast.success('Task updated successfully!');
       } else {
         await api.post('/tasks', taskData);
@@ -556,7 +556,7 @@ export default function Tasks() {
         recurrence_pattern: task.recurrence_pattern || 'monthly',
         recurrence_interval: task.recurrence_interval || 1,
       };
-      await api.put(`/tasks/${task.id}`, taskData);
+      await api.patch(`/tasks/${task.id}`, { status: newStatus });
       toast.success(`Task marked as ${STATUS_STYLES[newStatus]?.label || newStatus}!`);
       fetchTasks();
       fetchNotifications();
