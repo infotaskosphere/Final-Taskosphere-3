@@ -100,24 +100,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ====================== APP + FIXED CORS (MUST BE FIRST) ===========
 app = FastAPI(title="Taskosphere Backend")
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8080",
-    ],
-    allow_origin_regex=r"https?://.*\.onrender\.com", # safety net for Render
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
-)
-# GZip comes AFTER CORS
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(
+ CORSMiddleware,
+ allow_origins=[
+  "https://final-taskosphere-frontend.onrender.com",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://final-taskosphere-backend.onrender.com",
+ ],
+ allow_credentials=True,
+ allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+ allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+ expose_headers=["*"],
+ max_age=3600,
+)
 # ====================== HEALTH + STARTUP (your original code) ======================
 @app.get("/health")
 async def health():
