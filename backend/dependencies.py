@@ -4,6 +4,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from backend.models import User
 
 # ==========================================================
 # DATABASE
@@ -113,9 +114,7 @@ async def get_current_user(
             detail="User not found",
         )
 
-    # Import inside function to avoid circular import
-    from backend.server import User
-
+   
     user_dict.pop("_id", None)
 
     return User(**user_dict)
