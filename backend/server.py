@@ -1,34 +1,51 @@
 from backend.models import (
+    # Auth & Users
     Token,
     User,
     UserCreate,
     UserLogin,
     UserPermissions,
+    
+    # Todos & Tasks
     Todo,
     TodoCreate,
     Task,
     TaskCreate,
     BulkTaskCreate,
+    
+    # Clients
     Client,
     ClientCreate,
+    
+    # Attendance & Activity
     Attendance,
     StaffActivityLog,
     StaffActivityCreate,
+    
+    # Due Dates
     DueDate,
     DueDateCreate,
+    
+    # DSC (Digital Signature)
     DSC,
     DSCCreate,
+    DSCListResponse,
     DSCMovementRequest,
     MovementUpdateRequest,
-    DSCListResponse,
+    
+    # Documents
     Document,
     DocumentCreate,
     DocumentMovementRequest,
+    
+    # Reports & Metrics
     PerformanceMetric,
-    HolidayResponse,
-    HolidayCreate,
     DashboardStats,
-    AuditLog
+    AuditLog,
+    
+    # Holidays
+    HolidayResponse,
+    HolidayCreate
 )
 from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
