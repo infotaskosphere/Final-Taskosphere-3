@@ -66,6 +66,13 @@ class User(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
 
+    @field_validator('birthday', mode='before')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
 class UserCreate(BaseModel):
     email: str
     full_name: str
