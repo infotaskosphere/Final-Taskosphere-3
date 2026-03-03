@@ -17,7 +17,7 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Helpers
-  ============================================================ */
+     ============================================================ */
 
   const normalizePermissions = (permissions) => {
     if (
@@ -60,7 +60,7 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Restore Session On Mount
-  ============================================================ */
+     ============================================================ */
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -90,7 +90,7 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Login
-  ============================================================ */
+     ============================================================ */
 
   const login = (responseData, rememberMe = false) => {
     const token = responseData?.access_token;
@@ -111,7 +111,7 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Logout
-  ============================================================ */
+     ============================================================ */
 
   const logout = () => {
     clearStorage();
@@ -119,12 +119,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   /* ============================================================
-     Refresh Current User (CRITICAL FIX)
-  ============================================================ */
+     Refresh Current User
+     ============================================================ */
 
   const refreshUser = useCallback(async () => {
     try {
-      const response = await api.get("/auth/me"); // Must exist in backend
+      const response = await api.get("/auth/me");
       const updatedUser = response.data;
 
       updatedUser.permissions = normalizePermissions(updatedUser.permissions);
@@ -132,7 +132,7 @@ export const AuthProvider = ({ children }) => {
       const { token } = getStoredAuth();
       if (!token) return;
 
-      // Determine where to persist (local or session)
+      // Update the same storage where user was originally saved
       if (localStorage.getItem("user")) {
         localStorage.setItem("user", JSON.stringify(updatedUser));
       } else {
@@ -147,7 +147,7 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Permission Helpers
-  ============================================================ */
+     ============================================================ */
 
   const hasPermission = (permission) => {
     if (!user) return false;
@@ -185,14 +185,14 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
      Context Value
-  ============================================================ */
+     ============================================================ */
 
   const value = {
     user,
     loading,
     login,
     logout,
-    refreshUser,   // 🔥 IMPORTANT
+    refreshUser,
     hasPermission,
     canAccessUser,
   };
