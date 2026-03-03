@@ -2677,13 +2677,14 @@ async def log_staff_activity(activity_data: StaffActivityCreate, current_user: U
     # Ensure this uses a variable that is actually defined at the top of your file
     doc["timestamp"] = datetime.now(IST).isoformat() 
     await db.staff_activity.insert_one(doc)
-    return {"message": "Activity logged successfully"}@api_router.get("/activity/summary")
-    
+    return {"message": "Activity logged successfully"}
+
+@api_router.get("/activity/summary")
 async def get_activity_summary(
- user_id: Optional[str] = None,
- date_from: Optional[str] = None,
- date_to: Optional[str] = None,
- current_user: User = Depends(check_permission("can_view_staff_activity"))
+    user_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
  """Get staff activity summary (admin only)"""
  if current_user.role != "admin":
