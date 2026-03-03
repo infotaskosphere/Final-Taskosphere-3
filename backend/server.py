@@ -327,26 +327,7 @@ def send_email(to_email: str, subject: str, body: str):
   return response.status_code == 202
  except Exception as e:
   raise Exception(f"SendGrid error: {str(e)}")
-async def create_audit_log(
- current_user: User,
- action: str,
- module: str,
- record_id: str,
- old_data: dict = None,
- new_data: dict = None
-):
- log = AuditLog(
-  user_id=current_user.id,
-  user_name=current_user.full_name,
-  action=action,
-  module=module,
-  record_id=record_id,
-  old_data=old_data,
-  new_data=new_data
- )
- doc = log.model_dump()
- doc["timestamp"] = doc["timestamp"].isoformat()
- await db.audit_logs.insert_one(doc)
+
 # AUTH ROUTES
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
