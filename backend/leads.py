@@ -7,7 +7,7 @@ import uuid
 import logging
 
 from backend.dependencies import db, get_current_user
-from backend.server import create_audit_log  # correct location
+from backend.dependencies import create_audit_log
 from backend.models import User  # only if actually needed
 
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
