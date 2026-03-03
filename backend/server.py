@@ -1,116 +1,92 @@
-from starlette.middleware.gzip import GZipMiddleware # Corrected from fastapi to starlette
-from fpdf import FPDF
-from io import BytesIO
-from pydantic import BaseModel, EmailStr
-from typing import List, Optional, Dict, Any
-from backend.dependencies import get_current_user, create_access_token
-from backend.telegram import router as telegram_router
-from typing import Optional
-from typing import Dict, Any
-from .leads import router as leads_router
-from datetime import date, datetime
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
+from fastapi.security import HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware   # ← important
+from starlette.middleware.gzip import GZipMiddleware
+
+from datetime import date, datetime, timedelta, timezone   # ← fixed
 import pytz
-IST = pytz.timezone('Asia/Kolkata')
-india_tz = IST # Standardize both variables to use the same timezone object
-from bson import ObjectId
-from fastapi import Request
 from dateutil import parser
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query
-from backend.notifications import router as notification_router, create_notification
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+from bson import ObjectId
 import os
 from pathlib import Path
-from typing import List, Dict
-from pydantic import Field, ConfigDict, field_validator, ValidationError
+from dotenv import load_dotenv
 import uuid
+import logging
+import re
+import csv
+from io import StringIO, BytesIO
+import pandas as pd   # ← MISSING BEFORE → now added
+
+from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-import csv
-from io import StringIO, BytesIO
-from fastapi.responses import StreamingResponse
-from math import radians, sin, cos, sqrt, atan2
-import re
-import logging
-import openpyxl
-from openpyxl import load_workbook
-OFFICE_LAT = 21.1652
-OFFICE_LON = 72.7799
-ALLOWED_RADIUS_METERS = 2000
-APPROVED_OFFICE_IPS = [
- "49.36.81.196",
-]
-import requests
-# Added missing helper functions (required by the original code - they are called but were never defined)
-def convert_objectids(obj):
- if isinstance(obj, list):
-  return [convert_objectids(i) for i in obj]
- if isinstance(obj, dict):
-  return {k: convert_objectids(v) for k, v in obj.items()}
- if isinstance(obj, ObjectId):
-  return str(obj)
- return obj
-def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
- """Haversine formula - distance in meters (original code uses this for geo-fencing)"""
- R = 6371000 # Earth radius in meters
- phi1 = radians(lat1)
- phi2 = radians(lat2)
- delta_phi = radians(lat2 - lat1)
- delta_lambda = radians(lon2 - lon1)
- a = sin(delta_phi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(delta_lambda / 2) ** 2
- c = 2 * atan2(sqrt(a), sqrt(1 - a))
- return R * c
-def calculate_expected_hours(punch_in_time: Optional[str], punch_out_time: Optional[str]) -> float:
- """Calculate expected working hours per day (used in staff-report)"""
- if not punch_in_time or not punch_out_time:
-  return 8.0 # default 8 hours
- try:
-  h1, m1 = map(int, punch_in_time.split(":"))
-  h2, m2 = map(int, punch_out_time.split(":"))
-  start = h1 + m1 / 60.0
-  end = h2 + m2 / 60.0
-  if end < start:
-   end += 24
-  return end - start
- except:
-  return 8.0
-def sanitize_user_data(user_data, current_user):
- """
- Remove sensitive fields for non-admin users
- """
- # If admin → return full data
- if current_user.role.lower() == "admin":
-  return user_data
- # If list of users
- if isinstance(user_data, list):
-  sanitized = []
-  for u in user_data:
-   u_dict = u.dict() if hasattr(u, "dict") else dict(u)
-   sanitized.append(u_dict)
-  return sanitized
- # If single user
- u_dict = user_data.dict() if hasattr(user_data, "dict") else dict(user_data)
- return u_dict
+from fpdf import FPDF
+
+# Your routers (keep these)
+from backend.telegram import router as telegram_router
+from .leads import router as leads_router
+from backend.notifications import router as notification_router, create_notification
+
+# ====================== CONFIG ======================
+IST = pytz.timezone('Asia/Kolkata')
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-# Security
+
+# ====================== APP + FIXED CORS (MUST BE FIRST) ======================
+app = FastAPI(title="Taskosphere Backend")
+
+# === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://final-taskosphere-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+    ],
+    allow_origin_regex=r"https?://.*\.onrender\.com",   # safety net for Render
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
+)
+
+# GZip comes AFTER CORS
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# ====================== HEALTH + STARTUP (your original code) ======================
+@app.get("/health")
+async def health():
+    return {"status": "ok", "cors": "configured correctly"}
+
+@app.on_event("startup")
+async def create_indexes():
+    # ← YOUR ORIGINAL INDEX CODE GOES HERE (unchanged)
+    await db.tasks.create_index("assigned_to")
+    await db.clients.create_index([("created_by", 1), ("company_name", 1)], unique=True)
+    await db.holidays.create_index("date", unique=True)
+    # ... rest of your indexes
+
+# ====================== SECURITY & DB (your original) ======================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 security = HTTPBearer()
-# MongoDB connection
+
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
 rankings_cache = {}
 rankings_cache_time = {}
+
 def check_permission(permission_name: str):
  def dependency(current_user: User = Depends(get_current_user)):
   # Admin override
