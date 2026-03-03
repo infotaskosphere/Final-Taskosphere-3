@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, model_validator
 from typing import Any
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 
 # Timezone Configuration
@@ -376,7 +377,6 @@ class MasterClientForm(BaseModel):
                 if v == "":
                     data[k] = None
         return data
-
 # ======================
 # DUE DATES & REMINDERS
 # ======================
