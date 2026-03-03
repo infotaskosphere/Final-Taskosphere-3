@@ -207,41 +207,6 @@ async def create_indexes():
  )
 # NEW: Holiday index for fast lookup
  await db.holidays.create_index("date", unique=True)
-# ALL MODELS
-class UserPermissions(BaseModel):
- can_view_all_tasks: bool = False
- can_view_all_clients: bool = False
- can_view_all_dsc: bool = False
- can_view_documents: bool = False
- can_view_all_duedates: bool = False
- can_view_reports: bool = False
- can_manage_users: bool = False
- can_assign_tasks: bool = False # Can staff member assign tasks to others
- can_view_staff_activity: bool = False
- can_view_attendance: bool = False
- can_send_reminders: bool = False
- assigned_clients: List[str] = [] # List of client IDs user can access
- can_view_user_page: bool = False
- can_view_audit_logs: bool = False
- can_edit_tasks: bool = False
- can_edit_dsc: bool = False
- can_edit_documents: bool = False
- can_edit_due_dates: bool = False
- can_edit_users: bool = False
- can_download_reports: bool = False
- can_view_selected_users_reports: bool = False
- can_view_todo_dashboard: bool = False
- # Cross User Viewing
- view_other_tasks: List[str] = []
- view_other_attendance: List[str] = []
- view_other_reports: List[str] = []
- view_other_todos: List[str] = []
- view_other_activity: List[str] = []
- # Admin-like Feature Grants
- can_edit_clients: bool = False
- can_use_chat: bool = False
- can_view_all_leads: bool = False
- can_manage_settings: bool = False
 
 # ROUTER
 api_router = APIRouter(prefix="/api")
