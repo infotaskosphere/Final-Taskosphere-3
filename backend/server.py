@@ -1,8 +1,9 @@
 from backend.models import Token, UserCreate
+from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
-from backend.dependencies import get_current_user, create_access_token, db
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -74,6 +75,18 @@ async def health():
 rankings_cache = {}
 rankings_cache_time = {}
 # ===================== HELPER FUNCTIONS =====================
+def check_permission(required_perm: str):
+    def dependency(user: User = Depends(get_current_user)):
+        # Admin always has access
+        if user.role == "admin":
+            return user
+        # Check specific permission
+        perms = user.permissions.model_dump() if hasattr(user.permissions, "model_dump") else user.permissions
+        if not perms.get(required_perm, False):
+            raise HTTPException(status_code=403, detail=f"Permission denied: {required_perm} required")
+        return user
+    return dependency
+    
 def safe_dt(value):
     if not value:
         return None
@@ -83,7 +96,7 @@ def safe_dt(value):
         return datetime.fromisoformat(value)
     except Exception:
         return None
-       
+
 def sanitize_user_data(users, current_user):
     sanitized = []
     for user in users:
@@ -125,6 +138,20 @@ def convert_objectids(data):
                 new_dict[key] = value
         return new_dict
     return data
+
+async def create_audit_log(current_user: User, action: str, module: str, record_id: str, old_data: dict = None, new_data: dict = None):
+    log_entry = AuditLog(
+        user_id=current_user.id,
+        user_name=current_user.full_name,
+        action=action,
+        module=module,
+        record_id=record_id,
+        old_data=convert_objectids(old_data) if old_data else None,
+        new_data=convert_objectids(new_data) if new_data else None,
+        timestamp=datetime.now(timezone.utc)
+    )
+    await db.audit_logs.insert_one(log_entry.model_dump())
+       
   
 async def calculate_expected_hours(start_date, end_date, punch_in_time=None):
     """
@@ -186,6 +213,7 @@ async def create_indexes():
 api_router = APIRouter(prefix="/api")
 # HELPERS
 # Email Service Functions
+
 def send_birthday_email(recipient_email: str, client_name: str):
  """Send birthday wish email to client"""
  sendgrid_key = os.environ.get('SENDGRID_API_KEY')
