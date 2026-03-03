@@ -477,18 +477,23 @@ export default function Dashboard() {
  return "Working Late? 🌙";
 };
 
- useEffect(() => {
-  if (!todayAttendance) return;
-
-  // If user is on leave → no gate
-  if (todayAttendance.status === "leave") {
+useEffect(() => {
+ 
+  if (!todayAttendance) {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
 
-  // If not punched in → show gate
-  if (!todayAttendance?.punch_in) {
+  // 2. If user is on leave → no gate
+  if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
+    setMustPunchIn(false);
+    document.body.style.overflow = "auto";
+    return;
+  }
+
+  // 3. Only show gate if we have a valid response and punch_in is missing
+  if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
     setMustPunchIn(true);
     document.body.style.overflow = "hidden";
   } else {
@@ -500,7 +505,6 @@ export default function Dashboard() {
     document.body.style.overflow = "auto";
   };
 }, [todayAttendance]);
-
  // ── JSX Render ──────────────────────────────────────────────────────────────
  return (
  <motion.div
