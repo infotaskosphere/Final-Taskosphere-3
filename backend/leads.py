@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 from datetime import datetime, timezone
 from bson import ObjectId
+from backend.models import User
+from backend.dependencies import db
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 import uuid
 import logging
@@ -69,8 +71,7 @@ def validate_obj_id(id_str: str):
 
 @router.post("/", response_model=Lead)
 async def create_lead(lead_data: LeadCreate, current_user=Depends(get_current_user)):
-    from backend.models import User db  # LOCAL IMPORT
-
+    
     now = datetime.now(timezone.utc)
     lead_dict = lead_data.model_dump()
 
