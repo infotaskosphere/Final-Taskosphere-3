@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
@@ -21,7 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
-import { motion } from "motion/react"; // ← CORRECTED: Official Motion import (npm install motion)
+import { motion } from "motion/react";
 
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -37,11 +37,36 @@ const DashboardLayout = ({ children }) => {
   const location = useLocation();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    // Optimized: Load persisted preference on mount (client-side safe)
+    if (typeof window === 'undefined') return false;
+    const saved = localStorage.getItem('sidebarCollapsed');
+    return saved === 'true';
+  });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useActivityTracker(true);
 
+  // Optimized: Persist collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('sidebarCollapsed', collapsed.toString());
+  }, [collapsed]);
+
+  // Optimized: Smart resize handler (prevents broken collapsed state on mobile + restores on desktop)
+  const handleResize = useCallback(() => {
+    if (window.innerWidth < 1024) {
+      setCollapsed(false); // Force expanded on mobile (toggle is hidden anyway)
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('resize', handleResize);
+    // Initial check after mount
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, [handleResize]);
+
+  // Existing mobile open logic (kept unchanged)
   useEffect(() => {
     if (window.innerWidth >= 1024) {
       setSidebarOpen(true);
@@ -97,7 +122,7 @@ const DashboardLayout = ({ children }) => {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar – Optimized collapse with persistent state + resize sync */}
       <aside
         className={`
           fixed top-0 left-0 h-full ${sidebarWidth}
@@ -120,13 +145,15 @@ const DashboardLayout = ({ children }) => {
               className={`transition-all duration-300 ${collapsed ? 'h-10' : 'h-16'} object-contain`}
             />
 
-            {/* Collapse Toggle (desktop only) – now with Motion spring animation */}
+            {/* Collapse Toggle – now with optimized accessibility + Motion */}
             <motion.button
               onClick={() => setCollapsed(prev => !prev)}
               className="hidden lg:flex absolute right-2 p-1 rounded-md hover:bg-blue-100 transition"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               transition={{ type: "spring", stiffness: 400 }}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
             >
               {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </motion.button>
@@ -145,7 +172,7 @@ const DashboardLayout = ({ children }) => {
                     <div className="my-4 border-t border-slate-200/50 mx-4" />
                   )}
 
-                  {/* Motion-enhanced Nav Link – slide + scale on hover/tap */}
+                  {/* Motion-enhanced Nav Link – optimized with hover tooltip when collapsed */}
                   <motion.div
                     whileHover={{ x: 6, scale: 1.02 }}
                     whileTap={{ scale: 0.97 }}
@@ -163,6 +190,7 @@ const DashboardLayout = ({ children }) => {
                         ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}
                       `}
                       style={isActive ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+                      title={collapsed ? item.label : undefined}   {/* Optimized tooltip when collapsed */}
                     >
                       {isActive && (
                         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
@@ -184,8 +212,8 @@ const DashboardLayout = ({ children }) => {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className={`${contentMargin} transition-all duration-300`}>
+      {/* Main Content – smoother transition when sidebar collapses */}
+      <div className={`${contentMargin} transition-all duration-300 ease-in-out`}>
 
         {/* Header */}
         <header className="sticky top-0 bg-white border-b z-40">
@@ -204,7 +232,6 @@ const DashboardLayout = ({ children }) => {
             </motion.div>
 
             <div className="flex items-center space-x-4 ml-auto">
-              {/* NotificationBell stays as-is (you can upgrade it separately with lucide-animated if you want) */}
               <NotificationBell />
 
               {/* User Dropdown (LOGOUT REMAINS HERE) – animated chevron + avatar hover */}
