@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware   # ← important
 from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+india_tz = ZoneInfo("Asia/Kolkata")
 from datetime import date, datetime, timedelta, timezone   # ← fixed
 import pytz
 from dateutil import parser
@@ -116,7 +117,43 @@ def sanitize_user_data(users, current_user):
             })
 
     return sanitized
+    
+async def calculate_expected_hours(start_date, end_date, punch_in_time=None):
+    """
+    Calculate expected working hours between two dates.
+    - Excludes weekends (Sat & Sun)
+    - Excludes holidays from DB
+    - Uses office timing 10:30 AM – 7:00 PM (8.5 hours)
+    """
 
+    if not start_date or not end_date:
+        return 0
+
+    if start_date > end_date:
+        return 0
+
+    total_hours = 0
+    current_date = start_date
+
+    # Fetch holidays once
+    holidays_cursor = db.holidays.find({})
+    holidays = [h["date"] for h in await holidays_cursor.to_list(length=None)]
+
+    WORKING_HOURS_PER_DAY = 8.5  # 10:30 AM – 7:00 PM
+
+    while current_date <= end_date:
+        weekday = current_date.weekday()  # Monday=0, Sunday=6
+
+        is_weekend = weekday >= 5  # 5=Saturday, 6=Sunday
+        is_holiday = current_date in holidays
+
+        if not is_weekend and not is_holiday:
+            total_hours += WORKING_HOURS_PER_DAY
+
+        current_date += timedelta(days=1)
+
+    return round(total_hours, 2)
+    
 def check_permission(permission_name: str):
  def dependency(current_user: User = Depends(get_current_user)):
   # Admin override
