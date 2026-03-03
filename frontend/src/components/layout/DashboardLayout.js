@@ -32,18 +32,21 @@ const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
 
   useActivityTracker(true);
 
   useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 1024;
-      setIsMobile(mobile);
-      setSidebarOpen(!mobile);
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
     };
+
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -61,123 +64,78 @@ const DashboardLayout = ({ children }) => {
     navigate("/login", { replace: true });
   };
 
-  /* =============================
-     UPDATED NAV ITEMS (NEW PERMISSION ARCHITECTURE)
-     ============================= */
   const navItems = [
-    // Core modules — always visible
-    {
-      path: '/dashboard',
-      icon: LayoutDashboard,
-      label: 'Dashboard'
-    },
-    {
-      path: '/tasks',
-      icon: CheckSquare,
-      label: 'Tasks'
-    },
-    {
-      path: '/todos',
-      icon: CheckSquare,
-      label: 'Todo Dashboard'
-    },
-    {
-      path: '/clients',
-      icon: Building2,
-      label: 'Clients'
-    },
-    {
-      path: '/attendance',
-      icon: Clock,
-      label: 'Attendance'
-    },
-    {
-      path: '/duedates',
-      icon: Calendar,
-      label: 'Compliance Calendar'
-    },
-    {
-      path: '/reports',
-      icon: BarChart3,
-      label: 'Reports'
-    },
-
-    // Administrative / advanced modules — permission required
-    {
-      path: '/dsc',
-      icon: FileText,
-      label: 'DSC Register',
-      permission: 'can_view_all_dsc'
-    },
-    {
-      path: '/documents',
-      icon: FileText,
-      label: 'Documents Register',
-      permission: 'can_view_documents'
-    },
-    {
-      path: '/users',
-      icon: Users,
-      label: 'Users',
-      permission: 'can_view_user_page'
-    },
-    {
-      path: '/staff-activity',
-      icon: Activity,
-      label: 'Staff Activity',
-      permission: 'can_view_staff_activity'
-    },
-    {
-      path: '/task-audit',
-      icon: Activity,
-      label: 'Task Audit Log',
-      permission: 'can_view_audit_logs'
-    },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
+    { path: '/todos', icon: CheckSquare, label: 'Todo Dashboard' },
+    { path: '/clients', icon: Building2, label: 'Clients' },
+    { path: '/attendance', icon: Clock, label: 'Attendance' },
+    { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
+    { path: '/reports', icon: BarChart3, label: 'Reports' },
+    { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
+    { path: '/documents', icon: FileText, label: 'Documents Register', permission: 'can_view_documents' },
+    { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
+    { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
+    { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
   ];
 
-  const visibleNavItems = navItems.filter((item) => {
-    // If no permission required → always visible
-    if (!item.permission) return true;
-
-    // If permission required → check it
-    return hasPermission(item.permission);
-  });
+  const visibleNavItems = navItems.filter(item =>
+    !item.permission || hasPermission(item.permission)
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 relative">
-      {userMenuOpen && (
+
+      {/* Mobile Overlay */}
+      {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30"
-          onClick={() => setUserMenuOpen(false)}
+          className="fixed inset-0 bg-black/40 z-40 lg:hidden transition-opacity"
+          onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed left-0 top-0 h-full border-r shadow-lg transition-all duration-300 z-40
-          ${sidebarOpen ? 'w-64 translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0'}`}
-        style={{
-          background: `linear-gradient(180deg, ${COLORS.lightBlue} 0%, #F0F9FF 50%, #E0F7FA 100%)`
-        }}
+        className={`
+          fixed top-0 left-0 h-full w-72
+          bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50
+          border-r shadow-xl z-50
+          transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          lg:translate-x-0
+        `}
       >
         <div className="flex flex-col h-full">
-          <div className="py-4 flex justify-center">
-            <img src="/logo.png" alt="Taskosphere" className="h-16 object-contain" />
+
+          {/* Logo */}
+          <div className="py-6 flex justify-center border-b">
+            <img src="/logo.png" alt="Taskosphere" className="h-14 object-contain" />
           </div>
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+
+          {/* Navigation */}
+          <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
+
               return (
                 <Link
                   key={item.path}
                   to={item.path}
+                  onClick={() => {
+                    if (window.innerWidth < 1024) {
+                      setSidebarOpen(false);
+                    }
+                  }}
                   className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
-                    ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}`}
+                    ${isActive
+                      ? 'text-white shadow-md'
+                      : 'text-slate-700 hover:bg-blue-100'
+                    }`}
                   style={
                     isActive
                       ? {
-                          background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+                          background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`
                         }
                       : {}
                   }
@@ -192,14 +150,17 @@ const DashboardLayout = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <div className={`${sidebarOpen ? 'lg:ml-64' : ''} transition-all duration-300`}>
+      <div className="lg:ml-72 transition-all duration-300">
+
         {/* Header */}
         <header className="sticky top-0 bg-white border-b z-40">
-          <div className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4">
+
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={() => setSidebarOpen(prev => !prev)}
+              className="lg:hidden"
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -221,18 +182,25 @@ const DashboardLayout = ({ children }) => {
                   >
                     {user?.full_name?.[0]?.toUpperCase() || "U"}
                   </div>
+
                   <span className="hidden md:block font-semibold">
                     {user?.full_name}
                   </span>
-                  <ChevronDown className={`h-4 w-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${
+                      userMenuOpen ? 'rotate-180' : ''
+                    }`}
+                  />
                 </button>
 
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2 z-50">
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2">
                     <div className="px-4 py-3 border-b">
                       <p className="font-semibold text-sm">{user?.full_name}</p>
                       <p className="text-xs text-slate-500">{user?.email}</p>
                     </div>
+
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50"
@@ -248,11 +216,12 @@ const DashboardLayout = ({ children }) => {
         </header>
 
         {/* Page Content */}
-        <main className="p-6">
+        <main className="p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
+
       </div>
     </div>
   );
