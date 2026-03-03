@@ -4,6 +4,7 @@ from backend.dependencies import get_current_user, create_access_token
 from fastapi.middleware.cors import CORSMiddleware   # ← important
 from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from datetime import date, datetime, timedelta, timezone   # ← fixed
 import pytz
 from dateutil import parser
