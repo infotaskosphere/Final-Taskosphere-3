@@ -973,20 +973,17 @@ def get_real_client_ip(request: Request):
 # ── UPDATE EXISTING /attendance ENDPOINT ───────────────────────────────
 
 @api_router.post("/attendance")
-async def handle_attendance(
- data: dict,
- current_user: User = Depends(get_current_user)
-):
- today = datetime.now(india_tz).date()
- today_str = today.isoformat()
+async def handle_attendance(data: dict, current_user: User = Depends(get_current_user)):
+    today = datetime.now(india_tz).date()
+    today_str = today.isoformat()
 
- # ==================== HOLIDAY CHECK (STEP 5) ====================
- holiday = await db.holidays.find_one({"date": today})
- if holiday:
-  raise HTTPException(
-   status_code=400,
-   detail=f"Today is a holiday ({holiday.get('name')}). Attendance marking is not allowed."
-  )
+    # FIX: Use today_str for the holiday check
+    holiday = await db.holidays.find_one({"date": today_str})
+    if holiday:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Today is a holiday ({holiday.get('name')})."
+        )
  # ============================================================
 
  action = data.get("action")
@@ -1068,22 +1065,21 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
 # ── GET TODAY ATTENDANCE ───────────────────────────────────────────────
 
 @api_router.get("/attendance/today")
-async def get_today_attendance(
- current_user: User = Depends(get_current_user)
-):
- today = datetime.now(india_tz).date()
- today_str = today.isoformat()
+async def get_today_attendance(current_user: User = Depends(get_current_user)):
+    today = datetime.now(india_tz).date()
+    today_str = today.isoformat() # Convert to "YYYY-MM-DD" string
 
- # ==================== HOLIDAY CHECK (STEP 5) ====================
- holiday = await db.holidays.find_one({"date": today})
- if holiday:
-  return {
-   "status": "holiday",
-   "holiday": holiday,
-   "punch_in": None,
-   "punch_out": None,
-   "leave_reason": None
-  }
+    # FIX: Query using the string today_str, not the date object
+    holiday = await db.holidays.find_one({"date": today_str}) 
+    if holiday:
+        return {
+            "status": "holiday",
+            "holiday": holiday,
+            "punch_in": None,
+            "punch_out": None,
+            "leave_reason": None
+        }
+  
  # ============================================================
 
  attendance = await db.attendance.find_one(
