@@ -392,7 +392,9 @@ export default function Users() {
       role: userData.role,
       departments: userData.departments || [],
       phone: userData.phone || '',
-      birthday: userData.birthday ? format(new Date(userData.birthday), 'yyyy-MM-dd') : '',
+     birthday: userData.birthday && userData.birthday !== ""
+       ? format(new Date(userData.birthday), "yyyy-MM-dd")
+       : "",
       profile_picture: userData.profile_picture || '',
       punch_in_time: userData.punch_in_time || '',
       grace_time: userData.grace_time || '',
