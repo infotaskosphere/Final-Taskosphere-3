@@ -10,10 +10,8 @@ from typing import Dict, Any
 from .leads import router as leads_router
 from datetime import date
 import pytz
-import logging
-import smtplib
-import pandas as pd
-from datetime import datetime, timedelta, timezone
+IST = pytz.timezone('Asia/Kolkata')
+india_tz = IST # Standardize both variables to use the same timezone object
 from bson import ObjectId
 from fastapi import Request
 from dateutil import parser
@@ -47,7 +45,6 @@ ALLOWED_RADIUS_METERS = 2000
 APPROVED_OFFICE_IPS = [
  "49.36.81.196",
 ]
-india_tz = pytz.timezone("Asia/Kolkata")
 import requests
 # Added missing helper functions (required by the original code - they are called but were never defined)
 def convert_objectids(obj):
@@ -83,7 +80,7 @@ def calculate_expected_hours(punch_in_time: Optional[str], punch_out_time: Optio
  except:
   return 8.0
 def sanitize_user_data(user_data, current_user):
- """ 
+ """
  Remove sensitive fields for non-admin users
  """
  # If admin → return full data
@@ -218,7 +215,6 @@ class UserPermissions(BaseModel):
  can_use_chat: bool = False
  can_view_all_leads: bool = False
  can_manage_settings: bool = False
-
 class Todo(BaseModel):
  model_config = ConfigDict(extra="ignore")
  id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -251,7 +247,6 @@ class User(BaseModel):
  permissions: UserPermissions = Field(default_factory=UserPermissions)
  created_at: datetime = Field(default_factory=datetime.utcnow)
  is_active: bool = True
- 
 class Attendance(BaseModel):
  model_config = ConfigDict(extra="ignore")
  id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -545,18 +540,15 @@ class UserCreate(BaseModel):
  birthday: Optional[date] = None
  telegram_id: Optional[int] = None
  permissions: Dict[str, Any] = {}
- 
 # ==================== HOLIDAY MODELS (STEP 1 - added here) ====================
 class HolidayCreate(BaseModel):
     date: date
     name: str
     description: Optional[str] = None
-
 class HolidayResponse(BaseModel):
     date: date
     name: str
     description: Optional[str] = None
-
 # ROUTER
 api_router = APIRouter(prefix="/api")
 # HELPERS
@@ -717,7 +709,6 @@ async def create_todo(
  # Return proper id from Mongo
  doc["id"] = str(result.inserted_id)
  return doc
- 
 @api_router.get("/todos")
 async def get_todos(
  user_id: Optional[str] = None,
@@ -800,7 +791,7 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
  # Only creator or admin can promote
  if current_user.role != "admin" and todo["user_id"] != current_user.id:
   raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  new_task = {
   "id": str(uuid.uuid4()),
   "title": todo["title"],
@@ -851,7 +842,7 @@ async def update_todo(
   raise HTTPException(status_code=404, detail="Todo not found")
  if current_user.role != "admin" and todo["user_id"] != current_user.id:
   raise HTTPException(status_code=403, detail="Not authorized")
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  if updates.get("is_completed") is True:
   updates["completed_at"] = now
  updates["updated_at"] = now
@@ -860,7 +851,6 @@ async def update_todo(
   {"$set": updates}
  )
  return {"message": "Todo updated successfully"}
- 
 @api_router.post("/auth/register", response_model=Token)
 async def register(
  user_data: UserCreate,
@@ -904,7 +894,9 @@ async def register(
   "view_other_todos": [],
   "view_other_activity": [],
   "can_edit_clients": False,
-  "can_manage_settings": False  # ← NEW for holiday management
+  "can_view_all_leads": False,
+  "can_edit_leads": False,
+  "can_manage_settings": False
  }
  # 🧱 Build User Object
  user_id = str(uuid.uuid4())
@@ -929,7 +921,6 @@ async def register(
   "token_type": "bearer",
   "user": user
  }
- 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
  user = await db.users.find_one({"email": credentials.email})
@@ -971,10 +962,7 @@ def get_real_client_ip(request: Request):
  if request.client:
   return request.client.host
  return None
- 
-
 # ── UPDATE EXISTING /attendance ENDPOINT ───────────────────────────────
-
 @api_router.post("/attendance")
 async def handle_attendance(
     data: dict,
@@ -982,7 +970,6 @@ async def handle_attendance(
 ):
     today = datetime.now(india_tz).date()
     today_str = today.isoformat() # Standardize to string "YYYY-MM-DD"
-
     # FIX: Query using the string today_str to match database format
     holiday = await db.holidays.find_one({"date": today_str})
     if holiday:
@@ -990,59 +977,46 @@ async def handle_attendance(
             status_code=400,
             detail=f"Today is a holiday ({holiday.get('name')}). Attendance marking is not allowed."
         )
-
     action = data.get("action")
-
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
-
     attendance = await db.attendance.find_one(
         {"user_id": current_user.id, "date": today_str}
     )
-
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Already punched in")
-
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
                 "$set": {
                     "status": "present",
-                    "punch_in": datetime.now(timezone.utc),
+                    "punch_in": datetime.now(IST),
                     "leave_reason": None
                 }
             },
             upsert=True
         )
-
         return {"message": "Punched in successfully"}
-
     if action == "punch_out":
         if not attendance or not attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Not punched in yet")
-
         if attendance.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out")
-
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
                 "$set": {
-                    "punch_out": datetime.now(timezone.utc)
+                    "punch_out": datetime.now(IST)
                 }
             }
         )
-
         return {"message": "Punched out successfully"}
-
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
-
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
     today = datetime.now(india_tz).date()
     today_str = today.isoformat()
-
     # FIX: Query using today_str string
     holiday = await db.holidays.find_one({"date": today_str})
     if holiday:
@@ -1050,7 +1024,6 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
             status_code=400,
             detail=f"Today is a holiday ({holiday.get('name')}). Leave marking is not allowed."
         )
-
     await db.attendance.update_one(
         {"user_id": current_user.id, "date": today_str},
         {
@@ -1063,18 +1036,14 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
         },
         upsert=True
     )
-
     return {"message": "Marked on leave today"}
-
 # ── GET TODAY ATTENDANCE ───────────────────────────────────────────────
-
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
     today = datetime.now(india_tz).date()
-    today_str = today.isoformat() 
-
+    today_str = today.isoformat()
     # FIX: Query using today_str string
-    holiday = await db.holidays.find_one({"date": today_str}) 
+    holiday = await db.holidays.find_one({"date": today_str})
     if holiday:
         return {
             "status": "holiday",
@@ -1083,12 +1052,11 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
-  
+ 
     attendance = await db.attendance.find_one(
         {"user_id": current_user.id, "date": today_str},
         {"_id": 0}
     )
-
     if not attendance:
         return {
             "status": "absent",
@@ -1096,16 +1064,12 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
-
     if "status" not in attendance:
         attendance["status"] = (
             "present" if attendance.get("punch_in") else "absent"
         )
-
     return attendance
-
 # ── APPLY LEAVE (DATE RANGE SUPPORT) ───────────────────────────────
-
 @api_router.post("/attendance/apply-leave")
 async def apply_leave(
  data: dict,
@@ -1115,12 +1079,9 @@ async def apply_leave(
   from_date = datetime.fromisoformat(data["from_date"]).date()
   to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
   reason = data.get("reason", "Leave Applied")
-
   if to_date < from_date:
    raise HTTPException(status_code=400, detail="Invalid date range")
-
   current = from_date
-
   while current <= to_date:
    await db.attendance.update_one(
     {
@@ -1138,12 +1099,9 @@ async def apply_leave(
     upsert=True
    )
    current += timedelta(days=1)
-
   return {"message": "Leave applied successfully"}
-
  except Exception as e:
   raise HTTPException(status_code=400, detail=str(e))
- 
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
  period: str = "monthly",
@@ -1151,7 +1109,7 @@ async def get_top_performers_data(
  db = None
 ):
  """Single source of truth for both Dashboard Star Performers and Reports Top Performers"""
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  # Date filter
  if period == "weekly":
   start_date = now - timedelta(days=7)
@@ -1303,8 +1261,8 @@ async def create_tasks_bulk(
   task_dict = task_data.dict()
   task_dict["id"] = str(uuid.uuid4())
   task_dict["created_by"] = current_user.id
-  task_dict["created_at"] = datetime.now(timezone.utc).isoformat()
-  task_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
+  task_dict["created_at"] = datetime.now(IST).isoformat()
+  task_dict["updated_at"] = datetime.now(IST).isoformat()
   if task_dict.get("due_date"):
    task_dict["due_date"] = task_dict["due_date"].isoformat()
   await db.tasks.insert_one(task_dict)
@@ -1435,9 +1393,9 @@ async def patch_task(
  if not is_authorized:
   raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
  old_data = existing_task.copy()
- updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+ updates["updated_at"] = datetime.now(IST).isoformat()
  if updates.get("status") == "completed":
-  updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+  updates["completed_at"] = datetime.now(IST).isoformat()
  await db.tasks.update_one({"id": task_id}, {"$set": updates})
  updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
  # 🔥 AUDIT LOGGING
@@ -1504,9 +1462,8 @@ async def add_task_comment(
   "user_id": current_user.id,
   "user_name": current_user.full_name,
   "text": comment_data.get("text"),
-  "created_at": datetime.now(timezone.utc).isoformat()
+  "created_at": datetime.now(IST).isoformat()
  }
- 
  await db.tasks.update_one({"id": task_id}, {"$push": {"comments": comment}})
  return comment
 # =========================================================
@@ -1538,12 +1495,12 @@ async def export_task_log_pdf(
  pdf.cell(0, 8, "Task Information", ln=True)
  pdf.ln(3)
  pdf.set_font("Arial", size=11)
- pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}") 
- pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}") 
- pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}") 
- pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}") 
- pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}") 
- pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}") 
+ pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}")
+ pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}")
+ pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}")
+ pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}")
+ pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}")
+ pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}")
  pdf.ln(8)
  # ───────────────── TIMELINE ─────────────────
  pdf.set_font("Arial", "B", 12)
@@ -1642,7 +1599,7 @@ async def get_dsc_list(
   {"_id": 0}
  ).sort(sort_by, sort_dir).skip(skip).limit(limit)
  dsc_list = await cursor.to_list(length=limit)
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  for dsc in dsc_list:
   if isinstance(dsc.get("created_at"), str):
    dsc["created_at"] = datetime.fromisoformat(dsc["created_at"])
@@ -1735,7 +1692,7 @@ async def record_dsc_movement(
   "id": str(uuid.uuid4()), # Add unique ID for each movement
   "movement_type": movement_data.movement_type,
   "person_name": movement_data.person_name,
-  "timestamp": datetime.now(timezone.utc).isoformat(),
+  "timestamp": datetime.now(IST).isoformat(),
   "notes": movement_data.notes,
   "recorded_by": current_user.full_name
  }
@@ -1808,7 +1765,6 @@ async def update_dsc_movement(
   new_data={"movement_log": movement_log}
  )
  return {"message": "Movement updated successfully", "movement_log": movement_log}
- 
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
@@ -1884,7 +1840,7 @@ async def record_document_movement(
   "id": str(uuid.uuid4()),
   "movement_type": movement_data.movement_type,
   "person_name": movement_data.person_name,
-  "timestamp": datetime.now(timezone.utc).isoformat(),
+  "timestamp": datetime.now(IST).isoformat(),
   "notes": movement_data.notes,
   "recorded_by": current_user.full_name
  }
@@ -1958,7 +1914,7 @@ async def get_attendance_history(
  user_id: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- """ 
+ """
  If:
  - Admin → can see all
  - Manager with permission → can see all
@@ -2000,7 +1956,7 @@ async def get_my_attendance_summary(
  current_user: User = Depends(get_current_user)
 ):
  """Get current user's attendance summary with monthly hours"""
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  current_month = now.strftime("%Y-%m")
  attendance_list = await db.attendance.find(
   {"user_id": current_user.id},
@@ -2053,7 +2009,7 @@ async def get_staff_attendance_report(
    permissions = {}
   if not permissions.get("can_view_attendance"):
    raise HTTPException(status_code=403, detail="Not allowed")
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  target_month = month or now.strftime("%Y-%m")
  # Get all users
  users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
@@ -2193,7 +2149,7 @@ async def get_upcoming_due_dates(
  days: int = 30,
  current_user: User = Depends(get_current_user)
 ):
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  future_date = now + timedelta(days=days)
  query = {"status": "pending"}
  if current_user.role != "admin":
@@ -2264,7 +2220,7 @@ async def get_efficiency_report(
  user_id: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- """ 
+ """
  Access Rules:
  - Everyone can view their own report
  - Admin can view anyone
@@ -2300,14 +2256,13 @@ async def get_efficiency_report(
   "total_tasks_completed": total_tasks_completed,
   "days_logged": len(logs)
  }
- 
 @api_router.get("/reports/export")
 async def export_reports(
  format: str = "csv",
  user_id: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- """ 
+ """
  Access Rules:
  - Everyone can export their own report
  - Admin can export anyone
@@ -2324,7 +2279,7 @@ async def export_reports(
     else {}
    )
    allowed_users = permissions.get("view_other_reports", [])
-   
+  
    if target_user_id not in allowed_users:
     raise HTTPException(
      status_code=403,
@@ -2385,7 +2340,6 @@ async def export_reports(
   )
  else:
   raise HTTPException(status_code=400, detail="Invalid format")
- 
 # ====================== PERFORMANCE RANKINGS + PDF EXPORT (NEW - added here, no original line touched) ======================
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
@@ -2393,7 +2347,6 @@ async def get_performance_rankings(
  current_user: User = Depends(get_current_user)
 ):
  global rankings_cache, rankings_cache_time
- 
  """⭐ Star & 🏆 Top Performer Rankings (cached 5 min)"""
  cache_key = f"rankings_{period}"
  # ✅ Safe timezone-aware cache check
@@ -2403,7 +2356,7 @@ async def get_performance_rankings(
   (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
  ):
   return rankings_cache[cache_key]
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  # ----------------------------
  # Date range setup
  # ----------------------------
@@ -2545,7 +2498,6 @@ async def get_performance_rankings(
  rankings_cache[cache_key] = rankings
  rankings_cache_time[cache_key] = datetime.now(timezone.utc)
  return rankings
- 
 # ==============================================================
 # INTEGRATED MASTER DATA SYSTEM & CLIENT ROUTES (PREVIEW & SYNC)
 # ==============================================================
@@ -2554,7 +2506,7 @@ async def import_master_data_preview(
  file: UploadFile = File(...),
  current_user: User = Depends(get_current_user)
 ):
- """ 
+ """
  STEP 1: The 'Scan' Logic.
  Parses the multi-sheet reference Excel and returns a JSON blueprint for UI review.
  Does NOT modify the database.
@@ -2567,7 +2519,7 @@ async def import_master_data_preview(
  try:
   content = await file.read()
   excel = pd.ExcelFile(BytesIO(content))
-  
+ 
   # Deep telemetry of all sheets in the reference file
   parsed_blueprint = {}
   total_vectors = 0
@@ -2592,7 +2544,7 @@ async def sync_master_sheets(
  file: UploadFile = File(...),
  current_user: User = Depends(get_current_user)
 ):
- """ 
+ """
  STEP 2: The 'Commit' Logic.
  Iterates through ALL sheets and synchronizes them with permanent database collections.
  """
@@ -2601,15 +2553,15 @@ async def sync_master_sheets(
  try:
   content = await file.read()
   excel = pd.ExcelFile(BytesIO(content))
-  
+ 
   sync_results = {"clients": 0, "compliance": 0, "staff": 0}
   now_iso = datetime.now(timezone.utc).isoformat()
-  
+ 
   for sheet in excel.sheet_names:
    df = pd.read_excel(excel, sheet_name=sheet).fillna("")
    records = df.to_dict(orient="records")
    sheet_type = sheet.lower()
-   
+  
    # Layer A: Client Registry Vectors
    if "client" in sheet_type:
     for rec in records:
@@ -2627,7 +2579,7 @@ async def sync_master_sheets(
       upsert=True
      )
      sync_results["clients"] += 1
-   
+  
    # Layer B: Compliance (Due Dates/Reminders) Vectors
    elif "due" in sheet_type or "compliance" in sheet_type:
     for rec in records:
@@ -2661,7 +2613,6 @@ async def sync_master_sheets(
    "message": "Global Master Sync Successfully Executed",
    "telemetry": sync_results
   }
- 
  except Exception as e:
   logger.error(f"Sync Failure: {str(e)}")
   raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
@@ -2902,7 +2853,7 @@ async def import_clients_from_file(
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
  """Get comprehensive dashboard statistics"""
- now = datetime.now(timezone.utc)
+ now = datetime.now(IST)
  # Task statistics
  task_query = {}
  if current_user.role != "admin":
@@ -2937,7 +2888,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     due_date = due_date.replace(tzinfo=timezone.utc)
    if due_date < now:
     overdue_tasks += 1
-   
+  
  # DSC statistics
  dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
  total_dsc = len(dsc_list)
@@ -3202,7 +3153,7 @@ async def get_audit_logs(
  action: Optional[str] = None, # ✅ ADD THIS
  current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
- """ 
+ """
  Fetch audit logs with optional filtering
  """
  query = {}
@@ -3225,7 +3176,6 @@ async def get_audit_logs(
    except:
     pass
  return logs
- 
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
  tasks = await db.tasks.find(
@@ -3279,14 +3229,13 @@ async def auto_daily_reminder(request, call_next):
     }
    })
    # Calculate retention dates
-   now = datetime.now(timezone.utc)
+   now = datetime.now(IST)
    thirty_days = now - timedelta(days=30)
  except Exception as e:
   logger.error(f"Auto job failed: {e}")
  # VERY IMPORTANT: continue request processing
  response = await call_next(request)
  return response
-
 # ==================== HOLIDAY ROUTES (STEP 3 & 4 - added here) ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(
@@ -3295,7 +3244,6 @@ async def get_holidays(
     """Public GET - anyone can view holidays"""
     holidays = await db.holidays.find({}, {"_id": 0}).to_list(length=500)
     return holidays
-
 @api_router.post("/holidays", response_model=HolidayResponse)
 async def create_holiday(
     holiday: HolidayCreate,
@@ -3304,15 +3252,12 @@ async def create_holiday(
     """Admin-only POST - create new holiday with duplicate protection"""
     # Convert date to string for consistent Mongo storage (ISO format)
     holiday_dict = holiday.model_dump()
-    holiday_dict["date"] = holiday.date.isoformat()  # store as YYYY-MM-DD string
-
+    holiday_dict["date"] = holiday.date.isoformat() # store as YYYY-MM-DD string
     existing = await db.holidays.find_one({"date": holiday_dict["date"]})
     if existing:
         raise HTTPException(status_code=400, detail="Holiday already exists for this date")
-
     await db.holidays.insert_one(holiday_dict)
     return holiday_dict
-
 # Api Router
 api_router.include_router(telegram_router)
 app.include_router(leads_router)
