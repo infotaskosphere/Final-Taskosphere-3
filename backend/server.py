@@ -20,8 +20,8 @@ import logging
 import re
 import csv
 from io import StringIO, BytesIO
-import pandas as pd   # ← MISSING BEFORE → now added
-
+import pandas as pd
+from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -29,7 +29,6 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from fpdf import FPDF
 
-# Your routers (keep these)
 from backend.telegram import router as telegram_router
 from .leads import router as leads_router
 from backend.notifications import router as notification_router, create_notification
