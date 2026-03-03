@@ -28,13 +28,18 @@ def send_message(chat_id: int, text: str, keyboard=None):
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
 
-def inline_keyboard(buttons):
-    return {
-        "inline_keyboard": [
-            [{"text": b["text"], "callback_data": b["callback"]}]
-            for b in buttons
-        ]
-    }
+def inline_keyboard(buttons, include_cancel=True):
+    keyboard_buttons = [
+        [{"text": b["text"], "callback_data": b["callback"]}]
+        for b in buttons
+    ]
+
+    if include_cancel:
+        keyboard_buttons.append(
+            [{"text": "❌ Cancel", "callback_data": "cancel_task"}]
+        )
+
+    return {"inline_keyboard": keyboard_buttons}
 
 
 # =========================================================
@@ -56,11 +61,27 @@ async def telegram_webhook(request: Request):
         chat_id = callback["message"]["chat"]["id"]
         clicked = callback["data"]
 
-        # remove loading spinner
         requests.post(
             f"{TELEGRAM_API}/answerCallbackQuery",
             json={"callback_query_id": callback["id"]}
         )
+
+        # ===============================
+        # CANCEL CREATION
+        # ===============================
+        if clicked == "cancel_task":
+            await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+            send_message(chat_id, "❌ Task creation cancelled.")
+            return {"status": "cancelled"}
+
+        # ===============================
+        # DELETE TASK
+        # ===============================
+        if clicked.startswith("delete_"):
+            task_id = clicked.replace("delete_", "")
+            await db.tasks.delete_one({"id": task_id})
+            send_message(chat_id, "🗑 Task deleted successfully.")
+            return {"status": "task_deleted"}
 
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
         if not convo:
@@ -296,18 +317,38 @@ async def telegram_webhook(request: Request):
     chat_id = message["chat"]["id"]
     text = message.get("text", "").strip()
 
-    user = await db.users.find_one({"telegram_id": chat_id})
-    if not user:
-        user = await db.users.find_one({"email": ADMIN_EMAIL})
-        if user:
-            await db.users.update_one(
-                {"email": ADMIN_EMAIL},
-                {"$set": {"telegram_id": chat_id}}
-            )
-            send_message(chat_id, "✅ Telegram Linked!")
-        else:
-            send_message(chat_id, "❌ No account found.")
+    # CANCEL VIA COMMAND
+    if text.lower() == "/cancel":
+        await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+        send_message(chat_id, "❌ Task creation cancelled.")
+        return {"status": "cancelled"}
+
+    # SHOW MY TASKS
+    if text.lower() == "/mytasks":
+        user = await db.users.find_one({"telegram_id": chat_id})
+        if not user:
+            send_message(chat_id, "User not linked.")
             return {"status": "no_user"}
+
+        tasks = await db.tasks.find(
+            {"created_by": user["id"]},
+            {"_id": 0}
+        ).to_list(20)
+
+        if not tasks:
+            send_message(chat_id, "No tasks found.")
+            return {"status": "no_tasks"}
+
+        for task in tasks:
+            send_message(
+                chat_id,
+                f"📋 {task['title']}\n📅 Due: {task.get('due_date')}",
+                inline_keyboard([
+                    {"text": "🗑 Delete", "callback": f"delete_{task['id']}"}
+                ])
+            )
+
+        return {"status": "tasks_listed"}
 
     # START
     if text == "/start":
