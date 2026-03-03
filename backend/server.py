@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
+from backend.dependencies import get_current_user, create_access_token
 from fastapi.middleware.cors import CORSMiddleware   # ← important
 from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
