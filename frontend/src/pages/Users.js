@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -29,7 +28,6 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 // Department categories with colors (Synced with backend logic)
 const DEPARTMENTS = [
   { value: 'GST', label: 'GST', color: '#1E3A8A' },
@@ -43,17 +41,14 @@ const DEPARTMENTS = [
   { value: 'DSC', label: 'DSC', color: '#3F3F46' },
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -72,7 +67,6 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
-
 const UserCard = ({
   userData,
   onEdit,
@@ -86,7 +80,6 @@ const UserCard = ({
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
-
   const getRoleIcon = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -94,7 +87,6 @@ const UserCard = ({
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
-
   const getRoleStyle = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -102,9 +94,7 @@ const UserCard = ({
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
-
   const roleStyle = getRoleStyle(userData.role);
-
   return (
     <motion.div
       variants={itemVariants}
@@ -141,7 +131,6 @@ const UserCard = ({
           </button>
         )}
       </div>
-
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -174,7 +163,6 @@ const UserCard = ({
           </div>
         </div>
       </div>
-
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => (
@@ -182,7 +170,6 @@ const UserCard = ({
           ))}
         </div>
       )}
-
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -212,14 +199,12 @@ const UserCard = ({
     </motion.div>
   );
 };
-
 export default function Users() {
   const { user, hasPermission } = useAuth();
   const isAdmin = user?.role === "admin";
   const canViewUserPage = hasPermission("can_view_user_page") || isAdmin;
   const canEditUsers = hasPermission("can_edit_users") || isAdmin;
   const canManagePermissions = hasPermission("can_manage_users") || isAdmin;
-
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -228,7 +213,6 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
-
   // Form State (Synced with Backend User Model)
   const [formData, setFormData] = useState({
     full_name: '',
@@ -245,7 +229,6 @@ export default function Users() {
     telegram_id: null,
     is_active: true
   });
-
   // Permissions State (Synced with Backend UserPermissions Model)
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
@@ -276,19 +259,18 @@ export default function Users() {
     view_other_todos: [],
     view_other_activity: [],
     can_edit_clients: false,
-    can_use_chat: false
+    can_use_chat: false,
+    can_view_all_leads: false, // NEW: Control access to Leads module
+    can_edit_leads: false,      // NEW: Control edit/delete of leads
   });
-
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
-
   useEffect(() => {
     if (canViewUserPage) {
       fetchUsers();
       fetchClients();
     }
   }, [canViewUserPage]);
-
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -297,7 +279,6 @@ export default function Users() {
       toast.error('Failed to fetch users');
     }
   };
-
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -306,7 +287,6 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
-
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
@@ -319,12 +299,10 @@ export default function Users() {
       toast.error("Using default permission template");
     }
   };
-
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
-
   const handleDepartmentChange = (dept) => {
     setFormData(prev => ({
       ...prev,
@@ -333,7 +311,6 @@ export default function Users() {
         : [...prev.departments, dept]
     }));
   };
-
   const handleProfilePictureChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -347,7 +324,6 @@ export default function Users() {
       toast.error('Failed to process image');
     }
   };
-
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -378,7 +354,6 @@ export default function Users() {
       setLoading(false);
     }
   };
-
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
@@ -397,7 +372,6 @@ export default function Users() {
     });
     setDialogOpen(true);
   };
-
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure? This will permanently delete the user and their logs.')) return;
     try {
@@ -408,13 +382,11 @@ export default function Users() {
       toast.error(error.response?.data?.detail || 'Failed to delete user');
     }
   };
-
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
     await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
-
   const handleSavePermissions = async () => {
     setLoading(true);
     try {
@@ -427,14 +399,12 @@ export default function Users() {
       setLoading(false);
     }
   };
-
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role?.toLowerCase() === activeTab;
     return matchesSearch && matchesTab;
   });
-
   if (!canViewUserPage) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
@@ -446,7 +416,6 @@ export default function Users() {
       </div>
     );
   }
-
   return (
     <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
       {/* Header Section */}
@@ -455,11 +424,10 @@ export default function Users() {
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>User Directory</h1>
           <p className="text-slate-500 font-medium">Core team administration and access control</p>
         </div>
-
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           {canEditUsers && (
             <DialogTrigger asChild>
-              <Button 
+              <Button
                 className="rounded-xl font-bold h-12 shadow-lg transition-all hover:scale-105"
                 style={{ background: COLORS.deepBlue }}
                 onClick={() => {
@@ -477,7 +445,6 @@ export default function Users() {
               </Button>
             </DialogTrigger>
           )}
-
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-outfit font-bold" style={{ color: COLORS.deepBlue }}>
@@ -485,7 +452,6 @@ export default function Users() {
               </DialogTitle>
               <DialogDescription>Input primary identity and shift schedule details below.</DialogDescription>
             </DialogHeader>
-
             <div className="space-y-6 py-4">
               {/* Profile Image Upload */}
               <div className="flex justify-center">
@@ -503,7 +469,6 @@ export default function Users() {
                   </label>
                 </div>
               </div>
-
               {/* Identity Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
@@ -515,7 +480,6 @@ export default function Users() {
                   <Input type="email" placeholder="name@firm.com" name="email" value={formData.email} onChange={handleInputChange} disabled={!!selectedUser} className="rounded-xl" />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Contact Number</Label>
@@ -534,7 +498,6 @@ export default function Users() {
                   </div>
                 )}
               </div>
-
               {/* Shift Timing Details (Crucial for Attendance Logic) */}
               <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
                 <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
@@ -555,7 +518,6 @@ export default function Users() {
                   </div>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Birthdate</Label>
@@ -573,7 +535,6 @@ export default function Users() {
                   </Select>
                 </div>
               </div>
-
               {/* Department Multi-Select */}
               <div className="space-y-3">
                 <Label className="text-slate-700 font-semibold">Assigned Departments</Label>
@@ -596,12 +557,11 @@ export default function Users() {
                 </div>
               </div>
             </div>
-
             <DialogFooter className="gap-3 border-t pt-5">
               <Button variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl h-12">Discard</Button>
-              <Button 
-                onClick={handleSubmit} 
-                disabled={loading} 
+              <Button
+                onClick={handleSubmit}
+                disabled={loading}
                 className="rounded-xl h-12 px-8 font-bold shadow-lg"
                 style={{ background: COLORS.emeraldGreen }}
               >
@@ -611,19 +571,17 @@ export default function Users() {
           </DialogContent>
         </Dialog>
       </div>
-
       {/* Navigation & Search */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-          <Input 
-            placeholder="Search by name, email, or role..." 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
-            className="pl-12 h-12 rounded-2xl border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-500" 
+          <Input
+            placeholder="Search by name, email, or role..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-12 h-12 rounded-2xl border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-500"
           />
         </div>
-
         <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-white p-1 rounded-2xl border shadow-sm self-start">
           <TabsList className="bg-transparent h-10">
             <TabsTrigger value="all" className="rounded-xl font-bold px-4">All</TabsTrigger>
@@ -633,7 +591,6 @@ export default function Users() {
           </TabsList>
         </Tabs>
       </div>
-
       {/* Grid Display */}
       <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredUsers.length === 0 ? (
@@ -658,7 +615,6 @@ export default function Users() {
           ))
         )}
       </motion.div>
-
       {/* Permissions Dialog (Synced with UserPermissions Model) */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
@@ -674,10 +630,9 @@ export default function Users() {
             </div>
             <Button variant="ghost" className="rounded-xl" onClick={() => setPermissionsDialogOpen(false)}>Close</Button>
           </div>
-
           <div className="p-6 space-y-6">
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
-              
+             
               {/* Data Access Section */}
               <AccordionItem value="global" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -692,7 +647,9 @@ export default function Users() {
                     { key: 'can_view_all_duedates', label: 'Compliance Roadmap', desc: 'View all upcoming statutory due dates' },
                     { key: 'can_view_reports', label: 'Analytics Dashboard', desc: 'View performance and system reports' },
                     { key: 'can_view_todo_dashboard', label: 'Todo Dashboard', desc: 'Access to global team todo overview' },
-                    { key: 'can_view_audit_logs', label: 'System Audit Trail', desc: 'View activity logs and record histories' }
+                    { key: 'can_view_audit_logs', label: 'System Audit Trail', desc: 'View activity logs and record histories' },
+                    { key: 'can_view_all_leads', label: 'Leads Pipeline Access', desc: 'Can view the global leads and sales dashboard' },
+                    { key: 'can_edit_leads', label: 'Lead Management', desc: 'Permission to modify lead details and status' }
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
@@ -704,7 +661,6 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-
               {/* Operations & Management */}
               <AccordionItem value="management" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -729,7 +685,6 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-
               {/* Editing & Deletion */}
               <AccordionItem value="edits" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -754,7 +709,6 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-
               {/* CROSS-USER VISIBILITY (NEW BACKEND LOGIC) */}
               <AccordionItem value="cross-user" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -805,7 +759,6 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-
               {/* Client Assignment */}
               <AccordionItem value="clients" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -814,11 +767,11 @@ export default function Users() {
                 <AccordionContent className="pb-4 space-y-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <Input 
-                      placeholder="Filter company list..." 
-                      value={clientSearchQuery} 
-                      onChange={(e) => setClientSearchQuery(e.target.value)} 
-                      className="pl-10 h-10 rounded-xl" 
+                    <Input
+                      placeholder="Filter company list..."
+                      value={clientSearchQuery}
+                      onChange={(e) => setClientSearchQuery(e.target.value)}
+                      className="pl-10 h-10 rounded-xl"
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
@@ -827,12 +780,12 @@ export default function Users() {
                       .map((client) => {
                         const isAssigned = (permissions.assigned_clients || []).includes(client.id);
                         return (
-                          <div 
-                            key={client.id} 
+                          <div
+                            key={client.id}
                             onClick={() => {
                               setPermissions(prev => ({
                                 ...prev,
-                                assigned_clients: isAssigned 
+                                assigned_clients: isAssigned
                                   ? prev.assigned_clients.filter(id => id !== client.id)
                                   : [...prev.assigned_clients, client.id]
                               }));
@@ -853,12 +806,11 @@ export default function Users() {
               </AccordionItem>
             </Accordion>
           </div>
-
           <div className="sticky bottom-0 p-6 bg-slate-50 border-t flex justify-end gap-3">
             <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermissionsDialogOpen(false)}>Discard</Button>
-            <Button 
-              onClick={handleSavePermissions} 
-              disabled={loading} 
+            <Button
+              onClick={handleSavePermissions}
+              disabled={loading}
               className="rounded-xl h-12 px-10 font-bold shadow-xl"
               style={{ background: COLORS.emeraldGreen }}
             >
