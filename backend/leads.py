@@ -92,8 +92,6 @@ async def get_leads(
     status_filter: Optional[str] = Query(None, alias="status"),
     current_user=Depends(get_current_user),
 ):
-    from backend.models import User db  # LOCAL IMPORT
-
     query = {}
 
     permissions = getattr(current_user, "permissions", {})
@@ -119,8 +117,6 @@ async def get_leads(
 
 @router.get("/{lead_id}", response_model=Lead)
 async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.models import User db  # LOCAL IMPORT
-
     obj_id = validate_obj_id(lead_id)
     raw_lead = await db.leads.find_one({"_id": obj_id})
 
@@ -211,8 +207,6 @@ async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_
 
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.models import User db  # LOCAL IMPORT
-
     if current_user.role.lower() != "admin":
         raise HTTPException(
             status_code=403,
