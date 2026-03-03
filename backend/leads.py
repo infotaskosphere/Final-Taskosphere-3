@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
+from backend.models import User
+from backend.dependencies import db
+from backend.server import create_audit_log
 from datetime import datetime, timezone
 from bson import ObjectId
 from backend.models import User
@@ -128,8 +131,6 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
 
 @router.patch("/{lead_id}", response_model=Lead)
 async def update_lead(lead_id: str, updates: dict, current_user=Depends(get_current_user)):
-    from backend.models import User db, create_audit_log  # LOCAL IMPORT
-
     obj_id = validate_obj_id(lead_id)
     existing = await db.leads.find_one({"_id": obj_id})
 
@@ -155,8 +156,6 @@ async def update_lead(lead_id: str, updates: dict, current_user=Depends(get_curr
 
 @router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
 async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.models import User db, create_audit_log  # LOCAL IMPORT
-
     obj_id = validate_obj_id(lead_id)
     lead = await db.leads.find_one({"_id": obj_id})
 
