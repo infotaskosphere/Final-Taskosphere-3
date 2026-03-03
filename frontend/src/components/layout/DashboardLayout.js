@@ -38,7 +38,6 @@ const DashboardLayout = ({ children }) => {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
-    // Optimized: Load persisted preference on mount (client-side safe)
     if (typeof window === 'undefined') return false;
     const saved = localStorage.getItem('sidebarCollapsed');
     return saved === 'true';
@@ -47,26 +46,25 @@ const DashboardLayout = ({ children }) => {
 
   useActivityTracker(true);
 
-  // Optimized: Persist collapsed state to localStorage
+  // Persist collapsed state
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', collapsed.toString());
   }, [collapsed]);
 
-  // Optimized: Smart resize handler (prevents broken collapsed state on mobile + restores on desktop)
+  // Smart resize handler
   const handleResize = useCallback(() => {
     if (window.innerWidth < 1024) {
-      setCollapsed(false); // Force expanded on mobile (toggle is hidden anyway)
+      setCollapsed(false);
     }
   }, []);
 
   useEffect(() => {
     window.addEventListener('resize', handleResize);
-    // Initial check after mount
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  // Existing mobile open logic (kept unchanged)
+  // Mobile open logic
   useEffect(() => {
     if (window.innerWidth >= 1024) {
       setSidebarOpen(true);
@@ -91,11 +89,11 @@ const DashboardLayout = ({ children }) => {
     { path: '/todos', icon: CheckSquare, label: 'To Do' },
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-   
+
     // Registers Group
     { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
     { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
-   
+
     // Management & Sales Group
     { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
@@ -113,7 +111,6 @@ const DashboardLayout = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-slate-50 relative">
-
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
@@ -122,7 +119,7 @@ const DashboardLayout = ({ children }) => {
         />
       )}
 
-      {/* Sidebar – Optimized collapse with persistent state + resize sync */}
+      {/* Sidebar */}
       <aside
         className={`
           fixed top-0 left-0 h-full ${sidebarWidth}
@@ -136,8 +133,7 @@ const DashboardLayout = ({ children }) => {
         }}
       >
         <div className="flex flex-col h-full">
-
-          {/* Logo (UNCHANGED POSITION) */}
+          {/* Logo + Collapse Toggle */}
           <div className="py-5 flex items-center justify-center relative">
             <img
               src="/logo.png"
@@ -145,7 +141,6 @@ const DashboardLayout = ({ children }) => {
               className={`transition-all duration-300 ${collapsed ? 'h-10' : 'h-16'} object-contain`}
             />
 
-            {/* Collapse Toggle – now with optimized accessibility + Motion */}
             <motion.button
               onClick={() => setCollapsed(prev => !prev)}
               className="hidden lg:flex absolute right-2 p-1 rounded-md hover:bg-blue-100 transition"
@@ -167,12 +162,11 @@ const DashboardLayout = ({ children }) => {
 
               return (
                 <React.Fragment key={item.path}>
-                  {/* Separator before 'Staff Activity' to group Admin, Reports, and Sales tools */}
+                  {/* Separator before Staff Activity */}
                   {item.path === '/staff-activity' && (
                     <div className="my-4 border-t border-slate-200/50 mx-4" />
                   )}
 
-                  {/* Motion-enhanced Nav Link – optimized with hover tooltip when collapsed */}
                   <motion.div
                     whileHover={{ x: 6, scale: 1.02 }}
                     whileTap={{ scale: 0.97 }}
@@ -190,7 +184,7 @@ const DashboardLayout = ({ children }) => {
                         ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}
                       `}
                       style={isActive ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
-                      title={collapsed ? item.label : undefined}   {/* Optimized tooltip when collapsed */}
+                      title={collapsed ? item.label : undefined}
                     >
                       {isActive && (
                         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
@@ -212,14 +206,12 @@ const DashboardLayout = ({ children }) => {
         </div>
       </aside>
 
-      {/* Main Content – smoother transition when sidebar collapses */}
+      {/* Main Content */}
       <div className={`${contentMargin} transition-all duration-300 ease-in-out`}>
-
         {/* Header */}
         <header className="sticky top-0 bg-white border-b z-40">
           <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4">
-
-            {/* Mobile Menu Button – with subtle tap animation */}
+            {/* Mobile Menu Button */}
             <motion.div whileTap={{ scale: 0.9 }}>
               <Button
                 variant="ghost"
@@ -234,7 +226,7 @@ const DashboardLayout = ({ children }) => {
             <div className="flex items-center space-x-4 ml-auto">
               <NotificationBell />
 
-              {/* User Dropdown (LOGOUT REMAINS HERE) – animated chevron + avatar hover */}
+              {/* User Dropdown */}
               <div className="relative">
                 <motion.button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
@@ -255,7 +247,6 @@ const DashboardLayout = ({ children }) => {
                     {user?.full_name}
                   </span>
 
-                  {/* Animated Chevron */}
                   <motion.div
                     animate={{ rotate: userMenuOpen ? 180 : 0 }}
                     transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -291,7 +282,6 @@ const DashboardLayout = ({ children }) => {
             {children}
           </div>
         </main>
-
       </div>
     </div>
   );
