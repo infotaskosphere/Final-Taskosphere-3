@@ -32,10 +32,24 @@ async def create_lead(lead_data: LeadCreate, current_user = Depends(get_current_
 
 @router.get("/")
 async def get_leads(current_user = Depends(get_current_user)):
-    from .main import db
-    # Admins see all; Staff see only leads assigned to them or created by them
-    query = {} if current_user.role == "admin" else {
-        "$or": [{"assigned_to": current_user.id}, {"created_by": current_user.id}]
-    }
+    from backend.server import db
+    
+    # 1. Admins see everything
+    if current_user.role == "admin":
+        query = {}
+    else:
+        # 2. Check for specific permission or if the lead is assigned to them
+        permissions = current_user.permissions or {}
+        if permissions.get("can_view_all_leads", False):
+            query = {}
+        else:
+            # 3. Staff only see leads assigned to them OR created by them
+            query = {
+                "$or": [
+                    {"assigned_to": current_user.id},
+                    {"created_by": current_user.id}
+                ]
+            }
+            
     leads = await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return leads
