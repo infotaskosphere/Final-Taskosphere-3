@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import Depends, HTTPException, status
+from typing import List, Optional, Dict, Any
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 # ✅ CHANGE 1: Imported AuditLog to prevent NameError
