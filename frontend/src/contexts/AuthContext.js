@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 
 const AuthContext = createContext(null);
@@ -15,91 +15,144 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Load persisted auth data on mount
-  useEffect(() => {
-    const loadUserFromStorage = () => {
-      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-      const storedUserJson = localStorage.getItem("user") || sessionStorage.getItem("user");
+  /* ============================================================
+     Helpers
+  ============================================================ */
 
-      if (!token || !storedUserJson) {
-        setLoading(false);
-        return;
-      }
+  const normalizePermissions = (permissions) => {
+    if (
+      permissions &&
+      typeof permissions === "object" &&
+      !Array.isArray(permissions)
+    ) {
+      return permissions;
+    }
+    return {};
+  };
 
-      try {
-        const parsedUser = JSON.parse(storedUserJson);
+  const getStoredAuth = () => {
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token");
 
-        // Normalize permissions to always be an object
-        parsedUser.permissions = parsedUser.permissions &&
-          typeof parsedUser.permissions === "object" &&
-          !Array.isArray(parsedUser.permissions)
-          ? parsedUser.permissions
-          : {};
+    const storedUser =
+      localStorage.getItem("user") || sessionStorage.getItem("user");
 
-        // Set auth header for all future requests
-        api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    return { token, storedUser };
+  };
 
-        setUser(parsedUser);
-      } catch (err) {
-        console.error("Failed to restore user from storage:", err);
-        logout();
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUserFromStorage();
-  }, []);
-
-  // Login handler
-  const login = (responseData, rememberMe = false) => {
+  const persistAuth = (token, userData, rememberMe = false) => {
     const storage = rememberMe ? localStorage : sessionStorage;
 
-    const token = responseData?.access_token;
-    const userData = responseData?.user;
-
-    if (!token || !userData) {
-      console.error("Login failed: invalid response structure", { responseData });
-      return false;
-    }
-
-    // Normalize permissions to object
-    userData.permissions = userData.permissions &&
-      typeof userData.permissions === "object" &&
-      !Array.isArray(userData.permissions)
-      ? userData.permissions
-      : {};
-
-    // Persist
     storage.setItem("token", token);
     storage.setItem("user", JSON.stringify(userData));
 
-    // Update axios default header
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
-
-    setUser(userData);
-    return true;
   };
 
-  // Logout handler
-  const logout = () => {
+  const clearStorage = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
 
     delete api.defaults.headers.common.Authorization;
+  };
+
+  /* ============================================================
+     Restore Session On Mount
+  ============================================================ */
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      const { token, storedUser } = getStoredAuth();
+
+      if (!token || !storedUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        parsedUser.permissions = normalizePermissions(parsedUser.permissions);
+
+        api.defaults.headers.common.Authorization = `Bearer ${token}`;
+        setUser(parsedUser);
+      } catch (error) {
+        console.error("Session restore failed:", error);
+        clearStorage();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    restoreSession();
+  }, []);
+
+  /* ============================================================
+     Login
+  ============================================================ */
+
+  const login = (responseData, rememberMe = false) => {
+    const token = responseData?.access_token;
+    const userData = responseData?.user;
+
+    if (!token || !userData) {
+      console.error("Invalid login response structure", responseData);
+      return false;
+    }
+
+    userData.permissions = normalizePermissions(userData.permissions);
+
+    persistAuth(token, userData, rememberMe);
+    setUser(userData);
+
+    return true;
+  };
+
+  /* ============================================================
+     Logout
+  ============================================================ */
+
+  const logout = () => {
+    clearStorage();
     setUser(null);
   };
 
-  // Check if user has a certain permission
-  // Supports:
-  // - boolean flags:    "export_reports": true
-  // - access lists:     "view_other_tasks": ["uuid-123", "uuid-456"]
+  /* ============================================================
+     Refresh Current User (CRITICAL FIX)
+  ============================================================ */
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const response = await api.get("/auth/me"); // Must exist in backend
+      const updatedUser = response.data;
+
+      updatedUser.permissions = normalizePermissions(updatedUser.permissions);
+
+      const { token } = getStoredAuth();
+      if (!token) return;
+
+      // Determine where to persist (local or session)
+      if (localStorage.getItem("user")) {
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+      } else {
+        sessionStorage.setItem("user", JSON.stringify(updatedUser));
+      }
+
+      setUser(updatedUser);
+    } catch (error) {
+      console.error("Failed to refresh user:", error);
+    }
+  }, []);
+
+  /* ============================================================
+     Permission Helpers
+  ============================================================ */
+
   const hasPermission = (permission) => {
     if (!user) return false;
 
-    // Admin always has full access
+    // Admin override
     if (user.role?.toLowerCase() === "admin") {
       return true;
     }
@@ -107,11 +160,9 @@ export const AuthProvider = ({ children }) => {
     const perms = user.permissions || {};
 
     // Boolean permission
-    if (perms[permission] === true) {
-      return true;
-    }
+    if (perms[permission] === true) return true;
 
-    // List-based permission → true if list is non-empty
+    // List-based permission
     if (Array.isArray(perms[permission])) {
       return perms[permission].length > 0;
     }
@@ -119,8 +170,6 @@ export const AuthProvider = ({ children }) => {
     return false;
   };
 
-  // Check if user can access a specific target user's data
-  // Example: canAccessUser("manage_other_attendance", "user-uuid-789")
   const canAccessUser = (permissionKey, targetUserId) => {
     if (!user) return false;
 
@@ -134,11 +183,16 @@ export const AuthProvider = ({ children }) => {
     return Array.isArray(allowedIds) && allowedIds.includes(targetUserId);
   };
 
+  /* ============================================================
+     Context Value
+  ============================================================ */
+
   const value = {
     user,
     loading,
     login,
     logout,
+    refreshUser,   // 🔥 IMPORTANT
     hasPermission,
     canAccessUser,
   };
