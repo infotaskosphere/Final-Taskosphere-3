@@ -947,7 +947,7 @@ async def handle_attendance(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    today = datetime.now(india_tz).date()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat() # Standardize to string "YYYY-MM-DD"
     # FIX: Query using the string today_str to match database format
     holiday = await db.holidays.find_one({"date": today_str})
@@ -994,7 +994,7 @@ async def handle_attendance(
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
-    today = datetime.now(india_tz).date()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
     # FIX: Query using today_str string
     holiday = await db.holidays.find_one({"date": today_str})
@@ -1019,7 +1019,7 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
 # ── GET TODAY ATTENDANCE ───────────────────────────────────────────────
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
-    today = datetime.now(india_tz).date()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
     # FIX: Query using today_str string
     holiday = await db.holidays.find_one({"date": today_str})
