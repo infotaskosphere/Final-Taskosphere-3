@@ -331,23 +331,23 @@ export default function Dashboard() {
  );
  };
  const handlePunchAction = async (action) => {
-  setLoading(true);
-  try {
-    await api.post('/attendance', { action });
+ setLoading(true);
+ try {
+ await api.post('/attendance', { action });
 
-    toast.success(
-      action === 'punch_in'
-        ? 'Punched in successfully!'
-        : 'Punched out successfully!'
-    );
+ toast.success(
+ action === 'punch_in'
+ ? 'Punched in successfully!'
+ : 'Punched out successfully!'
+ );
 
-    queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
+ queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
 
-  } catch (err) {
-    toast.error(err.response?.data?.detail || 'Attendance action failed');
-  } finally {
-    setLoading(false);
-  }
+ } catch (err) {
+ toast.error(err.response?.data?.detail || 'Attendance action failed');
+ } finally {
+ setLoading(false);
+ }
 };
 
  // ── Utility Helpers ─────────────────────────────────────────────────────────
@@ -469,17 +469,25 @@ export default function Dashboard() {
  });
 
  const getGreeting = () => {
-  const hour = new Date().getHours();
+ const hour = new Date().getHours();
 
-  if (hour < 12) return "Good Morning ☀️";
-  if (hour < 17) return "Good Afternoon 🌤️";
-  if (hour < 21) return "Good Evening 🌆";
-  return "Working Late? 🌙";
+ if (hour < 12) return "Good Morning ☀️";
+ if (hour < 17) return "Good Afternoon 🌤️";
+ if (hour < 21) return "Good Evening 🌆";
+ return "Working Late? 🌙";
 };
 
  useEffect(() => {
-  if (todayAttendance === undefined) return;
+  if (!todayAttendance) return;
 
+  // If user is on leave → no gate
+  if (todayAttendance.status === "leave") {
+    setMustPunchIn(false);
+    document.body.style.overflow = "auto";
+    return;
+  }
+
+  // If not punched in → show gate
   if (!todayAttendance?.punch_in) {
     setMustPunchIn(true);
     document.body.style.overflow = "hidden";
@@ -1179,58 +1187,80 @@ export default function Dashboard() {
  )}
  </motion.div>
 <AnimatePresence>
-  {mustPunchIn && (
-    <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <motion.div
-        initial={{ scale: 0.9, y: 40 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.9, y: 40 }}
-        transition={{ type: "spring", stiffness: 160, damping: 18 }}
-        className="bg-white w-[480px] p-10 rounded-3xl shadow-2xl text-center relative"
-      >
-        <motion.h2
-          className="text-3xl font-bold mb-3"
-          initial={{ scale: 0.95 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", stiffness: 220, damping: 14 }}
-        >
-          {getGreeting()}
-        </motion.h2>
+ {mustPunchIn && (
+ <motion.div
+ className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center"
+ initial={{ opacity: 0 }}
+ animate={{ opacity: 1 }}
+ exit={{ opacity: 0 }}
+ >
+ <motion.div
+ initial={{ scale: 0.9, y: 40 }}
+ animate={{ scale: 1, y: 0 }}
+ exit={{ scale: 0.9, y: 40 }}
+ transition={{ type: "spring", stiffness: 160, damping: 18 }}
+ className="bg-white w-[480px] p-10 rounded-3xl shadow-2xl text-center relative"
+ >
+ <motion.h2
+ className="text-3xl font-bold mb-3"
+ initial={{ scale: 0.95 }}
+ animate={{ scale: 1 }}
+ transition={{ type: "spring", stiffness: 220, damping: 14 }}
+ >
+ {getGreeting()}
+ </motion.h2>
 
-        <p className="text-slate-500 mb-8">
-          Please punch in to begin your workday.
-        </p>
+ <p className="text-slate-500 mb-8">
+ Please punch in to begin your workday.
+ </p>
 
-        <motion.div
-          initial={{ y: 0 }}
-          animate={{ y: [0, -2, 0] }}
-          transition={{
-            duration: 3,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-          whileHover={{ y: 0 }}
-        >
-          <Button
-            onClick={async () => {
-              await handlePunchAction('punch_in');
-              setMustPunchIn(false);
-              document.body.style.overflow = "auto";
-            }}
-            disabled={loading}
-            className="w-full h-12 text-lg bg-green-600 hover:bg-green-700 rounded-2xl shadow-lg hover:shadow-xl transition-all"
-          >
-            {loading ? "Punching In..." : "Punch In"}
-          </Button>
-        </motion.div>
-      </motion.div>
-    </motion.div>
-  )}
+<motion.div
+  initial={{ y: 0 }}
+  animate={{ y: [0, -2, 0] }}
+  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+  whileHover={{ y: 0 }}
+>
+  <Button
+    onClick={async () => {
+      await handlePunchAction('punch_in');
+      setMustPunchIn(false);
+      document.body.style.overflow = "auto";
+    }}
+    disabled={loading}
+    className="w-full h-12 text-lg bg-green-600 hover:bg-green-700 rounded-2xl shadow-lg hover:shadow-xl transition-all"
+  >
+    {loading ? "Punching In..." : "Punch In"}
+  </Button>
+</motion.div>
+
+<div className="mt-4">
+  <Button
+    variant="secondary"
+    className="w-full"
+    onClick={async () => {
+      setLoading(true);
+      try {
+        await api.post("/attendance/mark-leave-today");
+
+        toast.success("Marked on leave today");
+
+        queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
+
+        setMustPunchIn(false);
+        document.body.style.overflow = "auto";
+      } catch (err) {
+        toast.error("Failed to mark leave");
+      } finally {
+        setLoading(false);
+      }
+    }}
+  >
+    On Leave Today
+  </Button>
+</div>
+ </motion.div>
+ </motion.div>
+ )}
 </AnimatePresence>
  </motion.div>
  );
