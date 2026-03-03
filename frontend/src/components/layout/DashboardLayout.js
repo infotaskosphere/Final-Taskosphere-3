@@ -21,7 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 
 const COLORS = {
   deepBlue: '#0D3B66',
