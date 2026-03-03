@@ -322,7 +322,13 @@ export default function Attendance() {
                   {todayAttendance?.punch_in && (
                     <p className="text-sm text-blue-100/80">
                       In: {formatInTimeZone(new Date(todayAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
-                      {todayAttendance?.punch_out && ` • Out: {formatInTimeZone(new Date(todayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
+                      {todayAttendance?.punch_out && (
+                        <>
+                          {" • Out: "}
+                          {formatInTimeZone(new Date(todayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
+                        </>
+                      )}
+                    </p>
                   )}
                   <p className="text-sm text-blue-100/80 mt-1">
                     Expected: In {user.punch_in_time || 'N/A'} (Grace {user.grace_time || 'N/A'}) • Out {user.punch_out_time || 'N/A'}
