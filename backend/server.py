@@ -51,7 +51,6 @@ from backend.models import (
 )
 from passlib.context import CryptContext
 from backend.leads import router as leads_router
-from .leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
@@ -90,7 +89,6 @@ from backend.models import (
 )
 from fpdf import FPDF
 from backend.telegram import router as telegram_router
-from .leads import router as leads_router
 from backend.notifications import router as notification_router, create_notification
 # ====================== CONFIG ======================
 IST = pytz.timezone('Asia/Kolkata')
@@ -2962,7 +2960,7 @@ async def create_holiday(
     return holiday_dict
 # Api Router
 api_router.include_router(telegram_router)
-app.include_router(leads_router)
+api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 app.include_router(api_router)
 import traceback
