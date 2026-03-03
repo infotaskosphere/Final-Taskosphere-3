@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
+  lightBlue: '#E0F2FE',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
@@ -73,8 +74,8 @@ const DashboardLayout = ({ children }) => {
     { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
   ];
 
-  const visibleNavItems = navItems.filter(item =>
-    !item.permission || hasPermission(item.permission)
+  const visibleNavItems = navItems.filter(
+    item => !item.permission || hasPermission(item.permission)
   );
 
   const sidebarWidth = collapsed ? 'w-[70px]' : 'w-72';
@@ -86,7 +87,7 @@ const DashboardLayout = ({ children }) => {
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -95,33 +96,36 @@ const DashboardLayout = ({ children }) => {
       <aside
         className={`
           fixed top-0 left-0 h-full ${sidebarWidth}
-          bg-white border-r shadow-xl z-50
+          border-r shadow-lg z-50
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
+        style={{
+          background: `linear-gradient(180deg, ${COLORS.lightBlue} 0%, #F0F9FF 50%, #E0F7FA 100%)`
+        }}
       >
         <div className="flex flex-col h-full">
 
-          {/* Logo + Collapse Toggle */}
-          <div className="flex items-center justify-between px-4 py-5 border-b">
-            {!collapsed && (
-              <span className="text-lg font-bold tracking-tight"
-                style={{ color: COLORS.deepBlue }}>
-                Taskosphere
-              </span>
-            )}
+          {/* Logo (UNCHANGED POSITION) */}
+          <div className="py-5 flex items-center justify-center relative">
+            <img
+              src="/logo.png"
+              alt="Taskosphere"
+              className={`transition-all duration-300 ${collapsed ? 'h-10' : 'h-16'} object-contain`}
+            />
 
+            {/* Collapse Toggle (desktop only) */}
             <button
               onClick={() => setCollapsed(prev => !prev)}
-              className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-slate-100 transition"
+              className="hidden lg:flex absolute right-2 p-1 rounded-md hover:bg-blue-100 transition"
             >
               {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-3 space-y-2 overflow-y-auto">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -136,12 +140,20 @@ const DashboardLayout = ({ children }) => {
                     }
                   }}
                   className={`
-                    relative flex items-center ${collapsed ? 'justify-center' : 'space-x-3'}
-                    px-3 py-3 rounded-xl transition-all group
+                    relative flex items-center
+                    ${collapsed ? 'justify-center' : 'space-x-3'}
+                    px-4 py-3 rounded-xl transition-all
                     ${isActive
-                      ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md'
-                      : 'text-slate-600 hover:bg-slate-100'}
+                      ? 'text-white shadow-md'
+                      : 'text-slate-700 hover:bg-blue-100'}
                   `}
+                  style={
+                    isActive
+                      ? {
+                          background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`
+                        }
+                      : {}
+                  }
                 >
                   {/* Active Indicator */}
                   {isActive && (
@@ -150,7 +162,6 @@ const DashboardLayout = ({ children }) => {
 
                   <Icon className="h-5 w-5 flex-shrink-0" />
 
-                  {/* Label with Smooth Fade */}
                   {!collapsed && (
                     <span className="font-medium whitespace-nowrap transition-opacity duration-200">
                       {item.label}
@@ -160,21 +171,6 @@ const DashboardLayout = ({ children }) => {
               );
             })}
           </nav>
-
-          {/* Bottom Logout */}
-          <div className="p-3 border-t">
-            <button
-              onClick={handleLogout}
-              className={`
-                flex items-center ${collapsed ? 'justify-center' : 'space-x-3'}
-                w-full px-3 py-3 rounded-xl text-red-600
-                hover:bg-red-50 transition
-              `}
-            >
-              <LogOut size={18} />
-              {!collapsed && <span className="font-medium">Logout</span>}
-            </button>
-          </div>
         </div>
       </aside>
 
@@ -185,7 +181,7 @@ const DashboardLayout = ({ children }) => {
         <header className="sticky top-0 bg-white border-b z-40">
           <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4">
 
-            {/* Mobile Toggle */}
+            {/* Mobile Menu Button */}
             <Button
               variant="ghost"
               size="icon"
@@ -195,10 +191,10 @@ const DashboardLayout = ({ children }) => {
               <Menu className="h-5 w-5" />
             </Button>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 ml-auto">
               <NotificationBell />
 
-              {/* User Menu */}
+              {/* User Dropdown (LOGOUT REMAINS HERE) */}
               <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
@@ -225,11 +221,19 @@ const DashboardLayout = ({ children }) => {
                 </button>
 
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2">
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2 z-50">
                     <div className="px-4 py-3 border-b">
                       <p className="font-semibold text-sm">{user?.full_name}</p>
                       <p className="text-xs text-slate-500">{user?.email}</p>
                     </div>
+
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50"
+                    >
+                      <LogOut className="h-5 w-5" />
+                      <span>Logout</span>
+                    </button>
                   </div>
                 )}
               </div>
