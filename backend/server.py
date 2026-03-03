@@ -168,10 +168,17 @@ def check_permission(permission_name: str):
    )
   return current_user
  return dependency
-#@app = FastAPI()  # Commented out duplicate app definition
-#@app.get("/health")  # Commented out duplicate health endpoint
-#async def health():
-# return {"status": "ok"}
+def safe_dt(dt_input):
+    """Permanently handles None, strings, and datetime objects."""
+    if dt_input is None:
+        return None
+    if isinstance(dt_input, datetime):
+        return dt_input
+    try:
+        # Handles ISO strings from Mongo
+        return parser.parse(dt_input)
+    except (ValueError, TypeError):
+        return None
 @app.on_event("startup")
 async def create_indexes():
  await db.tasks.create_index("assigned_to")
@@ -202,22 +209,6 @@ async def create_indexes():
  )
 # NEW: Holiday index for fast lookup
  await db.holidays.create_index("date", unique=True)
-#app.add_middleware(GZipMiddleware, minimum_size=1000)  # Commented out duplicate GZip
-#app.add_middleware(  # Commented out duplicate CORS
-#    CORSMiddleware,
-#    allow_origins=[
-#        "https://final-taskosphere-frontend.onrender.com",
-#        "https://final-taskosphere-backend.onrender.com",
-#        "http://localhost:3000",
-#        "http://localhost:5173",
-#        "http://127.0.0.1:5173",
-#    ],
-#    allow_credentials=True,
-#    allow_methods=["*"],
-#    allow_headers=["*"],
-#    expose_headers=["*"],
-#    max_age=3600,
-#)
 # ALL MODELS
 class UserPermissions(BaseModel):
  can_view_all_tasks: bool = False
@@ -269,9 +260,10 @@ class TodoCreate(BaseModel):
  description: Optional[str] = None
  due_date: Optional[datetime] = None
 class User(BaseModel):
+ model_config = ConfigDict(extra="ignore")
  id: str
  email: str
- full_name: str
+ full_name: Optional[str] = None
  role: str = "staff"
  password: Optional[str] = None
  departments: List[str] = []
@@ -279,7 +271,7 @@ class User(BaseModel):
  birthday: Optional[date] = None
  profile_picture: Optional[str] = None
  punch_in_time: Optional[str] = None
- grace_time: Optional[str] = None
+ grace_time: Optional[str] = "00:15"
  punch_out_time: Optional[str] = None
  telegram_id: Optional[int] = None
  permissions: UserPermissions = Field(default_factory=UserPermissions)
@@ -846,8 +838,11 @@ async def promote_todo(todo_id: str, current_user: User = Depends(get_current_us
   "created_at": now,
   "updated_at": now
  }
- await db.tasks.insert_one(new_task)
- await db.todos.delete_one({"_id": ObjectId(todo_id)})
+ async with await client.start_session() as session:
+     async def cb(session):
+         await db.tasks.insert_one(new_task, session=session)
+         await db.todos.delete_one({"_id": ObjectId(todo_id)}, session=session)
+     await session.with_transaction(cb)
  return {"message": "Todo promoted to task successfully"}
 # Delete Todo Route
 @api_router.delete("/todos/{todo_id}")
@@ -1391,12 +1386,9 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
  ).to_list(1000)
  user_map = {u["id"]: u["full_name"] for u in users}
  for task in tasks:
-  if isinstance(task.get("created_at"), str):
-   task["created_at"] = datetime.fromisoformat(task["created_at"])
-  if isinstance(task.get("updated_at"), str):
-   task["updated_at"] = datetime.fromisoformat(task["updated_at"])
-  if task.get("due_date") and isinstance(task["due_date"], str):
-   task["due_date"] = datetime.fromisoformat(task["due_date"])
+  task["created_at"] = safe_dt(task.get("created_at"))
+  task["updated_at"] = safe_dt(task.get("updated_at"))
+  task["due_date"] = safe_dt(task.get("due_date"))
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
  return tasks
@@ -1989,10 +1981,8 @@ async def get_attendance_history(
     raise HTTPException(status_code=403, detail="Not authorized")
  attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
  for attendance in attendance_list:
-  if isinstance(attendance["punch_in"], str):
-   attendance["punch_in"] = datetime.fromisoformat(attendance["punch_in"])
-  if attendance.get("punch_out") and isinstance(attendance["punch_out"], str):
-   attendance["punch_out"] = datetime.fromisoformat(attendance["punch_out"])
+  attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
+  attendance["punch_out"] = safe_dt(attendance.get("punch_out"))
   if "status" not in attendance:
    attendance["status"] = (
     "present" if attendance.get("punch_in") else "absent"
@@ -2487,8 +2477,8 @@ async def get_performance_rankings(
   completed_ontime = 0
   for t in todos:
    if t.get("is_completed"):
-    due = t.get("due_date")
-    completed_at = t.get("completed_at")
+    due = safe_dt(t.get("due_date"))
+    completed_at = safe_dt(t.get("completed_at"))
     if due and completed_at and completed_at <= due:
      completed_ontime += 1
   todo_ontime_percent = round(
@@ -3307,3 +3297,19 @@ api_router.include_router(telegram_router)
 app.include_router(leads_router)
 api_router.include_router(notification_router)
 app.include_router(api_router)
+import traceback
+
+@app.exception_handler(Exception)
+async def universal_exception_handler(request: Request, exc: Exception):
+    # This logs the EXACT line number and file that caused the 500
+    logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
+    logger.error(traceback.format_exc()) 
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "InternalServerError",
+            "message": "A database or logic error occurred.",
+            "path": request.url.path
+        }
+    )
