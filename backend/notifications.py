@@ -11,7 +11,6 @@ from backend.models import User
 logger = logging.getLogger(__name__)
 
 # ====================== RESILIENT MODELS ======================
-
 class NotificationBase(BaseModel):
     model_config = ConfigDict(extra="ignore")  # Permanently prevents crashes on schema drift
     title: str
@@ -25,7 +24,6 @@ class Notification(NotificationBase):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # ====================== STABILITY HELPERS ======================
-
 def normalize_notification(doc: dict) -> dict:
     """Standardizes MongoDB data to prevent Pydantic 500 errors."""
     if not doc:
@@ -41,11 +39,9 @@ def normalize_notification(doc: dict) -> dict:
     return doc
 
 # ====================== ROUTER ======================
-
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 # ====================== INTERNAL LOGIC ======================
-
 async def create_notification(
     user_id: str,
     title: str,
@@ -71,7 +67,6 @@ async def create_notification(
         return None
 
 # ====================== API ROUTES ======================
-
 @router.get("/", response_model=List[Notification])
 async def get_my_notifications(current_user=Depends(get_current_user)):
     """Fetches user notifications, sorted by newest first."""
@@ -101,10 +96,8 @@ async def mark_notification_read(notification_id: str, current_user=Depends(get_
         },
         {"$set": {"is_read": True}}
     )
-
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
-
     return {"message": "Success"}
 
 @router.put("/read-all")
@@ -126,8 +119,6 @@ async def delete_notification(notification_id: str, current_user=Depends(get_cur
         "id": notification_id,
         "user_id": current_user.id
     })
-
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
-
     return {"message": "Notification removed"}
