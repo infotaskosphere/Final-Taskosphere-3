@@ -58,6 +58,27 @@ class Lead(LeadBase):
 # ====================== HELPERS ======================
 
 def normalize_lead_doc(doc: dict) -> dict:
+    # ✅ FIX: Explicitly handle the helper to prevent NameError/ImportError
+    try:
+        from backend.dependencies import safe_dt
+    except ImportError:
+        # Fallback if safe_dt isn't available
+        def safe_dt(v): return v 
+
+    if not doc:
+        return doc
+
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+
+    # Ensure these fields exist before passing to safe_dt
+    for field in ["created_at", "updated_at", "next_follow_up"]:
+        if field in doc:
+            doc[field] = safe_dt(doc.get(field))
+
+    return doc
+
+def normalize_lead_doc(doc: dict) -> dict:
     from backend.dependencies import safe_dt
 
     if not doc:
