@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+from backend.models import User
 from datetime import datetime, timezone
 import os
 import uuid
