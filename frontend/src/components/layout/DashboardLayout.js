@@ -14,7 +14,9 @@ import {
   Building2,
   Calendar,
   Activity,
-  ChevronDown
+  ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -23,7 +25,6 @@ import { toast } from 'sonner';
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
-  lightBlue: '#E0F2FE',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
@@ -34,22 +35,15 @@ const DashboardLayout = ({ children }) => {
   const location = useLocation();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useActivityTracker(true);
 
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        setSidebarOpen(true);
-      } else {
-        setSidebarOpen(false);
-      }
-    };
-
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    if (window.innerWidth >= 1024) {
+      setSidebarOpen(true);
+    }
   }, []);
 
   if (loading) return null;
@@ -83,13 +77,16 @@ const DashboardLayout = ({ children }) => {
     !item.permission || hasPermission(item.permission)
   );
 
+  const sidebarWidth = collapsed ? 'w-[70px]' : 'w-72';
+  const contentMargin = collapsed ? 'lg:ml-[70px]' : 'lg:ml-72';
+
   return (
     <div className="min-h-screen bg-slate-50 relative">
 
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden transition-opacity"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden transition-opacity"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -97,23 +94,34 @@ const DashboardLayout = ({ children }) => {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 h-full w-72
-          bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50
-          border-r shadow-xl z-50
-          transform transition-transform duration-300 ease-in-out
+          fixed top-0 left-0 h-full ${sidebarWidth}
+          bg-white border-r shadow-xl z-50
+          transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
 
-          {/* Logo */}
-          <div className="py-6 flex justify-center border-b">
-            <img src="/logo.png" alt="Taskosphere" className="h-14 object-contain" />
+          {/* Logo + Collapse Toggle */}
+          <div className="flex items-center justify-between px-4 py-5 border-b">
+            {!collapsed && (
+              <span className="text-lg font-bold tracking-tight"
+                style={{ color: COLORS.deepBlue }}>
+                Taskosphere
+              </span>
+            )}
+
+            <button
+              onClick={() => setCollapsed(prev => !prev)}
+              className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-slate-100 transition"
+            >
+              {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -127,35 +135,57 @@ const DashboardLayout = ({ children }) => {
                       setSidebarOpen(false);
                     }
                   }}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all
+                  className={`
+                    relative flex items-center ${collapsed ? 'justify-center' : 'space-x-3'}
+                    px-3 py-3 rounded-xl transition-all group
                     ${isActive
-                      ? 'text-white shadow-md'
-                      : 'text-slate-700 hover:bg-blue-100'
-                    }`}
-                  style={
-                    isActive
-                      ? {
-                          background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`
-                        }
-                      : {}
-                  }
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md'
+                      : 'text-slate-600 hover:bg-slate-100'}
+                  `}
                 >
-                  <Icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
+                  {/* Active Indicator */}
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
+                  )}
+
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+
+                  {/* Label with Smooth Fade */}
+                  {!collapsed && (
+                    <span className="font-medium whitespace-nowrap transition-opacity duration-200">
+                      {item.label}
+                    </span>
+                  )}
                 </Link>
               );
             })}
           </nav>
+
+          {/* Bottom Logout */}
+          <div className="p-3 border-t">
+            <button
+              onClick={handleLogout}
+              className={`
+                flex items-center ${collapsed ? 'justify-center' : 'space-x-3'}
+                w-full px-3 py-3 rounded-xl text-red-600
+                hover:bg-red-50 transition
+              `}
+            >
+              <LogOut size={18} />
+              {!collapsed && <span className="font-medium">Logout</span>}
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className="lg:ml-72 transition-all duration-300">
+      <div className={`${contentMargin} transition-all duration-300`}>
 
         {/* Header */}
         <header className="sticky top-0 bg-white border-b z-40">
           <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4">
 
+            {/* Mobile Toggle */}
             <Button
               variant="ghost"
               size="icon"
@@ -169,7 +199,7 @@ const DashboardLayout = ({ children }) => {
               <NotificationBell />
 
               {/* User Menu */}
-              <div className="relative z-50">
+              <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
                   className="flex items-center space-x-2 px-3 py-2 rounded-full hover:bg-slate-100"
@@ -200,14 +230,6 @@ const DashboardLayout = ({ children }) => {
                       <p className="font-semibold text-sm">{user?.full_name}</p>
                       <p className="text-xs text-slate-500">{user?.email}</p>
                     </div>
-
-                    <button
-                      onClick={handleLogout}
-                      className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50"
-                    >
-                      <LogOut className="h-5 w-5" />
-                      <span>Logout</span>
-                    </button>
                   </div>
                 )}
               </div>
