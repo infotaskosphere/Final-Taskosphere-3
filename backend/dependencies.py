@@ -4,7 +4,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
-from backend.models import User
+# ✅ CHANGE 1: Imported AuditLog to prevent NameError
+from backend.models import User, AuditLog
 import uuid
 
 # ==========================================================
@@ -19,28 +20,6 @@ if not MONGO_URL:
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
-
-
-# ==========================================================
-# PERMISSION CHECK
-# ==========================================================
-
-def check_permission(permission: str):
-    async def permission_checker(
-        current_user = Depends(get_current_user)
-    ):
-        # If your User model has permissions attribute
-        user_permissions = getattr(current_user, "permissions", [])
-
-        if permission not in user_permissions:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to access this resource",
-            )
-
-        return current_user
-
-    return permission_checker
 
 # ==========================================================
 # AUTH CONFIG
@@ -67,9 +46,9 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
 
-#===========================================================
+# ==========================================================
 # SAFE DT
-#===========================================================
+# ==========================================================
 
 def safe_dt(value):
     if not value:
@@ -87,6 +66,7 @@ def safe_dt(value):
 # AUTH DEPENDENCY
 # ==========================================================
 
+# ✅ CHANGE 2: Moved get_current_user BEFORE check_permission
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
@@ -115,11 +95,48 @@ async def get_current_user(
             detail="User not found",
         )
 
-   
     user_dict.pop("_id", None)
 
     return User(**user_dict)
-    
+
+# ==========================================================
+# PERMISSION CHECK
+# ==========================================================
+
+# ✅ CHANGE 3: Updated logic to handle Pydantic Permission Model
+def check_permission(required_permission: str):
+    async def permission_checker(
+        current_user: User = Depends(get_current_user)
+    ):
+        # Optional: Admin override (prevents lockout)
+        if current_user.role.lower() == "admin":
+            return current_user
+
+        # Get permissions object (Pydantic model)
+        perms = getattr(current_user, "permissions", None)
+        has_perm = False
+
+        if perms:
+            # If it's the new Pydantic model, check the attribute directly
+            if hasattr(perms, "model_dump"):
+                has_perm = getattr(perms, required_permission, False)
+            # Fallback for dictionary (if data hasn't migrated)
+            elif isinstance(perms, dict):
+                has_perm = perms.get(required_permission, False)
+            # Fallback for old list style
+            elif isinstance(perms, list):
+                has_perm = required_permission in perms
+
+        if not has_perm:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {required_permission} required",
+            )
+
+        return current_user
+
+    return permission_checker
+
 # ==========================================================
 # AUDIT LOG
 # ==========================================================
@@ -132,6 +149,7 @@ async def create_audit_log(
     old_data: dict = None,
     new_data: dict = None
 ):
+    # ✅ CHANGE 4: AuditLog class is now correctly imported
     log = AuditLog(
         user_id=current_user.id,
         user_name=current_user.full_name,
