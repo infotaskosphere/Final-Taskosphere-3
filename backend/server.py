@@ -47,6 +47,7 @@ from backend.models import (
     HolidayResponse,
     HolidayCreate
 )
+from passlib.context import CryptContext
 from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
@@ -73,7 +74,6 @@ from io import StringIO, BytesIO
 import pandas as pd
 from zoneinfo import ZoneInfo
 india_time = datetime.now(ZoneInfo("Asia/Kolkata"))
-from passlib.context import CryptContext
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from backend.models import (
