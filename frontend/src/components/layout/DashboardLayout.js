@@ -59,19 +59,22 @@ const DashboardLayout = ({ children }) => {
     navigate("/login", { replace: true });
   };
 
-  const navItems = [
+const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
-    { path: '/todos', icon: CheckSquare, label: 'Todo Dashboard' },
-    { path: '/clients', icon: Building2, label: 'Clients' },
+    { path: '/todos', icon: CheckSquare, label: 'To Do' }, // Updated label from 'Todo Dashboard'
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-    { path: '/reports', icon: BarChart3, label: 'Reports' },
+    
+    // Registers Group
     { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
-    { path: '/documents', icon: FileText, label: 'Documents Register', permission: 'can_view_documents' },
-    { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
+    { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
+    
+    // Admin & Monitoring Group
     { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
+    { path: '/reports', icon: BarChart3, label: 'Reports' },
     { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
+    { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
   ];
 
   const visibleNavItems = navItems.filter(
@@ -125,36 +128,47 @@ const DashboardLayout = ({ children }) => {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-3 space-y-2 overflow-y-auto">
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+<nav className="flex-1 px-3 space-y-2 overflow-y-auto">
+  {visibleNavItems.map((item) => {
+    const Icon = item.icon;
+    const isActive = location.pathname === item.path;
 
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => {
-                    if (window.innerWidth < 1024) {
-                      setSidebarOpen(false);
-                    }
-                  }}
-                  className={`
-                    relative flex items-center
-                    ${collapsed ? 'justify-center' : 'space-x-3'}
-                    px-4 py-3 rounded-xl transition-all
-                    ${isActive
-                      ? 'text-white shadow-md'
-                      : 'text-slate-700 hover:bg-blue-100'}
-                  `}
-                  style={
-                    isActive
-                      ? {
-                          background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`
-                        }
-                      : {}
-                  }
-                >
+    return (
+      <React.Fragment key={item.path}>
+        {/* Adds a separator line before 'Staff Activity' to group Admin tools */}
+        {item.path === '/staff-activity' && (
+          <div className="my-4 border-t border-slate-200/50 mx-4" />
+        )}
+
+        <Link
+          to={item.path}
+          onClick={() => {
+            if (window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          className={`
+            relative flex items-center
+            ${collapsed ? 'justify-center' : 'space-x-3'}
+            px-4 py-3 rounded-xl transition-all
+            ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}
+          `}
+          style={isActive ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+        >
+          {isActive && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
+          )}
+
+          <Icon className="h-5 w-5 flex-shrink-0" />
+
+          {!collapsed && (
+            <span className="font-medium whitespace-nowrap transition-opacity duration-200">
+              {item.label}
+            </span>
+          )}
+        </Link>
+      </React.Fragment>
+    );
+  })}
+</nav>
                   {/* Active Indicator */}
                   {isActive && (
                     <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
