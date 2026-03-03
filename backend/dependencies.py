@@ -70,6 +70,9 @@ def safe_dt(value):
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
+    # ✅ FIX: Move import inside the function to prevent Circular Dependency crashes
+    from backend.models import User
+
     try:
         token = credentials.credentials
         payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
@@ -87,6 +90,7 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
 
+    # Fetch user from MongoDB
     user_dict = await db.users.find_one({"id": user_id})
 
     if not user_dict:
@@ -95,10 +99,23 @@ async def get_current_user(
             detail="User not found",
         )
 
+    # Clean the MongoDB internal ID
     user_dict.pop("_id", None)
 
-    return User(**user_dict)
+    # ✅ SAFETY: Clean empty strings before creating the User object
+    # This prevents the Pydantic ValidationError that crashes your Dashboard
+    for key, value in user_dict.items():
+        if value == "":
+            user_dict[key] = None
 
+    try:
+        return User(**user_dict)
+    except Exception as e:
+        logger.error(f"Error validating user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User profile data is corrupted. Please check birthday/phone fields."
+        )
 # ==========================================================
 # PERMISSION CHECK
 # ==========================================================
@@ -142,14 +159,16 @@ def check_permission(required_permission: str):
 # ==========================================================
 
 async def create_audit_log(
-    current_user: User,
+    current_user: Any,  # Use Any to avoid type-check errors during startup
     action: str,
     module: str,
     record_id: str,
     old_data: dict = None,
     new_data: dict = None
 ):
-    # ✅ CHANGE 4: AuditLog class is now correctly imported
+    # ✅ FIX: Move import inside the function to prevent Circular Dependency
+    from backend.models import AuditLog
+
     log = AuditLog(
         user_id=current_user.id,
         user_name=current_user.full_name,
@@ -162,7 +181,9 @@ async def create_audit_log(
 
     doc = log.model_dump()
 
-    # Ensure proper datetime format for Mongo
+    # Ensure proper datetime format for MongoDB
+    # If your AuditLog model uses a default factory for datetime, 
+    # it is already a datetime object.
     if isinstance(doc.get("timestamp"), datetime):
         doc["timestamp"] = doc["timestamp"]
 
