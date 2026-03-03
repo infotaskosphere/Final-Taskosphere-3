@@ -1120,6 +1120,24 @@ useEffect(() => {
 
  {/* Quick Access Tiles */}
  <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
+
+ <motion.div
+    whileHover={{ y: -5, scale: 1.01 }}
+    whileTap={{ scale: 0.985 }}
+    onClick={() => navigate('/leads')}
+    className="border border-slate-100 hover:shadow-xl hover:border-slate-200 transition-all cursor-pointer group rounded-3xl"
+  >
+    <CardContent className="p-6 flex items-center gap-5">
+      <div className="p-4 rounded-2xl group-hover:scale-125 transition-transform" style={{ backgroundColor: `${COLORS.mediumBlue}15` }}>
+        <Target className="h-6 w-6" style={{ color: COLORS.mediumBlue }} />
+      </div>
+      <div>
+        <p className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>Leads</p>
+        <p className="text-sm text-slate-500">Pipeline</p>
+      </div>
+    </CardContent>
+  </motion.div>
+  
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
  whileTap={{ scale: 0.985 }}
