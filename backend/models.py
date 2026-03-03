@@ -2,6 +2,8 @@ import uuid
 import re
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, model_validator
+from typing import Any
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 
 # Timezone Configuration
@@ -355,7 +357,7 @@ class MasterClientForm(BaseModel):
     """Expanded model to capture ALL details from the sheet and form"""
     company_name: str
     client_type: str  # pvt_ltd, llp, proprietor, etc.
-    email: EmailStr
+    email: Optional[EmailStr] = None # Changed to Optional to prevent crashes on missing email
     phone: str
     date_of_incorporation: Optional[date] = None
     gst_number: Optional[str] = None
@@ -363,8 +365,17 @@ class MasterClientForm(BaseModel):
     tan_number: Optional[str] = None
     assigned_to: Optional[str] = None  # Personnel ID
     services: List[str] = []
-    contact_persons: List[ContactPerson] = []
+    contact_persons: List[Any] = [] # Changed to Any if ContactPerson is defined elsewhere
     notes: Optional[str] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def clean_empty_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if v == "":
+                    data[k] = None
+        return data
 
 # ======================
 # DUE DATES & REMINDERS
