@@ -72,13 +72,9 @@ async def health():
     return {"status": "ok", "cors": "configured correctly"}
 
 # ====================== SECURITY & DB (your original) ======================
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
 rankings_cache = {}
 rankings_cache_time = {}
+
 # ===================== HELPER FUNCTIONS =====================
 def safe_dt(value):
     if not value:
