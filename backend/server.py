@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
-from backend.dependencies import get_current_user, create_access_token
-from fastapi.middleware.cors import CORSMiddleware # ← important
+from backend.dependencies import get_current_user, create_access_token, db
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -23,9 +23,7 @@ from io import StringIO, BytesIO
 import pandas as pd
 from zoneinfo import ZoneInfo
 india_time = datetime.now(ZoneInfo("Asia/Kolkata"))
-from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
-from jose import jwt, JWTError
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from backend.models import (
@@ -71,11 +69,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 @app.get("/health")
 async def health():
     return {"status": "ok", "cors": "configured correctly"}
-
 # ====================== SECURITY & DB (your original) ======================
 rankings_cache = {}
 rankings_cache_time = {}
-
 # ===================== HELPER FUNCTIONS =====================
 def safe_dt(value):
     if not value:
@@ -86,7 +82,7 @@ def safe_dt(value):
         return datetime.fromisoformat(value)
     except Exception:
         return None
-        
+       
 def sanitize_user_data(users, current_user):
     sanitized = []
     for user in users:
@@ -110,7 +106,7 @@ def sanitize_user_data(users, current_user):
                 "is_active": getattr(user, "is_active", True)
             })
     return sanitized
-   
+  
 def convert_objectids(data):
     """
     Recursively convert MongoDB ObjectId fields to string.
@@ -128,7 +124,7 @@ def convert_objectids(data):
                 new_dict[key] = value
         return new_dict
     return data
-   
+  
 async def calculate_expected_hours(start_date, end_date, punch_in_time=None):
     """
     Calculate expected working hours between two dates.
@@ -154,28 +150,7 @@ async def calculate_expected_hours(start_date, end_date, punch_in_time=None):
             total_hours += WORKING_HOURS_PER_DAY
         current_date += timedelta(days=1)
     return round(total_hours, 2)
-   
-def check_permission(permission_name: str):
- def dependency(current_user: User = Depends(get_current_user)):
-  # Admin override
-  if current_user.role.lower() == "admin":
-   return current_user
-  # Safely extract permissions (handle both dict and model)
-  permissions = current_user.permissions
-  if isinstance(permissions, dict):
-   user_permissions = permissions
-  elif permissions:
-   user_permissions = permissions.model_dump()
-  else:
-   user_permissions = {}
-  if not user_permissions.get(permission_name, False):
-   raise HTTPException(
-    status_code=403,
-    detail="You do not have permission"
-   )
-  return current_user
- return dependency
-
+  
 @app.on_event("startup")
 async def create_indexes():
  await db.tasks.create_index("assigned_to")
@@ -206,7 +181,6 @@ async def create_indexes():
  )
 # NEW: Holiday index for fast lookup
  await db.holidays.create_index("date", unique=True)
-
 # ROUTER
 api_router = APIRouter(prefix="/api")
 # HELPERS
@@ -324,7 +298,6 @@ def send_email(to_email: str, subject: str, body: str):
   return response.status_code == 202
  except Exception as e:
   raise Exception(f"SendGrid error: {str(e)}")
-
 # AUTH ROUTES
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
@@ -806,7 +779,7 @@ async def get_top_performers_data(
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
     # Fetch data directly as dictionaries
     users_raw = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
-   
+  
     for u in users_raw:
         # Convert ISO strings to datetime objects so Pydantic doesn't crash
         if "created_at" in u and isinstance(u["created_at"], str):
@@ -814,7 +787,7 @@ async def get_users(current_user: User = Depends(check_permission("can_view_user
                 u["created_at"] = datetime.fromisoformat(u["created_at"])
             except:
                 u["created_at"] = datetime.utcnow() # Fallback
-               
+              
     # Return sanitized data
     return sanitize_user_data(users_raw, current_user)
 @api_router.put("/users/{user_id}", response_model=User)
@@ -830,13 +803,13 @@ async def update_user(user_id: str, user_data: dict, current_user: User = Depend
         "birthday", "punch_in_time", "grace_time",
         "punch_out_time", "is_active", "profile_picture"
     ]
-   
+  
     # Filter the incoming data
     update_payload = {k: v for k, v in user_data.items() if k in allowed_fields}
-   
+  
     # Apply to DB
     await db.users.update_one({"id": user_id}, {"$set": update_payload})
-   
+  
     # Audit log the change
     await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
     # Return the fresh data
@@ -1925,7 +1898,6 @@ async def export_reports(
     else {}
    )
    allowed_users = permissions.get("view_other_reports", [])
- 
    if target_user_id not in allowed_users:
     raise HTTPException(
      status_code=403,
@@ -2204,7 +2176,6 @@ async def sync_master_sheets(
    df = pd.read_excel(excel, sheet_name=sheet).fillna("")
    records = df.to_dict(orient="records")
    sheet_type = sheet.lower()
- 
    # Layer A: Client Registry Vectors
    if "client" in sheet_type:
     for rec in records:
@@ -2222,7 +2193,6 @@ async def sync_master_sheets(
       upsert=True
      )
      sync_results["clients"] += 1
- 
    # Layer B: Compliance (Due Dates/Reminders) Vectors
    elif "due" in sheet_type or "compliance" in sheet_type:
     for rec in records:
@@ -2531,7 +2501,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     due_date = due_date.replace(tzinfo=timezone.utc)
    if due_date < now:
     overdue_tasks += 1
- 
  # DSC statistics
  dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
  total_dsc = len(dsc_list)
@@ -2907,13 +2876,12 @@ app.include_router(leads_router)
 api_router.include_router(notification_router)
 app.include_router(api_router)
 import traceback
-
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     # This logs the EXACT line number and file that caused the 500
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
-    logger.error(traceback.format_exc()) 
-    
+    logger.error(traceback.format_exc())
+   
     return JSONResponse(
         status_code=500,
         content={
