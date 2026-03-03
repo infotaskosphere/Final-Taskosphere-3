@@ -125,24 +125,27 @@ async def get_current_user(
 # ==========================================================
 
 async def create_audit_log(
-    current_user,
+    current_user: User,
     action: str,
     module: str,
-    record_id: str = None,
+    record_id: str,
     old_data: dict = None,
-    new_data: dict = None,
+    new_data: dict = None
 ):
-    try:
-        await db.audit_logs.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": current_user.id,
-            "user_name": getattr(current_user, "full_name", None),
-            "action": action,
-            "module": module,
-            "record_id": record_id,
-            "old_data": old_data,
-            "new_data": new_data,
-            "timestamp": datetime.now(timezone.utc),
-        })
-    except Exception as e:
-        print("Audit log error:", e)
+    log = AuditLog(
+        user_id=current_user.id,
+        user_name=current_user.full_name,
+        action=action,
+        module=module,
+        record_id=record_id,
+        old_data=old_data,
+        new_data=new_data
+    )
+
+    doc = log.model_dump()
+
+    # Ensure proper datetime format for Mongo
+    if isinstance(doc.get("timestamp"), datetime):
+        doc["timestamp"] = doc["timestamp"]
+
+    await db.audit_logs.insert_one(doc)
