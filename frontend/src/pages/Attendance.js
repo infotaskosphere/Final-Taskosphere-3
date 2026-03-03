@@ -202,7 +202,7 @@ export default function Attendance() {
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
 
-  
+    
     if (todayAttendance.punch_out) {
       return formatDuration(todayAttendance.duration_minutes);
     }
@@ -237,8 +237,8 @@ export default function Attendance() {
   const lateDates = isLateToday && todayAttendance?.date
     ? [parseISO(todayAttendance.date)]
     : attendanceHistory
-        .filter(a => a.is_late === true)
-        .map(a => parseISO(a.date));
+      .filter(a => a.is_late === true)
+      .map(a => parseISO(a.date));
   const modifiers = {
     present: attendanceDates,
     late: lateDates,
@@ -418,23 +418,23 @@ export default function Attendance() {
         </Card>
         {/* Your Star Performance Rank */}
         {canViewRankings && (
-        <Card className="border border-slate-200 shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Your Star Performance Rank</p>
-                <p className="text-5xl font-extrabold mt-1 font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
-                  {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
-                  {myRank}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">overall</p>
+          <Card className="border border-slate-200 shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Your Star Performance Rank</p>
+                  <p className="text-5xl font-extrabold mt-1 font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
+                    {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
+                    {myRank}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">overall</p>
+                </div>
+                <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
+                  <TrendingUp className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
+                </div>
               </div>
-              <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                <TrendingUp className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
         )}
       </motion.div>
       {/* Live Total Hours Today Card */}
@@ -477,7 +477,7 @@ export default function Attendance() {
                 </p>
               </div>
 
-                {/* Days Present */}
+              {/* Days Present */}
               <div className="bg-white rounded-xl p-5 border shadow-sm">
                 <p className="text-xs text-slate-500 uppercase">Days Present</p>
                 <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
@@ -489,9 +489,9 @@ export default function Attendance() {
               <div className="bg-white rounded-xl p-5 border shadow-sm">
                 <p className="text-xs text-slate-500 uppercase">Days Late</p>
                 <p className="text-2xl font-bold mt-1 text-red-500">
-                    {totalDaysLateThisMonth}
-                  </p>
-                </div>
+                  {totalDaysLateThisMonth}
+                </p>
+              </div>
 
             </div>
           </CardContent>
