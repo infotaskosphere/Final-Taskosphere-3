@@ -970,106 +970,108 @@ def get_real_client_ip(request: Request):
   return request.client.host
  return None
  
+
 # ── UPDATE EXISTING /attendance ENDPOINT ───────────────────────────────
 
 @api_router.post("/attendance")
-async def handle_attendance(data: dict, current_user: User = Depends(get_current_user)):
+async def handle_attendance(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
     today = datetime.now(india_tz).date()
-    today_str = today.isoformat()
+    today_str = today.isoformat() # Standardize to string "YYYY-MM-DD"
 
-    # FIX: Use today_str for the holiday check
+    # FIX: Query using the string today_str to match database format
     holiday = await db.holidays.find_one({"date": today_str})
     if holiday:
         raise HTTPException(
             status_code=400,
-            detail=f"Today is a holiday ({holiday.get('name')})."
+            detail=f"Today is a holiday ({holiday.get('name')}). Attendance marking is not allowed."
         )
- # ============================================================
 
- action = data.get("action")
+    action = data.get("action")
 
- if action not in ["punch_in", "punch_out"]:
-  raise HTTPException(status_code=400, detail="Invalid action")
+    if action not in ["punch_in", "punch_out"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
 
- attendance = await db.attendance.find_one(
-  {"user_id": current_user.id, "date": today_str}
- )
+    attendance = await db.attendance.find_one(
+        {"user_id": current_user.id, "date": today_str}
+    )
 
- if action == "punch_in":
-  if attendance and attendance.get("punch_in"):
-   raise HTTPException(status_code=400, detail="Already punched in")
+    if action == "punch_in":
+        if attendance and attendance.get("punch_in"):
+            raise HTTPException(status_code=400, detail="Already punched in")
 
-  await db.attendance.update_one(
-   {"user_id": current_user.id, "date": today_str},
-   {
-    "$set": {
-     "status": "present",
-     "punch_in": datetime.now(timezone.utc),
-     "leave_reason": None
-    }
-   },
-   upsert=True
-  )
+        await db.attendance.update_one(
+            {"user_id": current_user.id, "date": today_str},
+            {
+                "$set": {
+                    "status": "present",
+                    "punch_in": datetime.now(timezone.utc),
+                    "leave_reason": None
+                }
+            },
+            upsert=True
+        )
 
-  return {"message": "Punched in successfully"}
+        return {"message": "Punched in successfully"}
 
- if action == "punch_out":
-  if not attendance or not attendance.get("punch_in"):
-   raise HTTPException(status_code=400, detail="Not punched in yet")
+    if action == "punch_out":
+        if not attendance or not attendance.get("punch_in"):
+            raise HTTPException(status_code=400, detail="Not punched in yet")
 
-  if attendance.get("punch_out"):
-   raise HTTPException(status_code=400, detail="Already punched out")
+        if attendance.get("punch_out"):
+            raise HTTPException(status_code=400, detail="Already punched out")
 
-  await db.attendance.update_one(
-   {"user_id": current_user.id, "date": today_str},
-   {
-    "$set": {
-     "punch_out": datetime.now(timezone.utc)
-    }
-   }
-  )
+        await db.attendance.update_one(
+            {"user_id": current_user.id, "date": today_str},
+            {
+                "$set": {
+                    "punch_out": datetime.now(timezone.utc)
+                }
+            }
+        )
 
-  return {"message": "Punched out successfully"}
+        return {"message": "Punched out successfully"}
 
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
- today = datetime.now(india_tz).date()
- today_str = today.isoformat()
+    today = datetime.now(india_tz).date()
+    today_str = today.isoformat()
 
- # ==================== HOLIDAY CHECK (STEP 5) ====================
- holiday = await db.holidays.find_one({"date": today})
- if holiday:
-  raise HTTPException(
-   status_code=400,
-   detail=f"Today is a holiday ({holiday.get('name')}). Leave marking is not allowed."
-  )
- # ============================================================
+    # FIX: Query using today_str string
+    holiday = await db.holidays.find_one({"date": today_str})
+    if holiday:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Today is a holiday ({holiday.get('name')}). Leave marking is not allowed."
+        )
 
- await db.attendance.update_one(
-  {"user_id": current_user.id, "date": today_str},
-  {
-   "$set": {
-    "status": "leave",
-    "punch_in": None,
-    "punch_out": None,
-    "leave_reason": "Marked on leave today"
-   }
-  },
-  upsert=True
- )
+    await db.attendance.update_one(
+        {"user_id": current_user.id, "date": today_str},
+        {
+            "$set": {
+                "status": "leave",
+                "punch_in": None,
+                "punch_out": None,
+                "leave_reason": "Marked on leave today"
+            }
+        },
+        upsert=True
+    )
 
- return {"message": "Marked on leave today"}
+    return {"message": "Marked on leave today"}
 
 # ── GET TODAY ATTENDANCE ───────────────────────────────────────────────
 
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
     today = datetime.now(india_tz).date()
-    today_str = today.isoformat() # Convert to "YYYY-MM-DD" string
+    today_str = today.isoformat() 
 
-    # FIX: Query using the string today_str, not the date object
+    # FIX: Query using today_str string
     holiday = await db.holidays.find_one({"date": today_str}) 
     if holiday:
         return {
@@ -1080,28 +1082,25 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "leave_reason": None
         }
   
- # ============================================================
+    attendance = await db.attendance.find_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"_id": 0}
+    )
 
- attendance = await db.attendance.find_one(
-  {"user_id": current_user.id, "date": today_str},
-  {"_id": 0}
- )
+    if not attendance:
+        return {
+            "status": "absent",
+            "punch_in": None,
+            "punch_out": None,
+            "leave_reason": None
+        }
 
- if not attendance:
-  return {
-   "status": "absent",
-   "punch_in": None,
-   "punch_out": None,
-   "leave_reason": None
-  }
+    if "status" not in attendance:
+        attendance["status"] = (
+            "present" if attendance.get("punch_in") else "absent"
+        )
 
- # Ensure status exists
- if "status" not in attendance:
-  attendance["status"] = (
-   "present" if attendance.get("punch_in") else "absent"
-  )
-
- return attendance
+    return attendance
 
 # ── APPLY LEAVE (DATE RANGE SUPPORT) ───────────────────────────────
 
