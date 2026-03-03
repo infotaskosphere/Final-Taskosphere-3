@@ -5,7 +5,7 @@ import uuid
 import logging
 from backend.dependencies import db, get_current_user
 from pydantic import BaseModel, Field, ConfigDict
-from backend.server import safe_dt
+from backend.dependencies import safe_dt
 
 logger = logging.getLogger(__name__)
 
