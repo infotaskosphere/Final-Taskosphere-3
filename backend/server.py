@@ -118,6 +118,27 @@ def sanitize_user_data(users, current_user):
 
     return sanitized
     
+def convert_objectids(data):
+    """
+    Recursively convert MongoDB ObjectId fields to string.
+    """
+
+    if isinstance(data, list):
+        return [convert_objectids(item) for item in data]
+
+    if isinstance(data, dict):
+        new_dict = {}
+        for key, value in data.items():
+            if isinstance(value, ObjectId):
+                new_dict[key] = str(value)
+            elif isinstance(value, (dict, list)):
+                new_dict[key] = convert_objectids(value)
+            else:
+                new_dict[key] = value
+        return new_dict
+
+    return data
+    
 async def calculate_expected_hours(start_date, end_date, punch_in_time=None):
     """
     Calculate expected working hours between two dates.
