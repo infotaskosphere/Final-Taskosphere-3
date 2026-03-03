@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -28,6 +29,7 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
+
 // Department categories with colors (Synced with backend logic)
 const DEPARTMENTS = [
   { value: 'GST', label: 'GST', color: '#1E3A8A' },
@@ -41,14 +43,17 @@ const DEPARTMENTS = [
   { value: 'DSC', label: 'DSC', color: '#3F3F46' },
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -67,6 +72,7 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
+
 const UserCard = ({
   userData,
   onEdit,
@@ -199,12 +205,14 @@ const UserCard = ({
     </motion.div>
   );
 };
+
 export default function Users() {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, refreshUser } = useAuth();
   const isAdmin = user?.role === "admin";
   const canViewUserPage = hasPermission("can_view_user_page") || isAdmin;
   const canEditUsers = hasPermission("can_edit_users") || isAdmin;
   const canManagePermissions = hasPermission("can_manage_users") || isAdmin;
+
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,6 +221,7 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
+
   // Form State (Synced with Backend User Model)
   const [formData, setFormData] = useState({
     full_name: '',
@@ -229,6 +238,7 @@ export default function Users() {
     telegram_id: null,
     is_active: true
   });
+
   // Permissions State (Synced with Backend UserPermissions Model)
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
@@ -260,17 +270,21 @@ export default function Users() {
     view_other_activity: [],
     can_edit_clients: false,
     can_use_chat: false,
-    can_view_all_leads: false, // NEW: Control access to Leads module
-    can_edit_leads: false,      // NEW: Control edit/delete of leads
+    can_view_all_leads: false,
+    can_edit_leads: false,
+    can_manage_settings: false,
   });
+
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+
   useEffect(() => {
     if (canViewUserPage) {
       fetchUsers();
       fetchClients();
     }
   }, [canViewUserPage]);
+
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -279,6 +293,7 @@ export default function Users() {
       toast.error('Failed to fetch users');
     }
   };
+
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -287,6 +302,7 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
+
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
@@ -299,10 +315,12 @@ export default function Users() {
       toast.error("Using default permission template");
     }
   };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
+
   const handleDepartmentChange = (dept) => {
     setFormData(prev => ({
       ...prev,
@@ -311,6 +329,7 @@ export default function Users() {
         : [...prev.departments, dept]
     }));
   };
+
   const handleProfilePictureChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -324,11 +343,12 @@ export default function Users() {
       toast.error('Failed to process image');
     }
   };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
       if (selectedUser) {
-        // Only sending backend-allowed fields for updates
+        // Construct expanded update payload
         const updatePayload = {
           full_name: formData.full_name,
           role: formData.role,
@@ -338,13 +358,21 @@ export default function Users() {
           punch_in_time: formData.punch_in_time,
           grace_time: formData.grace_time,
           punch_out_time: formData.punch_out_time,
-          is_active: formData.is_active
+          is_active: formData.is_active,
+          profile_picture: formData.profile_picture
         };
+
         await api.put(`/users/${selectedUser.id}`, updatePayload);
-        toast.success('User details updated');
+        
+        // Refresh session if editing self
+        if (selectedUser.id === user.id) {
+          await refreshUser();
+        }
+
+        toast.success('User profile successfully synchronized');
       } else {
         await api.post('/auth/register', formData);
-        toast.success('New user registered successfully');
+        toast.success('New member registered successfully');
       }
       setDialogOpen(false);
       fetchUsers();
@@ -354,12 +382,13 @@ export default function Users() {
       setLoading(false);
     }
   };
+
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
       full_name: userData.full_name,
       email: userData.email,
-      password: '', // Hidden for security
+      password: '', 
       role: userData.role,
       departments: userData.departments || [],
       phone: userData.phone || '',
@@ -372,6 +401,7 @@ export default function Users() {
     });
     setDialogOpen(true);
   };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure? This will permanently delete the user and their logs.')) return;
     try {
@@ -382,15 +412,23 @@ export default function Users() {
       toast.error(error.response?.data?.detail || 'Failed to delete user');
     }
   };
+
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
     await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
+
   const handleSavePermissions = async () => {
     setLoading(true);
     try {
       await api.put(`/users/${selectedUserForPermissions.id}/permissions`, permissions);
+      
+      // Refresh session if editing self
+      if (selectedUserForPermissions.id === user.id) {
+        await refreshUser();
+      }
+
       toast.success('System access rules updated');
       setPermissionsDialogOpen(false);
     } catch (error) {
@@ -399,12 +437,14 @@ export default function Users() {
       setLoading(false);
     }
   };
+
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role?.toLowerCase() === activeTab;
     return matchesSearch && matchesTab;
   });
+
   if (!canViewUserPage) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
@@ -416,6 +456,7 @@ export default function Users() {
       </div>
     );
   }
+
   return (
     <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
       {/* Header Section */}
@@ -435,7 +476,7 @@ export default function Users() {
                   setFormData({
                     full_name: '', email: '', password: '', role: 'staff',
                     departments: [], phone: '', birthday: '', profile_picture: '',
-                    punch_in_time: '09:30', grace_time: '00:15', punch_out_time: '18:30',
+                    punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
                     is_active: true
                   });
                 }}
@@ -632,7 +673,7 @@ export default function Users() {
           </div>
           <div className="p-6 space-y-6">
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
-             
+              
               {/* Data Access Section */}
               <AccordionItem value="global" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
