@@ -168,17 +168,7 @@ def check_permission(permission_name: str):
    )
   return current_user
  return dependency
-def safe_dt(dt_input):
-    """Permanently handles None, strings, and datetime objects."""
-    if dt_input is None:
-        return None
-    if isinstance(dt_input, datetime):
-        return dt_input
-    try:
-        # Handles ISO strings from Mongo
-        return parser.parse(dt_input)
-    except (ValueError, TypeError):
-        return None
+
 @app.on_event("startup")
 async def create_indexes():
  await db.tasks.create_index("assigned_to")
