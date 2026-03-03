@@ -569,9 +569,9 @@ export default function Users() {
                   <Select value={formData.role} onValueChange={(val) => setFormData({...formData, role: val})}>
                     <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="staff">Associate / Staff</SelectItem>
-                      <SelectItem value="manager">Dept. Manager</SelectItem>
-                      <SelectItem value="admin">System Administrator</SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
