@@ -1199,7 +1199,7 @@ export default function Dashboard() {
  animate={{ scale: 1, y: 0 }}
  exit={{ scale: 0.9, y: 40 }}
  transition={{ type: "spring", stiffness: 160, damping: 18 }}
- className="bg-white w-[480px] p-10 rounded-3xl shadow-2xl text-center relative"
+ className="bg-white w-full max-w-md mx-4 p-6 md:p-10 rounded-3xl shadow-2xl text-center relative"
  >
  <motion.h2
  className="text-3xl font-bold mb-3"
