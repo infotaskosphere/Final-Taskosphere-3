@@ -7,6 +7,7 @@ from backend.dependencies import get_current_user, create_access_token
 from backend.telegram import router as telegram_router
 from typing import Optional
 from typing import Dict, Any
+from .leads import router as leads_router
 from datetime import date
 import pytz
 import logging
@@ -3313,5 +3314,6 @@ async def create_holiday(
 
 # Api Router
 api_router.include_router(telegram_router)
+app.include_router(leads_router)
 api_router.include_router(notification_router)
 app.include_router(api_router)
