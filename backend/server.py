@@ -1057,6 +1057,46 @@ async def get_today_attendance(
         )
 
     return attendance
+
+# ── APPLY LEAVE (DATE RANGE SUPPORT) ───────────────────────────────
+
+@api_router.post("/attendance/apply-leave")
+async def apply_leave(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        from_date = datetime.fromisoformat(data["from_date"]).date()
+        to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
+        reason = data.get("reason", "Leave Applied")
+
+        if to_date < from_date:
+            raise HTTPException(status_code=400, detail="Invalid date range")
+
+        current = from_date
+
+        while current <= to_date:
+            await db.attendance.update_one(
+                {
+                    "user_id": current_user.id,
+                    "date": current.isoformat()
+                },
+                {
+                    "$set": {
+                        "status": "leave",
+                        "leave_reason": reason,
+                        "punch_in": None,
+                        "punch_out": None
+                    }
+                },
+                upsert=True
+            )
+            current += timedelta(days=1)
+
+        return {"message": "Leave applied successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
       
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
