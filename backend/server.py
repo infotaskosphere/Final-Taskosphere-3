@@ -94,7 +94,10 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-# ====================== APP + FIXED CORS (MUST BE FIRST) ======================
+
+# ====================== SECURITY CONFIG ===========================
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# ====================== APP + FIXED CORS (MUST BE FIRST) ===========
 app = FastAPI(title="Taskosphere Backend")
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 app.add_middleware(
