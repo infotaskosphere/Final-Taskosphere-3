@@ -1,17 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional
-from backend.models import User
-from backend.dependencies import db
-from backend.server import create_audit_log
+from typing import List, Optional, Literal
 from datetime import datetime, timezone
 from bson import ObjectId
-from backend.models import User
-from backend.dependencies import db
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 import uuid
 import logging
 
-from backend.dependencies import get_current_user
+from backend.dependencies import db, get_current_user
+from backend.server import create_audit_log  # correct location
+from backend.models import User  # only if actually needed
 
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
 logger = logging.getLogger(__name__)
@@ -25,8 +22,8 @@ class LeadBase(BaseModel):
     contact_person: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
-    status: str = "new"
-    source: Optional[str] = "direct"
+    status: Literal["new", "contacted", "qualified", "won", "lost"] = "new"
+    source: Literal["direct", "website", "referral", "social_media", "event"] = "direct"
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
@@ -35,6 +32,19 @@ class LeadBase(BaseModel):
 
 class LeadCreate(LeadBase):
     pass
+
+
+class LeadUpdate(BaseModel):
+    company_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    status: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = None
+    source: Optional[Literal["direct", "website", "referral", "social_media", "event"]] = None
+    next_follow_up: Optional[datetime] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    converted_client_id: Optional[str] = None
 
 
 class Lead(LeadBase):
@@ -65,7 +75,7 @@ def validate_obj_id(id_str: str):
     if not ObjectId.is_valid(id_str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid hex format for Lead ID: {id_str}",
+            detail=f"Invalid Lead ID: {id_str}",
         )
     return ObjectId(id_str)
 
@@ -73,11 +83,13 @@ def validate_obj_id(id_str: str):
 # ====================== ROUTES ======================
 
 @router.post("/", response_model=Lead)
-async def create_lead(lead_data: LeadCreate, current_user=Depends(get_current_user)):
-    
+async def create_lead(
+    lead_data: LeadCreate,
+    current_user=Depends(get_current_user),
+):
     now = datetime.now(timezone.utc)
-    lead_dict = lead_data.model_dump()
 
+    lead_dict = lead_data.model_dump()
     lead_dict.update({
         "created_by": current_user.id,
         "created_at": now,
@@ -92,7 +104,7 @@ async def create_lead(lead_data: LeadCreate, current_user=Depends(get_current_us
 
 @router.get("/", response_model=List[Lead])
 async def get_leads(
-    status_filter: Optional[str] = Query(None, alias="status"),
+    status_filter: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = Query(None, alias="status"),
     current_user=Depends(get_current_user),
 ):
     query = {}
@@ -121,8 +133,8 @@ async def get_leads(
 @router.get("/{lead_id}", response_model=Lead)
 async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     obj_id = validate_obj_id(lead_id)
-    raw_lead = await db.leads.find_one({"_id": obj_id})
 
+    raw_lead = await db.leads.find_one({"_id": obj_id})
     if not raw_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -130,35 +142,48 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
 
 
 @router.patch("/{lead_id}", response_model=Lead)
-async def update_lead(lead_id: str, updates: dict, current_user=Depends(get_current_user)):
+async def update_lead(
+    lead_id: str,
+    updates: LeadUpdate,
+    current_user=Depends(get_current_user),
+):
     obj_id = validate_obj_id(lead_id)
-    existing = await db.leads.find_one({"_id": obj_id})
 
+    existing = await db.leads.find_one({"_id": obj_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    updates["updated_at"] = datetime.now(timezone.utc)
+    update_dict = updates.model_dump(exclude_unset=True)
 
-    await db.leads.update_one({"_id": obj_id}, {"$set": updates})
+    if update_dict:
+        update_dict["updated_at"] = datetime.now(timezone.utc)
 
-    await create_audit_log(
-        current_user=current_user,
-        action="UPDATE_LEAD",
-        module="leads",
-        record_id=lead_id,
-        old_data={"status": existing.get("status")},
-        new_data=updates,
-    )
+        await db.leads.update_one(
+            {"_id": obj_id},
+            {"$set": update_dict},
+        )
+
+        await create_audit_log(
+            current_user=current_user,
+            action="UPDATE_LEAD",
+            module="leads",
+            record_id=lead_id,
+            old_data={"status": existing.get("status")},
+            new_data=update_dict,
+        )
 
     updated_doc = await db.leads.find_one({"_id": obj_id})
     return normalize_lead_doc(updated_doc)
 
 
 @router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
-async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_user)):
+async def convert_lead_to_client(
+    lead_id: str,
+    current_user=Depends(get_current_user),
+):
     obj_id = validate_obj_id(lead_id)
-    lead = await db.leads.find_one({"_id": obj_id})
 
+    lead = await db.leads.find_one({"_id": obj_id})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -176,6 +201,7 @@ async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_
         "assigned_to": lead.get("assigned_to") or current_user.id,
         "created_by": current_user.id,
         "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
         "notes": f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}",
     }
 
@@ -193,12 +219,12 @@ async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_
     )
 
     await create_audit_log(
-        current_user,
-        "LEAD_CONVERTED",
-        "leads",
-        lead_id,
-        None,
-        {"client_id": client_id},
+        current_user=current_user,
+        action="LEAD_CONVERTED",
+        module="leads",
+        record_id=lead_id,
+        old_data=None,
+        new_data={"client_id": client_id},
     )
 
     return {"message": "Conversion successful", "client_id": client_id}
@@ -209,12 +235,12 @@ async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
     if current_user.role.lower() != "admin":
         raise HTTPException(
             status_code=403,
-            detail="Administrative privileges required to delete leads.",
+            detail="Administrative privileges required.",
         )
 
     obj_id = validate_obj_id(lead_id)
-    result = await db.leads.delete_one({"_id": obj_id})
 
+    result = await db.leads.delete_one({"_id": obj_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
 
