@@ -77,6 +77,12 @@ class UserCreate(BaseModel):
     telegram_id: Optional[int] = None
     permissions: Dict[str, Any] = {}
 
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: str = "user"
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
