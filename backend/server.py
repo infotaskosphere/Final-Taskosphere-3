@@ -216,7 +216,8 @@ class UserPermissions(BaseModel):
  # Admin-like Feature Grants
  can_edit_clients: bool = False
  can_use_chat: bool = False
- can_manage_settings: bool = False  # ← NEW for holiday management
+ can_view_all_leads: bool = False
+ can_manage_settings: bool = False
 
 class Todo(BaseModel):
  model_config = ConfigDict(extra="ignore")
