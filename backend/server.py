@@ -89,6 +89,34 @@ db = client[os.environ['DB_NAME']]
 rankings_cache = {}
 rankings_cache_time = {}
 
+# ===================== HELPER FUNCTIONS =====================
+
+def sanitize_user_data(users, current_user):
+    sanitized = []
+
+    for user in users:
+        # Handle both dict and object cases
+        if isinstance(user, dict):
+            sanitized.append({
+                "id": user.get("id"),
+                "email": user.get("email"),
+                "full_name": user.get("full_name"),
+                "role": user.get("role"),
+                "profile_picture": user.get("profile_picture"),
+                "is_active": user.get("is_active", True)
+            })
+        else:
+            sanitized.append({
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role,
+                "profile_picture": getattr(user, "profile_picture", None),
+                "is_active": getattr(user, "is_active", True)
+            })
+
+    return sanitized
+
 def check_permission(permission_name: str):
  def dependency(current_user: User = Depends(get_current_user)):
   # Admin override
