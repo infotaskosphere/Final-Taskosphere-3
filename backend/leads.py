@@ -42,7 +42,7 @@ class Lead(LeadBase):
 # ====================== HELPERS ======================
 
 def normalize_lead_doc(doc: dict) -> dict:
-    from backend.server import safe_dt  # LOCAL IMPORT (prevents circular import)
+    from backend.dependencies import safe_dt
 
     if not doc:
         return doc
