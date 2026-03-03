@@ -1164,34 +1164,47 @@ async def get_top_performers_data(
 # User routes
 @api_router.get("/users")
 async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
- users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
- for user in users:
-  if "created_at" in user and isinstance(user["created_at"], str):
-   user["created_at"] = datetime.fromisoformat(user["created_at"])
- return sanitize_user_data(users, current_user)
+    # Fetch data directly as dictionaries
+    users_raw = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    
+    for u in users_raw:
+        # Convert ISO strings to datetime objects so Pydantic doesn't crash
+        if "created_at" in u and isinstance(u["created_at"], str):
+            try:
+                u["created_at"] = datetime.fromisoformat(u["created_at"])
+            except:
+                u["created_at"] = datetime.utcnow() # Fallback
+                
+    # Return sanitized data
+    return sanitize_user_data(users_raw, current_user)
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(user_id: str, user_data: dict, current_user: User = Depends(check_permission("can_edit_users"))):
- if current_user.role != "admin":
-  raise HTTPException(status_code=403, detail="Not authorized")
- existing = await db.users.find_one({"id": user_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="User not found")
- # Only allow updating these fields
- allowed_fields = ["full_name", "role", "departments"]
- update_data = {k: v for k, v in user_data.items() if k in allowed_fields}
- await db.users.update_one({"id": user_id}, {"$set": update_data})
- await create_audit_log(
-  current_user,
-  action="UPDATE_USER",
-  module="user",
-  record_id=user_id,
-  old_data=existing,
-  new_data=update_data
- )
- updated = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
- if isinstance(updated["created_at"], str):
-  updated["created_at"] = datetime.fromisoformat(updated["created_at"])
- return sanitize_user_data(User(**updated), current_user)
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # EXPAND THIS LIST: Add every field your frontend form uses
+    allowed_fields = [
+        "full_name", "role", "departments", "phone", 
+        "birthday", "punch_in_time", "grace_time", 
+        "punch_out_time", "is_active", "profile_picture"
+    ]
+    
+    # Filter the incoming data
+    update_payload = {k: v for k, v in user_data.items() if k in allowed_fields}
+    
+    # Apply to DB
+    await db.users.update_one({"id": user_id}, {"$set": update_payload})
+    
+    # Audit log the change
+    await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
+
+    # Return the fresh data
+    updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    return updated_user
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, current_user: User = Depends(check_permission("can_edit_users"))):
  if current_user.role != "admin":
