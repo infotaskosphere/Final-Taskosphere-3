@@ -54,7 +54,7 @@ from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone, timedelta
 from zoneinfo import ZoneInfo
 india_tz = ZoneInfo("Asia/Kolkata")
 import pytz
