@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
-from .dependencies import get_current_user # Ensure this path is correct
+from .dependencies import get_current_user # Ensure correct path
 
 router = APIRouter(prefix="/api/leads", tags=["Leads"])
 
@@ -33,16 +33,9 @@ async def create_lead(lead_data: LeadCreate, current_user = Depends(get_current_
 @router.get("/")
 async def get_leads(current_user = Depends(get_current_user)):
     from .main import db
-    # Admins see all; Staff see only leads assigned to them
-    query = {} if current_user.role == "admin" else {"assigned_to": current_user.id}
+    # Admins see all; Staff see only leads assigned to them or created by them
+    query = {} if current_user.role == "admin" else {
+        "$or": [{"assigned_to": current_user.id}, {"created_by": current_user.id}]
+    }
     leads = await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return leads
-
-@router.patch("/{lead_id}/assign")
-async def assign_lead(lead_id: str, staff_id: str, current_user = Depends(get_current_user)):
-    from .main import db
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can assign leads")
-    
-    await db.leads.update_one({"id": lead_id}, {"$set": {"assigned_to": staff_id}})
-    return {"message": "Lead assigned successfully"}
