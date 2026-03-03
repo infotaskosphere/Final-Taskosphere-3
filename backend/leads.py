@@ -69,7 +69,7 @@ def validate_obj_id(id_str: str):
 
 @router.post("/", response_model=Lead)
 async def create_lead(lead_data: LeadCreate, current_user=Depends(get_current_user)):
-    from backend.server import db  # LOCAL IMPORT
+    from backend.models import User db  # LOCAL IMPORT
 
     now = datetime.now(timezone.utc)
     lead_dict = lead_data.model_dump()
@@ -91,7 +91,7 @@ async def get_leads(
     status_filter: Optional[str] = Query(None, alias="status"),
     current_user=Depends(get_current_user),
 ):
-    from backend.server import db  # LOCAL IMPORT
+    from backend.models import User db  # LOCAL IMPORT
 
     query = {}
 
@@ -118,7 +118,7 @@ async def get_leads(
 
 @router.get("/{lead_id}", response_model=Lead)
 async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.server import db  # LOCAL IMPORT
+    from backend.models import User db  # LOCAL IMPORT
 
     obj_id = validate_obj_id(lead_id)
     raw_lead = await db.leads.find_one({"_id": obj_id})
@@ -131,7 +131,7 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
 
 @router.patch("/{lead_id}", response_model=Lead)
 async def update_lead(lead_id: str, updates: dict, current_user=Depends(get_current_user)):
-    from backend.server import db, create_audit_log  # LOCAL IMPORT
+    from backend.models import User db, create_audit_log  # LOCAL IMPORT
 
     obj_id = validate_obj_id(lead_id)
     existing = await db.leads.find_one({"_id": obj_id})
@@ -158,7 +158,7 @@ async def update_lead(lead_id: str, updates: dict, current_user=Depends(get_curr
 
 @router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
 async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.server import db, create_audit_log  # LOCAL IMPORT
+    from backend.models import User db, create_audit_log  # LOCAL IMPORT
 
     obj_id = validate_obj_id(lead_id)
     lead = await db.leads.find_one({"_id": obj_id})
@@ -210,7 +210,7 @@ async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_
 
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
-    from backend.server import db  # LOCAL IMPORT
+    from backend.models import User db  # LOCAL IMPORT
 
     if current_user.role.lower() != "admin":
         raise HTTPException(
