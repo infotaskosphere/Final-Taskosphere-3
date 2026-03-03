@@ -21,6 +21,7 @@ from backend.models import (
     Attendance,
     StaffActivityLog,
     StaffActivityCreate,
+    PerformanceMetric,
     
     # Due Dates
     DueDate,
@@ -2666,16 +2667,16 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
 # Staff Activity Tracking Endpoints
 @api_router.post("/activity/log")
 async def log_staff_activity(activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)):
- """Log staff activity (app/website usage)"""
- activity = StaffActivityLog(
-  user_id=current_user.id,
-  **activity_data.model_dump()
- )
- doc = activity.model_dump()
- doc["timestamp"] = doc["timestamp"].isoformat()
- await db.staff_activity.insert_one(doc)
- return {"message": "Activity logged successfully"}
-@api_router.get("/activity/summary")
+    activity = StaffActivityLog(
+        user_id=current_user.id,
+        **activity_data.model_dump()
+    )
+    doc = activity.model_dump()
+    # Ensure this uses a variable that is actually defined at the top of your file
+    doc["timestamp"] = datetime.now(IST).isoformat() 
+    await db.staff_activity.insert_one(doc)
+    return {"message": "Activity logged successfully"}@api_router.get("/activity/summary")
+    
 async def get_activity_summary(
  user_id: Optional[str] = None,
  date_from: Optional[str] = None,
