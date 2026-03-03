@@ -16,36 +16,25 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   /* ============================================================
-     Helpers
+      Helpers: Ensure permissions are always a valid object
      ============================================================ */
-
   const normalizePermissions = (permissions) => {
-    if (
-      permissions &&
-      typeof permissions === "object" &&
-      !Array.isArray(permissions)
-    ) {
+    if (permissions && typeof permissions === "object" && !Array.isArray(permissions)) {
       return permissions;
     }
     return {};
   };
 
   const getStoredAuth = () => {
-    const token =
-      localStorage.getItem("token") || sessionStorage.getItem("token");
-
-    const storedUser =
-      localStorage.getItem("user") || sessionStorage.getItem("user");
-
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+    const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
     return { token, storedUser };
   };
 
   const persistAuth = (token, userData, rememberMe = false) => {
     const storage = rememberMe ? localStorage : sessionStorage;
-
     storage.setItem("token", token);
     storage.setItem("user", JSON.stringify(userData));
-
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
   };
 
@@ -54,14 +43,12 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
-
     delete api.defaults.headers.common.Authorization;
   };
 
   /* ============================================================
-     Restore Session On Mount
+      Restore Session On Mount
      ============================================================ */
-
   useEffect(() => {
     const restoreSession = async () => {
       const { token, storedUser } = getStoredAuth();
@@ -74,7 +61,6 @@ export const AuthProvider = ({ children }) => {
       try {
         const parsedUser = JSON.parse(storedUser);
         parsedUser.permissions = normalizePermissions(parsedUser.permissions);
-
         api.defaults.headers.common.Authorization = `Bearer ${token}`;
         setUser(parsedUser);
       } catch (error) {
@@ -89,9 +75,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /* ============================================================
-     Login
+      Login Logic
      ============================================================ */
-
   const login = (responseData, rememberMe = false) => {
     const token = responseData?.access_token;
     const userData = responseData?.user;
@@ -102,16 +87,10 @@ export const AuthProvider = ({ children }) => {
     }
 
     userData.permissions = normalizePermissions(userData.permissions);
-
     persistAuth(token, userData, rememberMe);
     setUser(userData);
-
     return true;
   };
-
-  /* ============================================================
-     Logout
-     ============================================================ */
 
   const logout = () => {
     clearStorage();
@@ -119,9 +98,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   /* ============================================================
-     Refresh Current User
+      Refresh User: CRITICAL for solving the "Not able to update" bug
      ============================================================ */
-
   const refreshUser = useCallback(async () => {
     try {
       const response = await api.get("/auth/me");
@@ -129,40 +107,34 @@ export const AuthProvider = ({ children }) => {
 
       updatedUser.permissions = normalizePermissions(updatedUser.permissions);
 
-      const { token } = getStoredAuth();
-      if (!token) return;
-
-      // Update the same storage where user was originally saved
-      if (localStorage.getItem("user")) {
-        localStorage.setItem("user", JSON.stringify(updatedUser));
-      } else {
-        sessionStorage.setItem("user", JSON.stringify(updatedUser));
-      }
-
+      // We update the existing storage (Local or Session) automatically
+      const isLocal = !!localStorage.getItem("token");
+      const storage = isLocal ? localStorage : sessionStorage;
+      
+      storage.setItem("user", JSON.stringify(updatedUser));
       setUser(updatedUser);
+      
+      console.log("User context synchronized with database.");
     } catch (error) {
       console.error("Failed to refresh user:", error);
     }
   }, []);
 
   /* ============================================================
-     Permission Helpers
+      Permission Helpers (Used for Role Guards)
      ============================================================ */
-
   const hasPermission = (permission) => {
     if (!user) return false;
 
-    // Admin override
-    if (user.role?.toLowerCase() === "admin") {
-      return true;
-    }
+    // Admin always has full access
+    if (user.role?.toLowerCase() === "admin") return true;
 
     const perms = user.permissions || {};
-
-    // Boolean permission
+    
+    // Check if key exists and is true
     if (perms[permission] === true) return true;
 
-    // List-based permission
+    // Support for list-based permissions
     if (Array.isArray(perms[permission])) {
       return perms[permission].length > 0;
     }
@@ -172,20 +144,13 @@ export const AuthProvider = ({ children }) => {
 
   const canAccessUser = (permissionKey, targetUserId) => {
     if (!user) return false;
-
-    if (user.role?.toLowerCase() === "admin") {
-      return true;
-    }
+    if (user.role?.toLowerCase() === "admin") return true;
 
     const perms = user.permissions || {};
     const allowedIds = perms[permissionKey];
 
     return Array.isArray(allowedIds) && allowedIds.includes(targetUserId);
   };
-
-  /* ============================================================
-     Context Value
-     ============================================================ */
 
   const value = {
     user,
@@ -197,9 +162,5 @@ export const AuthProvider = ({ children }) => {
     canAccessUser,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
