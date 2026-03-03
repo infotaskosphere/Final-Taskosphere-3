@@ -167,19 +167,19 @@ async def create_indexes():
  await db.holidays.create_index("date", unique=True)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
- CORSMiddleware,
- allow_origins=[
-  "https://final-taskosphere-frontend.onrender.com",
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "https://final-taskosphere-backend.onrender.com",
- ],
- allow_credentials=True,
- allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
- allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
- expose_headers=["*"],
- max_age=3600, # cache preflight for 1 hour
+    CORSMiddleware,
+    allow_origins=[
+        "https://final-taskosphere-frontend.onrender.com",
+        "https://final-taskosphere-backend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"], 
+    expose_headers=["*"],
+    max_age=3600,
 )
 # ALL MODELS
 class UserPermissions(BaseModel):
