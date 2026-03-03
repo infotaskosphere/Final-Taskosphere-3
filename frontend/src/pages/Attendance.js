@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { format, startOfMonth, endOfMonth, parseISO, subDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -19,6 +19,7 @@ import {
   TrendingUp,
   Timer
 } from 'lucide-react';
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -26,18 +27,17 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-const modalVariants = {
-  hidden: { opacity: 0, scale: 0.95, y: 20 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.3 } }
-};
+
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
   const canViewRankings = hasPermission("can_view_staff_rankings");
@@ -60,15 +60,17 @@ export default function Attendance() {
   const [leaveTo, setLeaveTo] = useState(null);
   const [leaveReason, setLeaveReason] = useState("");
   const [holidays, setHolidays] = useState([]);
+
   useEffect(() => {
     fetchData();
   }, []);
-  
+
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
       setShowPunchInModal(true);
     }
   }, [todayAttendance]);
+
   useEffect(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (todayAttendance?.date !== todayStr) {
@@ -78,10 +80,10 @@ export default function Attendance() {
       setEarlyByMinutesToday(0);
     }
   }, [todayAttendance]);
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      // --- EXPANDED PROMISE.ALL TO INCLUDE RANKINGS AND TASKS (NO DELETIONS) ---
       const requests = [
         api.get('/attendance/history'),
         api.get('/attendance/my-summary'),
@@ -96,17 +98,18 @@ export default function Attendance() {
       }
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] =
         await Promise.all(requests);
+
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
       setHolidays(holidaysRes.data || []);
-      // --- LOGIC FOR DYNAMIC RANKING ---
+
       const rankingList = rankingRes.data.rankings || [];
       const myEntry = rankingList.find(r => r.user_id === user?.id);
       if (myEntry) {
         setMyRank(`#${myEntry.rank}`);
       }
-      // --- LOGIC FOR REAL COMPLETED TASKS COUNT ---
+
       const completedCount = tasksRes.data.filter(
         task => task.status === 'completed'
       ).length;
@@ -118,6 +121,7 @@ export default function Attendance() {
       setLoading(false);
     }
   };
+
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -139,10 +143,12 @@ export default function Attendance() {
         action,
         location: locationData
       });
+
       let isLate = false;
       let lateByMinutes = 0;
       let isEarlyLeave = false;
       let earlyByMinutes = 0;
+
       if (action === 'punch_in' && user?.punch_in_time) {
         try {
           const [expH, expM] = user.punch_in_time.split(':').map(Number);
@@ -188,6 +194,7 @@ export default function Attendance() {
           console.warn("Cannot calculate early leave status:", err);
         }
       }
+
       toast.success(
         action === 'punch_in'
           ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
@@ -200,30 +207,27 @@ export default function Attendance() {
       setLoading(false);
     }
   };
+
   const formatDuration = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
+
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
-  
-    
     if (todayAttendance.punch_out) {
       return formatDuration(todayAttendance.duration_minutes);
     }
-  
     const start = new Date(todayAttendance.punch_in);
     let diffMs = Date.now() - start.getTime();
-  
     if (diffMs < 0) diffMs = 0;
-  
     const hours = Math.floor(diffMs / 3600000);
     const minutes = Math.floor((diffMs % 3600000) / 60000);
-  
     return `${hours}h ${minutes}m`;
   };
+
   const getMonthAttendance = () => {
     const start = startOfMonth(selectedDate);
     const end = endOfMonth(selectedDate);
@@ -232,20 +236,19 @@ export default function Attendance() {
       return date >= start && date <= end;
     });
   };
+
   const monthAttendance = getMonthAttendance();
   const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
   const monthDaysPresent = monthAttendance.length;
-  // Total days late this month
   const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late === true).length;
-  // Placeholder for tasks completed this month (can be replaced with real API later)
-  const tasksCompletedThisMonth = 0;
+
   // Calendar highlighting
   const attendanceDates = attendanceHistory.map(a => parseISO(a.date));
   const lateDates = isLateToday && todayAttendance?.date
     ? [parseISO(todayAttendance.date)]
     : attendanceHistory
-      .filter(a => a.is_late === true)
-      .map(a => parseISO(a.date));
+        .filter(a => a.is_late === true)
+        .map(a => parseISO(a.date));
   const holidayDates = holidays.map(h => parseISO(h.date));
   const modifiers = {
     present: attendanceDates,
@@ -275,12 +278,15 @@ export default function Attendance() {
       color: COLORS.deepBlue
     }
   };
+
   const getSelectedDayAttendance = () => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     return attendanceHistory.find(a => a.date === dateStr);
   };
+
   const selectedDayAttendance = getSelectedDayAttendance();
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
+
   return (
     <motion.div
       className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
@@ -295,6 +301,7 @@ export default function Attendance() {
           <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
         </div>
       </motion.div>
+
       {/* Today's Punch Widget */}
       <motion.div variants={itemVariants}>
         <Card
@@ -318,7 +325,6 @@ export default function Attendance() {
                       {todayAttendance?.punch_out && ` • Out: ${format(new Date(todayAttendance.punch_out), 'hh:mm a')}`}
                     </p>
                   )}
-                  {/* Added expected times display */}
                   <p className="text-sm text-blue-100/80 mt-1">
                     Expected: In {user.punch_in_time || 'N/A'} (Grace {user.grace_time || 'N/A'}) • Out {user.punch_out_time || 'N/A'}
                   </p>
@@ -352,7 +358,7 @@ export default function Attendance() {
                     >
                       Punch In
                     </Button>
-                  
+                    
                     <Button
                       variant="outline"
                       onClick={() => setShowLeaveForm(true)}
@@ -383,7 +389,8 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-      {/* Stats Cards Row – 4 cards including new "Your Star Performance Rank" */}
+
+      {/* Stats Cards Row */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
         {/* This Month */}
         <Card className="border border-slate-200 shadow-sm">
@@ -402,14 +409,14 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-        {/* Tasks Completed For the Month */}
+
+        {/* Tasks Completed */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Tasks Completed</p>
                 <p className="text-2xl font-bold mt-1 font-outfit" style={{ color: COLORS.emeraldGreen }}>
-                  {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
                   {tasksCompleted}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">this month</p>
@@ -420,6 +427,7 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
+
         {/* Total Days Late */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
@@ -437,6 +445,7 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
+
         {/* Your Star Performance Rank */}
         {canViewRankings && (
           <Card className="border border-slate-200 shadow-sm">
@@ -445,7 +454,6 @@ export default function Attendance() {
                 <div>
                   <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Your Star Performance Rank</p>
                   <p className="text-5xl font-extrabold mt-1 font-outfit tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    {/* --- UPDATED TO DYNAMIC STATE (NO DELETIONS) --- */}
                     {myRank}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">overall</p>
@@ -458,7 +466,8 @@ export default function Attendance() {
           </Card>
         )}
       </motion.div>
-      {/* Live Total Hours Today Card */}
+
+      {/* Live Total Hours Today */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-6 text-center">
@@ -474,6 +483,7 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
+
       {/* Monthly Performance Summary */}
       <motion.div variants={itemVariants}>
         <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
@@ -486,49 +496,53 @@ export default function Attendance() {
               Your attendance insights for {format(selectedDate, 'MMMM yyyy')}
             </CardDescription>
           </CardHeader>
-        
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        
-              {/* Total Hours */}
               <div className="bg-white rounded-xl p-5 border shadow-sm">
                 <p className="text-xs text-slate-500 uppercase">Total Hours</p>
                 <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
                   {formatDuration(monthTotalMinutes)}
                 </p>
               </div>
-        
-              {/* Days Present */}
               <div className="bg-white rounded-xl p-5 border shadow-sm">
                 <p className="text-xs text-slate-500 uppercase">Days Present</p>
                 <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
                   {monthDaysPresent}
                 </p>
               </div>
-        
-              {/* Days Late */}
               <div className="bg-white rounded-xl p-5 border shadow-sm">
                 <p className="text-xs text-slate-500 uppercase">Days Late</p>
                 <p className="text-2xl font-bold mt-1 text-red-500">
                   {totalDaysLateThisMonth}
                 </p>
               </div>
-        
             </div>
           </CardContent>
         </Card>
       </motion.div>
-      {/* Calendar and History Section */}
+
+      {/* Calendar and History Section - IMPROVED UX */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
-        {/* Calendar */}
+        {/* ENHANCED ATTENDANCE CALENDAR */}
         <Card className="border border-slate-200 shadow-sm lg:col-span-1">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-              <CalendarIcon className="h-5 w-5" />
-              Attendance Calendar
-            </CardTitle>
-            <CardDescription>Green dates = present • Red dates = Late • Yellow dates = Holidays</CardDescription>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-outfit flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                <CalendarIcon className="h-5 w-5" />
+                Attendance Calendar
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedDate(new Date())}
+                className="text-xs h-8 px-3"
+              >
+                Today
+              </Button>
+            </div>
+            <CardDescription>Click any date to see details</CardDescription>
           </CardHeader>
+
           <CardContent className="p-4">
             <Calendar
               mode="single"
@@ -536,48 +550,70 @@ export default function Attendance() {
               onSelect={(date) => date && setSelectedDate(date)}
               modifiers={modifiers}
               modifiersStyles={modifiersStyles}
-              className="rounded-md border-0"
+              className="rounded-xl border"
+              showOutsideDays={false}
             />
+
+            {/* Visual Legend */}
+            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }}></div>
+                <span className="text-slate-600">Present</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <span className="text-slate-600">Late</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#DAA520' }}></div>
+                <span className="text-slate-600">Holiday</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full ring-2 ring-blue-500 ring-offset-2" style={{ backgroundColor: COLORS.deepBlue }}></div>
+                <span className="text-slate-600">Today</span>
+              </div>
+            </div>
+
+            {/* Enhanced Selected Day Info */}
             {selectedDayAttendance ? (
-              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
-                <p className="text-sm font-medium text-slate-700">
-                  {format(selectedDate, 'MMMM d, yyyy')}
+              <div className="mt-6 p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                <p className="font-semibold text-slate-700 mb-4 text-lg">
+                  {format(selectedDate, 'EEEE, MMMM d')}
                 </p>
-                <div className="mt-2 space-y-1">
-                  <p className="text-sm text-slate-600">
-                    <span className="font-medium">In:</span> {format(new Date(selectedDayAttendance.punch_in), 'hh:mm a')}
-                  </p>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Punch In</span>
+                    <span className="font-medium">{format(new Date(selectedDayAttendance.punch_in), 'hh:mm a')}</span>
+                  </div>
                   {selectedDayAttendance.punch_out && (
-                    <p className="text-sm text-slate-600">
-                      <span className="font-medium">Out:</span> {format(new Date(selectedDayAttendance.punch_out), 'hh:mm a')}
-                    </p>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Punch Out</span>
+                      <span className="font-medium">{format(new Date(selectedDayAttendance.punch_out), 'hh:mm a')}</span>
+                    </div>
                   )}
-                  <p className="text-sm font-semibold" style={{ color: COLORS.emeraldGreen }}>
-                    Duration: {formatDuration(selectedDayAttendance.duration_minutes)}
-                  </p>
+                  <div className="pt-3 border-t flex justify-between items-center">
+                    <span className="font-medium">Duration</span>
+                    <Badge className="font-semibold text-base px-3 py-1">
+                      {formatDuration(selectedDayAttendance.duration_minutes)}
+                    </Badge>
+                  </div>
+                  {selectedDayAttendance.is_late && (
+                    <Badge variant="destructive" className="mt-2">Late Arrival</Badge>
+                  )}
                 </div>
               </div>
             ) : selectedHoliday ? (
-              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
-                <p className="text-sm font-medium text-slate-700">
-                  {format(selectedDate, 'MMMM d, yyyy')}
-                </p>
-                <p className="text-sm font-semibold text-yellow-600 mt-2">
-                  Holiday: {selectedHoliday.name}
-                </p>
+              <div className="mt-6 p-5 rounded-2xl bg-yellow-50 border border-yellow-200 text-center">
+                <p className="text-yellow-700 font-medium">Holiday — {selectedHoliday.name}</p>
               </div>
             ) : (
-              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
-                <p className="text-sm font-medium text-slate-700">
-                  {format(selectedDate, 'MMMM d, yyyy')}
-                </p>
-                <p className="text-sm text-red-500 mt-2">
-                  Absent
-                </p>
+              <div className="mt-6 p-5 rounded-2xl bg-red-50 border border-red-100 text-center">
+                <p className="text-red-600 font-medium">No record — Absent</p>
               </div>
             )}
           </CardContent>
         </Card>
+
         {/* Recent Attendance History */}
         <Card className="border border-slate-200 shadow-sm lg:col-span-2">
           <CardHeader>
@@ -609,14 +645,14 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-    
+
       {/* Auto Punch-In Popup */}
       {showPunchInModal && (
         <motion.div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
           initial="hidden"
           animate="visible"
-          variants={modalVariants}
+          variants={itemVariants}
           onClick={() => setShowPunchInModal(false)}
         >
           <motion.div
@@ -659,76 +695,169 @@ export default function Attendance() {
           </motion.div>
         </motion.div>
       )}
+
+      {/* PREMIUM LEAVE MODAL WITH SUPERIOR CALENDAR UX */}
       <AnimatePresence>
         {showLeaveForm && (
           <motion.div
-            className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center"
+            className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="bg-white w-[500px] p-8 rounded-3xl shadow-2xl"
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
+              className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border p-8"
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
             >
-              <h2 className="text-xl font-semibold mb-6">
-                Apply For Leave
-              </h2>
-      
-              <div className="space-y-4">
-      
+              {/* Header */}
+              <div className="flex justify-between items-start mb-8">
                 <div>
-                  <label className="text-sm font-medium">From Date</label>
+                  <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>
+                    Request Leave
+                  </h2>
+                  <p className="text-slate-500 mt-1">Select your leave period</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowLeaveForm(false);
+                    setLeaveFrom(null);
+                    setLeaveTo(null);
+                    setLeaveReason("");
+                  }}
+                  className="text-slate-400 hover:text-slate-600 text-2xl leading-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="mb-8">
+                <p className="text-xs font-medium text-slate-500 mb-3">QUICK SELECT</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "1 Day", days: 1 },
+                    { label: "3 Days", days: 3 },
+                    { label: "1 Week", days: 7 },
+                    { label: "15 Days", days: 15 },
+                    { label: "30 Days", days: 30 },
+                  ].map((preset) => (
+                    <Button
+                      key={preset.days}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const from = new Date();
+                        const to = new Date();
+                        to.setDate(from.getDate() + preset.days - 1);
+                        setLeaveFrom(from);
+                        setLeaveTo(to);
+                      }}
+                      className="hover:bg-blue-50"
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Side-by-side Calendars */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 mb-2 block">From Date</label>
                   <Calendar
                     mode="single"
                     selected={leaveFrom}
                     onSelect={setLeaveFrom}
+                    disabled={{ before: new Date() }}
+                    className="rounded-2xl border shadow-sm"
                   />
                 </div>
-      
+
                 <div>
-                  <label className="text-sm font-medium">To Date</label>
+                  <label className="text-sm font-medium text-slate-700 mb-2 block">To Date</label>
                   <Calendar
                     mode="single"
                     selected={leaveTo}
                     onSelect={setLeaveTo}
+                    disabled={{
+                      before: leaveFrom || new Date(),
+                    }}
+                    className="rounded-2xl border shadow-sm"
                   />
                 </div>
-      
+              </div>
+
+              {/* Live Duration Display */}
+              {leaveFrom && (
+                <div className="mt-6 p-4 bg-blue-50 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600">Total Leave Duration</p>
+                    <p className="text-3xl font-bold text-blue-700">
+                      {Math.max(
+                        1,
+                        leaveTo
+                          ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                          : 1
+                      )}
+                      <span className="text-xl font-normal text-blue-600"> days</span>
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-slate-500">
+                    {format(leaveFrom, 'dd MMM')} — {leaveTo ? format(leaveTo, 'dd MMM yyyy') : format(leaveFrom, 'dd MMM yyyy')}
+                  </div>
+                </div>
+              )}
+
+              {/* Reason */}
+              <div className="mt-8">
+                <label className="text-sm font-medium text-slate-700 mb-2 block">
+                  Reason for Leave
+                </label>
                 <textarea
-                  placeholder="Reason for leave..."
+                  placeholder="Please provide a reason for your leave request..."
                   value={leaveReason}
                   onChange={(e) => setLeaveReason(e.target.value)}
-                  className="w-full p-3 border rounded-xl"
+                  className="w-full min-h-[110px] p-4 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
-      
-              <div className="flex justify-end gap-3 mt-6">
-                <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>
+
+              {/* Footer */}
+              <div className="flex justify-end gap-4 mt-8">
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowLeaveForm(false)}
+                  className="px-8"
+                >
                   Cancel
                 </Button>
-      
                 <Button
+                  disabled={!leaveFrom}
                   onClick={async () => {
-                    if (!leaveFrom) {
-                      toast.error("Select From Date");
-                      return;
+                    if (!leaveFrom) return;
+                    try {
+                      await api.post("/attendance/apply-leave", {
+                        from_date: format(leaveFrom, 'yyyy-MM-dd'),
+                        to_date: leaveTo
+                          ? format(leaveTo, 'yyyy-MM-dd')
+                          : format(leaveFrom, 'yyyy-MM-dd'),
+                        reason: leaveReason || "Personal Leave"
+                      });
+                      toast.success("Leave request submitted successfully");
+                      setShowLeaveForm(false);
+                      setLeaveFrom(null);
+                      setLeaveTo(null);
+                      setLeaveReason("");
+                      fetchData();
+                    } catch (err) {
+                      toast.error("Failed to submit leave request");
                     }
-      
-                    await api.post("/attendance/apply-leave", {
-                      from_date: format(leaveFrom, 'yyyy-MM-dd'),
-                      to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
-                      reason: leaveReason
-                    });
-      
-                    toast.success("Leave applied successfully");
-      
-                    setShowLeaveForm(false);
-                    fetchData();
                   }}
+                  className="px-10"
+                  style={{ backgroundColor: COLORS.deepBlue }}
                 >
-                  Submit
+                  Submit Leave Request
                 </Button>
               </div>
             </motion.div>
