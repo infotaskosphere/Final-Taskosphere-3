@@ -19,10 +19,11 @@ import uuid
 import logging
 import re
 import csv
-import { formatInTimeZone } from 'date-fns-tz'
 from io import StringIO, BytesIO
 import pandas as pd
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+india_time = datetime.now(ZoneInfo("Asia/Kolkata"))
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from jose import jwt, JWTError
