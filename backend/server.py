@@ -2667,19 +2667,25 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
   compliance_status=compliance_status
  )
 # STAFF ACTIVITY ROUTES
-# Staff Activity Tracking Endpoints
 @api_router.post("/activity/log")
-async def log_staff_activity(activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)):
+async def log_staff_activity(
+    activity_data: StaffActivityCreate, 
+    current_user: User = Depends(get_current_user)
+):
     activity = StaffActivityLog(
         user_id=current_user.id,
         **activity_data.model_dump()
     )
     doc = activity.model_dump()
-    # Ensure this uses a variable that is actually defined at the top of your file
+    
+    # ✅ FIX: Ensure IST is defined at the top of server.py
+    # IST = pytz.timezone('Asia/Kolkata')
     doc["timestamp"] = datetime.now(IST).isoformat() 
+    
     await db.staff_activity.insert_one(doc)
     return {"message": "Activity logged successfully"}
 
+# ✅ FIX: This decorator MUST be on its own line (Line 2680)
 @api_router.get("/activity/summary")
 async def get_activity_summary(
     user_id: Optional[str] = None,
@@ -2687,6 +2693,7 @@ async def get_activity_summary(
     date_to: Optional[str] = None,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
+  
  """Get staff activity summary (admin only)"""
  if current_user.role != "admin":
   permissions = current_user.permissions.model_dump() if current_user.permissions else {}
