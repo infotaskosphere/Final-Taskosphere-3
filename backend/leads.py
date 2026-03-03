@@ -187,7 +187,14 @@ async def convert_lead_to_client(lead_id: str, current_user=Depends(get_current_
     await create_audit_log(current_user, "LEAD_CONVERTED", "leads", lead_id, None, {"client_id": client_id})
 
     return {"message": "Conversion successful", "client_id": client_id}
+@router.get("/leads")
+async def get_leads(current_user = Depends(get_current_user)):
 
+    from backend.server import db  # ← LOCAL IMPORT
+
+    leads = await db.leads.find().to_list(1000)
+    return leads
+    
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
     """Restricted deletion of lead data."""
