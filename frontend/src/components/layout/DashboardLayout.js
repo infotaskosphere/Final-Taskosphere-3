@@ -11,16 +11,17 @@ import {
   Users,
   LogOut,
   Menu,
-  Building2,
   Calendar,
   Activity,
   ChevronDown,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
 import { toast } from 'sonner';
+import { motion } from "motion/react"; // ← CORRECTED: Official Motion import (npm install motion)
 
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -62,18 +63,19 @@ const DashboardLayout = ({ children }) => {
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
-    { path: '/todos', icon: CheckSquare, label: 'To Do' }, // Updated label from 'Todo Dashboard'
+    { path: '/todos', icon: CheckSquare, label: 'To Do' },
     { path: '/attendance', icon: Clock, label: 'Attendance' },
     { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-
+   
     // Registers Group
     { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
     { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
-
-    // Admin & Monitoring Group
+   
+    // Management & Sales Group
     { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
     { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
+    { path: '/leads', icon: Target, label: 'Lead', permission: 'can_view_all_leads' },
     { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
   ];
 
@@ -118,13 +120,16 @@ const DashboardLayout = ({ children }) => {
               className={`transition-all duration-300 ${collapsed ? 'h-10' : 'h-16'} object-contain`}
             />
 
-            {/* Collapse Toggle (desktop only) */}
-            <button
+            {/* Collapse Toggle (desktop only) – now with Motion spring animation */}
+            <motion.button
               onClick={() => setCollapsed(prev => !prev)}
               className="hidden lg:flex absolute right-2 p-1 rounded-md hover:bg-blue-100 transition"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 400 }}
             >
               {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-            </button>
+            </motion.button>
           </div>
 
           {/* Navigation */}
@@ -135,36 +140,43 @@ const DashboardLayout = ({ children }) => {
 
               return (
                 <React.Fragment key={item.path}>
-                  {/* Adds a separator line before 'Staff Activity' to group Admin tools */}
+                  {/* Separator before 'Staff Activity' to group Admin, Reports, and Sales tools */}
                   {item.path === '/staff-activity' && (
                     <div className="my-4 border-t border-slate-200/50 mx-4" />
                   )}
 
-                  <Link
-                    to={item.path}
-                    onClick={() => {
-                      if (window.innerWidth < 1024) setSidebarOpen(false);
-                    }}
-                    className={`
-                      relative flex items-center
-                      ${collapsed ? 'justify-center' : 'space-x-3'}
-                      px-4 py-3 rounded-xl transition-all
-                      ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}
-                    `}
-                    style={isActive ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+                  {/* Motion-enhanced Nav Link – slide + scale on hover/tap */}
+                  <motion.div
+                    whileHover={{ x: 6, scale: 1.02 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
                   >
-                    {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
-                    )}
+                    <Link
+                      to={item.path}
+                      onClick={() => {
+                        if (window.innerWidth < 1024) setSidebarOpen(false);
+                      }}
+                      className={`
+                        relative flex items-center
+                        ${collapsed ? 'justify-center' : 'space-x-3'}
+                        px-4 py-3 rounded-xl transition-all
+                        ${isActive ? 'text-white shadow-md' : 'text-slate-700 hover:bg-blue-100'}
+                      `}
+                      style={isActive ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+                    >
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
+                      )}
 
-                    <Icon className="h-5 w-5 flex-shrink-0" />
+                      <Icon className="h-5 w-5 flex-shrink-0" />
 
-                    {!collapsed && (
-                      <span className="font-medium whitespace-nowrap transition-opacity duration-200">
-                        {item.label}
-                      </span>
-                    )}
-                  </Link>
+                      {!collapsed && (
+                        <span className="font-medium whitespace-nowrap transition-opacity duration-200">
+                          {item.label}
+                        </span>
+                      )}
+                    </Link>
+                  </motion.div>
                 </React.Fragment>
               );
             })}
@@ -179,24 +191,29 @@ const DashboardLayout = ({ children }) => {
         <header className="sticky top-0 bg-white border-b z-40">
           <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4">
 
-            {/* Mobile Menu Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(prev => !prev)}
-              className="lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
+            {/* Mobile Menu Button – with subtle tap animation */}
+            <motion.div whileTap={{ scale: 0.9 }}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(prev => !prev)}
+                className="lg:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </motion.div>
 
             <div className="flex items-center space-x-4 ml-auto">
+              {/* NotificationBell stays as-is (you can upgrade it separately with lucide-animated if you want) */}
               <NotificationBell />
 
-              {/* User Dropdown (LOGOUT REMAINS HERE) */}
+              {/* User Dropdown (LOGOUT REMAINS HERE) – animated chevron + avatar hover */}
               <div className="relative">
-                <button
+                <motion.button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
                   className="flex items-center space-x-2 px-3 py-2 rounded-full hover:bg-slate-100"
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
                 >
                   <div
                     className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold"
@@ -211,12 +228,14 @@ const DashboardLayout = ({ children }) => {
                     {user?.full_name}
                   </span>
 
-                  <ChevronDown
-                    className={`h-4 w-4 transition-transform ${
-                      userMenuOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
+                  {/* Animated Chevron */}
+                  <motion.div
+                    animate={{ rotate: userMenuOpen ? 180 : 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </motion.div>
+                </motion.button>
 
                 {userMenuOpen && (
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border py-2 z-50">
