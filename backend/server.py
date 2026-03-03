@@ -6,7 +6,6 @@ from starlette.middleware.gzip import GZipMiddleware
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 india_tz = ZoneInfo("Asia/Kolkata")
-from datetime import date, datetime, timedelta, timezone # ← fixed
 import pytz
 from dateutil import parser
 from typing import List, Optional, Dict, Any
@@ -21,7 +20,6 @@ import re
 import csv
 from io import StringIO, BytesIO
 import pandas as pd
-from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 india_time = datetime.now(ZoneInfo("Asia/Kolkata"))
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -72,13 +70,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 @app.get("/health")
 async def health():
     return {"status": "ok", "cors": "configured correctly"}
-@app.on_event("startup")
-async def create_indexes():
-    # ← YOUR ORIGINAL INDEX CODE GOES HERE (unchanged)
-    await db.tasks.create_index("assigned_to")
-    await db.clients.create_index([("created_by", 1), ("company_name", 1)], unique=True)
-    await db.holidays.create_index("date", unique=True)
-    # ... rest of your indexes
+
 # ====================== SECURITY & DB (your original) ======================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -88,6 +80,16 @@ db = client[os.environ['DB_NAME']]
 rankings_cache = {}
 rankings_cache_time = {}
 # ===================== HELPER FUNCTIONS =====================
+def safe_dt(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+        
 def sanitize_user_data(users, current_user):
     sanitized = []
     for user in users:
