@@ -1,6 +1,5 @@
 import os
 from datetime import datetime, timedelta, timezone
-
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -65,6 +64,22 @@ def create_access_token(data: dict):
     )
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+
+#===========================================================
+# SAFE DT
+#===========================================================
+
+def safe_dt(value):
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return None
 
 # ==========================================================
 # AUTH DEPENDENCY
