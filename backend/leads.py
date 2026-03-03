@@ -10,7 +10,7 @@ from dateutil import parser
 # Import internal dependencies
 # Ensure these paths match your folder structure
 from backend.dependencies import get_current_user
-from backend.main import db, create_audit_log, safe_dt
+from backend.server import db, create_audit_log, safe_dt
 
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
 logger = logging.getLogger(__name__)
