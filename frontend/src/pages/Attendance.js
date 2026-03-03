@@ -321,9 +321,8 @@ export default function Attendance() {
                   </p>
                   {todayAttendance?.punch_in && (
                     <p className="text-sm text-blue-100/80">
-                      In: {format(new Date(todayAttendance.punch_in), 'hh:mm a')}
-                      {todayAttendance?.punch_out && ` • Out: ${format(new Date(todayAttendance.punch_out), 'hh:mm a')}`}
-                    </p>
+                      In: {formatInTimeZone(new Date(todayAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
+                      {todayAttendance?.punch_out && ` • Out: {formatInTimeZone(new Date(todayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
                   )}
                   <p className="text-sm text-blue-100/80 mt-1">
                     Expected: In {user.punch_in_time || 'N/A'} (Grace {user.grace_time || 'N/A'}) • Out {user.punch_out_time || 'N/A'}
@@ -583,12 +582,12 @@ export default function Attendance() {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Punch In</span>
-                    <span className="font-medium">{format(new Date(selectedDayAttendance.punch_in), 'hh:mm a')}</span>
+                    <span className="font-medium">{formatInTimeZone(new Date(selectedDayAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}</span>
                   </div>
                   {selectedDayAttendance.punch_out && (
                     <div className="flex justify-between items-center">
                       <span className="text-slate-600">Punch Out</span>
-                      <span className="font-medium">{format(new Date(selectedDayAttendance.punch_out), 'hh:mm a')}</span>
+                      <span className="font-medium">{formatInTimeZone(new Date(selectedDayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}</span>
                     </div>
                   )}
                   <div className="pt-3 border-t flex justify-between items-center">
@@ -631,8 +630,8 @@ export default function Attendance() {
                     <div>
                       <p className="font-medium">{format(parseISO(record.date), 'MMM d, yyyy')}</p>
                       <p className="text-sm text-slate-600">
-                        {record.punch_in ? format(new Date(record.punch_in), 'hh:mm a') : '—'} —
-                        {record.punch_out ? format(new Date(record.punch_out), 'hh:mm a') : '—'}
+                        {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} —
+                        {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : '—'}
                       </p>
                     </div>
                     <Badge variant={record.duration_minutes > 0 ? "default" : "secondary"}>
