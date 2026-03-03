@@ -1,3 +1,4 @@
+from backend.models import Token
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
 from backend.dependencies import get_current_user, create_access_token, db
