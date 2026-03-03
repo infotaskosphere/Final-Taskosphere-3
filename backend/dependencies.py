@@ -118,3 +118,30 @@ async def get_current_user(
     user_dict.pop("_id", None)
 
     return User(**user_dict)
+    
+# ==========================================================
+# AUDIT LOG
+# ==========================================================
+
+async def create_audit_log(
+    current_user,
+    action: str,
+    module: str,
+    record_id: str = None,
+    old_data: dict = None,
+    new_data: dict = None,
+):
+    try:
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": current_user.id,
+            "user_name": getattr(current_user, "full_name", None),
+            "action": action,
+            "module": module,
+            "record_id": record_id,
+            "old_data": old_data,
+            "new_data": new_data,
+            "timestamp": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        print("Audit log error:", e)
