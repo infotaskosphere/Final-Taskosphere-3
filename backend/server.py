@@ -37,6 +37,7 @@ from io import StringIO, BytesIO
 from fastapi.responses import StreamingResponse
 from math import radians, sin, cos, sqrt, atan2
 import re
+import logging
 import openpyxl
 from openpyxl import load_workbook
 OFFICE_LAT = 21.1652
