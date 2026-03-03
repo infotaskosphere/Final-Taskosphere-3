@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field, ConfigDict, EmailStr
 import uuid
 import logging
 
-from backend.dependencies import db, get_current_user
-from backend.dependencies import create_audit_log
-from backend.models import User  # only if actually needed
+# ✅ CHANGE 1: Removed unused User import
+from backend.dependencies import db, get_current_user, create_audit_log
+# ✅ OPTIONAL CHANGE IMPORT: Added notification support
+from backend.notifications import create_notification  
 
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
 logger = logging.getLogger(__name__)
@@ -75,7 +76,8 @@ def validate_obj_id(id_str: str):
     if not ObjectId.is_valid(id_str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid Lead ID: {id_str}",
+            # ✅ CHANGE 2: Generic error message for security
+            detail="Invalid Lead ID format",
         )
     return ObjectId(id_str)
 
@@ -156,6 +158,27 @@ async def update_lead(
     update_dict = updates.model_dump(exclude_unset=True)
 
     if update_dict:
+        # ✅ CHANGE 3: Assignee Validation
+        if update_dict.get("assigned_to"):
+            user_exists = await db.users.find_one({"id": update_dict["assigned_to"]})
+            if not user_exists:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
+
+        # ✅ CHANGE 4: Protect "Won" Status
+        if update_dict.get("status") == "won" and not existing.get("converted_client_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Use convert endpoint to mark lead as won"
+            )
+
+        # ✅ CHANGE 5: Future Date Validation
+        if update_dict.get("next_follow_up"):
+            if update_dict["next_follow_up"] < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Follow-up date cannot be in the past"
+                )
+
         update_dict["updated_at"] = datetime.now(timezone.utc)
 
         await db.leads.update_one(
@@ -227,12 +250,25 @@ async def convert_lead_to_client(
         new_data={"client_id": client_id},
     )
 
+    # ✅ OPTIONAL PROFESSIONAL IMPROVEMENT: Notification
+    await create_notification(
+        user_id=current_user.id,
+        title="Lead Converted",
+        message=f"{lead['company_name']} converted to client",
+        type="lead"
+    )
+
     return {"message": "Conversion successful", "client_id": client_id}
 
 
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
-    if current_user.role.lower() != "admin":
+    # ✅ CHANGE 6: Updated Permission Check (Admin OR can_manage_users)
+    permissions = getattr(current_user, "permissions", {})
+    if hasattr(permissions, "model_dump"):
+        permissions = permissions.model_dump()
+
+    if not permissions.get("can_manage_users", False) and current_user.role.lower() != "admin":
         raise HTTPException(
             status_code=403,
             detail="Administrative privileges required.",
