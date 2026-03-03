@@ -50,6 +50,7 @@ from backend.models import (
     HolidayCreate
 )
 from passlib.context import CryptContext
+from backend.leads import router as leads_router
 from .leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
