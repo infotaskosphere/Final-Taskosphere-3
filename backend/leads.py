@@ -19,9 +19,18 @@ class LeadBase(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     services: List[str] = []
-    approx_quote: Optional[float] = None
+    quotation_amount: Optional[float] = None
     date_of_meeting: Optional[datetime] = None
-    status: Literal["new", "contacted", "qualified", "won", "lost"] = "new"
+    status: Literal[
+    "new",
+    "contacted",
+    "meeting",
+    "proposal",
+    "negotiation",
+    "on_hold",
+    "won",
+    "lost"
+] = "new"
     source: Literal["direct", "website", "referral", "social_media", "event"] = "direct"
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
@@ -36,7 +45,7 @@ class LeadUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     services: Optional[List[str]] = None
-    approx_quote: Optional[float] = None
+    quotation_amount: Optional[float] = None
     date_of_meeting: Optional[datetime] = None
     status: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = None
     source: Optional[Literal["direct", "website", "referral", "social_media", "event"]] = None
