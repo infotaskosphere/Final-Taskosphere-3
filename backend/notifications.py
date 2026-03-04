@@ -58,7 +58,7 @@ async def create_notification(
         )
         doc = notification.model_dump()
         # Store dates as ISO strings for broad compatibility
-        doc["created_at"] = doc["created_at"].isoformat()
+        doc["created_at"] = datetime.now(timezone.utc)
         
         await db.notifications.insert_one(doc)
         return notification
