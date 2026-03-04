@@ -1,8 +1,14 @@
 import axios from "axios";
-/**
- * Global API configuration for Taskosphere.
- * Handles base URL, JWT token injection, and global 403/401 error catching.
- */
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+function App() {
+  return (
+    <TooltipProvider>
+      <YourRoutes OrComponents />
+    </TooltipProvider>
+  );
+}
+
 const BASE_URL =
   process.env.REACT_APP_BACKEND_URL
     ? `${process.env.REACT_APP_BACKEND_URL}/api`
