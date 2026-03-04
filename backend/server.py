@@ -2666,6 +2666,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
  )
 # STAFF ACTIVITY ROUTES
 @api_router.post("/activity/log")
+
 async def log_staff_activity(
     activity_data: StaffActivityCreate, 
     current_user: User = Depends(get_current_user)
@@ -2681,6 +2682,7 @@ async def log_staff_activity(
     doc["timestamp"] = datetime.now(IST).isoformat() 
     
     await db.staff_activity.insert_one(doc)
+    
     return {"message": "Activity logged successfully"}
 
 # ✅ FIX: This decorator MUST be on its own line (Line 2680)
