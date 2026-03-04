@@ -2709,27 +2709,48 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
   compliance_status=compliance_status
  )
 # STAFF ACTIVITY ROUTES
-@api_router.post("/activity/log")
+# ==========================================================
+# STAFF ACTIVITY ROUTES
+# ==========================================================
 
+from fastapi import HTTPException, Depends
+from typing import Optional
+from datetime import datetime
+import pytz
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+# ----------------------------------------------------------
+# LOG STAFF ACTIVITY
+# ----------------------------------------------------------
+
+@api_router.post("/activity/log")
 async def log_staff_activity(
-    activity_data: StaffActivityCreate, 
+    activity_data: StaffActivityCreate,
     current_user: User = Depends(get_current_user)
 ):
+    """Log staff desktop activity"""
+
     activity = StaffActivityLog(
         user_id=current_user.id,
         **activity_data.model_dump()
     )
+
     doc = activity.model_dump()
-    
-    # ✅ FIX: Ensure IST is defined at the top of server.py
-    # IST = pytz.timezone('Asia/Kolkata')
-    doc["timestamp"] = datetime.now(IST).isoformat() 
-    
+
+    # Ensure timestamp stored in IST
+    doc["timestamp"] = datetime.now(IST).isoformat()
+
     await db.staff_activity.insert_one(doc)
-    
+
     return {"message": "Activity logged successfully"}
 
-# ✅ FIX: This decorator MUST be on its own line (Line 2680)
+
+# ----------------------------------------------------------
+# ACTIVITY SUMMARY
+# ----------------------------------------------------------
+
 @api_router.get("/activity/summary")
 async def get_activity_summary(
     user_id: Optional[str] = None,
@@ -2737,81 +2758,163 @@ async def get_activity_summary(
     date_to: Optional[str] = None,
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-  
- """Get staff activity summary (admin only)"""
- if current_user.role != "admin":
-  permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-  allowed = permissions.get("view_other_activity", [])
-  if user_id and user_id != current_user.id and user_id not in allowed:
-   raise HTTPException(status_code=403, detail="Not authorized")
- query = {}
- if user_id:
-  query["user_id"] = user_id
- if date_from:
-  query["timestamp"] = {"$gte": date_from}
- if date_to:
-  if "timestamp" in query:
-   query["timestamp"]["$lte"] = date_to
-  else:
-   query["timestamp"] = {"$lte": date_to}
- activities = await db.staff_activity.find(query, {"_id": 0}).to_list(5000)
- # Aggregate by user and app
- user_summary = {}
- for activity in activities:
-  uid = activity["user_id"]
-  if uid not in user_summary:
-   user_summary[uid] = {
-    "user_id": uid,
-    "total_duration": 0,
-    "apps": {},
-    "categories": {}
-   }
-  user_summary[uid]["total_duration"] += activity.get("duration_seconds", 0)
-  app_name = activity["app_name"]
-  if app_name not in user_summary[uid]["apps"]:
-   user_summary[uid]["apps"][app_name] = {"count": 0, "duration": 0}
-  user_summary[uid]["apps"][app_name]["count"] += 1
-  user_summary[uid]["apps"][app_name]["duration"] += activity.get("duration_seconds", 0)
-  category = activity.get("category", "other")
-  if category not in user_summary[uid]["categories"]:
-   user_summary[uid]["categories"][category] = 0
-  user_summary[uid]["categories"][category] += activity.get("duration_seconds", 0)
- # Add user names
- users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
- user_map = {u["id"]: u["full_name"] for u in users}
- result = []
- for uid, data in user_summary.items():
-  data["user_name"] = user_map.get(uid, "Unknown")
-  data["apps_list"] = sorted(
-   [{"name": k, **v} for k, v in data["apps"].items()],
-   key=lambda x: x["duration"],
-   reverse=True
-  )
-  # Productivity score
-  productive_duration = data["categories"].get("productivity", 0)
-  entertainment_duration = data["categories"].get("entertainment", 0)
-  communication_duration = data["categories"].get("communication", 0)
-  total_duration = data["total_duration"]
-  if total_duration > 0:
-   data["productivity_percent"] = (productive_duration / total_duration) * 100
-  else:
-   data["productivity_percent"] = 0
-  result.append(data)
- return result
+    """Get staff activity summary"""
+
+    # -----------------------------
+    # Permission Check
+    # -----------------------------
+    if current_user.role != "admin":
+        permissions = (
+            current_user.permissions.model_dump()
+            if current_user.permissions else {}
+        )
+
+        allowed = permissions.get("view_other_activity", [])
+
+        if user_id and user_id != current_user.id and user_id not in allowed:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    # -----------------------------
+    # Build Query
+    # -----------------------------
+    query = {}
+
+    if user_id:
+        query["user_id"] = user_id
+
+    if date_from or date_to:
+        query["timestamp"] = {}
+
+    if date_from:
+        query["timestamp"]["$gte"] = date_from
+
+    if date_to:
+        query["timestamp"]["$lte"] = date_to
+
+    # -----------------------------
+    # Fetch Activities
+    # -----------------------------
+    activities = await db.staff_activity.find(
+        query,
+        {"_id": 0}
+    ).to_list(5000)
+
+    # -----------------------------
+    # Aggregate Data
+    # -----------------------------
+    user_summary = {}
+
+    for activity in activities:
+
+        uid = activity.get("user_id")
+        if not uid:
+            continue
+
+        duration = activity.get("duration_seconds") or 0
+        app_name = activity.get("app_name", "Unknown App")
+        category = activity.get("category", "other")
+
+        if uid not in user_summary:
+            user_summary[uid] = {
+                "user_id": uid,
+                "total_duration": 0,
+                "apps": {},
+                "categories": {}
+            }
+
+        user_summary[uid]["total_duration"] += duration
+
+        # -----------------------------
+        # App Aggregation
+        # -----------------------------
+        if app_name not in user_summary[uid]["apps"]:
+            user_summary[uid]["apps"][app_name] = {
+                "count": 0,
+                "duration": 0
+            }
+
+        user_summary[uid]["apps"][app_name]["count"] += 1
+        user_summary[uid]["apps"][app_name]["duration"] += duration
+
+        # -----------------------------
+        # Category Aggregation
+        # -----------------------------
+        if category not in user_summary[uid]["categories"]:
+            user_summary[uid]["categories"][category] = 0
+
+        user_summary[uid]["categories"][category] += duration
+
+    # -----------------------------
+    # Get User Names
+    # -----------------------------
+    users = await db.users.find(
+        {},
+        {"_id": 0, "password": 0}
+    ).to_list(200)
+
+    user_map = {
+        u.get("id"): u.get("full_name", "Unknown")
+        for u in users
+        if u.get("id")
+    }
+
+    # -----------------------------
+    # Build Response
+    # -----------------------------
+    result = []
+
+    for uid, data in user_summary.items():
+
+        data["user_name"] = user_map.get(uid, "Unknown")
+
+        data["apps_list"] = sorted(
+            [
+                {"name": k, **v}
+                for k, v in data["apps"].items()
+            ],
+            key=lambda x: x["duration"],
+            reverse=True
+        )
+
+        productive_duration = data["categories"].get("productivity", 0)
+        total_duration = data["total_duration"]
+
+        if total_duration > 0:
+            data["productivity_percent"] = (
+                productive_duration / total_duration
+            ) * 100
+        else:
+            data["productivity_percent"] = 0
+
+        result.append(data)
+
+    return result
+
+
+# ----------------------------------------------------------
+# USER ACTIVITY DETAIL
+# ----------------------------------------------------------
+
 @api_router.get("/activity/user/{user_id}")
 async def get_user_activity(
- user_id: str,
- limit: int = 100,
- current_user: User = Depends(check_permission("can_view_staff_activity"))
+    user_id: str,
+    limit: int = 100,
+    current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
- """Get detailed activity for a specific user (admin only)"""
- if current_user.role not in ["admin", "manager"]:
-  raise HTTPException(status_code=403, detail="Admin access required")
- activities = await db.staff_activity.find(
-  {"user_id": user_id},
-  {"_id": 0}
- ).sort("timestamp", -1).to_list(limit)
- return activities
+    """Get detailed activity for one user"""
+
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    activities = await db.staff_activity.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(limit)
+
+    return activities
 # USER PERMISSIONS
 # Update user permissions endpoint
 @api_router.put("/users/{user_id}/permissions")
