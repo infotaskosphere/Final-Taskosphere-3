@@ -52,7 +52,7 @@ from backend.models import (
 from passlib.context import CryptContext
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from . import models, schemas
+from backend import models, schemas
 from .database import get_db
 from .auth import get_current_active_user
 from backend.leads import router as leads_router
