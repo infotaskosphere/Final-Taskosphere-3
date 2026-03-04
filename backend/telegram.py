@@ -192,7 +192,7 @@ if clicked == "confirm_lead":
         f"✅ Lead '{new_lead['company_name']}' created successfully!"
     )
 
-    return {"status": "lead_created"}"lead_created"}
+    return {"status": "lead_created"}
             # ===============================
             # EXISTING TASK CALLBACKS (100% unchanged from your original)
             # ===============================
