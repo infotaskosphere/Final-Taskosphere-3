@@ -65,7 +65,7 @@ async def telegram_webhook(request: Request):
             # GENERIC CANCEL (works for Task & Lead)
             # ===============================
             if clicked == "cancel_convo":
-                await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+                await db.telegram_conversations.delete_many({"telegram_id": chat_id})
                 await send_message(chat_id, "❌ Action cancelled.")
                 return {"status": "cancelled"}
             # ===============================
@@ -129,70 +129,70 @@ async def telegram_webhook(request: Request):
                     )
                     await send_message(chat_id, "📅 Enter Next Follow-up Date (YYYY-MM-DD) or SKIP:")
                     return {"status": "assignee_selected"}
-# ===============================
-# CONFIRM LEAD
-# ===============================
-if clicked == "confirm_lead":
+            # ===============================
+            # CONFIRM LEAD
+            # ===============================
+            if clicked == "confirm_lead":
 
-    user = await db.users.find_one({"telegram_id": chat_id})
+                user = await db.users.find_one({"telegram_id": chat_id})
 
-    now = datetime.now(timezone.utc)
+                now = datetime.now(timezone.utc)
 
-    # convert follow-up to datetime
-    follow_up = None
-    if data.get("next_follow_up"):
-        try:
-            follow_up = datetime.fromisoformat(data["next_follow_up"])
-        except:
-            follow_up = None
+                # convert follow-up to datetime
+                follow_up = None
+                if data.get("next_follow_up"):
+                    try:
+                        follow_up = datetime.fromisoformat(data["next_follow_up"])
+                    except:
+                        follow_up = None
 
-    new_lead = {
-        "company_name": data.get("company_name"),
-        "contact_name": data.get("contact_person"),
-        "email": data.get("email"),
-        "phone": data.get("phone"),
+                new_lead = {
+                    "company_name": data.get("company_name"),
+                    "contact_name": data.get("contact_person"),
+                    "email": data.get("email"),
+                    "phone": data.get("phone"),
 
-        # services must be list (backend model)
-        "services": [data.get("service")] if data.get("service") else [],
+                    # services must be list (backend model)
+                    "services": [data.get("service")] if data.get("service") else [],
 
-        "quotation_amount": data.get("quotation_amount"),
+                    "quotation_amount": float(data["quotation_amount"]) if data.get("quotation_amount") else None,
 
-        "status": "new",
-        "source": data.get("source"),
+                    "status": "new",
+                    "source": data.get("source"),
 
-        "date_of_meeting": data.get("date_of_meeting"),
+                    "date_of_meeting": data.get("date_of_meeting"),
 
-        "next_follow_up": follow_up,
+                    "next_follow_up": follow_up,
 
-        "notes": data.get("notes"),
+                    "notes": data.get("notes"),
 
-        "assigned_to": data.get("assigned_to"),
+                    "assigned_to": data.get("assigned_to") or None,
 
-        "created_by": user["id"] if user else "telegram_bot",
+                    "created_by": user["id"] if user else "telegram_bot",
 
-        "created_at": now,
-        "updated_at": now
-    }
+                    "created_at": now,
+                    "updated_at": now
+                }
 
-    await db.leads.insert_one(new_lead)
+                await db.leads.insert_one(new_lead)
 
-    # create notification if assigned
-    if data.get("assigned_to"):
-        await create_notification(
-            user_id=data["assigned_to"],
-            title="New Lead Assigned",
-            message=f"Lead '{new_lead['company_name']}' assigned to you",
-            type="lead"
-        )
+                # create notification if assigned
+                if data.get("assigned_to"):
+                    await create_notification(
+                        user_id=data["assigned_to"],
+                        title="New Lead Assigned",
+                        message=f"Lead '{new_lead['company_name']}' assigned to you",
+                        type="lead"
+                    )
 
-    await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+                await db.telegram_conversations.delete_many({"telegram_id": chat_id})
 
-    await send_message(
-        chat_id,
-        f"✅ Lead '{new_lead['company_name']}' created successfully!"
-    )
+                await send_message(
+                    chat_id,
+                    f"✅ Lead '{new_lead['company_name']}' created successfully!"
+                )
 
-    return {"status": "lead_created"}
+                return {"status": "lead_created"}
             # ===============================
             # EXISTING TASK CALLBACKS (100% unchanged from your original)
             # ===============================
@@ -347,7 +347,7 @@ if clicked == "confirm_lead":
                     "id": str(uuid.uuid4()),
                     "title": data.get("title"),
                     "description": data.get("description"),
-                    "assigned_to": data.get("assigned_to"),
+                    "assigned_to": data.get("assigned_to") or None,
                     "sub_assignees": data.get("sub_assignees", []),
                     "priority": data.get("priority", "medium"),
                     "status": data.get("status", "pending"),
@@ -362,7 +362,7 @@ if clicked == "confirm_lead":
                     "due_date": data.get("due_date")
                 }
                 await db.tasks.insert_one(new_task)
-                await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+                await db.telegram_conversations.delete_many({"telegram_id": chat_id})
                 await send_message(chat_id, "✅ Task Created Successfully!")
                 return {"status": "task_created"}
         # =====================================================
@@ -375,7 +375,7 @@ if clicked == "confirm_lead":
         text = message.get("text", "").strip()
         # CANCEL VIA COMMAND
         if text.lower() == "/cancel":
-            await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+            await db.telegram_conversations.delete_many({"telegram_id": chat_id})
             await send_message(chat_id, "❌ Action cancelled.")
             return {"status": "cancelled"}
         # SHOW MY TASKS
@@ -385,7 +385,13 @@ if clicked == "confirm_lead":
                 await send_message(chat_id, "User not linked.")
                 return {"status": "no_user"}
             tasks = await db.tasks.find(
-                {"created_by": user["id"]},
+                {
+                    "$or": [
+                        {"created_by": user["id"]},
+                        {"assigned_to": user["id"]},
+                        {"sub_assignees": user["id"]}
+                    ]
+                },
                 {"_id": 0}
             ).to_list(20)
             if not tasks:
