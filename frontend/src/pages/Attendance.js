@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO, isBefore, isAfter, isToday as dateFnsIsToday, startOfDay } from 'date-fns';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -62,14 +63,18 @@ function DigitalClock() {
         repeat: Infinity
       }}
     >
-      <span className="text-3xl font-mono font-bold tracking-wider">
+      <motion.span
+        className="text-3xl font-mono font-bold tracking-wider"
+        animate={{ scale: [1, 1.05, 1] }}
+        transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+      >
         {time.toLocaleTimeString('en-IN', {
           hour12: true,
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit'
         })}
-      </span>
+      </motion.span>
 
       <span className="text-[11px] uppercase tracking-widest text-blue-200 mt-1">
         Indian Standard Time
@@ -84,6 +89,7 @@ export default function Attendance() {
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [mySummary, setMySummary] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState(null);
+  const [selectedAttendance, setSelectedAttendance] = useState(null);
   const [isLateToday, setIsLateToday] = useState(false);
   const [lateByMinutesToday, setLateByMinutesToday] = useState(0);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -128,6 +134,16 @@ export default function Attendance() {
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
+  useEffect(() => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const isTodayDate = dateFnsIsToday(selectedDate);
+    if (isTodayDate) {
+      setSelectedAttendance(todayAttendance);
+    } else {
+      const found = attendanceHistory.find(a => a.date === dateStr);
+      setSelectedAttendance(found || null);
+    }
+  }, [selectedDate, todayAttendance, attendanceHistory]);
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -247,6 +263,18 @@ export default function Attendance() {
       setLoading(false);
     }
   };
+  const handleAddHoliday = async () => {
+    const holidayName = prompt('Enter holiday name:');
+    if (!holidayName) return;
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    try {
+      await api.post('/holidays', { date: dateStr, name: holidayName });
+      toast.success('Holiday added successfully');
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to add holiday');
+    }
+  };
   const formatDuration = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
@@ -264,6 +292,28 @@ export default function Attendance() {
     const hours = Math.floor(diffMs / 3600000);
     const minutes = Math.floor((diffMs % 3600000) / 60000);
     return `${hours}h ${minutes}m`;
+  };
+  const getDateStatus = (date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const isTodayDate = dateFnsIsToday(date);
+    const att = isTodayDate ? todayAttendance : attendanceHistory.find(a => a.date === dateStr);
+    const hol = holidays.find(h => h.date === dateStr);
+    if (hol) {
+      return `Holiday: ${hol.name}`;
+    }
+    if (att) {
+      let str = att.is_late ? 'Late' : 'Present';
+      str += ` - Duration: ${formatDuration(att.duration_minutes || 0)}`;
+      if (!att.punch_out && isTodayDate) str += ' (Ongoing)';
+      return str;
+    }
+    if (isBefore(startOfDay(date), startOfDay(new Date()))) {
+      return 'Absent';
+    }
+    if (isAfter(date, new Date())) {
+      return 'Future date';
+    }
+    return 'Today - No record yet';
   };
   const getMonthAttendance = () => {
     const start = startOfMonth(selectedDate);
@@ -319,6 +369,30 @@ export default function Attendance() {
   };
   const selectedDayAttendance = getSelectedDayAttendance();
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
+  const isSelectedToday = dateFnsIsToday(selectedDate);
+  const isSelectedFuture = isAfter(selectedDate, new Date());
+  const isSelectedPast = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
+  const handleApplyLeaveClick = () => {
+    if (!isSelectedToday) {
+      setLeaveFrom(selectedDate);
+      setLeaveTo(selectedDate);
+    }
+    setShowLeaveForm(true);
+  };
+  const CustomDay = ({ date, ...props }) => {
+    const status = getDateStatus(date);
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button {...props} />
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{format(date, 'MMMM d, yyyy')}</p>
+          <p className="font-medium">{status}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
   return (
     <motion.div
       className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
@@ -333,7 +407,7 @@ export default function Attendance() {
           <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
         </div>
       </motion.div>
-      {/* Today's Punch Widget */}
+      {/* Selected Date Punch Widget */}
       <motion.div variants={itemVariants}>
         <Card
           className="border-0 shadow-lg overflow-hidden"
@@ -346,17 +420,17 @@ export default function Attendance() {
                   <Clock className="h-7 w-7 text-white" />
                 </div>
                 <div className="text-white">
-                  <h3 className="text-xl font-semibold font-outfit">Today's Status</h3>
-                  <p className="text-blue-100">
-                    {format(new Date(), 'EEEE, MMMM d, yyyy')}
-                  </p>
-                  {todayAttendance?.punch_in && (
+                  <h3 className="text-xl font-semibold font-outfit">{isSelectedToday ? "Today's Status" : `Status for ${format(selectedDate, 'EEEE, MMMM d, yyyy')}`}</h3>
+                  {!isSelectedToday && <p className="text-blue-100">
+                    {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+                  </p>}
+                  {selectedAttendance?.punch_in && (
                     <p className="text-sm text-blue-100/80">
-                      In: {formatInTimeZone(new Date(todayAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
-                      {todayAttendance?.punch_out && (
+                      In: {formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
+                      {selectedAttendance?.punch_out && (
                         <>
                           {" • Out: "}
-                          {formatInTimeZone(new Date(todayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
+                          {formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
                         </>
                       )}
                     </p>
@@ -364,7 +438,7 @@ export default function Attendance() {
                   <p className="text-sm text-blue-100/80 mt-1">
                     Expected: In {user.punch_in_time || 'N/A'} (Grace {user.grace_time || 'N/A'}) • Out {user.punch_out_time || 'N/A'}
                   </p>
-                  {isLateToday && (
+                  {isLateToday && isSelectedToday && (
                     <div className="mt-2 inline-flex items-center gap-2 bg-red-500/30 backdrop-blur px-3 py-1 rounded-full">
                       <AlertTriangle className="h-4 w-4 text-red-300" />
                       <span className="text-red-200 font-medium text-sm">
@@ -372,7 +446,7 @@ export default function Attendance() {
                       </span>
                     </div>
                   )}
-                  {isEarlyLeaveToday && (
+                  {isEarlyLeaveToday && isSelectedToday && (
                     <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/30 backdrop-blur px-3 py-1 rounded-full">
                       <AlertTriangle className="h-4 w-4 text-amber-300" />
                       <span className="text-amber-200 font-medium text-sm">
@@ -383,27 +457,30 @@ export default function Attendance() {
                 </div>
               </div>
               <div className="flex gap-3">
-                {!todayAttendance?.punch_in ? (
+                {!selectedAttendance?.punch_in ? (
                   <div className="flex gap-3">
-                    <Button
-                      onClick={() => {
-                        handlePunchAction("punch_in");
-                        setShowPunchInModal(false);
-                      }}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      Punch In
-                    </Button>
-                   
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowLeaveForm(true)}
-                    >
-                      Apply For Leave
-                    </Button>
+                    {isSelectedToday && (
+                      <Button
+                        onClick={() => {
+                          handlePunchAction("punch_in");
+                          setShowPunchInModal(false);
+                        }}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        Punch In
+                      </Button>
+                    )}
+                    {(!isSelectedPast || isSelectedToday) && (
+                      <Button
+                        variant="outline"
+                        onClick={handleApplyLeaveClick}
+                      >
+                        Apply For Leave
+                      </Button>
+                    )}
                   </div>
                 ) : (
-                  !todayAttendance?.punch_out && (
+                  !selectedAttendance?.punch_out && isSelectedToday && (
                     <Button
                       onClick={() => handlePunchAction('punch_out')}
                       disabled={loading}
@@ -415,9 +492,9 @@ export default function Attendance() {
                     </Button>
                   )
                 )}
-                {todayAttendance?.punch_out && (
+                {selectedAttendance?.punch_out && (
                   <Badge className="bg-white/20 text-white border-0 text-sm px-4 py-2">
-                    Completed: {formatDuration(todayAttendance.duration_minutes)}
+                    Completed: {formatDuration(selectedAttendance.duration_minutes)}
                   </Badge>
                 )}
               </div>
@@ -578,7 +655,7 @@ export default function Attendance() {
                 Today
               </Button>
             </div>
-            <CardDescription>Click any date to see details</CardDescription>
+            <CardDescription>Click any date to see details. Hover for quick info.</CardDescription>
           </CardHeader>
           <CardContent className="p-4">
             <Calendar
@@ -589,6 +666,9 @@ export default function Attendance() {
               modifiersStyles={modifiersStyles}
               className="rounded-xl border"
               showOutsideDays={false}
+              components={{
+                Day: CustomDay
+              }}
             />
             {/* Visual Legend */}
             <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
@@ -645,6 +725,11 @@ export default function Attendance() {
               <div className="mt-6 p-5 rounded-2xl bg-red-50 border border-red-100 text-center">
                 <p className="text-red-600 font-medium">No record — Absent</p>
               </div>
+            )}
+            {canViewRankings && isSelectedFuture && !selectedHoliday && (
+              <Button onClick={handleAddHoliday} className="mt-4" variant="outline">
+                Add Holiday
+              </Button>
             )}
           </CardContent>
         </Card>
