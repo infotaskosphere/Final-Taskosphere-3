@@ -962,9 +962,11 @@ function TaskCreationModal({ isOpen, onClose, lead, users, onCreateTask }) {
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right">Recurring</Label>
             <div className="col-span-3 flex items-center gap-4">
-              <Switch
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 checked={taskData.is_recurring}
-                onCheckedChange={(checked) => setTaskData(prev => ({ ...prev, is_recurring: checked }))}
+                onChange={(e) => setTaskData(prev => ({ ...prev, is_recurring: e.target.checked }))}
               />
               {taskData.is_recurring && (
                 <>
