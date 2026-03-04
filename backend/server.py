@@ -2723,219 +2723,169 @@ import pytz
 IST = pytz.timezone("Asia/Kolkata")
 
 # ----------------------------------------------------------
-
 # LOG STAFF ACTIVITY
-
 # ----------------------------------------------------------
 
 @api_router.post("/activity/log")
 async def log_staff_activity(
-activity_data: StaffActivityCreate,
-current_user: User = Depends(get_current_user)
+    activity_data: StaffActivityCreate,
+    current_user: User = Depends(get_current_user)
 ):
-"""Log staff desktop activity"""
+    """Log staff desktop activity"""
+    activity = StaffActivityLog(
+        user_id=current_user.id,
+        **activity_data.model_dump()
+    )
 
-```
-activity = StaffActivityLog(
-    user_id=current_user.id,
-    **activity_data.model_dump()
-)
+    doc = activity.model_dump()
 
-doc = activity.model_dump()
+    # store timestamp in IST
+    doc["timestamp"] = datetime.now(IST)
 
-# store timestamp in IST
-doc["timestamp"] = datetime.now(IST)
+    await db.staff_activity.insert_one(doc)
 
-await db.staff_activity.insert_one(doc)
-
-return {"message": "Activity logged successfully"}
-```
+    return {"message": "Activity logged successfully"}
 
 # ----------------------------------------------------------
-
 # ACTIVITY SUMMARY
-
 # ----------------------------------------------------------
 
 @api_router.get("/activity/summary")
 async def get_activity_summary(
-user_id: Optional[str] = None,
-date_from: Optional[str] = None,
-date_to: Optional[str] = None,
-current_user: User = Depends(check_permission("can_view_staff_activity"))
+    user_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-"""Get staff activity summary"""
+    """Get staff activity summary"""
+    
+    # ------------------------------------------------------
+    # Permission Check
+    # ------------------------------------------------------
+    if current_user.role != "admin":
+        permissions = (
+            current_user.permissions.model_dump()
+            if current_user.permissions else {}
+        )
 
-```
-# ------------------------------------------------------
-# Permission Check
-# ------------------------------------------------------
+        allowed = permissions.get("view_other_activity", [])
 
-if current_user.role != "admin":
+        if user_id and user_id != current_user.id and user_id not in allowed:
+            raise HTTPException(status_code=403, detail="Not authorized")
 
-    permissions = (
-        current_user.permissions.model_dump()
-        if current_user.permissions else {}
-    )
+    # ------------------------------------------------------
+    # Build Mongo Query
+    # ------------------------------------------------------
+    query = {}
 
-    allowed = permissions.get("view_other_activity", [])
+    if user_id:
+        query["user_id"] = user_id
 
-    if user_id and user_id != current_user.id and user_id not in allowed:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    if date_from or date_to:
+        query["timestamp"] = {}
 
-# ------------------------------------------------------
-# Build Mongo Query
-# ------------------------------------------------------
+    if date_from:
+        try:
+            query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
+        except:
+            pass
 
-query = {}
+    if date_to:
+        try:
+            query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
+        except:
+            pass
 
-if user_id:
-    query["user_id"] = user_id
+    # ------------------------------------------------------
+    # Fetch Activities
+    # ------------------------------------------------------
+    activities = await db.staff_activity.find(
+        query,
+        {"_id": 0}
+    ).to_list(10000)
 
-if date_from or date_to:
-    query["timestamp"] = {}
+    # ------------------------------------------------------
+    # Aggregate Data
+    # ------------------------------------------------------
+    user_summary = {}
 
-if date_from:
-    try:
-        query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
-    except:
-        pass
+    for activity in activities:
+        uid = activity.get("user_id")
+        if not uid:
+            continue
 
-if date_to:
-    try:
-        query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
-    except:
-        pass
+        duration = activity.get("duration_seconds") or 0
+        app_name = activity.get("app_name", "Unknown App")
+        category = activity.get("category", "other")
+        website = activity.get("website")
+        idle = activity.get("idle", False)
 
-# ------------------------------------------------------
-# Fetch Activities
-# ------------------------------------------------------
+        if uid not in user_summary:
+            user_summary[uid] = {
+                "user_id": uid,
+                "total_duration": 0,
+                "active_duration": 0,
+                "idle_duration": 0,
+                "apps": {},
+                "websites": {},
+                "categories": {}
+            }
 
-activities = await db.staff_activity.find(
-    query,
-    {"_id": 0}
-).to_list(10000)
+        user_summary[uid]["total_duration"] += duration
 
-# ------------------------------------------------------
-# Aggregate Data
-# ------------------------------------------------------
+        if idle:
+            user_summary[uid]["idle_duration"] += duration
+        else:
+            user_summary[uid]["active_duration"] += duration
 
-user_summary = {}
+        # App Aggregation
+        if app_name not in user_summary[uid]["apps"]:
+            user_summary[uid]["apps"][app_name] = {"count": 0, "duration": 0}
 
-for activity in activities:
+        user_summary[uid]["apps"][app_name]["count"] += 1
+        user_summary[uid]["apps"][app_name]["duration"] += duration
 
-    uid = activity.get("user_id")
-    if not uid:
-        continue
+        # Website Aggregation
+        if website:
+            if website not in user_summary[uid]["websites"]:
+                user_summary[uid]["websites"][website] = 0
+            user_summary[uid]["websites"][website] += duration
 
-    duration = activity.get("duration_seconds") or 0
-    app_name = activity.get("app_name", "Unknown App")
-    category = activity.get("category", "other")
-    website = activity.get("website")
-    idle = activity.get("idle", False)
+        # Category Aggregation
+        if category not in user_summary[uid]["categories"]:
+            user_summary[uid]["categories"][category] = 0
+        user_summary[uid]["categories"][category] += duration
 
-    if uid not in user_summary:
-        user_summary[uid] = {
-            "user_id": uid,
-            "total_duration": 0,
-            "active_duration": 0,
-            "idle_duration": 0,
-            "apps": {},
-            "websites": {},
-            "categories": {}
-        }
+    # ------------------------------------------------------
+    # Get User Names
+    # ------------------------------------------------------
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(200)
+    user_map = {u.get("id"): u.get("full_name", "Unknown") for u in users if u.get("id")}
 
-    # total time
-    user_summary[uid]["total_duration"] += duration
+    # ------------------------------------------------------
+    # Build Response
+    # ------------------------------------------------------
+    result = []
 
-    if idle:
-        user_summary[uid]["idle_duration"] += duration
-    else:
-        user_summary[uid]["active_duration"] += duration
+    for uid, data in user_summary.items():
+        data["user_name"] = user_map.get(uid, "Unknown")
+        data["apps_list"] = sorted(
+            [{"name": k, **v} for k, v in data["apps"].items()],
+            key=lambda x: x["duration"],
+            reverse=True
+        )
 
-    # --------------------------------------------------
-    # App Aggregation
-    # --------------------------------------------------
+        productive_duration = data["categories"].get("productivity", 0)
+        total_duration = data["total_duration"]
 
-    if app_name not in user_summary[uid]["apps"]:
-        user_summary[uid]["apps"][app_name] = {
-            "count": 0,
-            "duration": 0
-        }
+        if total_duration > 0:
+            data["productivity_percent"] = (productive_duration / total_duration) * 100
+        else:
+            data["productivity_percent"] = 0
 
-    user_summary[uid]["apps"][app_name]["count"] += 1
-    user_summary[uid]["apps"][app_name]["duration"] += duration
+        result.append(data)
 
-    # --------------------------------------------------
-    # Website Aggregation
-    # --------------------------------------------------
-
-    if website:
-
-        if website not in user_summary[uid]["websites"]:
-            user_summary[uid]["websites"][website] = 0
-
-        user_summary[uid]["websites"][website] += duration
-
-    # --------------------------------------------------
-    # Category Aggregation
-    # --------------------------------------------------
-
-    if category not in user_summary[uid]["categories"]:
-        user_summary[uid]["categories"][category] = 0
-
-    user_summary[uid]["categories"][category] += duration
-
-# ------------------------------------------------------
-# Get User Names
-# ------------------------------------------------------
-
-users = await db.users.find(
-    {},
-    {"_id": 0, "password": 0}
-).to_list(200)
-
-user_map = {
-    u.get("id"): u.get("full_name", "Unknown")
-    for u in users
-    if u.get("id")
-}
-
-# ------------------------------------------------------
-# Build Response
-# ------------------------------------------------------
-
-result = []
-
-for uid, data in user_summary.items():
-
-    data["user_name"] = user_map.get(uid, "Unknown")
-
-    # convert apps dict → sorted list
-    data["apps_list"] = sorted(
-        [
-            {"name": k, **v}
-            for k, v in data["apps"].items()
-        ],
-        key=lambda x: x["duration"],
-        reverse=True
-    )
-
-    # productivity calculation
-    productive_duration = data["categories"].get("productivity", 0)
-    total_duration = data["total_duration"]
-
-    if total_duration > 0:
-        data["productivity_percent"] = (
-            productive_duration / total_duration
-        ) * 100
-    else:
-        data["productivity_percent"] = 0
-
-    result.append(data)
-
-return result
-
+    return result
 # ----------------------------------------------------------
 # USER ACTIVITY DETAIL
 # ----------------------------------------------------------
