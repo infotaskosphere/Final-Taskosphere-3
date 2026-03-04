@@ -158,6 +158,7 @@ class Attendance(BaseModel):
     status: str = "absent"
     punch_in: Optional[datetime] = None
     punch_out: Optional[datetime] = None
+    duration_minutes: Optional[int] = 0
     leave_reason: Optional[str] = None
 
 class AttendanceBase(BaseModel):
