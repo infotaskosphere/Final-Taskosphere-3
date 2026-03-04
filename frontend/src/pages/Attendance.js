@@ -372,19 +372,22 @@ export default function Attendance() {
     setShowLeaveForm(true);
   };
   const CustomDay = ({ date, ...props }) => {
-    const status = getDateStatus(date);
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button {...props} />
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>{format(date, 'MMMM d, yyyy')}</p>
-          <p className="font-medium">{status}</p>
-        </TooltipContent>
-      </Tooltip>
-    );
-  };
+  const status = getDateStatus(date);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* Ensure props.children (which is the date number) is rendered */}
+        <button {...props}>
+          {format(date, 'd')} 
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{format(date, 'MMMM d, yyyy')}</p>
+        <p className="font-medium">{status}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
   return (
     <TooltipProvider>
       <motion.div
@@ -650,18 +653,29 @@ export default function Attendance() {
               <CardDescription>Click any date to see details. Hover for quick info.</CardDescription>
             </CardHeader>
             <CardContent className="p-4">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={(date) => date && setSelectedDate(date)}
-                modifiers={modifiers}
-                modifiersStyles={modifiersStyles}
-                className="rounded-xl border"
-                showOutsideDays={false}
-                components={{
-                  Day: CustomDay
-                }}
-              />
+              <div className="calendar-container text-slate-900">
+   <Calendar
+  mode="single"
+  selected={selectedDate}
+  onSelect={(date) => date && setSelectedDate(date)}
+  modifiers={modifiers}
+  modifiersStyles={modifiersStyles}
+  className="rounded-xl border"
+  showOutsideDays={false}
+  // Add this classNames prop to ensure day text is visible
+  classNames={{
+    day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 text-slate-900", // Force dark text
+    day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+    day_today: "bg-accent text-accent-foreground",
+    day_outside: "text-muted-foreground opacity-50",
+    day_disabled: "text-muted-foreground opacity-50",
+    day_hidden: "invisible",
+  }}
+  components={{
+    Day: CustomDay
+  }}
+/>
+</div>
               {/* Visual Legend */}
               <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
                 <div className="flex items-center gap-2">
