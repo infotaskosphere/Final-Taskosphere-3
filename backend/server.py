@@ -28,8 +28,8 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, Va
 from bson import ObjectId
 from dotenv import load_dotenv
 
-# Internal Project Imports
-# Removed 'schemas' because it is defined locally in this file
+# --- FIXED ABSOLUTE IMPORTS ---
+import backend.models as models
 from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
     Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
@@ -41,14 +41,14 @@ from backend.models import (
     DashboardStats, AuditLog,
     HolidayResponse, HolidayCreate
 )
-from .database import get_db
-from .auth import get_current_active_user
+from backend.database import get_db
+from backend.auth import get_current_active_user
 from backend.leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
+# ------------------------------
 
-# External Services
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
