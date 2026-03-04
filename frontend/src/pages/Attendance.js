@@ -20,7 +20,6 @@ import {
   TrendingUp,
   Timer
 } from 'lucide-react';
-
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -28,16 +27,56 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+
+function DigitalClock() {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <motion.div
+      className="flex flex-col items-center px-6 py-4 rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 text-white"
+      animate={{
+        boxShadow: [
+          "0 0 6px rgba(59,130,246,0.4)",
+          "0 0 18px rgba(59,130,246,0.9)",
+          "0 0 6px rgba(59,130,246,0.4)"
+        ]
+      }}
+      transition={{
+        duration: 2,
+        repeat: Infinity
+      }}
+    >
+      <span className="text-3xl font-mono font-bold tracking-wider">
+        {time.toLocaleTimeString('en-IN', {
+          hour12: true,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })}
+      </span>
+
+      <span className="text-[11px] uppercase tracking-widest text-blue-200 mt-1">
+        Indian Standard Time
+      </span>
+    </motion.div>
+  );
+}
 
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
@@ -50,7 +89,7 @@ export default function Attendance() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [showPunchInModal, setShowPunchInModal] = useState(false);
-  
+ 
   // --- ADDED STATES (NO DELETIONS) ---
   const [myRank, setMyRank] = useState('—');
   const [tasksCompleted, setTasksCompleted] = useState(0);
@@ -61,17 +100,16 @@ export default function Attendance() {
   const [leaveTo, setLeaveTo] = useState(null);
   const [leaveReason, setLeaveReason] = useState("");
   const [holidays, setHolidays] = useState([]);
+  const [liveDuration, setLiveDuration] = useState('0h 0m');
 
   useEffect(() => {
     fetchData();
   }, []);
-
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
       setShowPunchInModal(true);
     }
   }, [todayAttendance]);
-
   useEffect(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (todayAttendance?.date !== todayStr) {
@@ -81,7 +119,15 @@ export default function Attendance() {
       setEarlyByMinutesToday(0);
     }
   }, [todayAttendance]);
-
+  useEffect(() => {
+    if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
+      const interval = setInterval(() => {
+        setLiveDuration(getTodayLiveDuration());
+      }, 60000);
+      setLiveDuration(getTodayLiveDuration()); // initial
+      return () => clearInterval(interval);
+    }
+  }, [todayAttendance]);
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -99,18 +145,15 @@ export default function Attendance() {
       }
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] =
         await Promise.all(requests);
-
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
       setHolidays(holidaysRes.data || []);
-
       const rankingList = rankingRes.data.rankings || [];
       const myEntry = rankingList.find(r => r.user_id === user?.id);
       if (myEntry) {
         setMyRank(`#${myEntry.rank}`);
       }
-
       const completedCount = tasksRes.data.filter(
         task => task.status === 'completed'
       ).length;
@@ -122,7 +165,6 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-
   const handlePunchAction = async (action) => {
     setLoading(true);
     try {
@@ -144,12 +186,10 @@ export default function Attendance() {
         action,
         location: locationData
       });
-
       let isLate = false;
       let lateByMinutes = 0;
       let isEarlyLeave = false;
       let earlyByMinutes = 0;
-
       if (action === 'punch_in' && user?.punch_in_time) {
         try {
           const [expH, expM] = user.punch_in_time.split(':').map(Number);
@@ -195,7 +235,6 @@ export default function Attendance() {
           console.warn("Cannot calculate early leave status:", err);
         }
       }
-
       toast.success(
         action === 'punch_in'
           ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
@@ -208,14 +247,12 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-
   const formatDuration = (minutes) => {
     if (!minutes) return '0h 0m';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
-
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) {
@@ -228,7 +265,6 @@ export default function Attendance() {
     const minutes = Math.floor((diffMs % 3600000) / 60000);
     return `${hours}h ${minutes}m`;
   };
-
   const getMonthAttendance = () => {
     const start = startOfMonth(selectedDate);
     const end = endOfMonth(selectedDate);
@@ -237,12 +273,10 @@ export default function Attendance() {
       return date >= start && date <= end;
     });
   };
-
   const monthAttendance = getMonthAttendance();
   const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
   const monthDaysPresent = monthAttendance.length;
   const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late === true).length;
-
   // Calendar highlighting
   const attendanceDates = attendanceHistory.map(a => parseISO(a.date));
   const lateDates = isLateToday && todayAttendance?.date
@@ -279,15 +313,12 @@ export default function Attendance() {
       color: COLORS.deepBlue
     }
   };
-
   const getSelectedDayAttendance = () => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     return attendanceHistory.find(a => a.date === dateStr);
   };
-
   const selectedDayAttendance = getSelectedDayAttendance();
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
-
   return (
     <motion.div
       className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
@@ -302,7 +333,6 @@ export default function Attendance() {
           <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
         </div>
       </motion.div>
-
       {/* Today's Punch Widget */}
       <motion.div variants={itemVariants}>
         <Card
@@ -364,7 +394,7 @@ export default function Attendance() {
                     >
                       Punch In
                     </Button>
-                    
+                   
                     <Button
                       variant="outline"
                       onClick={() => setShowLeaveForm(true)}
@@ -395,7 +425,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Stats Cards Row */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
         {/* This Month */}
@@ -415,7 +444,6 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Tasks Completed */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
@@ -433,7 +461,6 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Total Days Late */}
         <Card className="border border-slate-200 shadow-sm">
           <CardContent className="p-5">
@@ -451,7 +478,6 @@ export default function Attendance() {
             </div>
           </CardContent>
         </Card>
-
         {/* Your Star Performance Rank */}
         {canViewRankings && (
           <Card className="border border-slate-200 shadow-sm">
@@ -472,24 +498,31 @@ export default function Attendance() {
           </Card>
         )}
       </motion.div>
-
       {/* Live Total Hours Today */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm">
-          <CardContent className="p-6 text-center">
-            <p className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">
-              Total Hours Today
-            </p>
-            <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-              {getTodayLiveDuration()}
-            </p>
-            {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
-              <p className="text-xs text-emerald-600 mt-2 font-medium">LIVE • updates every minute</p>
-            )}
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 items-center gap-6">
+              {/* LEFT SIDE — TOTAL HOURS */}
+              <div className="text-center md:text-left">
+                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">
+                  Total Hours Today
+                </p>
+                <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                  {liveDuration}
+                </p>
+                {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
+                  <p className="text-xs text-emerald-600 mt-2 font-medium">LIVE • updates every minute</p>
+                )}
+              </div>
+              {/* RIGHT SIDE — DIGITAL CLOCK */}
+              <div className="flex justify-center md:justify-end">
+                <DigitalClock />
+              </div>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Monthly Performance Summary */}
       <motion.div variants={itemVariants}>
         <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
@@ -526,7 +559,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Calendar and History Section - IMPROVED UX */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
         {/* ENHANCED ATTENDANCE CALENDAR */}
@@ -548,7 +580,6 @@ export default function Attendance() {
             </div>
             <CardDescription>Click any date to see details</CardDescription>
           </CardHeader>
-
           <CardContent className="p-4">
             <Calendar
               mode="single"
@@ -559,7 +590,6 @@ export default function Attendance() {
               className="rounded-xl border"
               showOutsideDays={false}
             />
-
             {/* Visual Legend */}
             <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
               <div className="flex items-center gap-2">
@@ -579,7 +609,6 @@ export default function Attendance() {
                 <span className="text-slate-600">Today</span>
               </div>
             </div>
-
             {/* Enhanced Selected Day Info */}
             {selectedDayAttendance ? (
               <div className="mt-6 p-5 rounded-2xl bg-slate-50 border border-slate-200">
@@ -619,7 +648,6 @@ export default function Attendance() {
             )}
           </CardContent>
         </Card>
-
         {/* Recent Attendance History */}
         <Card className="border border-slate-200 shadow-sm lg:col-span-2">
           <CardHeader>
@@ -651,7 +679,6 @@ export default function Attendance() {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Auto Punch-In Popup */}
       {showPunchInModal && (
         <motion.div
@@ -701,7 +728,6 @@ export default function Attendance() {
           </motion.div>
         </motion.div>
       )}
-
       {/* PREMIUM LEAVE MODAL WITH SUPERIOR CALENDAR UX */}
       <AnimatePresence>
         {showLeaveForm && (
@@ -737,7 +763,6 @@ export default function Attendance() {
                   ✕
                 </button>
               </div>
-
               {/* Quick Presets */}
               <div className="mb-8">
                 <p className="text-xs font-medium text-slate-500 mb-3">QUICK SELECT</p>
@@ -767,7 +792,6 @@ export default function Attendance() {
                   ))}
                 </div>
               </div>
-
               {/* Side-by-side Calendars */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
@@ -780,7 +804,6 @@ export default function Attendance() {
                     className="rounded-2xl border shadow-sm"
                   />
                 </div>
-
                 <div>
                   <label className="text-sm font-medium text-slate-700 mb-2 block">To Date</label>
                   <Calendar
@@ -794,7 +817,6 @@ export default function Attendance() {
                   />
                 </div>
               </div>
-
               {/* Live Duration Display */}
               {leaveFrom && (
                 <div className="mt-6 p-4 bg-blue-50 rounded-2xl flex items-center justify-between">
@@ -815,7 +837,6 @@ export default function Attendance() {
                   </div>
                 </div>
               )}
-
               {/* Reason */}
               <div className="mt-8">
                 <label className="text-sm font-medium text-slate-700 mb-2 block">
@@ -828,7 +849,6 @@ export default function Attendance() {
                   className="w-full min-h-[110px] p-4 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
-
               {/* Footer */}
               <div className="flex justify-end gap-4 mt-8">
                 <Button
