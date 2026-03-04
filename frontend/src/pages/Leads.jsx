@@ -811,202 +811,58 @@ function TaskCreationModal({ isOpen, onClose, lead, users, onCreateTask }) {
     recurrence_interval: 1,
   });
   const [date, setDate] = useState(undefined);
-  const [selectedWorkflow, setSelectedWorkflow] = useState(null);
 
-  const filteredWorkflows = useMemo(() => {
-    return COMPLIANCE_WORKFLOWS.filter(wf => wf.category === taskData.category);
-  }, [taskData.category]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setTaskData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const applyWorkflow = (wf) => {
-    const today = new Date();
-    const dueDate = addDays(today, wf.estimatedDays);
-    setTaskData(prev => ({
-      ...prev,
-      title: wf.title,
-      description: wf.description,
-      priority: wf.priority,
-      category: wf.category,
-      is_recurring: true,
-      recurrence_pattern: wf.recurrence_pattern,
-      recurrence_interval: wf.recurrence_interval,
-    }));
-    setDate(dueDate);
-    setSelectedWorkflow(wf);
-    toast.success(`Applied ${wf.name} workflow`);
-  };
-
-  const handleSubmit = () => {
-    onCreateTask({ ...taskData, due_date: date, lead_id: lead.id });
-    onClose();
-  };
+  // ... (keep your existing useMemo and applyWorkflow logic)
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[700px]">
-        <DialogHeader>
-          <DialogTitle>Create Task for Closed Lead</DialogTitle>
-          <DialogDescription>
-            Assign a follow-up task to a team member for this closed lead ({lead?.status}). Optionally apply a compliance workflow.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          {/* Workflow Selection */}
-          <div className="border rounded-lg p-4">
-            <Label className="mb-2 block">Apply Compliance Workflow</Label>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-              {filteredWorkflows.map(wf => (
-                <Button
-                  key={wf.id}
-                  variant={selectedWorkflow?.id === wf.id ? "default" : "outline"}
-                  className="h-auto py-2 text-left justify-start"
-                  onClick={() => applyWorkflow(wf)}
-                >
-                  <FileText className="mr-2 h-4 w-4" />
-                  {wf.name}
-                </Button>
-              ))}
-              {filteredWorkflows.length === 0 && (
-                <p className="col-span-full text-center text-sm text-muted-foreground">
-                  No workflows for this service
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="title" className="text-right">Title</Label>
-            <Input
-              id="title"
-              name="title"
-              value={taskData.title}
-              onChange={handleChange}
-              className="col-span-3"
+        {/* ... Header and other fields ... */}
+
+        {/* REPLACED SWITCH WITH NATIVE CHECKBOX HERE */}
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label className="text-right font-semibold">Recurring</Label>
+          <div className="col-span-3 flex items-center gap-4">
+            <input
+              type="checkbox"
+              className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              checked={taskData.is_recurring}
+              onChange={(e) => setTaskData(prev => ({ ...prev, is_recurring: e.target.checked }))}
             />
-          </div>
-          <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="description" className="text-right pt-2">Description</Label>
-            <Textarea
-              id="description"
-              name="description"
-              value={taskData.description}
-              onChange={handleChange}
-              className="col-span-3"
-            />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="assigned_to" className="text-right">Assigned To</Label>
-            <Select
-              value={taskData.assigned_to}
-              onValueChange={(val) => setTaskData(prev => ({ ...prev, assigned_to: val }))}
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select team member" />
-              </SelectTrigger>
-              <SelectContent>
-                {users.map(u => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="priority" className="text-right">Priority</Label>
-            <Select
-              value={taskData.priority}
-              onValueChange={(val) => setTaskData(prev => ({ ...prev, priority: val }))}
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select priority" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="due_date" className="text-right">Due Date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "col-span-3 justify-start text-left font-normal",
-                    !date && "text-muted-foreground"
-                  )}
+            <span className="text-sm text-slate-600">Enable recurring task</span>
+            
+            {taskData.is_recurring && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2">
+                <Select
+                  value={taskData.recurrence_pattern}
+                  onValueChange={(val) => setTaskData(prev => ({ ...prev, recurrence_pattern: val }))}
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "PPP") : <span>Pick a date</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  initialFocus
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RECURRENCE_PATTERNS.map(p => (
+                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min="1"
+                  value={taskData.recurrence_interval}
+                  onChange={(e) => setTaskData(prev => ({ ...prev, recurrence_interval: parseInt(e.target.value) || 1 }))}
+                  className="w-20"
                 />
-              </PopoverContent>
-            </Popover>
-          </div>
-          {/* Recurring Options */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Recurring</Label>
-            <div className="col-span-3 flex items-center gap-4">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                checked={taskData.is_recurring}
-                onChange={(e) => setTaskData(prev => ({ ...prev, is_recurring: e.target.checked }))}
-              />
-              {taskData.is_recurring && (
-                <>
-                  <Select
-                    value={taskData.recurrence_pattern}
-                    onValueChange={(val) => setTaskData(prev => ({ ...prev, recurrence_pattern: val }))}
-                  >
-                    <SelectTrigger className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RECURRENCE_PATTERNS.map(p => (
-                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={taskData.recurrence_interval}
-                    onChange={(e) => setTaskData(prev => ({ ...prev, recurrence_interval: parseInt(e.target.value) || 1 }))}
-                    className="w-20"
-                  />
-                </>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            <X className="mr-2 h-4 w-4" /> Cancel
-          </Button>
-          <Button onClick={handleSubmit}>
-            <Plus className="mr-2 h-4 w-4" /> Create Task
-          </Button>
-        </DialogFooter>
+
+        {/* ... Footer ... */}
       </DialogContent>
     </Dialog>
   );
 }
-
 // ─────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────
