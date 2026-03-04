@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { format, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { Switch } from "@/components/ui/switch";
 import api from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
