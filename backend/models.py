@@ -178,11 +178,12 @@ class StaffActivityLog(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class StaffActivityCreate(BaseModel):
-    app_name: str
+    app_name: Optional[str] = None
     window_title: Optional[str] = None
-    url: Optional[str] = None
-    category: str = "other"
-    duration_seconds: int = 0
+    website: Optional[str] = None
+    category: Optional[str] = "other"
+    duration_seconds: Optional[int] = 0
+    idle: Optional[bool] = False
 
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
