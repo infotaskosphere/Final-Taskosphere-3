@@ -2708,7 +2708,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
   team_workload=team_workload,
   compliance_status=compliance_status
  )
-# STAFF ACTIVITY ROUTES
+
 # ==========================================================
 # STAFF ACTIVITY ROUTES
 # ==========================================================
@@ -2739,8 +2739,8 @@ async def log_staff_activity(
 
     doc = activity.model_dump()
 
-    # Ensure timestamp stored in IST
-    doc["timestamp"] = datetime.now(IST).isoformat()
+    # Store timestamp as datetime (better for Mongo filtering)
+    doc["timestamp"] = datetime.now(IST)
 
     await db.staff_activity.insert_one(doc)
 
@@ -2760,10 +2760,12 @@ async def get_activity_summary(
 ):
     """Get staff activity summary"""
 
-    # -----------------------------
+    # ------------------------------------------------------
     # Permission Check
-    # -----------------------------
+    # ------------------------------------------------------
+
     if current_user.role != "admin":
+
         permissions = (
             current_user.permissions.model_dump()
             if current_user.permissions else {}
@@ -2774,9 +2776,10 @@ async def get_activity_summary(
         if user_id and user_id != current_user.id and user_id not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized")
 
-    # -----------------------------
-    # Build Query
-    # -----------------------------
+    # ------------------------------------------------------
+    # Build Mongo Query
+    # ------------------------------------------------------
+
     query = {}
 
     if user_id:
@@ -2786,22 +2789,30 @@ async def get_activity_summary(
         query["timestamp"] = {}
 
     if date_from:
-        query["timestamp"]["$gte"] = date_from
+        try:
+            query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
+        except:
+            pass
 
     if date_to:
-        query["timestamp"]["$lte"] = date_to
+        try:
+            query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
+        except:
+            pass
 
-    # -----------------------------
+    # ------------------------------------------------------
     # Fetch Activities
-    # -----------------------------
+    # ------------------------------------------------------
+
     activities = await db.staff_activity.find(
         query,
         {"_id": 0}
     ).to_list(5000)
 
-    # -----------------------------
+    # ------------------------------------------------------
     # Aggregate Data
-    # -----------------------------
+    # ------------------------------------------------------
+
     user_summary = {}
 
     for activity in activities:
@@ -2822,7 +2833,37 @@ async def get_activity_summary(
                 "categories": {}
             }
 
+        # Add duration
         user_summary[uid]["total_duration"] += duration
+
+        # --------------------------------------------------
+        # App usage aggregation
+        # --------------------------------------------------
+
+        if app_name not in user_summary[uid]["apps"]:
+            user_summary[uid]["apps"][app_name] = 0
+
+        user_summary[uid]["apps"][app_name] += duration
+
+        # --------------------------------------------------
+        # Category aggregation
+        # --------------------------------------------------
+
+        if category not in user_summary[uid]["categories"]:
+            user_summary[uid]["categories"][category] = 0
+
+        user_summary[uid]["categories"][category] += duration
+
+    # ------------------------------------------------------
+    # Convert Dict → List
+    # ------------------------------------------------------
+
+    summary_list = list(user_summary.values())
+
+    return {
+        "total_users": len(summary_list),
+        "summary": summary_list
+    }
 
         # -----------------------------
         # App Aggregation
