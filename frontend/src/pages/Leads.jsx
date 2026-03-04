@@ -733,7 +733,7 @@ function TaskCreationModal({ isOpen, onClose, lead, users, onCreateTask }) {
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right font-medium text-slate-700">Assigned To</Label>
-            <Select value={taskData.assigned_to} onValueChange={(val) => setTaskData(p => ({ ...p, assigned_to: val })}>
+            <Select value={taskData.assigned_to} onValueChange={(val) => setTaskData(p => ({ ...p, assigned_to: val }))}>
               <SelectTrigger className="col-span-3 rounded-2xl"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {users.map(u => <SelectItem key={u.id} value={String(u.id || "unassigned")}>{u.full_name}</SelectItem>)}
