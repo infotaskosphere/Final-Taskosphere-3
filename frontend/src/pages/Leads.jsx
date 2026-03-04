@@ -184,24 +184,26 @@ export default function LeadsPage() {
     setShowCreate(true)
   }
 
-  const handleSubmit = () => {
-    if (!validateForm()) return
+const handleSubmit = () => {
+    if (!newLead.company_name.trim()) {
+        alert("Company Name is required");
+        return;
+    }
 
     const payload = {
-      ...newLead,
-      // Ensure quotation is a float or null, not an empty string
-      quotation_amount: newLead.quotation_amount !== "" ? parseFloat(newLead.quotation_amount) : null,
-      // Ensure dates are valid ISO or null
-      date_of_meeting: newLead.date_of_meeting ? new Date(newLead.date_of_meeting).toISOString() : null,
-      next_follow_up: newLead.next_follow_up ? new Date(newLead.next_follow_up).toISOString() : null,
-    }
+        ...newLead,
+        // Ensure this is an array for the backend's List[str] requirement
+        services: Array.isArray(newLead.services) ? newLead.services : [],
+        quotation_amount: newLead.quotation_amount ? parseFloat(newLead.quotation_amount) : null
+    };
 
     if (editingLead) {
-      updateLead.mutate({ id: editingLead.id, data: payload })
+        updateLead.mutate({ id: editingLead.id, data: payload });
     } else {
-      createLead.mutate(payload)
+        // Use the trailing slash to avoid 307 redirects shown in your logs
+        createLead.mutate(payload);
     }
-  }
+};
 
   /* ---------- LOGIC ---------- */
   const filteredLeads = useMemo(() => {
