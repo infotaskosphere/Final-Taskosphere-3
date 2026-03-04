@@ -3133,26 +3133,7 @@ async def auto_daily_reminder(request, call_next):
  response = await call_next(request)
  return response
     
-# backend leads====================================================================
-
-@api_router.get("/leads/services-list", response_model=List[str])
-async def get_services_list(current_user: User = Depends(get_current_user)):
-    """
-    Returns a unique list of services from existing Clients and Leads.
-    """
-    # Fetch unique services from Clients collection
-    client_services = await db.clients.distinct("services")
-    
-    # Fetch unique services from Leads collection
-    lead_services = await db.leads.distinct("services")
-    
-    # Optional: Hardcoded defaults to ensure the list is never empty
-    defaults = ["GST Registration", "Income Tax Filing", "Trademark", "Audit", "ROC Compliance"]
-    
-    # Merge, remove duplicates, and sort
-    combined = list(set(client_services + lead_services + defaults))
-    return sorted([s for s in combined if s])
-    
+   
 # ==================== HOLIDAY ROUTES (STEP 3 & 4 - added here) ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
