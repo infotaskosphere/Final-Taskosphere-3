@@ -399,12 +399,12 @@ export default function LeadsPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Assigned To</Label>
-                    <Select value={newLead.assigned_to || ""} onValueChange={v => setNewLead({ ...newLead, assigned_to: v || null })}>
+                    <Select value={newLead.assigned_to || ""} onValueChange={v => setNewLead({ ...newLead, assigned_to: v === "none" ? null : v })}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select user" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {users.map(u => <SelectItem key={u._id} value={u._id}>{u.name || u.username}</SelectItem>)}
                       </SelectContent>
                     </Select>
