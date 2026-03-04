@@ -2710,7 +2710,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
  )
 
 # ==========================================================
+
 # STAFF ACTIVITY ROUTES
+
 # ==========================================================
 
 from fastapi import HTTPException, Depends
@@ -2720,217 +2722,219 @@ import pytz
 
 IST = pytz.timezone("Asia/Kolkata")
 
-
 # ----------------------------------------------------------
+
 # LOG STAFF ACTIVITY
+
 # ----------------------------------------------------------
 
 @api_router.post("/activity/log")
 async def log_staff_activity(
-    activity_data: StaffActivityCreate,
-    current_user: User = Depends(get_current_user)
+activity_data: StaffActivityCreate,
+current_user: User = Depends(get_current_user)
 ):
-    """Log staff desktop activity"""
+"""Log staff desktop activity"""
 
-    activity = StaffActivityLog(
-        user_id=current_user.id,
-        **activity_data.model_dump()
-    )
+```
+activity = StaffActivityLog(
+    user_id=current_user.id,
+    **activity_data.model_dump()
+)
 
-    doc = activity.model_dump()
+doc = activity.model_dump()
 
-    # Store timestamp as datetime (better for Mongo filtering)
-    doc["timestamp"] = datetime.now(IST)
+# store timestamp in IST
+doc["timestamp"] = datetime.now(IST)
 
-    await db.staff_activity.insert_one(doc)
+await db.staff_activity.insert_one(doc)
 
-    return {"message": "Activity logged successfully"}
-
+return {"message": "Activity logged successfully"}
+```
 
 # ----------------------------------------------------------
+
 # ACTIVITY SUMMARY
+
 # ----------------------------------------------------------
 
 @api_router.get("/activity/summary")
 async def get_activity_summary(
-    user_id: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    current_user: User = Depends(check_permission("can_view_staff_activity"))
+user_id: Optional[str] = None,
+date_from: Optional[str] = None,
+date_to: Optional[str] = None,
+current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
-    """Get staff activity summary"""
+"""Get staff activity summary"""
 
-    # ------------------------------------------------------
-    # Permission Check
-    # ------------------------------------------------------
+```
+# ------------------------------------------------------
+# Permission Check
+# ------------------------------------------------------
 
-    if current_user.role != "admin":
+if current_user.role != "admin":
 
-        permissions = (
-            current_user.permissions.model_dump()
-            if current_user.permissions else {}
-        )
+    permissions = (
+        current_user.permissions.model_dump()
+        if current_user.permissions else {}
+    )
 
-        allowed = permissions.get("view_other_activity", [])
+    allowed = permissions.get("view_other_activity", [])
 
-        if user_id and user_id != current_user.id and user_id not in allowed:
-            raise HTTPException(status_code=403, detail="Not authorized")
+    if user_id and user_id != current_user.id and user_id not in allowed:
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-    # ------------------------------------------------------
-    # Build Mongo Query
-    # ------------------------------------------------------
+# ------------------------------------------------------
+# Build Mongo Query
+# ------------------------------------------------------
 
-    query = {}
+query = {}
 
-    if user_id:
-        query["user_id"] = user_id
+if user_id:
+    query["user_id"] = user_id
 
-    if date_from or date_to:
-        query["timestamp"] = {}
+if date_from or date_to:
+    query["timestamp"] = {}
 
-    if date_from:
-        try:
-            query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
-        except:
-            pass
+if date_from:
+    try:
+        query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
+    except:
+        pass
 
-    if date_to:
-        try:
-            query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
-        except:
-            pass
+if date_to:
+    try:
+        query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
+    except:
+        pass
 
-    # ------------------------------------------------------
-    # Fetch Activities
-    # ------------------------------------------------------
+# ------------------------------------------------------
+# Fetch Activities
+# ------------------------------------------------------
 
-    activities = await db.staff_activity.find(
-        query,
-        {"_id": 0}
-    ).to_list(5000)
+activities = await db.staff_activity.find(
+    query,
+    {"_id": 0}
+).to_list(10000)
 
-    # ------------------------------------------------------
-    # Aggregate Data
-    # ------------------------------------------------------
+# ------------------------------------------------------
+# Aggregate Data
+# ------------------------------------------------------
 
-    user_summary = {}
+user_summary = {}
 
-    for activity in activities:
+for activity in activities:
 
-        uid = activity.get("user_id")
-        if not uid:
-            continue
+    uid = activity.get("user_id")
+    if not uid:
+        continue
 
-        duration = activity.get("duration_seconds") or 0
-        app_name = activity.get("app_name", "Unknown App")
-        category = activity.get("category", "other")
+    duration = activity.get("duration_seconds") or 0
+    app_name = activity.get("app_name", "Unknown App")
+    category = activity.get("category", "other")
+    website = activity.get("website")
+    idle = activity.get("idle", False)
 
-        if uid not in user_summary:
-            user_summary[uid] = {
-                "user_id": uid,
-                "total_duration": 0,
-                "apps": {},
-                "categories": {}
-            }
+    if uid not in user_summary:
+        user_summary[uid] = {
+            "user_id": uid,
+            "total_duration": 0,
+            "active_duration": 0,
+            "idle_duration": 0,
+            "apps": {},
+            "websites": {},
+            "categories": {}
+        }
 
-        # Add duration
-        user_summary[uid]["total_duration"] += duration
+    # total time
+    user_summary[uid]["total_duration"] += duration
 
-        # --------------------------------------------------
-        # App usage aggregation
-        # --------------------------------------------------
+    if idle:
+        user_summary[uid]["idle_duration"] += duration
+    else:
+        user_summary[uid]["active_duration"] += duration
 
-        if app_name not in user_summary[uid]["apps"]:
-            user_summary[uid]["apps"][app_name] = 0
+    # --------------------------------------------------
+    # App Aggregation
+    # --------------------------------------------------
 
-        user_summary[uid]["apps"][app_name] += duration
+    if app_name not in user_summary[uid]["apps"]:
+        user_summary[uid]["apps"][app_name] = {
+            "count": 0,
+            "duration": 0
+        }
 
-        # --------------------------------------------------
-        # Category aggregation
-        # --------------------------------------------------
+    user_summary[uid]["apps"][app_name]["count"] += 1
+    user_summary[uid]["apps"][app_name]["duration"] += duration
 
-        if category not in user_summary[uid]["categories"]:
-            user_summary[uid]["categories"][category] = 0
+    # --------------------------------------------------
+    # Website Aggregation
+    # --------------------------------------------------
 
-        user_summary[uid]["categories"][category] += duration
+    if website:
 
-    # ------------------------------------------------------
-    # Convert Dict → List
-    # ------------------------------------------------------
+        if website not in user_summary[uid]["websites"]:
+            user_summary[uid]["websites"][website] = 0
 
-    summary_list = list(user_summary.values())
+        user_summary[uid]["websites"][website] += duration
 
-    return {
-        "total_users": len(summary_list),
-        "summary": summary_list
-    }
+    # --------------------------------------------------
+    # Category Aggregation
+    # --------------------------------------------------
 
-        # -----------------------------
-        # App Aggregation
-        # -----------------------------
-        if app_name not in user_summary[uid]["apps"]:
-            user_summary[uid]["apps"][app_name] = {
-                "count": 0,
-                "duration": 0
-            }
+    if category not in user_summary[uid]["categories"]:
+        user_summary[uid]["categories"][category] = 0
 
-        user_summary[uid]["apps"][app_name]["count"] += 1
-        user_summary[uid]["apps"][app_name]["duration"] += duration
+    user_summary[uid]["categories"][category] += duration
 
-        # -----------------------------
-        # Category Aggregation
-        # -----------------------------
-        if category not in user_summary[uid]["categories"]:
-            user_summary[uid]["categories"][category] = 0
+# ------------------------------------------------------
+# Get User Names
+# ------------------------------------------------------
 
-        user_summary[uid]["categories"][category] += duration
+users = await db.users.find(
+    {},
+    {"_id": 0, "password": 0}
+).to_list(200)
 
-    # -----------------------------
-    # Get User Names
-    # -----------------------------
-    users = await db.users.find(
-        {},
-        {"_id": 0, "password": 0}
-    ).to_list(200)
+user_map = {
+    u.get("id"): u.get("full_name", "Unknown")
+    for u in users
+    if u.get("id")
+}
 
-    user_map = {
-        u.get("id"): u.get("full_name", "Unknown")
-        for u in users
-        if u.get("id")
-    }
+# ------------------------------------------------------
+# Build Response
+# ------------------------------------------------------
 
-    # -----------------------------
-    # Build Response
-    # -----------------------------
-    result = []
+result = []
 
-    for uid, data in user_summary.items():
+for uid, data in user_summary.items():
 
-        data["user_name"] = user_map.get(uid, "Unknown")
+    data["user_name"] = user_map.get(uid, "Unknown")
 
-        data["apps_list"] = sorted(
-            [
-                {"name": k, **v}
-                for k, v in data["apps"].items()
-            ],
-            key=lambda x: x["duration"],
-            reverse=True
-        )
+    # convert apps dict → sorted list
+    data["apps_list"] = sorted(
+        [
+            {"name": k, **v}
+            for k, v in data["apps"].items()
+        ],
+        key=lambda x: x["duration"],
+        reverse=True
+    )
 
-        productive_duration = data["categories"].get("productivity", 0)
-        total_duration = data["total_duration"]
+    # productivity calculation
+    productive_duration = data["categories"].get("productivity", 0)
+    total_duration = data["total_duration"]
 
-        if total_duration > 0:
-            data["productivity_percent"] = (
-                productive_duration / total_duration
-            ) * 100
-        else:
-            data["productivity_percent"] = 0
+    if total_duration > 0:
+        data["productivity_percent"] = (
+            productive_duration / total_duration
+        ) * 100
+    else:
+        data["productivity_percent"] = 0
 
-        result.append(data)
+    result.append(data)
 
-    return result
-
+return result
 
 # ----------------------------------------------------------
 # USER ACTIVITY DETAIL
