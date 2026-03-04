@@ -156,13 +156,16 @@ export default function StaffActivity() {
   }, [refreshTrigger]);
 
   const radarMetrics = useMemo(() => {
-    const labels = ['Efficiency', 'Precision', 'Consistency', 'Communication', 'Volume', 'Initiative'];
+    if (!unitAlpha || !unitBeta) return []
+
+    const labels = ['Efficiency','Precision','Consistency','Communication','Volume','Initiative']
+
     return labels.map(label => ({
       metric: label,
-      A: Math.floor(Math.random() * 40) + 60,
-      B: Math.floor(Math.random() * 40) + 55,
-    }));
-  }, [unitAlpha, unitBeta]);
+      A: Math.floor(Math.random()*40)+60,
+      B: Math.floor(Math.random()*40)+55
+    }))
+  }, [unitAlpha, unitBeta])
 
   const toolChainData = useMemo(() => [
     { tool: 'Google Chrome', value: 450, growth: 12 },
@@ -506,45 +509,50 @@ export default function StaffActivity() {
                 </div>
               </div>
 
-              {/* Radar Chart Container */}
-              <div className="xl:col-span-8 h-[420px] flex items-center justify-center bg-slate-50 rounded-3xl">
-                <AnimatePresence mode="wait">
-                  {unitAlpha && unitBeta ? (
-                    <motion.div
-                      key="radar"
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.92 }}
-                      className="w-full h-full"
-                    >
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RadarChart data={radarMetrics}>
-                          <PolarGrid stroke="#e2e8f0" strokeWidth={1} />
-                          <PolarAngleAxis 
-                            dataKey="metric" 
-                            tick={{ fill: COLORS.deepBlue, fontSize: 12, fontWeight: 600 }} 
-                          />
-                          <PolarRadiusAxis domain={[0, 100]} tickCount={5} />
-                          <Radar 
-                            name="Unit Alpha" 
-                            dataKey="A" 
-                            stroke={COLORS.mediumBlue} 
-                            fill={COLORS.mediumBlue} 
-                            fillOpacity={0.25} 
-                            strokeWidth={4} 
-                          />
-                          <Radar 
-                            name="Unit Beta" 
-                            dataKey="B" 
-                            stroke={COLORS.amber} 
-                            fill={COLORS.amber} 
-                            fillOpacity={0.25} 
-                            strokeWidth={4} 
-                          />
-                          <Tooltip />
-                          <Legend />
-                        </RadarChart>
-                      </ResponsiveContainer>
+             {/* Radar Chart Container */}
+             <div className="xl:col-span-8 h-[420px] flex items-center justify-center bg-slate-50 rounded-3xl">
+               <AnimatePresence mode="wait">
+                 {unitAlpha && unitBeta ? (
+                   <motion.div
+                     key="radar"
+                     initial={{ opacity: 0, scale: 0.92 }}
+                     animate={{ opacity: 1, scale: 1 }}
+                     exit={{ opacity: 0, scale: 0.92 }}
+                     className="w-full h-full"
+                   >
+                     {radarMetrics?.length > 0 && (
+                       <ResponsiveContainer width="100%" height={400}>
+                         <RadarChart data={radarMetrics}>
+                           <PolarGrid stroke="#e2e8f0" strokeWidth={1} />
+                           <PolarAngleAxis
+                             dataKey="metric"
+                             tick={{ fill: COLORS.deepBlue, fontSize: 12, fontWeight: 600 }}
+                           />
+                           <PolarRadiusAxis domain={[0, 100]} tickCount={5} />
+
+                           <Radar
+                             name="Unit Alpha"
+                             dataKey="A"
+                             stroke={COLORS.mediumBlue}
+                             fill={COLORS.mediumBlue}
+                             fillOpacity={0.25}
+                             strokeWidth={4}
+                           />
+
+                            <Radar
+                              name="Unit Beta"
+                              dataKey="B"
+                              stroke={COLORS.amber}
+                              fill={COLORS.amber}
+                              fillOpacity={0.25}
+                              strokeWidth={4}
+                            />
+
+                            <Tooltip />
+                            <Legend />
+                          </RadarChart>
+                        </ResponsiveContainer>
+                      )}
                     </motion.div>
                   ) : (
                     <motion.div 
@@ -576,7 +584,7 @@ export default function StaffActivity() {
           </CardHeader>
           <CardContent className="p-6">
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={320}>
                 <AreaChart data={intensityMap}>
                   <defs>
                     <linearGradient id="intensityGrad" x1="0" y1="0" x2="0" y2="1">
