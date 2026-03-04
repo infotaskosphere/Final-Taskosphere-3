@@ -9,15 +9,15 @@ import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  format, 
-  startOfMonth, 
-  endOfMonth, 
-  parseISO, 
-  isBefore, 
-  isAfter, 
-  isToday as dateFnsIsToday, 
-  startOfDay 
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  parseISO,
+  isBefore,
+  isAfter,
+  isToday as dateFnsIsToday,
+  startOfDay
 } from 'date-fns';
 import {
   Calendar as CalendarIcon,
@@ -30,41 +30,35 @@ import {
   TrendingUp,
   Timer
 } from 'lucide-react';
-
 // ────────────────────────────────────────────────
 // Brand Colors
 // ────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:    '#0D3B66',
-  mediumBlue:  '#1F6FB2',
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
+  lightGreen: '#5CCB5F',
 };
-
 // ────────────────────────────────────────────────
 // Framer Motion Variants
 // ────────────────────────────────────────────────
 const containerVariants = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
 };
-
 const itemVariants = {
-  hidden:  { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
-
 // ────────────────────────────────────────────────
 // Live Digital Clock
 // ────────────────────────────────────────────────
 function DigitalClock() {
   const [time, setTime] = useState(new Date());
-
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
-
   return (
     <motion.div
       className="flex flex-col items-center px-6 py-4 rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 text-white"
@@ -90,24 +84,20 @@ function DigitalClock() {
     </motion.div>
   );
 }
-
 // ────────────────────────────────────────────────
 // Main Attendance Component
 // ────────────────────────────────────────────────
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
   const canViewRankings = hasPermission("can_view_staff_rankings");
-
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [mySummary, setMySummary] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState(null);
-  const [selectedAttendance, setSelectedAttendance] = useState(null);
   const [isLateToday, setIsLateToday] = useState(false);
   const [lateByMinutesToday, setLateByMinutesToday] = useState(0);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [showPunchInModal, setShowPunchInModal] = useState(false);
-
   // Additional states
   const [myRank, setMyRank] = useState('—');
   const [tasksCompleted, setTasksCompleted] = useState(0);
@@ -120,18 +110,15 @@ export default function Attendance() {
   const [holidays, setHolidays] = useState([]);
   const [liveDuration, setLiveDuration] = useState('0h 0m');
   const [pendingHolidays, setPendingHolidays] = useState([]);
-
   // ─── Effects ─────────────────────────────────────────────────
   useEffect(() => {
     fetchData();
   }, []);
-
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
       setShowPunchInModal(true);
     }
   }, [todayAttendance]);
-
   useEffect(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (todayAttendance?.date !== todayStr) {
@@ -141,28 +128,15 @@ export default function Attendance() {
       setEarlyByMinutesToday(0);
     }
   }, [todayAttendance]);
-
   useEffect(() => {
+    setLiveDuration(getTodayLiveDuration());
     if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
       const interval = setInterval(() => {
         setLiveDuration(getTodayLiveDuration());
       }, 60000);
-      setLiveDuration(getTodayLiveDuration());
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
-
-  useEffect(() => {
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    const isTodayDate = dateFnsIsToday(selectedDate);
-    if (isTodayDate) {
-      setSelectedAttendance(todayAttendance);
-    } else {
-      const found = attendanceHistory.find(a => a.date === dateStr);
-      setSelectedAttendance(found || null);
-    }
-  }, [selectedDate, todayAttendance, attendanceHistory]);
-
   // ─── Data Fetching ───────────────────────────────────────────
   const fetchData = async () => {
     setLoading(true);
@@ -173,30 +147,24 @@ export default function Attendance() {
         api.get('/attendance/today'),
         api.get('/tasks'),
         api.get('/holidays'),
-        canViewRankings 
-          ? api.get('/reports/performance-rankings?period=monthly') 
+        canViewRankings
+          ? api.get('/reports/performance-rankings?period=monthly')
           : Promise.resolve({ data: { rankings: [] } })
       ];
-
       const [
         historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes
       ] = await Promise.all(requests);
-
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
-
       if (user?.role === 'admin') {
         setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
       }
-
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
-
       const rankingList = rankingRes.data.rankings || [];
       const myEntry = rankingList.find(r => r.user_id === user?.id);
       if (myEntry) setMyRank(`#${myEntry.rank}`);
-
       const completedCount = tasksRes.data.filter(t => t.status === 'completed').length;
       setTasksCompleted(completedCount);
     } catch (error) {
@@ -206,7 +174,6 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-
   // ─── Punch In / Out Handler ─────────────────────────────────
   const handlePunchAction = async (action) => {
     setLoading(true);
@@ -225,26 +192,21 @@ export default function Attendance() {
           console.warn("Location not available");
         }
       }
-
-      const res = await api.post('/attendance', { action, location: locationData });
-
+      await api.post('/attendance', { action, location: locationData });
       let isLate = false;
       let lateByMinutes = 0;
       let isEarlyLeave = false;
       let earlyByMinutes = 0;
-
       if (action === 'punch_in' && user?.punch_in_time) {
         const [expH, expM] = user.punch_in_time.split(':').map(Number);
         const expected = new Date();
         expected.setHours(expH, expM, 0, 0);
         const actual = new Date();
-
         if (actual > expected) {
           const diffMs = actual.getTime() - expected.getTime();
           lateByMinutes = Math.floor(diffMs / 60000);
           const [graceH, graceM] = user.grace_time ? user.grace_time.split(':').map(Number) : [0, 15];
           const grace = graceH * 60 + graceM;
-
           if (lateByMinutes > grace) {
             isLate = true;
             setIsLateToday(true);
@@ -257,7 +219,6 @@ export default function Attendance() {
         const expectedOut = new Date();
         expectedOut.setHours(expH, expM, 0, 0);
         const actualOut = new Date();
-
         if (actualOut < expectedOut) {
           const diffMs = expectedOut.getTime() - actualOut.getTime();
           earlyByMinutes = Math.floor(diffMs / 60000);
@@ -267,13 +228,11 @@ export default function Attendance() {
           toast.warning(`Early leave by ${earlyByMinutes} min`, { duration: 6000 });
         }
       }
-
       toast.success(
         action === 'punch_in'
           ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
           : (isEarlyLeave ? 'Punched out (early)' : 'Punched out successfully!')
       );
-
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
@@ -281,12 +240,10 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-
   // ─── Holiday & Leave Handlers ───────────────────────────────
   const handleAddHoliday = async () => {
     const holidayName = prompt('Enter holiday name:');
     if (!holidayName) return;
-
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     try {
       await api.post('/holidays', { date: dateStr, name: holidayName });
@@ -296,17 +253,15 @@ export default function Attendance() {
       toast.error('Failed to add holiday');
     }
   };
-
-const handleHolidayDecision = async (holidayId, decision) => {
-  try {
-    await api.patch(`/holidays/${holidayId}/status`, { status: decision });
-    toast.success(decision === 'confirmed' ? "Holiday confirmed" : "Holiday rejected");
-    fetchData();
-  } catch (err) {
-    toast.error("Failed to update holiday status");
-  }
-};
-
+  const handleHolidayDecision = async (holidayDate, decision) => {
+    try {
+      await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
+      toast.success(decision === 'confirmed' ? "Holiday confirmed" : "Holiday rejected");
+      fetchData();
+    } catch (err) {
+      toast.error("Failed to update holiday status");
+    }
+  };
   // ─── Utility Functions ───────────────────────────────────────
   const formatDuration = (minutes) => {
     if (!minutes) return '0h 0m';
@@ -314,26 +269,21 @@ const handleHolidayDecision = async (holidayId, decision) => {
     const m = minutes % 60;
     return `${h}h ${m}m`;
   };
-
   const getTodayLiveDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) return formatDuration(todayAttendance.duration_minutes);
-
     const start = new Date(todayAttendance.punch_in);
     let diffMs = Date.now() - start.getTime();
     if (diffMs < 0) diffMs = 0;
-
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
-
   const getDateStatus = (date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
     const isTodayDate = dateFnsIsToday(date);
     const att = isTodayDate ? todayAttendance : attendanceHistory.find(a => a.date === dateStr);
     const hol = holidays.find(h => h.date === dateStr);
-
     if (hol) return `Holiday: ${hol.name}`;
     if (att) {
       let str = att.is_late ? 'Late' : 'Present';
@@ -345,56 +295,58 @@ const handleHolidayDecision = async (holidayId, decision) => {
     if (isAfter(date, new Date())) return 'Future';
     return 'Today - No record';
   };
-
   const getMonthAttendance = () => {
     const start = startOfMonth(selectedDate);
     const end = endOfMonth(selectedDate);
-    return attendanceHistory.filter(a => {
+    let atts = attendanceHistory.filter(a => {
       const d = parseISO(a.date);
       return d >= start && d <= end;
     });
+    if (todayAttendance) {
+      const todayStr = todayAttendance.date;
+      if (!atts.some(a => a.date === todayStr)) {
+        const todayD = parseISO(todayStr);
+        if (todayD >= start && todayD <= end) {
+          atts = [...atts, todayAttendance];
+        }
+      }
+    }
+    return atts;
   };
-
+  // ─── Computed Values ─────────────────────────────────────────
   const monthAttendance = getMonthAttendance();
   const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
   const monthDaysPresent = monthAttendance.length;
   const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late).length;
-
-  // Calendar modifiers
-  const attendanceDates = attendanceHistory.map(a => parseISO(a.date));
-  const lateDates = isLateToday && todayAttendance?.date
-    ? [parseISO(todayAttendance.date)]
-    : attendanceHistory.filter(a => a.is_late).map(a => parseISO(a.date));
+  const attendanceDates = [
+    ...attendanceHistory.map(a => parseISO(a.date)),
+    ...(todayAttendance?.punch_in ? [parseISO(todayAttendance.date)] : [])
+  ];
+  const lateDates = [
+    ...attendanceHistory.filter(a => a.is_late).map(a => parseISO(a.date)),
+    ...((isLateToday || todayAttendance?.is_late) && todayAttendance?.date ? [parseISO(todayAttendance.date)] : [])
+  ];
   const holidayDates = holidays.map(h => parseISO(h.date));
-
   const modifiers = {
     present: attendanceDates,
     late: lateDates,
     holidays: holidayDates,
     today: [new Date()]
   };
-
   const modifiersStyles = {
-    present:   { backgroundColor: `${COLORS.emeraldGreen}20`, borderRadius: '50%' },
-    late:      { backgroundColor: '#fee2e2', color: '#ef4444', fontWeight: 'bold', borderRadius: '50%' },
-    holidays:  { backgroundColor: '#FFD70020', color: '#DAA520', fontWeight: 'bold', borderRadius: '50%' },
-    today:     { fontWeight: 'bold', color: COLORS.deepBlue }
+    present: { backgroundColor: `${COLORS.emeraldGreen}20`, borderRadius: '50%' },
+    late: { backgroundColor: '#fee2e2', color: '#ef4444', fontWeight: 'bold', borderRadius: '50%' },
+    holidays: { backgroundColor: '#FFD70020', color: '#DAA520', fontWeight: 'bold', borderRadius: '50%' },
+    today: { fontWeight: 'bold', color: COLORS.deepBlue }
   };
-
-  const selectedDayAttendance = attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd'));
+  const isTodaySelected = dateFnsIsToday(selectedDate);
+  const isSelectedFuture = isAfter(selectedDate, new Date());
+  const isSelectedPast = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
+  // Selected day data (computed, no extra state or lag)
+  const selectedAttendance = isTodaySelected
+    ? todayAttendance
+    : attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
-  const isSelectedToday   = dateFnsIsToday(selectedDate);
-  const isSelectedFuture  = isAfter(selectedDate, new Date());
-  const isSelectedPast    = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
-
-  const handleApplyLeaveClick = () => {
-    if (!isSelectedToday) {
-      setLeaveFrom(selectedDate);
-      setLeaveTo(selectedDate);
-    }
-    setShowLeaveForm(true);
-  };
-
   const CustomDay = ({ date, ...props }) => {
     const status = getDateStatus(date);
     return (
@@ -409,7 +361,11 @@ const handleHolidayDecision = async (holidayId, decision) => {
       </Tooltip>
     );
   };
-
+  const handleApplyLeaveClick = () => {
+    setLeaveFrom(selectedDate);
+    setLeaveTo(selectedDate);
+    setShowLeaveForm(true);
+  };
   // ─── JSX Render ──────────────────────────────────────────────
   return (
     <TooltipProvider>
@@ -426,7 +382,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
           </div>
         </motion.div>
-
         {/* Today's / Selected Date Status Card */}
         <motion.div variants={itemVariants}>
           <Card className="border-0 shadow-lg overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
@@ -438,9 +393,9 @@ const handleHolidayDecision = async (holidayId, decision) => {
                   </div>
                   <div className="text-white">
                     <h3 className="text-xl font-semibold">
-                      {isSelectedToday ? "Today's Status" : `Status for ${format(selectedDate, 'EEEE, MMMM d, yyyy')}`}
+                      {isTodaySelected ? "Today's Status" : `Status for ${format(selectedDate, 'EEEE, MMMM d, yyyy')}`}
                     </h3>
-                    {!isSelectedToday && (
+                    {!isTodaySelected && (
                       <p className="text-blue-100 text-sm">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
                     )}
                     {selectedAttendance?.punch_in && (
@@ -454,13 +409,13 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     <p className="text-sm text-blue-100/80 mt-1">
                       Expected: In {user?.punch_in_time || 'N/A'} (Grace {user?.grace_time || 'N/A'}) • Out {user?.punch_out_time || 'N/A'}
                     </p>
-                    {isLateToday && isSelectedToday && (
+                    {isLateToday && isTodaySelected && (
                       <div className="mt-2 inline-flex items-center gap-2 bg-red-500/30 backdrop-blur px-3 py-1 rounded-full">
                         <AlertTriangle className="h-4 w-4 text-red-300" />
                         <span className="text-red-200 font-medium text-sm">Late by {lateByMinutesToday} min</span>
                       </div>
                     )}
-                    {isEarlyLeaveToday && isSelectedToday && (
+                    {isEarlyLeaveToday && isTodaySelected && (
                       <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/30 backdrop-blur px-3 py-1 rounded-full">
                         <AlertTriangle className="h-4 w-4 text-amber-300" />
                         <span className="text-amber-200 font-medium text-sm">Early by {earlyByMinutesToday} min</span>
@@ -468,11 +423,10 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     )}
                   </div>
                 </div>
-
                 <div className="flex gap-3">
                   {!selectedAttendance?.punch_in ? (
                     <div className="flex gap-3">
-                      {isSelectedToday && (
+                      {isTodaySelected && (
                         <Button
                           onClick={() => { handlePunchAction("punch_in"); setShowPunchInModal(false); }}
                           className="bg-green-600 hover:bg-green-700"
@@ -480,14 +434,14 @@ const handleHolidayDecision = async (holidayId, decision) => {
                           Punch In
                         </Button>
                       )}
-                      {(!isSelectedPast || isSelectedToday) && (
+                      {(!isSelectedPast || isTodaySelected) && (
                         <Button variant="outline" onClick={handleApplyLeaveClick}>
                           Apply For Leave
                         </Button>
                       )}
                     </div>
                   ) : (
-                    !selectedAttendance?.punch_out && isSelectedToday && (
+                    !selectedAttendance?.punch_out && isTodaySelected && (
                       <Button
                         onClick={() => handlePunchAction('punch_out')}
                         disabled={loading}
@@ -508,7 +462,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </CardContent>
           </Card>
         </motion.div>
-
         {/* Admin Pending Holiday Review */}
         {user?.role === 'admin' && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-6">
@@ -536,11 +489,11 @@ const handleHolidayDecision = async (holidayId, decision) => {
                         <Button
                           size="sm"
                           className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                          onClick={() => handleHolidayDecision(holiday.id, 'confirmed')}
-                          onClick={() => handleHolidayDecision(holiday.id, 'rejected')}
+                          onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}
                         >
                           Yes (Closed)
                         </Button>
+
                         <Button
                           size="sm"
                           variant="outline"
@@ -557,7 +510,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </Card>
           </motion.div>
         )}
-
         {/* Stats Row */}
         <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
           <Card>
@@ -576,7 +528,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
@@ -593,7 +544,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
@@ -610,7 +560,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
               </div>
             </CardContent>
           </Card>
-
           {canViewRankings && (
             <Card>
               <CardContent className="p-5">
@@ -630,7 +579,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </Card>
           )}
         </motion.div>
-
         {/* Live Duration + Clock */}
         <motion.div variants={itemVariants}>
           <Card className="border border-slate-200 shadow-sm">
@@ -652,7 +600,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </CardContent>
           </Card>
         </motion.div>
-
         {/* Monthly Summary */}
         <motion.div variants={itemVariants}>
           <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
@@ -686,7 +633,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </CardContent>
           </Card>
         </motion.div>
-
         {/* Calendar + History */}
         <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
           {/* Calendar */}
@@ -709,11 +655,10 @@ const handleHolidayDecision = async (holidayId, decision) => {
                 onSelect={(date) => date && setSelectedDate(date)}
                 modifiers={modifiers}
                 modifiersStyles={modifiersStyles}
+                components={{ Day: CustomDay }}
                 className="rounded-xl border"
                 showOutsideDays={false}
               />
-              
-
               {/* Legend */}
               <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
                 <div className="flex items-center gap-2">
@@ -733,9 +678,8 @@ const handleHolidayDecision = async (holidayId, decision) => {
                   <span>Today</span>
                 </div>
               </div>
-
               {/* Selected Day Info */}
-              {selectedDayAttendance ? (
+              {selectedAttendance ? (
                 <div className="mt-6 p-5 rounded-2xl bg-slate-50 border border-slate-200">
                   <p className="font-semibold text-slate-700 mb-4 text-lg">
                     {format(selectedDate, 'EEEE, MMMM d')}
@@ -744,24 +688,24 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     <div className="flex justify-between">
                       <span className="text-slate-600">Punch In</span>
                       <span className="font-medium">
-                        {formatInTimeZone(new Date(selectedDayAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
+                        {formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
                       </span>
                     </div>
-                    {selectedDayAttendance.punch_out && (
+                    {selectedAttendance.punch_out && (
                       <div className="flex justify-between">
                         <span className="text-slate-600">Punch Out</span>
                         <span className="font-medium">
-                          {formatInTimeZone(new Date(selectedDayAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
+                          {formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
                         </span>
                       </div>
                     )}
                     <div className="pt-3 border-t flex justify-between items-center">
                       <span className="font-medium">Duration</span>
                       <Badge className="text-base px-3 py-1">
-                        {formatDuration(selectedDayAttendance.duration_minutes)}
+                        {formatDuration(selectedAttendance.duration_minutes)}
                       </Badge>
                     </div>
-                    {selectedDayAttendance.is_late && (
+                    {selectedAttendance.is_late && (
                       <Badge variant="destructive" className="mt-2">Late Arrival</Badge>
                     )}
                   </div>
@@ -775,7 +719,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
                   <p className="text-red-600 font-medium">No record — Absent</p>
                 </div>
               )}
-
               {canViewRankings && isSelectedFuture && !selectedHoliday && (
                 <Button onClick={handleAddHoliday} className="mt-4 w-full" variant="outline">
                   Add Holiday
@@ -783,7 +726,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
               )}
             </CardContent>
           </Card>
-
           {/* Recent History */}
           <Card className="border border-slate-200 shadow-sm lg:col-span-2">
             <CardHeader>
@@ -799,7 +741,7 @@ const handleHolidayDecision = async (holidayId, decision) => {
                       <div>
                         <p className="font-medium">{format(parseISO(record.date), 'MMM d, yyyy')}</p>
                         <p className="text-sm text-slate-600">
-                          {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} — 
+                          {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} —
                           {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : '—'}
                         </p>
                       </div>
@@ -813,7 +755,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </CardContent>
           </Card>
         </motion.div>
-
         {/* Auto Punch-in Modal */}
         {showPunchInModal && (
           <motion.div
@@ -856,7 +797,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
             </motion.div>
           </motion.div>
         )}
-
         {/* Leave Request Modal */}
         <AnimatePresence>
           {showLeaveForm && (
@@ -891,7 +831,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     ✕
                   </button>
                 </div>
-
                 {/* Quick Presets */}
                 <div className="mb-8">
                   <p className="text-xs font-medium text-slate-500 mb-3">QUICK SELECT</p>
@@ -914,17 +853,17 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     ))}
                   </div>
                 </div>
-
                 {/* Calendars */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div>
                     <label className="text-sm font-medium text-slate-700 mb-2 block">From</label>
                     <Calendar
                       mode="single"
-                      selected={selectedDate}
-                      onSelect={(date) => date && setSelectedDate(date)}
+                      selected={leaveFrom}
+                      onSelect={setLeaveFrom}
                       modifiers={modifiers}
                       modifiersStyles={modifiersStyles}
+                      components={{ Day: CustomDay }}
                       className="rounded-xl border"
                       showOutsideDays={false}
                     />
@@ -940,7 +879,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     />
                   </div>
                 </div>
-
                 {leaveFrom && (
                   <div className="mt-6 p-4 bg-blue-50 rounded-2xl flex items-center justify-between">
                     <div>
@@ -955,7 +893,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     </div>
                   </div>
                 )}
-
                 <div className="mt-8">
                   <label className="text-sm font-medium text-slate-700 mb-2 block">Reason</label>
                   <textarea
@@ -965,7 +902,6 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     className="w-full min-h-[110px] p-4 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   />
                 </div>
-
                 <div className="flex justify-end gap-4 mt-8">
                   <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>
                     Cancel
