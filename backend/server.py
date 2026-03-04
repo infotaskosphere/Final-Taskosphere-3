@@ -43,7 +43,7 @@ from backend.models import (
     HolidayResponse, HolidayCreate
 )
 from backend.dependencies import db
-from backend.auth import get_current_active_user
+from backend.dependencies import get_current_user
 from backend.leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
 from backend.telegram import router as telegram_router
