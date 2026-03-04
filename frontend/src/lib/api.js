@@ -1,5 +1,6 @@
 import axios from "axios";
-import { TooltipProvider } from "@/components/ui/tooltip"
+import "react-day-picker/dist/style.css";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 function App() {
   return (
