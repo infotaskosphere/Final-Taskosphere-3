@@ -736,7 +736,7 @@ function TaskCreationModal({ isOpen, onClose, lead, users, onCreateTask }) {
             <Select value={taskData.assigned_to} onValueChange={(val) => setTaskData(p => ({ ...p, assigned_to: val })}>
               <SelectTrigger className="col-span-3 rounded-2xl"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {users.map(u => <SelectItem key={u.id} value={u.id || "unassigned"}>{u.full_name}</SelectItem>)}
+                {users.map(u => <SelectItem key={u.id} value={String(u.id || "unassigned")}>{u.full_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
