@@ -1,459 +1,270 @@
-import React, {useState,useMemo,useEffect} from "react"
-import {motion} from "framer-motion"
-import {useQuery,useMutation,useQueryClient} from "@tanstack/react-query"
-import {format} from "date-fns"
-import Papa from "papaparse"
-
-import {useAuth} from "@/contexts/AuthContext"
-import api from "@/lib/api"
-
-import {Input} from "@/components/ui/input"
-import {Button} from "@/components/ui/button"
-import {Badge} from "@/components/ui/badge"
-import {Checkbox} from "@/components/ui/checkbox"
-
-import {
-Select,
-SelectTrigger,
-SelectContent,
-SelectItem,
-SelectValue
-} from "@/components/ui/select"
-
-import {
-Phone,
-Mail,
-DollarSign,
-Trash2,
-Plus,
-Search,
-Calendar,
-User
-} from "lucide-react"
-
-
-/* ---------- PIPELINE STAGES ---------- */
-
-const PIPELINE = [
-"new",
-"contacted",
-"meeting",
-"proposal",
-"negotiation",
-"on_hold",
-"won",
-"lost"
-]
-
-
-/* ---------- SERVICES ---------- */
-
-const SERVICES = [
-{value:"gst",label:"GST"},
-{value:"income_tax",label:"Income Tax"},
-{value:"accounts",label:"Accounts"},
-{value:"roc",label:"ROC"},
-{value:"tds",label:"TDS"},
-{value:"fema",label:"FEMA"},
-{value:"trademark",label:"Trademark"},
-{value:"dsc",label:"DSC"}
-]
-
-
-/* ---------- MAIN PAGE ---------- */
-
-export default function LeadsPage(){
-
-const {user} = useAuth()
-const queryClient = useQueryClient()
-
-const [search,setSearch] = useState("")
-const [statusFilter,setStatusFilter] = useState("all")
-
-const [selectedLead,setSelectedLead] = useState(null)
-
-const [showCreate,setShowCreate] = useState(false)
-
-
-/* ---------- FETCH LEADS ---------- */
-
-const {data:leads=[],isLoading} = useQuery({
-queryKey:["leads"],
-queryFn:()=>api.get("/leads").then(res=>res.data)
-})
-
-
-const {data:users=[]} = useQuery({
-queryKey:["users"],
-queryFn:()=>api.get("/users").then(res=>res.data)
-})
-
-
-/* ---------- CREATE LEAD ---------- */
-
-const createLead = useMutation({
-mutationFn:(data)=>api.post("/leads",data),
-
-onSuccess:()=>{
-queryClient.invalidateQueries(["leads"])
-setShowCreate(false)
-}
-})
-
-
-/* ---------- UPDATE LEAD ---------- */
-
-const updateLead = useMutation({
-mutationFn:({id,data})=>api.patch(`/leads/${id}`,data),
-
-onSuccess:(res)=>{
-
-queryClient.invalidateQueries(["leads"])
-
-const lead = res.data
-
-if(lead.status==="won"){
-
-/* create task */
-
-api.post("/tasks",{
-title:`Client Onboarding - ${lead.company_name}`,
-description:"Convert lead to client",
-assigned_to:lead.assigned_to
-})
-
-/* convert to client */
-
-api.post("/clients/from-lead",{
-lead_id:lead.id
-})
-
-}
-
-}
-})
-
-
-/* ---------- DELETE ---------- */
-
-const deleteLead = useMutation({
-mutationFn:(id)=>api.delete(`/leads/${id}`),
-
-onSuccess:()=>{
-queryClient.invalidateQueries(["leads"])
-}
-})
-
-
-
-/* ---------- FILTER ---------- */
-
-const filtered = useMemo(()=>{
-
-return leads.filter(l=>{
-
-const matchSearch =
-l.company_name?.toLowerCase().includes(search.toLowerCase())
-
-const matchStatus =
-statusFilter==="all" || l.status===statusFilter
-
-return matchSearch && matchStatus
-
-})
-
-},[leads,search,statusFilter])
-
-
-
-/* ---------- PIPELINE ---------- */
-
-const pipeline = useMemo(()=>{
-
-const map={}
-
-PIPELINE.forEach(p=>map[p]=[])
-
-filtered.forEach(l=>{
-map[l.status || "new"].push(l)
-})
-
-return map
-
-},[filtered])
-
-
-
-/* ---------- CSV EXPORT ---------- */
-
-const exportCSV=()=>{
-
-const csv = Papa.unparse(
-
-leads.map(l=>({
-
-Company:l.company_name,
-Contact:l.contact_name,
-Email:l.email,
-Phone:l.phone,
-Quote:l.quotation_amount,
-Status:l.status
-
-}))
-
-)
-
-const blob = new Blob([csv])
-const url = URL.createObjectURL(blob)
-
-const a=document.createElement("a")
-a.href=url
-a.download="leads.csv"
-a.click()
-
-}
-
-
-
-/* ---------- FOLLOW UP ALERT ---------- */
-
-useEffect(()=>{
-
-const due = leads.filter(l=>{
-
-if(!l.next_follow_up) return false
-
-return new Date(l.next_follow_up) < new Date()
-
-})
-
-if(due.length>0){
-
-console.warn(`${due.length} leads require follow-up`)
-
-}
-
-},[leads])
-
-
-
-if(isLoading) return <div className="p-10">Loading...</div>
-
-
-
-return(
-
-<div className="p-6 space-y-6">
-
-
-{/* HEADER */}
-
-<div className="flex justify-between flex-wrap gap-4">
-
-<h1 className="text-3xl font-bold">
-Leads CRM
-</h1>
-
-
-<div className="flex gap-3 flex-wrap">
-
-<Input
-placeholder="Search leads"
-value={search}
-onChange={(e)=>setSearch(e.target.value)}
-className="w-60"
-/>
-
-
-<Select
-value={statusFilter}
-onValueChange={setStatusFilter}
->
-
-<SelectTrigger className="w-40">
-<SelectValue/>
-</SelectTrigger>
-
-<SelectContent>
-
-<SelectItem value="all">All</SelectItem>
-
-{PIPELINE.map(s=>(
-<SelectItem key={s} value={s}>
-{s}
-</SelectItem>
-))}
-
-</SelectContent>
-
-</Select>
-
-
-<Button variant="outline" onClick={exportCSV}>
-Export CSV
-</Button>
-
-
-<Button onClick={()=>setShowCreate(true)}>
-<Plus className="w-4 h-4 mr-2"/>
-Add Lead
-</Button>
-
-</div>
-
-</div>
-
-
-
-{/* PIPELINE */}
-
-<div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-8 gap-4">
-
-
-{PIPELINE.map(stage=>(
-
-<div key={stage} className="bg-slate-50 rounded-xl p-3">
-
-<div className="flex justify-between mb-3">
-
-<h3 className="font-semibold capitalize">
-{stage.replace("_"," ")}
-</h3>
-
-<Badge>
-{pipeline[stage]?.length}
-</Badge>
-
-</div>
-
-
-<div className="space-y-3">
-
-{pipeline[stage]?.map(lead=>(
-
-<motion.div
-key={lead.id}
-whileHover={{scale:1.02}}
-className="bg-white p-4 rounded-xl border shadow-sm space-y-2"
->
-
-
-{/* NAME */}
-
-<div>
-
-<h4 className="font-semibold">
-{lead.company_name}
-</h4>
-
-<p className="text-sm text-slate-500">
-{lead.contact_name}
-</p>
-
-</div>
-
-
-
-{/* PHONE */}
-
-<div className="flex items-center text-sm gap-2 text-slate-600">
-
-<Phone className="w-4 h-4"/>
-
-{lead.phone}
-
-</div>
-
-
-
-{/* EMAIL */}
-
-<div className="flex items-center text-sm gap-2 text-slate-600">
-
-<Mail className="w-4 h-4"/>
-
-{lead.email || "—"}
-
-</div>
-
-
-
-{/* QUOTATION */}
-
-<div className="flex items-center text-sm gap-2">
-
-<DollarSign className="w-4 h-4 text-green-600"/>
-
-₹{lead.quotation_amount || "Not quoted"}
-
-</div>
-
-
-
-{/* SERVICES */}
-
-<div className="flex flex-wrap gap-1">
-
-{lead.services?.map((s,i)=>(
-<Badge key={i} variant="outline">
-{s}
-</Badge>
-))}
-
-</div>
-
-
-
-{/* FOLLOWUP */}
-
-{lead.next_follow_up && (
-
-<div className="text-xs text-amber-600 flex items-center gap-2">
-
-<Calendar className="w-3 h-3"/>
-
-Follow-up {format(new Date(lead.next_follow_up),"MMM d")}
-
-</div>
-
-)}
-
-
-
-{/* FOOTER */}
-
-<div className="flex justify-between pt-2">
-
-<Badge className="capitalize">
-{lead.status}
-</Badge>
-
-<Button
-size="icon"
-variant="ghost"
-onClick={()=>deleteLead.mutate(lead.id)}
->
-
-<Trash2 className="w-4 h-4 text-red-500"/>
-
-</Button>
-
-</div>
-
-</motion.div>
-
-))}
-
-</div>
-
-</div>
-
-))}
-
-</div>
-
-</div>
-
-)
-
-}
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional, Literal
+from datetime import datetime, timezone
+from bson import ObjectId
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
+import uuid
+import logging
+# ✅ CHANGE 1: Removed unused User import
+from backend.dependencies import db, get_current_user, create_audit_log
+# ✅ OPTIONAL CHANGE IMPORT: Added notification support
+from backend.notifications import create_notification
+router = APIRouter(prefix="/leads", tags=["Leads Management"])
+logger = logging.getLogger(__name__)
+# ====================== MODELS ======================
+class LeadBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    services: List[str] = []
+    approx_quote: Optional[float] = None
+    date_of_meeting: Optional[datetime] = None
+    status: Literal["new", "contacted", "qualified", "won", "lost"] = "new"
+    source: Literal["direct", "website", "referral", "social_media", "event"] = "direct"
+    next_follow_up: Optional[datetime] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    converted_client_id: Optional[str] = None
+    closure_probability: Optional[float] = None # Added for AI closure chance
+class LeadCreate(LeadBase):
+    pass
+class LeadUpdate(BaseModel):
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    services: Optional[List[str]] = None
+    approx_quote: Optional[float] = None
+    date_of_meeting: Optional[datetime] = None
+    status: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = None
+    source: Optional[Literal["direct", "website", "referral", "social_media", "event"]] = None
+    next_follow_up: Optional[datetime] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    converted_client_id: Optional[str] = None
+    closure_probability: Optional[float] = None # Allow updating probability
+class Lead(LeadBase):
+    id: str
+    created_by: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# ====================== HELPERS ======================
+def normalize_lead_doc(doc: dict) -> dict:
+    # ✅ FIX: Explicitly handle the helper to prevent NameError/ImportError
+    try:
+        from backend.dependencies import safe_dt
+    except ImportError:
+        # Fallback if safe_dt isn't available
+        def safe_dt(v): return v
+    if not doc:
+        return doc
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+    # Ensure these fields exist before passing to safe_dt
+    for field in ["created_at", "updated_at", "next_follow_up", "date_of_meeting"]:
+        if field in doc:
+            doc[field] = safe_dt(doc.get(field))
+    return doc
+def validate_obj_id(id_str: str):
+    if not ObjectId.is_valid(id_str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            # ✅ CHANGE 2: Generic error message for security
+            detail="Invalid Lead ID format",
+        )
+    return ObjectId(id_str)
+# ✅ NEW: Simple AI-like closure probability calculator based on predefined keywords
+def calculate_closure_probability(notes: str) -> float:
+    if not notes:
+        return 0.0
+    notes_lower = notes.lower()
+    positive_keywords = ["interested", "yes", "proceed", "deal", "sign", "agree", "excited", "good", "positive"]
+    negative_keywords = ["no", "not interested", "decline", "reject", "bad", "negative", "issue", "problem"]
+    positive_count = sum(1 for kw in positive_keywords if kw in notes_lower)
+    negative_count = sum(1 for kw in negative_keywords if kw in notes_lower)
+    total = positive_count + negative_count
+    if total == 0:
+        return 0.5 # Neutral if no keywords
+    score = (positive_count - negative_count) / total
+    probability = max(0.0, min(1.0, 0.5 + score * 0.5)) # Scale to 0-1
+    return round(probability * 100, 2) # Return as percentage
+# ====================== ROUTES ======================
+@router.post("/", response_model=Lead)
+async def create_lead(
+    lead_data: LeadCreate,
+    current_user=Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc)
+    lead_dict = lead_data.model_dump()
+    lead_dict.update({
+        "created_by": current_user.id,
+        "created_at": now,
+        "updated_at": now,
+    })
+    result = await db.leads.insert_one(lead_dict)
+    lead_dict["_id"] = result.inserted_id
+    return normalize_lead_doc(lead_dict)
+@router.get("/", response_model=List[Lead])
+async def get_leads(
+    status_filter: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = Query(None, alias="status"),
+    current_user=Depends(get_current_user),
+):
+    query = {}
+    permissions = getattr(current_user, "permissions", {})
+    if hasattr(permissions, "model_dump"):
+        permissions = permissions.model_dump()
+    can_view_all = permissions.get("can_view_all_leads", False)
+    if current_user.role.lower() != "admin" and not can_view_all:
+        query["$or"] = [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+        ]
+    if status_filter:
+        query["status"] = status_filter
+    cursor = db.leads.find(query).sort("updated_at", -1)
+    leads_raw = await cursor.to_list(length=1000)
+    return [normalize_lead_doc(l) for l in leads_raw]
+@router.get("/{lead_id}", response_model=Lead)
+async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
+    obj_id = validate_obj_id(lead_id)
+    raw_lead = await db.leads.find_one({"_id": obj_id})
+    if not raw_lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return normalize_lead_doc(raw_lead)
+@router.patch("/{lead_id}", response_model=Lead)
+async def update_lead(
+    lead_id: str,
+    updates: LeadUpdate,
+    current_user=Depends(get_current_user),
+):
+    obj_id = validate_obj_id(lead_id)
+    existing = await db.leads.find_one({"_id": obj_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    update_dict = updates.model_dump(exclude_unset=True)
+    if update_dict:
+        # ✅ CHANGE 3: Assignee Validation
+        if update_dict.get("assigned_to"):
+            user_exists = await db.users.find_one({"id": update_dict["assigned_to"]})
+            if not user_exists:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
+        # ✅ CHANGE 4: Protect "Won" Status
+        if update_dict.get("status") == "won" and not existing.get("converted_client_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Use convert endpoint to mark lead as won"
+            )
+        # ✅ CHANGE 5: Future Date Validation
+        if update_dict.get("next_follow_up"):
+            if update_dict["next_follow_up"] < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Follow-up date cannot be in the past"
+                )
+        if update_dict.get("date_of_meeting"):
+            pass  # No specific validation for meeting date, can be past
+        # ✅ NEW: Recalculate probability if notes changed
+        if "notes" in update_dict:
+            update_dict["closure_probability"] = calculate_closure_probability(update_dict["notes"])
+        update_dict["updated_at"] = datetime.now(timezone.utc)
+        await db.leads.update_one(
+            {"_id": obj_id},
+            {"$set": update_dict},
+        )
+        await create_audit_log(
+            current_user=current_user,
+            action="UPDATE_LEAD",
+            module="leads",
+            record_id=lead_id,
+            old_data={"status": existing.get("status")},
+            new_data=update_dict,
+        )
+    updated_doc = await db.leads.find_one({"_id": obj_id})
+    return normalize_lead_doc(updated_doc)
+@router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
+async def convert_lead_to_client(
+    lead_id: str,
+    current_user=Depends(get_current_user),
+):
+    obj_id = validate_obj_id(lead_id)
+    lead = await db.leads.find_one({"_id": obj_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("converted_client_id"):
+        raise HTTPException(status_code=400, detail="Lead already converted")
+    client_id = str(uuid.uuid4())
+    client_data = {
+        "id": client_id,
+        "company_name": lead["company_name"],
+        "contact_name": lead.get("contact_name"),
+        "email": lead.get("email"),
+        "phone": lead.get("phone") or "0000000000",
+        "services": lead.get("services", []),
+        "client_type": "other",
+        "assigned_to": lead.get("assigned_to") or current_user.id,
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "notes": f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}",
+    }
+    await db.clients.insert_one(client_data)
+    await db.leads.update_one(
+        {"_id": obj_id},
+        {
+            "$set": {
+                "status": "won",
+                "converted_client_id": client_id,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )
+    await create_audit_log(
+        current_user=current_user,
+        action="LEAD_CONVERTED",
+        module="leads",
+        record_id=lead_id,
+        old_data=None,
+        new_data={"client_id": client_id},
+    )
+    # ✅ OPTIONAL OPTIONAL PROFESSIONAL IMPROVEMENT: Notification
+    await create_notification(
+        user_id=current_user.id,
+        title="Lead Converted",
+        message=f"{lead['company_name']} converted to client",
+        type="lead"
+    )
+    return {"message": "Conversion successful", "client_id": client_id}
+@router.delete("/{lead_id}")
+async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
+    # ✅ CHANGE 6: Updated Permission Check (Admin OR can_manage_users)
+    permissions = getattr(current_user, "permissions", {})
+    if hasattr(permissions, "model_dump"):
+        permissions = permissions.model_dump()
+    if not permissions.get("can_manage_users", False) and current_user.role.lower() != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Administrative privileges required.",
+        )
+    obj_id = validate_obj_id(lead_id)
+    result = await db.leads.delete_one({"_id": obj_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"status": "success", "message": "Lead permanently removed"}
+# ✅ NEW: Endpoint to predict closure probability (can be called separately if needed)
+@router.post("/{lead_id}/predict_closure")
+async def predict_lead_closure(
+    lead_id: str,
+    current_user=Depends(get_current_user),
+):
+    obj_id = validate_obj_id(lead_id)
+    lead = await db.leads.find_one({"_id": obj_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    probability = calculate_closure_probability(lead.get("notes", ""))
+    await db.leads.update_one(
+        {"_id": obj_id},
+        {"$set": {"closure_probability": probability, "updated_at": datetime.now(timezone.utc)}}
+    )
+    return {"closure_probability": probability}
