@@ -142,12 +142,15 @@ def safe_dt(value):
     if not value:
         return None
     if isinstance(value, datetime):
-        return value
+        return value.astimezone(IST) # Force IST
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=pytz.UTC).astimezone(IST)
+        return dt
     except Exception:
         return None
-
+        
 def sanitize_user_data(users, current_user):
     sanitized = []
     for user in users:
@@ -378,7 +381,17 @@ def send_email(to_email: str, subject: str, body: str):
   return response.status_code == 202
  except Exception as e:
   raise Exception(f"SendGrid error: {str(e)}")
+#===========================================================
 # AUTH ROUTES
+#============================================================
+@api_router.get("/system/time")
+async def get_system_time():
+    now = datetime.now(IST)
+    return {
+        "server_time": now.isoformat(),
+        "display_time": now.strftime("%I:%M:%S %p"),
+        "date": now.strftime("%Y-%m-%d")
+    }
 # ==========================================================
 # TODO DASHBOARD (ROLE + PERMISSION BASED VISIBILITY)
 # ==========================================================
@@ -693,20 +706,30 @@ async def handle_attendance(
             upsert=True
         )
         return {"message": "Punched in successfully"}
+#=================PUNCH OUT==================================
     if action == "punch_out":
         if not attendance or not attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Not punched in yet")
         if attendance.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out")
+        
+        punch_in_dt = attendance.get("punch_in")
+        punch_out_dt = datetime.now(IST)
+        
+        # Calculate duration in minutes
+        delta = punch_out_dt - punch_in_dt
+        duration_minutes = int(delta.total_seconds() / 60)
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
                 "$set": {
-                    "punch_out": datetime.now(IST)
+                    "punch_out": punch_out_dt,
+                    "duration_minutes": duration_minutes
                 }
             }
         )
-        return {"message": "Punched out successfully"}
+        return {"message": "Punched out successfully", "duration": duration_minutes}
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
@@ -3104,6 +3127,13 @@ async def create_holiday(
     return holiday_dict
 
 import traceback
+@api_router.delete("/holidays/{holiday_date}")
+async def delete_holiday(holiday_date: str, current_user: User = Depends(check_permission("can_manage_settings"))):
+    result = await db.holidays.delete_one({"date": holiday_date})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Holiday not found")
+    return {"message": "Holiday removed"}
+    
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     # This logs the EXACT line number and file that caused the 500
