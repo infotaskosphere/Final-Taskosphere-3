@@ -3,19 +3,21 @@ import re
 import csv
 import uuid
 import logging
-logger = logging.getLogger(__name__)
 import pytz
 import asyncio
 import calendar
 import requests
 import pandas as pd
+
 from datetime import datetime, date, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 
-# FastAPI & Security
+logger = logging.getLogger(__name__)
+
+# FastAPI
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,14 +25,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
 
-# Database & Data Validation
-from sqlalchemy.orm import Session
+# Validation
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
 from bson import ObjectId
 from dotenv import load_dotenv
 
-# --- FIXED ABSOLUTE IMPORTS ---
+# Backend Modules
 import backend.models as models
+
 from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
     Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
@@ -42,14 +44,19 @@ from backend.models import (
     DashboardStats, AuditLog,
     HolidayResponse, HolidayCreate
 )
-from backend.dependencies import db
-from backend.dependencies import get_current_user
+
+from backend.dependencies import (
+    db,
+    client,
+    get_current_user,
+    create_access_token
+)
+
 from backend.leads import router as leads_router
-from backend.dependencies import get_current_user, create_access_token, db, client
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
-# ------------------------------
 
+# External Services
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
