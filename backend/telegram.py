@@ -129,7 +129,7 @@ async def telegram_webhook(request: Request):
                     )
                     await send_message(chat_id, "📅 Enter Next Follow-up Date (YYYY-MM-DD) or SKIP:")
                     return {"status": "assignee_selected"}
-                # ===============================
+# ===============================
 # CONFIRM LEAD
 # ===============================
 if clicked == "confirm_lead":
