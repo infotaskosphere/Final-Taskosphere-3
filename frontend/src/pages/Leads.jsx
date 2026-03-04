@@ -23,7 +23,6 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-
 const PIPELINE_STAGES = [
   { id: "new", label: "New", color: "bg-blue-100 text-blue-700" },
   { id: "contacted", label: "Contacted", color: "bg-indigo-100 text-indigo-700" },
@@ -34,13 +33,10 @@ const PIPELINE_STAGES = [
   { id: "won", label: "Won", color: "bg-green-100 text-green-700" },
   { id: "lost", label: "Lost", color: "bg-red-100 text-red-700" }
 ]
-
 const LEAD_SOURCES = ["Website", "Referral", "LinkedIn", "Cold Call", "Event", "Social Media", "Other"]
-
 export default function LeadsPage() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
-
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [sortBy, setSortBy] = useState("quotation_amount")
@@ -49,7 +45,6 @@ export default function LeadsPage() {
   const [editingLead, setEditingLead] = useState(null)
   const [csvFile, setCsvFile] = useState(null)
   const [errors, setErrors] = useState({})
-
   const [newLead, setNewLead] = useState({
     company_name: "",
     contact_name: "",
@@ -64,18 +59,15 @@ export default function LeadsPage() {
     notes: "",
     assigned_to: null
   })
-
   /* ---------- QUERIES & MUTATIONS ---------- */
   const { data: leads = [], isLoading, error } = useQuery({
     queryKey: ["leads"],
     queryFn: () => api.get("/leads").then(res => res.data)
   })
-
   const { data: users = [] } = useQuery({
     queryKey: ["users"],
     queryFn: () => api.get("/users").then(res => res.data)
   })
-
   const createLead = useMutation({
     mutationFn: (data) => api.post("/leads", data),
     onSuccess: () => {
@@ -84,7 +76,6 @@ export default function LeadsPage() {
       resetForm()
     }
   })
-
   const updateLead = useMutation({
     mutationFn: ({ id, data }) => api.patch(`/leads/${id}`, data),
     onSuccess: () => {
@@ -94,12 +85,10 @@ export default function LeadsPage() {
       resetForm()
     }
   })
-
   const deleteLead = useMutation({
     mutationFn: (id) => api.delete(`/leads/${id}`),
     onSuccess: () => queryClient.invalidateQueries(["leads"])
   })
-
   const importCsv = useMutation({
     mutationFn: (data) => api.post("/leads/import", data),
     onSuccess: () => {
@@ -107,7 +96,6 @@ export default function LeadsPage() {
       setCsvFile(null)
     }
   })
-
   /* ---------- FORM HELPERS ---------- */
   const resetForm = () => {
     setNewLead({
@@ -126,7 +114,6 @@ export default function LeadsPage() {
     })
     setErrors({})
   }
-
   const validateForm = () => {
     const newErrors = {}
     if (!newLead.company_name.trim()) {
@@ -147,11 +134,9 @@ export default function LeadsPage() {
     if (newLead.date_of_meeting && new Date(newLead.date_of_meeting) > new Date(newLead.next_follow_up)) {
       newErrors.next_follow_up = "Next follow up must be after date of meeting"
     }
-
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
-
   const handleEdit = (lead) => {
     setEditingLead(lead)
     setNewLead({
@@ -168,7 +153,6 @@ export default function LeadsPage() {
     setErrors({})
     setShowCreate(true)
   }
-
   const handleSubmit = () => {
     if (!validateForm()) {
       return
@@ -184,7 +168,6 @@ export default function LeadsPage() {
       createLead.mutate(payload)
     }
   }
-
   const handleCsvImport = () => {
     if (csvFile) {
       Papa.parse(csvFile, {
@@ -195,7 +178,6 @@ export default function LeadsPage() {
       })
     }
   }
-
   const handleCsvExport = () => {
     const csv = Papa.unparse(leads)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -204,7 +186,6 @@ export default function LeadsPage() {
     link.download = 'leads.csv'
     link.click()
   }
-
   /* ---------- LOGIC ---------- */
   const filteredLeads = useMemo(() => {
     let filtered = leads.filter(l => {
@@ -214,7 +195,6 @@ export default function LeadsPage() {
       const matchStatus = statusFilter === "all" || l.status === statusFilter
       return matchSearch && matchStatus
     })
-
     filtered.sort((a, b) => {
       let valA = a[sortBy]
       let valB = b[sortBy]
@@ -228,10 +208,8 @@ export default function LeadsPage() {
         return valA < valB ? 1 : -1
       }
     })
-
     return filtered
   }, [leads, search, statusFilter, sortBy, sortOrder])
-
   const counts = useMemo(() => {
     const map = { all: leads.length }
     PIPELINE_STAGES.forEach(p => {
@@ -239,16 +217,13 @@ export default function LeadsPage() {
     })
     return map
   }, [leads])
-
   const totalPipelineValue = useMemo(() => {
     return leads.reduce((acc, curr) => acc + (Number(curr.quotation_amount) || 0), 0)
   }, [leads])
-
   const wonToday = useMemo(() => {
     const today = format(new Date(), "yyyy-MM-dd")
     return leads.filter(l => l.status === 'won' && format(new Date(l.updated_at || l.created_at), "yyyy-MM-dd") === today).length
   }, [leads])
-
   if (error) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#F8FAFC]">
@@ -258,29 +233,27 @@ export default function LeadsPage() {
       </div>
     )
   }
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] p-6 lg:p-10">
-        <div className="max-w-[1600px] mx-auto space-y-8">
+        <div className="max-w-[1500px] mx-auto space-y-6 px-2">
           <Skeleton className="h-20 w-full" />
           <div className="flex gap-4">
             {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-10 w-24" />)}
           </div>
           <Skeleton className="h-14 w-full" />
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
             {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-64 w-full rounded-2xl" />)}
           </div>
         </div>
       </div>
     )
   }
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F8FAFC] to-[#E8EBEF] p-6 lg:p-10">
-      <div className="max-w-[1600px] mx-auto space-y-8">
+    <div className="min-h-screen bg-gradient-to-br from-[#F8FAFC] to-[#E8EBEF] px-4 py-4 lg:px-6 overflow-x-hidden">
+      <div className="max-w-[1500px] mx-auto space-y-6 px-2">
         {/* EXECUTIVE HEADER */}
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 border-b border-slate-200 pb-8">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-slate-200 pb-6">
           <div className="space-y-1">
             <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Leads Engine</h1>
             <p className="text-slate-500 font-medium">Advanced pipeline management & conversion analytics</p>
@@ -296,12 +269,12 @@ export default function LeadsPage() {
                 <p className="text-xl font-black text-emerald-600">{wonToday}</p>
               </div>
             </div>
-            <Button variant="outline" className="h-12 px-6 rounded-2xl" onClick={handleCsvExport}>
+            <Button variant="outline" className="h-9 px-4 rounded-xl text-sm" onClick={handleCsvExport}>
               <Download className="w-4 h-4 mr-2" /> Export CSV
             </Button>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="h-12 px-6 rounded-2xl">
+                <Button variant="outline" className="h-9 px-4 rounded-xl text-sm">
                   <Upload className="w-4 h-4 mr-2" /> Import CSV
                 </Button>
               </PopoverTrigger>
@@ -322,7 +295,7 @@ export default function LeadsPage() {
               }
             }}>
               <DialogTrigger asChild>
-                <Button size="lg" className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-100 px-8 transition-all hover:-translate-y-0.5">
+                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white px-5">
                   <Plus className="w-5 h-5 mr-2 stroke-[3]" /> Create Lead
                 </Button>
               </DialogTrigger>
@@ -332,7 +305,6 @@ export default function LeadsPage() {
                     {editingLead ? "Edit Lead" : "New Lead"}
                   </DialogTitle>
                 </DialogHeader>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
                   {/* Contact */}
                   <div className="space-y-1">
@@ -345,7 +317,6 @@ export default function LeadsPage() {
                     <Input value={newLead.contact_name} onChange={e => setNewLead({ ...newLead, contact_name: e.target.value })} placeholder="Rahul Sharma" />
                     {errors.contact_name && <p className="text-red-500 text-xs">{errors.contact_name}</p>}
                   </div>
-
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Email</Label>
                     <Input type="email" value={newLead.email} onChange={e => setNewLead({ ...newLead, email: e.target.value })} placeholder="rahul@acmecorp.in" />
@@ -356,7 +327,6 @@ export default function LeadsPage() {
                     <Input value={newLead.phone} onChange={e => setNewLead({ ...newLead, phone: e.target.value })} placeholder="+91 98765 43210" />
                     {errors.phone && <p className="text-red-500 text-xs">{errors.phone}</p>}
                   </div>
-
                   {/* Deal Info */}
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Quotation Amount (₹)</Label>
@@ -374,7 +344,6 @@ export default function LeadsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Date of Meeting</Label>
                     <Input type="date" value={newLead.date_of_meeting} onChange={e => setNewLead({ ...newLead, date_of_meeting: e.target.value })} />
@@ -384,7 +353,6 @@ export default function LeadsPage() {
                     <Input type="date" value={newLead.next_follow_up} onChange={e => setNewLead({ ...newLead, next_follow_up: e.target.value })} />
                     {errors.next_follow_up && <p className="text-red-500 text-xs">{errors.next_follow_up}</p>}
                   </div>
-
                   {/* Status & Assignment */}
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Status</Label>
@@ -409,7 +377,6 @@ export default function LeadsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   {/* Services & Notes */}
                   <div className="md:col-span-2 space-y-1">
                     <Label className="font-bold text-slate-600">Services (comma separated)</Label>
@@ -422,7 +389,6 @@ export default function LeadsPage() {
                       })}
                     />
                   </div>
-
                   <div className="md:col-span-2 space-y-1">
                     <Label className="font-bold text-slate-600">Notes</Label>
                     <Textarea
@@ -433,7 +399,6 @@ export default function LeadsPage() {
                     />
                   </div>
                 </div>
-
                 <DialogFooter className="pt-6 border-t mt-4">
                   <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
                   <Button onClick={handleSubmit} disabled={createLead.isLoading || updateLead.isLoading} className="bg-indigo-600 hover:bg-indigo-700">
@@ -444,15 +409,14 @@ export default function LeadsPage() {
             </Dialog>
           </div>
         </div>
-
         {/* STATUS STICKER BAR */}
-        <div className="sticky top-0 z-10 bg-[#F8FAFC]/90 backdrop-blur-sm flex items-center gap-4 py-2 px-4 overflow-x-auto scrollbar-hide border-b border-slate-100">
+        <div className="sticky top-0 z-10 bg-[#F8FAFC]/90 backdrop-blur-sm flex items-center gap-4 py-1.5 px-3 text-xs overflow-x-auto max-w-full scrollbar-hide border-b border-slate-100">
           <button
             onClick={() => setStatusFilter("all")}
-            className={`flex items-center gap-3 shrink-0 py-2 px-4 transition-all rounded-full ${statusFilter === "all" ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
+            className={`flex items-center gap-3 shrink-0 py-1.5 px-3 text-xs transition-all rounded-full ${statusFilter === "all" ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
           >
             <span className="text-sm font-bold uppercase tracking-widest">All</span>
-            <div className="text-white text-[11px] font-black h-5 min-w-[28px] px-2 flex items-center justify-center rounded-full bg-indigo-600">
+            <div className="text-white text-[10px] font-black h-4 min-w-[22px] px-2 flex items-center justify-center rounded-full bg-indigo-600">
               {counts.all}
             </div>
           </button>
@@ -460,31 +424,30 @@ export default function LeadsPage() {
             <button
               key={stage.id}
               onClick={() => setStatusFilter(stage.id)}
-              className={`flex items-center gap-3 shrink-0 py-2 px-4 transition-all rounded-full ${statusFilter === stage.id ? stage.color : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`flex items-center gap-3 shrink-0 py-1.5 px-3 text-xs transition-all rounded-full ${statusFilter === stage.id ? stage.color : 'text-slate-500 hover:bg-slate-100'}`}
             >
               <span className="text-sm font-bold uppercase tracking-widest">
                 {stage.label}
               </span>
-              <div className="text-white text-[11px] font-black h-5 min-w-[28px] px-2 flex items-center justify-center rounded-full bg-slate-600">
+              <div className="text-white text-[10px] font-black h-4 min-w-[22px] px-2 flex items-center justify-center rounded-full bg-slate-600">
                 {counts[stage.id] || 0}
               </div>
             </button>
           ))}
         </div>
-
         {/* FILTER & TOOLS AREA */}
         <div className="flex flex-col md:flex-row gap-4 items-center">
           <div className="flex-1 relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
             <Input
-              className="pl-12 h-14 bg-white border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-indigo-50 transition-all text-lg"
+              className="pl-10 h-10 bg-white border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-50 transition-all text-sm"
               placeholder="Search by company, contact, email or services..."
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[180px] h-14 rounded-2xl">
+            <SelectTrigger className="w-[150px] h-10 rounded-xl">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -494,7 +457,7 @@ export default function LeadsPage() {
             </SelectContent>
           </Select>
           <Select value={sortOrder} onValueChange={setSortOrder}>
-            <SelectTrigger className="w-[120px] h-14 rounded-2xl">
+            <SelectTrigger className="w-[110px] h-10 rounded-xl">
               <SelectValue placeholder="Order" />
             </SelectTrigger>
             <SelectContent>
@@ -502,13 +465,12 @@ export default function LeadsPage() {
               <SelectItem value="desc">Descending</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" className="h-14 px-6 rounded-2xl border-slate-200 bg-white font-bold text-slate-600">
+          <Button variant="outline" className="h-10 px-4 rounded-xl border-slate-200 bg-white text-sm font-medium">
             <Filter className="w-4 h-4 mr-2" /> More Filters
           </Button>
         </div>
-
         {/* DATA GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
           <AnimatePresence mode='popLayout'>
             {filteredLeads.map((lead) => (
               <motion.div
@@ -520,7 +482,7 @@ export default function LeadsPage() {
                 transition={{ duration: 0.2 }}
               >
                 <Card className="group h-full border-none shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ring-1 ring-slate-200/60 bg-white rounded-[24px] overflow-hidden">
-                  <CardHeader className="p-6 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100">
+                  <CardHeader className="p-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100">
                     <div className="flex justify-between items-start">
                       <div className="space-y-1 max-w-[70%]">
                         <div className="flex items-center gap-2">
@@ -534,7 +496,7 @@ export default function LeadsPage() {
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="p-6 space-y-6">
+                  <CardContent className="p-4 space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-0.5">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Phone</span>
@@ -602,7 +564,6 @@ export default function LeadsPage() {
             ))}
           </AnimatePresence>
         </div>
-
         {/* EMPTY STATE */}
         {filteredLeads.length === 0 && (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
