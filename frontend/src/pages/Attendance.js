@@ -131,7 +131,7 @@ export default function Attendance() {
         setLiveDuration(getTodayLiveDuration());
       }, 60000);
       setLiveDuration(getTodayLiveDuration()); // initial
-      return () => clearInterval(interval);
+      ) => clearInterval(interval);
     }
   }, [todayAttendance]);
   useEffect(() => {
@@ -394,6 +394,19 @@ export default function Attendance() {
     );
   };
   return (
+    <TooltipProvider> {/* ADD THIS HERE */}
+      <motion.div
+        className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* ... all your existing code ... */}
+
+      </motion.div>
+    </TooltipProvider> {/* ADD THIS AT THE VERY BOTTOM (before the final closing parenthesis) */}
+  );
+}
     <motion.div
       className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
       variants={containerVariants}
