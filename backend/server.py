@@ -561,74 +561,101 @@ async def update_todo(
  return {"message": "Todo updated successfully"}
 @api_router.post("/auth/register", response_model=Token)
 async def register(
- user_data: UserCreate,
- current_user: User = Depends(get_current_user)
+    user_data: UserCreate,
+    current_user: User = Depends(get_current_user)
 ):
- # 🔒 Admin Only
- if current_user.role != "admin":
-  raise HTTPException(status_code=403, detail="Admin only")
- # 🔎 Check existing email
- existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
- if existing:
-  raise HTTPException(status_code=400, detail="Email already registered")
- # 🔐 Hash password
- hashed_password = get_password_hash(user_data.password)
- # 🎯 Default Permissions
- default_permissions = {
-  "can_view_all_tasks": False,
-  "can_view_all_clients": False,
-  "can_view_all_dsc": False,
-  "can_view_documents": False,
-  "can_view_all_duedates": False,
-  "can_view_reports": False,
-  "can_manage_users": False,
-  "can_assign_tasks": False,
-  "can_view_staff_activity": False,
-  "can_view_attendance": False,
-  "can_use_chat": False,
-  "can_send_reminders": False,
-  "assigned_clients": [],
-  "can_view_user_page": False,
-  "can_view_audit_logs": False,
-  "can_edit_tasks": False,
-  "can_edit_dsc": False,
-  "can_edit_documents": False,
-  "can_edit_due_dates": False,
-  "can_edit_users": False,
-  "can_download_reports": False,
-  "view_other_tasks": [],
-  "view_other_attendance": [],
-  "view_other_reports": [],
-  "view_other_todos": [],
-  "view_other_activity": [],
-  "can_edit_clients": False,
-  "can_view_all_leads": False,
-  "can_edit_leads": False,
-  "can_manage_settings": False
- }
- # 🧱 Build User Object
- user_id = str(uuid.uuid4())
- user = User(
-  id=user_id,
-  email=user_data.email,
-  full_name=user_data.full_name,
-  role=user_data.role,
-  password=hashed_password,
-  departments=user_data.departments,
-  phone=user_data.phone,
-  birthday=user_data.birthday,
-  telegram_id=user_data.telegram_id,
-  permissions=default_permissions
- )
- doc = user.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- await db.users.insert_one(doc)
- access_token = create_access_token({"sub": user_id})
- return {
-  "access_token": access_token,
-  "token_type": "bearer",
-  "user": user
- }
+
+    # 🔒 Admin Only
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    # 🔎 Check existing email
+    existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # 🔐 Hash password
+    hashed_password = get_password_hash(user_data.password)
+
+    # 🎯 Default Permissions
+    default_permissions = {
+        "can_view_all_tasks": False,
+        "can_view_all_clients": False,
+        "can_view_all_dsc": False,
+        "can_view_documents": False,
+        "can_view_all_duedates": False,
+        "can_view_reports": False,
+        "can_manage_users": False,
+        "can_assign_tasks": False,
+        "can_view_staff_activity": False,
+        "can_view_attendance": False,
+        "can_use_chat": False,
+        "can_send_reminders": False,
+        "assigned_clients": [],
+        "can_view_user_page": False,
+        "can_view_audit_logs": False,
+        "can_edit_tasks": False,
+        "can_edit_dsc": False,
+        "can_edit_documents": False,
+        "can_edit_due_dates": False,
+        "can_edit_users": False,
+        "can_download_reports": False,
+        "view_other_tasks": [],
+        "view_other_attendance": [],
+        "view_other_reports": [],
+        "view_other_todos": [],
+        "view_other_activity": [],
+        "can_edit_clients": False,
+        "can_view_all_leads": False,
+        "can_edit_leads": False,
+        "can_manage_settings": False
+    }
+
+    # 🧱 Build User Object
+    user_id = str(uuid.uuid4())
+
+    user = User(
+        id=user_id,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        role=user_data.role,
+        password=hashed_password,
+
+        departments=user_data.departments,
+        phone=user_data.phone,
+        birthday=user_data.birthday,
+        telegram_id=user_data.telegram_id,
+
+        # ✅ Newly added fields (fix for your issue)
+        punch_in_time=user_data.punch_in_time,
+        grace_time=user_data.grace_time,
+        punch_out_time=user_data.punch_out_time,
+        profile_picture=user_data.profile_picture,
+        is_active=user_data.is_active,
+
+        permissions=user_data.permissions or default_permissions
+    )
+
+    # Convert to dict for Mongo
+    doc = user.model_dump()
+
+    # Convert datetime to ISO
+    doc["created_at"] = doc["created_at"].isoformat()
+
+    # Insert user
+    await db.users.insert_one(doc)
+
+    # Create token
+    access_token = create_access_token({"sub": user_id})
+
+    # Hide password in response
+    user.password = None
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
  user = await db.users.find_one({"email": credentials.email})
