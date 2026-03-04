@@ -8,15 +8,12 @@ import asyncio
 import calendar
 import requests
 import pandas as pd
-
 from datetime import datetime, date, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
-
 logger = logging.getLogger(__name__)
-
 # FastAPI
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
@@ -24,15 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
-
 # Validation
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
 from bson import ObjectId
 from dotenv import load_dotenv
-
 # Backend Modules
 import backend.models as models
-
 from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
     Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
@@ -42,26 +36,28 @@ from backend.models import (
     DSC, DSCCreate, DSCListResponse, DSCMovementRequest, MovementUpdateRequest,
     Document, DocumentCreate, DocumentMovementRequest,
     DashboardStats, AuditLog,
-    HolidayResponse, HolidayCreate
+    HolidayResponse, HolidayCreate,
+    DEFAULT_ROLE_PERMISSIONS
 )
-
 from backend.dependencies import (
     db,
     client,
     get_current_user,
-    create_access_token
+    create_access_token,
+    check_permission,
+    require_admin,
+    require_manager_or_admin,
+    verify_record_access,
+    verify_client_access
 )
-
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
-
 # External Services
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from apscheduler.schedulers.background import BackgroundScheduler
-
 # ====================== CONFIG ======================
 IST = pytz.timezone('Asia/Kolkata')
 india_tz = ZoneInfo("Asia/Kolkata")
@@ -69,13 +65,10 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
 # ====================== SECURITY CONFIG ===========================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # ====================== APP + FIXED CORS (MUST BE FIRST) ===========
 app = FastAPI(title="Taskosphere Backend")
-
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -101,18 +94,7 @@ async def health():
 rankings_cache = {}
 rankings_cache_time = {}
 # ===================== HELPER FUNCTIONS =====================
-def check_permission(required_perm: str):
-    def dependency(user: User = Depends(get_current_user)):
-        # Admin always has access
-        if user.role == "admin":
-            return user
-        # Check specific permission
-        perms = user.permissions.model_dump() if hasattr(user.permissions, "model_dump") else user.permissions
-        if not perms.get(required_perm, False):
-            raise HTTPException(status_code=403, detail=f"Permission denied: {required_perm} required")
-        return user
-    return dependency
-  
+ 
 def safe_dt(value):
     if not value:
         return None
@@ -125,7 +107,7 @@ def safe_dt(value):
         return dt
     except Exception:
         return None
-      
+     
 def sanitize_user_data(users, current_user):
     sanitized = []
     for user in users:
@@ -178,7 +160,7 @@ async def create_audit_log(current_user: User, action: str, module: str, record_
         timestamp=datetime.now(timezone.utc)
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
-     
+    
 async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift_start: str = "10:30", shift_end: str = "19:00"):
     """
     Calculate target hours based on user's shift strings (HH:MM) and date range (YYYY-MM-DD).
@@ -188,7 +170,7 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
         end = date.fromisoformat(end_date_str)
     except Exception:
         return 0
-   
+  
     if start > end:
         return 0
     # Calculate work hours per day from shift strings
@@ -200,14 +182,14 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
         hrs_per_day = 8.5 # Fallback to standard 10:30 - 19:00
     holidays_cursor = db.holidays.find({})
     holidays = [h["date"] for h in await holidays_cursor.to_list(length=None)]
-   
+  
     total_hours = 0
     current_date = start
     while current_date <= end:
         if current_date.weekday() < 5 and current_date.isoformat() not in holidays:
             total_hours += hrs_per_day
         current_date += timedelta(days=1)
-   
+  
     return round(total_hours, 2)
 # --- NEW: HOLIDAY AUTOFETCH LOGIC ---
 async def fetch_indian_holidays_task():
@@ -219,25 +201,25 @@ async def fetch_indian_holidays_task():
         now = datetime.now(IST)
         year = now.year
         month = now.month
-       
+      
         # Indian Public Holidays API (Nager.Date is free/reliable)
         url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
         response = requests.get(url, timeout=10)
-       
+      
         if response.status_code == 200:
             external_holidays = response.json()
             count = 0
-           
+          
             for h in external_holidays:
                 h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
-               
+              
                 # Only process holidays for the current month
                 if h_date_obj.month == month:
                     date_str = h_date_obj.isoformat()
-                   
+                  
                     # Check if already exists in your Mongo 'holidays' collection
                     existing = await db.holidays.find_one({"date": date_str})
-                   
+                  
                     if not existing:
                         new_holiday = {
                             "date": date_str,
@@ -436,22 +418,38 @@ async def create_todo(
  # Return proper id from Mongo
  doc["id"] = str(result.inserted_id)
  return doc
+async def get_team_user_ids(manager_id: str):
+    manager = await db.users.find_one({"id": manager_id})
+    if not manager or not manager.get("departments"):
+        return []
+    team = await db.users.find({
+        "departments": {"$in": manager["departments"]},
+        "id": {"$ne": manager_id},
+        "role": "staff"
+    }).to_list(100)
+    return [u["id"] for u in team]
 @api_router.get("/todos")
 async def get_todos(
  user_id: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- # 🔒 If admin
  if current_user.role == "admin":
-  if user_id:
-   query = {"user_id": user_id}
-  else:
-   query = {} # return all todos
+    query = {} if not user_id else {"user_id": user_id}
+
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+
+    if user_id:
+        if user_id not in team_ids and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not allowed")
+        query = {"user_id": user_id}
+    else:
+        query = {"user_id": {"$in": team_ids + [current_user.id]}}
+
  else:
-  # 🔒 Non-admin can ONLY see their own
-  if user_id and user_id != current_user.id:
-   raise HTTPException(status_code=403, detail="Not allowed")
-  query = {"user_id": current_user.id}
+    if user_id and user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    query = {"user_id": current_user.id}
  todos = await db.todos.find(query).to_list(1000)
  # Convert ObjectId safely
  for t in todos:
@@ -595,39 +593,13 @@ async def register(
         raise HTTPException(status_code=400, detail="Email already registered")
     # 🔐 Hash password
     hashed_password = get_password_hash(user_data.password)
-    # 🎯 Default Permissions
-    default_permissions = {
-        "can_view_all_tasks": False,
-        "can_view_all_clients": False,
-        "can_view_all_dsc": False,
-        "can_view_documents": False,
-        "can_view_all_duedates": False,
-        "can_view_reports": False,
-        "can_manage_users": False,
-        "can_assign_tasks": False,
-        "can_view_staff_activity": False,
-        "can_view_attendance": False,
-        "can_use_chat": False,
-        "can_send_reminders": False,
-        "assigned_clients": [],
-        "can_view_user_page": False,
-        "can_view_audit_logs": False,
-        "can_edit_tasks": False,
-        "can_edit_dsc": False,
-        "can_edit_documents": False,
-        "can_edit_due_dates": False,
-        "can_edit_users": False,
-        "can_download_reports": False,
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-        "can_edit_clients": False,
-        "can_view_all_leads": False,
-        "can_edit_leads": False,
-        "can_manage_settings": False
-    }
+    # 🎯 Default Permissions based on role
+    from backend.models import DEFAULT_ROLE_PERMISSIONS
+
+    default_permissions = DEFAULT_ROLE_PERMISSIONS.get(
+        user_data.role.value if hasattr(user_data.role, "value") else user_data.role,
+        {}
+    )
     # 🧱 Build User Object
     user_id = str(uuid.uuid4())
     user = User(
@@ -698,26 +670,23 @@ async def get_me(current_user: User = Depends(get_current_user)):
 #=============================================================
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(
-    user_id: str,  # Changed from int to str to support UUIDs
-    user_data: dict, 
+    user_id: str, # Changed from int to str to support UUIDs
+    user_data: dict,
     current_user: User = Depends(get_current_user) # Standardized dependency
 ):
     # 1. Admin only check
     if current_user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin clearance required for profile modification.")
-
     # 2. Find existing user in MongoDB
     existing = await db.users.find_one({"id": user_id})
     if not existing:
         raise HTTPException(status_code=404, detail="User profile not found.")
-
     # 3. Explicitly define allowed fields (Security best practice)
     allowed_fields = [
-        "full_name", "role", "departments", "phone", 
-        "birthday", "punch_in_time", "grace_time", 
+        "full_name", "role", "departments", "phone",
+        "birthday", "punch_in_time", "grace_time",
         "punch_out_time", "is_active", "profile_picture"
     ]
-
     # 4. Filter and clean the payload
     update_payload = {}
     for key in allowed_fields:
@@ -725,13 +694,10 @@ async def update_user(
             val = user_data[key]
             # Convert empty strings to None for DB consistency
             update_payload[key] = val if val != "" else None
-
     # 5. Execute Update
     await db.users.update_one({"id": user_id}, {"$set": update_payload})
-
     # 6. Log the change for Audit
     await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
-
     # 7. Return fresh record
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     return updated_user
@@ -790,10 +756,10 @@ async def handle_attendance(
             raise HTTPException(status_code=400, detail="Not punched in yet")
         if attendance.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out")
-      
+     
         punch_in_dt = attendance.get("punch_in")
         punch_out_dt = datetime.now(timezone.utc)
-      
+     
         # Calculate duration in minutes
         delta = punch_out_dt - punch_in_dt
         duration_minutes = int(delta.total_seconds() / 60)
@@ -956,7 +922,7 @@ async def get_top_performers_data(
  return performers
 # User routes
 @api_router.get("/users")
-async def get_users(current_user: User = Depends(check_permission("can_view_user_page"))):
+async def get_users(current_user: User = Depends(require_admin)):
     # Fetch data directly as dictionaries
     users_raw = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     for u in users_raw:
@@ -966,7 +932,7 @@ async def get_users(current_user: User = Depends(check_permission("can_view_user
                 u["created_at"] = datetime.fromisoformat(u["created_at"])
             except:
                 u["created_at"] = datetime.utcnow() # Fallback
-            
+           
     # Return sanitized data
     return sanitize_user_data(users_raw, current_user)
 @api_router.put("/users/{user_id}", response_model=User)
@@ -1026,7 +992,7 @@ async def create_task(
     # Initialize task with generated ID and ownership
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
-  
+ 
     # Create Task object
     task = Task(
         **task_data.model_dump(),
@@ -1035,17 +1001,17 @@ async def create_task(
         created_at=now,
         updated_at=now
     )
-  
+ 
     # Prepare document for MongoDB with ISO string conversion
     doc = task.model_dump()
     date_fields = ["created_at", "updated_at", "due_date", "recurrence_end_date"]
-  
+ 
     for field in date_fields:
         if doc.get(field) and isinstance(doc[field], datetime):
             doc[field] = doc[field].isoformat()
     # Insert into database
     await db.tasks.insert_one(doc)
-  
+ 
     # Notification logic for assigned users
     if task.assigned_to and task.assigned_to != current_user.id:
         await create_notification(
@@ -1054,7 +1020,7 @@ async def create_task(
             message=f"You have been assigned task '{task.title}'",
             type="assignment"
         )
-      
+     
     # Audit logging
     await create_audit_log(
         current_user=current_user,
@@ -1071,17 +1037,17 @@ async def get_task_comments(
 ):
     # Fetch task and exclude MongoDB internal _id
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-  
+ 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-  
+ 
     # Basic permission check: Admin or involved parties
     is_admin = getattr(current_user, "role", "").lower() == "admin"
     is_involved = (
         task.get("assigned_to") == current_user.id or
         task.get("created_by") == current_user.id
     )
-  
+ 
     if not is_admin and not is_involved:
         raise HTTPException(
             status_code=403,
@@ -1154,14 +1120,19 @@ async def import_tasks_from_csv(
 # =========================================================
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
- permissions = current_user.permissions or {}
  query = {"type": {"$ne": "todo"}}
  # Admin → all
  if current_user.role == "admin":
   pass
- # Global permission → all
- elif permissions.get("can_view_all_tasks", False):
-  pass
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+
+    query["$or"] = [
+        {"assigned_to": current_user.id},
+        {"assigned_to": {"$in": team_ids}},
+        {"sub_assignees": current_user.id},
+        {"created_by": current_user.id}
+    ]
  # Cross-user
  else:
   allowed_users = permissions.get("view_other_tasks", [])
@@ -1759,24 +1730,21 @@ async def get_attendance_history(
  """
  query = {}
  if current_user.role == "admin":
-  if user_id:
-   query["user_id"] = user_id
-  else:
-   if isinstance(current_user.permissions, dict):
-    permissions = current_user.permissions
-   elif current_user.permissions:
-    permissions = current_user.permissions.model_dump()
-   else:
-    permissions = {}
-   allowed = permissions.get("view_other_attendance", [])
-   if user_id is None:
+    if user_id:
+        query["user_id"] = user_id
+
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+
+    if user_id:
+        if user_id not in team_ids and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        query["user_id"] = user_id
+    else:
+        query["user_id"] = {"$in": team_ids + [current_user.id]}
+
+ else:
     query["user_id"] = current_user.id
-   elif user_id == current_user.id:
-    query["user_id"] = current_user.id
-   elif user_id in allowed:
-    query["user_id"] = user_id
-   else:
-    raise HTTPException(status_code=403, detail="Not authorized")
  attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
  for attendance in attendance_list:
   attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
@@ -2463,13 +2431,14 @@ async def create_client(client_data: ClientCreate, current_user: User = Depends(
 async def get_clients(current_user: User = Depends(get_current_user)):
  query = {}
  if current_user.role == "admin":
-  query = {}
+    query = {}
+
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+    query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
+
  else:
-  permissions = current_user.permissions.model_dump() if current_user.permissions else {}
-  if permissions.get("can_view_all_clients", False):
-   query = {}
-  else:
-   query["assigned_to"] = current_user.id
+    query = {"assigned_to": current_user.id}
  clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
  for client in clients:
   if isinstance(client["created_at"], str):
@@ -2842,18 +2811,12 @@ async def get_activity_summary(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     """Get staff activity summary"""
-  
+ 
     # ------------------------------------------------------
     # Permission Check
     # ------------------------------------------------------
-    if current_user.role != "admin":
-        permissions = (
-            current_user.permissions.model_dump()
-            if current_user.permissions else {}
-        )
-        allowed = permissions.get("view_other_activity", [])
-        if user_id and user_id != current_user.id and user_id not in allowed:
-            raise HTTPException(status_code=403, detail="Not authorized")
+    if current_user.role == "staff":
+        raise HTTPException(status_code=403, detail="Not allowed")
     # ------------------------------------------------------
     # Build Mongo Query
     # ------------------------------------------------------
@@ -3132,8 +3095,8 @@ async def auto_daily_reminder(request, call_next):
  # VERY IMPORTANT: continue request processing
  response = await call_next(request)
  return response
-    
    
+  
 # ==================== HOLIDAY ROUTES (STEP 3 & 4 - added here) ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
@@ -3146,7 +3109,7 @@ async def get_holidays(current_user: User = Depends(get_current_user)):
         query = {}
     else:
         query = {"status": "confirmed"}
-       
+      
     holidays = await db.holidays.find(query, {"_id": 0}).sort("date", 1).to_list(500)
     return holidays
 @api_router.post("/holidays", response_model=HolidayResponse)
@@ -3182,10 +3145,10 @@ async def update_holiday_status(
         {"date": holiday_date},
         {"$set": {"status": new_status, "updated_by": current_user.id}}
     )
-   
+  
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
-       
+      
     return {"message": f"Holiday marked as {new_status}"}
 import traceback
 @api_router.delete("/holidays/{holiday_date}")
@@ -3194,13 +3157,12 @@ async def delete_holiday(holiday_date: str, current_user: User = Depends(check_p
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
     return {"message": "Holiday removed"}
-  
+ 
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     # This logs the EXACT line number and file that caused the 500
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
     logger.error(traceback.format_exc())
- 
     return JSONResponse(
         status_code=500,
         content={
