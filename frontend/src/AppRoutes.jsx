@@ -18,6 +18,8 @@ const Clients = lazy(() => import("@/pages/Clients"));
 const Users = lazy(() => import("@/pages/Users"));
 const DueDates = lazy(() => import("@/pages/DueDates"));
 const StaffActivity = lazy(() => import("@/pages/StaffActivity"));
+const LeadsPage = lazy(() => import("@/pages/LeadsPage"));
+
 
 /* Route Guards */
 
@@ -166,6 +168,16 @@ function AppRoutes() {
           element={
             <Permission permission="can_view_user_page">
               <Users />
+            </Permission>
+          }
+        />
+
+        {/* Leads Management */}
+        <Route
+          path="/leads"
+          element={
+            <Permission permission="can_view_all_leads">
+              <LeadsPage />
             </Permission>
           }
         />
