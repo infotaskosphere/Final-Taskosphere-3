@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
 from typing import List, Optional, Literal
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from datetime import datetime, timezone
 from bson import ObjectId
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
@@ -20,117 +21,116 @@ from datetime import datetime
 
 
 class LeadBase(BaseModel):
-
     model_config = ConfigDict(extra="ignore")
 
     # ---------------- BASIC DETAILS ---------------- #
-
     company_name: str = Field(
-        ...,
+        ..., 
+        min_length=1,
         description="Name of the company or business"
     )
 
     contact_name: Optional[str] = Field(
-        None,
+        None, 
         description="Primary contact person for the lead"
     )
 
     email: Optional[EmailStr] = Field(
-        None,
+        None, 
         description="Contact email address"
     )
 
     phone: Optional[str] = Field(
-        None,
+        None, 
         description="Contact phone number"
     )
 
     # ---------------- SERVICES ---------------- #
-
     services: List[str] = Field(
         default_factory=list,
         description="List of services requested (GST, ROC, etc.)"
     )
 
     # ---------------- QUOTATION ---------------- #
-
     quotation_amount: Optional[float] = Field(
         None,
         description="Quotation amount given to the client"
     )
 
-    # ---------------- MEETING ---------------- #
-
-    date_of_meeting: Optional[datetime] = Field(
-        None,
-        description="Date of meeting scheduled with lead"
-    )
-
-    # ---------------- PIPELINE STATUS ---------------- #
-
+    # ---------------- PIPELINE & STATUS ---------------- #
     status: Literal[
-        "new",
-        "contacted",
-        "meeting",
-        "proposal",
-        "negotiation",
-        "on_hold",
-        "won",
-        "lost"
+        "new", "contacted", "meeting", "proposal", 
+        "negotiation", "on_hold", "won", "lost"
     ] = Field(
         "new",
         description="Current pipeline stage of the lead"
     )
 
-    # ---------------- LEAD SOURCE ---------------- #
-
     source: Literal[
-        "direct",
-        "website",
-        "referral",
-        "social_media",
-        "event"
+        "direct", "website", "referral", "social_media", "event", "other"
     ] = Field(
         "direct",
         description="Where the lead originated"
     )
 
-    # ---------------- FOLLOW UP ---------------- #
+    # ---------------- DATES ---------------- #
+    date_of_meeting: Optional[datetime] = Field(
+        None,
+        description="Date of meeting scheduled with lead"
+    )
 
     next_follow_up: Optional[datetime] = Field(
         None,
         description="Next scheduled follow-up date"
     )
 
-    # ---------------- NOTES ---------------- #
-
+    # ---------------- ADDITIONAL INFO ---------------- #
     notes: Optional[str] = Field(
         None,
         description="Additional notes about the lead"
     )
-
-    # ---------------- ASSIGNMENT ---------------- #
 
     assigned_to: Optional[str] = Field(
         None,
         description="Staff user ID assigned to this lead"
     )
 
-    # ---------------- CONVERSION ---------------- #
-
     converted_client_id: Optional[str] = Field(
         None,
         description="Client ID created after lead conversion"
     )
 
-    # ---------------- AI PROBABILITY ---------------- #
-
     closure_probability: Optional[float] = Field(
         None,
         description="AI predicted probability of closing this lead"
     )
+
+    # ====================== VALIDATORS (THE FIX) ======================
+
+    @field_validator('quotation_amount', 'assigned_to', 'contact_name', 'email', 'phone', mode='before')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        """
+        Prevents 422 errors by converting empty strings from the 
+        frontend form into None values.
+        """
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator('services', mode='before')
+    @classmethod
+    def ensure_list_format(cls, v):
+        """
+        Ensures services is always a list, even if a string is sent.
+        """
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(',') if s.strip()]
+        return v or []
+        
 class LeadCreate(LeadBase):
     pass
+    
 class LeadUpdate(BaseModel):
     company_name: Optional[str] = None
     contact_name: Optional[str] = None
