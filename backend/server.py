@@ -2978,7 +2978,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
     )
 # Api Router
 api_router.include_router(telegram_router)
-api_router.include_router(leads_router) 
+api_router.include_router(leads_router)
 api_router.include_router(notification_router)
 
 app.include_router(api_router)
