@@ -1,154 +1,132 @@
 import os
 from datetime import datetime, timedelta, timezone
-from motor.motor_asyncio import AsyncIOMotorClient
-from fastapi import Depends, HTTPException, status
 from typing import List, Optional, Dict, Any
+
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
-# ✅ CHANGE 1: Imported AuditLog to prevent NameError
+from motor.motor_asyncio import AsyncIOMotorClient
+
+# Models – imported inside functions where needed to avoid circular imports
 from backend.models import User, AuditLog
-import uuid
 
 # ==========================================================
-# DATABASE
+# ENVIRONMENT & DATABASE
 # ==========================================================
-
 MONGO_URL = os.getenv("MONGO_URL")
 DB_NAME = os.getenv("DB_NAME", "taskosphere")
 
 if not MONGO_URL:
-    raise Exception("MONGO_URL is not set")
+    raise Exception("MONGO_URL environment variable is not set")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
 # ==========================================================
-# AUTH CONFIG
+# JWT / AUTH CONFIG
 # ==========================================================
-
 JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 if not JWT_SECRET:
-    raise Exception("JWT_SECRET is not set")
+    raise Exception("JWT_SECRET environment variable is not set")
 
 security = HTTPBearer()
 
 # ==========================================================
-# TOKEN CREATION
+# TOKEN UTILITIES
 # ==========================================================
-
-def create_access_token(data: dict):
+def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-    )
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+    return encoded_jwt
 
 # ==========================================================
-# SAFE DT
+# HELPER – SAFE DATETIME CONVERSION
 # ==========================================================
-
-def safe_dt(value):
+def safe_dt(value: Any) -> Optional[datetime]:
     if not value:
         return None
-
     if isinstance(value, datetime):
         return value
-
     try:
-        return datetime.fromisoformat(str(value))
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except Exception:
         return None
 
 # ==========================================================
-# AUTH DEPENDENCY
+# CURRENT USER DEPENDENCY
 # ==========================================================
-
-# ✅ CHANGE 2: Moved get_current_user BEFORE check_permission
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    # ✅ FIX: Move import inside the function to prevent Circular Dependency crashes
-    from backend.models import User
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
     try:
         token = credentials.credentials
         payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
-            )
-
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
     except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
+        raise credentials_exception
 
-    # Fetch user from MongoDB
     user_dict = await db.users.find_one({"id": user_id})
-
-    if not user_dict:
+    if user_dict is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="User not found"
         )
 
-    # Clean the MongoDB internal ID
+    # Remove MongoDB _id field
     user_dict.pop("_id", None)
 
-    # ✅ SAFETY: Clean empty strings before creating the User object
-    # This prevents the Pydantic ValidationError that crashes your Dashboard
-    for key, value in user_dict.items():
+    # Replace empty strings with None (helps Pydantic validation)
+    for key, value in list(user_dict.items()):
         if value == "":
             user_dict[key] = None
 
     try:
         return User(**user_dict)
     except Exception as e:
-        logger.error(f"Error validating user {user_id}: {str(e)}")
+        # In production → use proper logger
+        print(f"User validation failed for {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User profile data is corrupted. Please check birthday/phone fields."
+            detail="User profile data is corrupted (check birthday, phone, etc.)"
         )
-# ==========================================================
-# PERMISSION CHECK
-# ==========================================================
 
-# ✅ CHANGE 3: Updated logic to handle Pydantic Permission Model
+# ==========================================================
+# PERMISSION DEPENDENCY FACTORY
+# ==========================================================
 def check_permission(required_permission: str):
-    async def permission_checker(
-        current_user: User = Depends(get_current_user)
-    ):
-        # Optional: Admin override (prevents lockout)
-        if current_user.role.lower() == "admin":
+    async def permission_checker(current_user: User = Depends(get_current_user)) -> User:
+        # Admin bypass
+        if current_user.role == "admin":
             return current_user
 
-        # Get permissions object (Pydantic model)
         perms = getattr(current_user, "permissions", None)
-        has_perm = False
+        has_permission = False
 
         if perms:
-            # If it's the new Pydantic model, check the attribute directly
-            if hasattr(perms, "model_dump"):
-                has_perm = getattr(perms, required_permission, False)
-            # Fallback for dictionary (if data hasn't migrated)
+            if hasattr(perms, "model_dump"):           # Pydantic v2+
+                has_permission = getattr(perms, required_permission, False)
             elif isinstance(perms, dict):
-                has_perm = perms.get(required_permission, False)
-            # Fallback for old list style
+                has_permission = perms.get(required_permission, False)
             elif isinstance(perms, list):
-                has_perm = required_permission in perms
+                has_permission = required_permission in perms
 
-        if not has_perm:
+        if not has_permission:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {required_permission} required",
+                detail=f"Required permission: {required_permission}"
             )
 
         return current_user
@@ -156,36 +134,73 @@ def check_permission(required_permission: str):
     return permission_checker
 
 # ==========================================================
-# AUDIT LOG
+# DATA SCOPE & TEAM HELPERS
 # ==========================================================
+async def get_team_user_ids(manager_id: str) -> List[str]:
+    """
+    Returns list of user IDs that this manager should have access to.
+    Current naive implementation: all non-admin users except self.
+    
+    Recommended improvements:
+    • Add manager_id field to User
+    • Add department / team field
+    • Add explicit team_members array on manager
+    """
+    users = await db.users.find(
+        {"role": {"$ne": "admin"}},
+        {"id": 1}
+    ).to_list(length=2000)
 
+    return [u["id"] for u in users if u["id"] != manager_id]
+
+
+async def apply_data_scope(
+    current_user: User,
+    record_user_field: str = "assigned_to"
+) -> Dict[str, Any]:
+    """
+    Returns MongoDB query filter that implements row-level security based on role.
+
+    Usage example:
+        filter_ = await apply_data_scope(current_user, "assigned_to")
+        tasks = await db.tasks.find(filter_).to_list(None)
+    """
+    if current_user.role == "admin":
+        return {}
+
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        return {
+            "$or": [
+                {record_user_field: current_user.id},
+                {record_user_field: {"$in": team_ids}}
+            ]
+        }
+
+    # Regular user / staff → only own records
+    return {record_user_field: current_user.id}
+
+# ==========================================================
+# AUDIT LOGGING
+# ==========================================================
 async def create_audit_log(
-    current_user: Any,  # Use Any to avoid type-check errors during startup
+    current_user: Any,  # Any → avoids import-time circular issues
     action: str,
     module: str,
     record_id: str,
-    old_data: dict = None,
-    new_data: dict = None
-):
-    # ✅ FIX: Move import inside the function to prevent Circular Dependency
-    from backend.models import AuditLog
+    old_data: Optional[dict] = None,
+    new_data: Optional[dict] = None
+) -> None:
+    from backend.models import AuditLog  # late import
 
-    log = AuditLog(
+    log_entry = AuditLog(
         user_id=current_user.id,
-        user_name=current_user.full_name,
+        user_name=getattr(current_user, "full_name", "Unknown"),
         action=action,
         module=module,
         record_id=record_id,
         old_data=old_data,
-        new_data=new_data
+        new_data=new_data,
     )
 
-    doc = log.model_dump()
-
-    # Ensure proper datetime format for MongoDB
-    # If your AuditLog model uses a default factory for datetime, 
-    # it is already a datetime object.
-    if isinstance(doc.get("timestamp"), datetime):
-        doc["timestamp"] = doc["timestamp"]
-
-    await db.audit_logs.insert_one(doc)
+    await db.audit_logs.insert_one(log_entry.model_dump())
