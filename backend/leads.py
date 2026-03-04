@@ -190,6 +190,19 @@ def calculate_closure_probability(notes: str) -> float:
     probability = max(0.0, min(1.0, 0.5 + score * 0.5)) # Scale to 0-1
     return round(probability * 100, 2) # Return as percentage
 # ====================== ROUTES ======================
+@router.get("/meta/services", response_model=List[str])
+async def get_unique_services(current_user=Depends(get_current_user)):
+    """Fetches all unique services from Leads and Clients for the dropdown."""
+    # Get services from Leads
+    lead_services = await db.leads.distinct("services")
+    # Get services from Clients (since converted leads live there)
+    client_services = await db.clients.distinct("services")
+    
+    # Merge and add standard defaults
+    defaults = ["GST Registration", "Trademark", "ROC Compliance", "Income Tax", "Audit"]
+    combined = list(set(lead_services + client_services + defaults))
+    return sorted([s for s in combined if s])
+    
 @router.get("/followups")
 async def get_due_followups(
     current_user=Depends(get_current_user)
