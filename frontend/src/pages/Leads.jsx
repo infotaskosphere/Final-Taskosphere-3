@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect } from "react" // Added useEffect
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { format } from "date-fns"
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Phone, Mail, DollarSign, Trash2, Plus, Search, Calendar, Building2,
-  MessageSquare, History, TrendingUp, Filter, ArrowUpRight, Edit2, Download, Upload
+  MessageSquare, History, TrendingUp, Filter, ArrowUpRight, Edit2, Download, Upload, Check
 } from "lucide-react"
 import {
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue
@@ -23,6 +23,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+
 const PIPELINE_STAGES = [
   { id: "new", label: "New", color: "bg-blue-100 text-blue-700" },
   { id: "contacted", label: "Contacted", color: "bg-indigo-100 text-indigo-700" },
@@ -33,7 +34,9 @@ const PIPELINE_STAGES = [
   { id: "won", label: "Won", color: "bg-green-100 text-green-700" },
   { id: "lost", label: "Lost", color: "bg-red-100 text-red-700" }
 ]
+
 const LEAD_SOURCES = ["Website", "Referral", "LinkedIn", "Cold Call", "Event", "Social Media", "Other"]
+
 export default function LeadsPage() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -45,6 +48,10 @@ export default function LeadsPage() {
   const [editingLead, setEditingLead] = useState(null)
   const [csvFile, setCsvFile] = useState(null)
   const [errors, setErrors] = useState({})
+  
+  // NEW: State for dynamic services from backend
+  const [availableServices, setAvailableServices] = useState([])
+
   const [newLead, setNewLead] = useState({
     company_name: "",
     contact_name: "",
@@ -59,23 +66,35 @@ export default function LeadsPage() {
     notes: "",
     assigned_to: null
   })
+
   /* ---------- QUERIES & MUTATIONS ---------- */
+  
+  // NEW: Fetch dynamic services on mount
+  useEffect(() => {
+    api.get("/leads/meta/services")
+      .then(res => setAvailableServices(res.data))
+      .catch(err => console.error("Could not fetch services", err))
+  }, [])
+
   const { data: leads = [], isLoading, error } = useQuery({
     queryKey: ["leads"],
-    queryFn: () => api.get("/leads").then(res => res.data)
+    queryFn: () => api.get("/leads/").then(res => res.data) // Added trailing slash
   })
+
   const { data: users = [] } = useQuery({
     queryKey: ["users"],
     queryFn: () => api.get("/users").then(res => res.data)
   })
+
   const createLead = useMutation({
-    mutationFn: (data) => api.post("/leads", data),
+    mutationFn: (data) => api.post("/leads/", data), // Added trailing slash
     onSuccess: () => {
       queryClient.invalidateQueries(["leads"])
       setShowCreate(false)
       resetForm()
     }
   })
+
   const updateLead = useMutation({
     mutationFn: ({ id, data }) => api.patch(`/leads/${id}`, data),
     onSuccess: () => {
@@ -85,10 +104,12 @@ export default function LeadsPage() {
       resetForm()
     }
   })
+
   const deleteLead = useMutation({
     mutationFn: (id) => api.delete(`/leads/${id}`),
     onSuccess: () => queryClient.invalidateQueries(["leads"])
   })
+
   const importCsv = useMutation({
     mutationFn: (data) => api.post("/leads/import", data),
     onSuccess: () => {
@@ -96,6 +117,23 @@ export default function LeadsPage() {
       setCsvFile(null)
     }
   })
+  const handleCsvImport = async () => {
+    if (!csvFile) return;
+
+    // 1. Create FormData object to handle the file upload
+    const formData = new FormData();
+    formData.append("file", csvFile);
+
+    try {
+      // 2. Trigger the mutation with the FormData
+      await importCsv.mutateAsync(formData);
+      alert("Leads imported successfully!");
+      setCsvFile(null); // Clear file after success
+    } catch (err) {
+      console.error("Import failed:", err);
+      alert("Import failed: " + (err.response?.data?.detail || "Unknown error"));
+    }
+  };
   /* ---------- FORM HELPERS ---------- */
   const resetForm = () => {
     setNewLead({
@@ -114,29 +152,21 @@ export default function LeadsPage() {
     })
     setErrors({})
   }
+
   const validateForm = () => {
     const newErrors = {}
-    if (!newLead.company_name.trim()) {
+    if (!newLead.company_name?.trim()) {
       newErrors.company_name = "Company name is required"
     }
-    if (!newLead.contact_name.trim()) {
+    // contact_name removed as required to match backend (Optional[str]) 
+    // but kept here if you want it mandatory in UI
+    if (!newLead.contact_name?.trim()) {
       newErrors.contact_name = "Contact person is required"
-    }
-    if (newLead.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newLead.email)) {
-      newErrors.email = "Invalid email format"
-    }
-    if (newLead.phone && !/^\+?[1-9]\d{1,14}$/.test(newLead.phone)) {
-      newErrors.phone = "Invalid phone number format"
-    }
-    if (newLead.quotation_amount && (isNaN(newLead.quotation_amount) || Number(newLead.quotation_amount) < 0)) {
-      newErrors.quotation_amount = "Quotation amount must be a positive number"
-    }
-    if (newLead.date_of_meeting && new Date(newLead.date_of_meeting) > new Date(newLead.next_follow_up)) {
-      newErrors.next_follow_up = "Next follow up must be after date of meeting"
     }
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
+
   const handleEdit = (lead) => {
     setEditingLead(lead)
     setNewLead({
@@ -153,48 +183,37 @@ export default function LeadsPage() {
     setErrors({})
     setShowCreate(true)
   }
+
   const handleSubmit = () => {
-    if (!validateForm()) {
-      return
-    }
+    if (!validateForm()) return
+
     const payload = {
       ...newLead,
-      services: newLead.services || [],
-      quotation_amount: newLead.quotation_amount ? parseFloat(newLead.quotation_amount) : null
+      // Ensure quotation is a float or null, not an empty string
+      quotation_amount: newLead.quotation_amount !== "" ? parseFloat(newLead.quotation_amount) : null,
+      // Ensure dates are valid ISO or null
+      date_of_meeting: newLead.date_of_meeting ? new Date(newLead.date_of_meeting).toISOString() : null,
+      next_follow_up: newLead.next_follow_up ? new Date(newLead.next_follow_up).toISOString() : null,
     }
+
     if (editingLead) {
       updateLead.mutate({ id: editingLead.id, data: payload })
     } else {
       createLead.mutate(payload)
     }
   }
-  const handleCsvImport = () => {
-    if (csvFile) {
-      Papa.parse(csvFile, {
-        header: true,
-        complete: (results) => {
-          importCsv.mutate(results.data)
-        }
-      })
-    }
-  }
-  const handleCsvExport = () => {
-    const csv = Papa.unparse(leads)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = 'leads.csv'
-    link.click()
-  }
+
   /* ---------- LOGIC ---------- */
   const filteredLeads = useMemo(() => {
     let filtered = leads.filter(l => {
       const matchSearch = l.company_name?.toLowerCase().includes(search.toLowerCase()) ||
                           l.contact_name?.toLowerCase().includes(search.toLowerCase()) ||
-                          l.email?.toLowerCase().includes(search.toLowerCase())
+                          l.email?.toLowerCase().includes(search.toLowerCase()) ||
+                          l.services?.some(s => s.toLowerCase().includes(search.toLowerCase()))
       const matchStatus = statusFilter === "all" || l.status === statusFilter
       return matchSearch && matchStatus
     })
+    
     filtered.sort((a, b) => {
       let valA = a[sortBy]
       let valB = b[sortBy]
@@ -202,14 +221,11 @@ export default function LeadsPage() {
         valA = Number(valA) || 0
         valB = Number(valB) || 0
       }
-      if (sortOrder === "asc") {
-        return valA > valB ? 1 : -1
-      } else {
-        return valA < valB ? 1 : -1
-      }
+      return sortOrder === "asc" ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1)
     })
     return filtered
   }, [leads, search, statusFilter, sortBy, sortOrder])
+
   const counts = useMemo(() => {
     const map = { all: leads.length }
     PIPELINE_STAGES.forEach(p => {
@@ -217,346 +233,225 @@ export default function LeadsPage() {
     })
     return map
   }, [leads])
+
   const totalPipelineValue = useMemo(() => {
     return leads.reduce((acc, curr) => acc + (Number(curr.quotation_amount) || 0), 0)
   }, [leads])
+
   const wonToday = useMemo(() => {
     const today = format(new Date(), "yyyy-MM-dd")
     return leads.filter(l => l.status === 'won' && format(new Date(l.updated_at || l.created_at), "yyyy-MM-dd") === today).length
   }, [leads])
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#F8FAFC]">
-        <Alert variant="destructive" className="max-w-md">
-          <AlertDescription>Error loading leads: {error.message}</AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-[#F8FAFC] p-6 lg:p-10">
-        <div className="max-w-[1500px] mx-auto space-y-6 px-2">
-          <Skeleton className="h-20 w-full" />
-          <div className="flex gap-4">
-            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-10 w-24" />)}
-          </div>
-          <Skeleton className="h-14 w-full" />
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-64 w-full rounded-2xl" />)}
-          </div>
-        </div>
-      </div>
-    )
-  }
+
+  if (isLoading) return <div className="p-10"><Skeleton className="h-20 w-full" /></div>
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F8FAFC] to-[#E8EBEF] px-4 py-4 lg:px-6 overflow-x-hidden">
       <div className="max-w-[1500px] mx-auto space-y-6 px-2">
-        {/* EXECUTIVE HEADER */}
+        
+        {/* HEADER SECTION */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-slate-200 pb-6">
           <div className="space-y-1">
             <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Leads Engine</h1>
             <p className="text-slate-500 font-medium">Advanced pipeline management & conversion analytics</p>
           </div>
+          
           <div className="flex items-center gap-3">
+             {/* Stats Cards Hidden on Mobile */}
             <div className="hidden xl:flex items-center gap-6 px-6 border-r border-slate-200 mr-4">
               <div className="text-right">
                 <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Active Pipeline</p>
                 <p className="text-xl font-black text-indigo-600">₹{totalPipelineValue.toLocaleString()}</p>
               </div>
-              <div className="text-right">
-                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Won Today</p>
-                <p className="text-xl font-black text-emerald-600">{wonToday}</p>
-              </div>
             </div>
-            <Button variant="outline" className="h-9 px-4 rounded-xl text-sm" onClick={handleCsvExport}>
-              <Download className="w-4 h-4 mr-2" /> Export CSV
-            </Button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 px-4 rounded-xl text-sm">
-                  <Upload className="w-4 h-4 mr-2" /> Import CSV
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80">
-                <div className="space-y-4">
-                  <Input type="file" accept=".csv" onChange={(e) => setCsvFile(e.target.files[0])} />
-                  <Button className="w-full" onClick={handleCsvImport} disabled={!csvFile || importCsv.isLoading}>
-                    {importCsv.isLoading ? "Importing..." : "Upload and Import"}
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
+
             <Dialog open={showCreate} onOpenChange={(open) => {
               setShowCreate(open)
-              if (!open) {
-                resetForm()
-                setEditingLead(null)
-              }
+              if (!open) { resetForm(); setEditingLead(null); }
             }}>
               <DialogTrigger asChild>
-                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white px-5">
+                <Button className="bg-indigo-600 hover:bg-indigo-700 text-white px-5">
                   <Plus className="w-5 h-5 mr-2 stroke-[3]" /> Create Lead
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto rounded-3xl border-none shadow-2xl bg-white">
-                <DialogHeader className="pb-4">
-                  <DialogTitle className="text-2xl font-bold text-slate-900">
-                    {editingLead ? "Edit Lead" : "New Lead"}
-                  </DialogTitle>
+              <DialogContent className="sm:max-w-[680px] rounded-3xl bg-white">
+                <DialogHeader>
+                  <DialogTitle>{editingLead ? "Edit Lead Profile" : "Initialize New Lead"}</DialogTitle>
                 </DialogHeader>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
-                  {/* Contact */}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
+                  {/* Company Name - CRITICAL FIX */}
                   <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Company Name <span className="text-red-500">*</span></Label>
-                    <Input value={newLead.company_name} onChange={e => setNewLead({ ...newLead, company_name: e.target.value })} placeholder="Acme Corp" />
-                    {errors.company_name && <p className="text-red-500 text-xs">{errors.company_name}</p>}
+                    <Label className="font-bold text-slate-600">Company Name *</Label>
+                    <Input 
+                        value={newLead.company_name} 
+                        onChange={e => setNewLead({ ...newLead, company_name: e.target.value })} 
+                        placeholder="e.g. Mahadev Ice Cream"
+                        className={errors.company_name ? "border-red-500" : ""}
+                    />
+                    {errors.company_name && <p className="text-red-500 text-[10px] font-bold uppercase">{errors.company_name}</p>}
                   </div>
+
                   <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Contact Person <span className="text-red-500">*</span></Label>
-                    <Input value={newLead.contact_name} onChange={e => setNewLead({ ...newLead, contact_name: e.target.value })} placeholder="Rahul Sharma" />
-                    {errors.contact_name && <p className="text-red-500 text-xs">{errors.contact_name}</p>}
+                    <Label className="font-bold text-slate-600">Contact Person *</Label>
+                    <Input value={newLead.contact_name} onChange={e => setNewLead({ ...newLead, contact_name: e.target.value })} placeholder="Client Name" />
                   </div>
+
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Email</Label>
-                    <Input type="email" value={newLead.email} onChange={e => setNewLead({ ...newLead, email: e.target.value })} placeholder="rahul@acmecorp.in" />
-                    {errors.email && <p className="text-red-500 text-xs">{errors.email}</p>}
+                    <Input type="email" value={newLead.email} onChange={e => setNewLead({ ...newLead, email: e.target.value })} placeholder="client@example.com" />
                   </div>
+
                   <div className="space-y-1">
                     <Label className="font-bold text-slate-600">Phone</Label>
-                    <Input value={newLead.phone} onChange={e => setNewLead({ ...newLead, phone: e.target.value })} placeholder="+91 98765 43210" />
-                    {errors.phone && <p className="text-red-500 text-xs">{errors.phone}</p>}
+                    <Input value={newLead.phone} onChange={e => setNewLead({ ...newLead, phone: e.target.value })} placeholder="+91 ..." />
                   </div>
-                  {/* Deal Info */}
+
                   <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Quotation Amount (₹)</Label>
-                    <Input type="number" value={newLead.quotation_amount} onChange={e => setNewLead({ ...newLead, quotation_amount: e.target.value })} placeholder="1250000" />
-                    {errors.quotation_amount && <p className="text-red-500 text-xs">{errors.quotation_amount}</p>}
+                    <Label className="font-bold text-slate-600">Quotation (₹)</Label>
+                    <Input type="number" value={newLead.quotation_amount} onChange={e => setNewLead({ ...newLead, quotation_amount: e.target.value })} />
                   </div>
+
                   <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Source</Label>
+                    <Label className="font-bold text-slate-600">Lead Source</Label>
                     <Select value={newLead.source} onValueChange={v => setNewLead({ ...newLead, source: v })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select source" />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Source" /></SelectTrigger>
                       <SelectContent>
-                        {LEAD_SOURCES.map(src => <SelectItem key={src} value={src}>{src}</SelectItem>)}
+                        {LEAD_SOURCES.map(s => <SelectItem key={s} value={s.toLowerCase()}>{s}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Date of Meeting</Label>
-                    <Input type="date" value={newLead.date_of_meeting} onChange={e => setNewLead({ ...newLead, date_of_meeting: e.target.value })} />
+
+                  {/* MULTI-SELECT SERVICES DROPDOWN */}
+                  <div className="md:col-span-2 space-y-2">
+                    <Label className="font-bold text-slate-600">Services Required</Label>
+                    <div className="flex flex-wrap gap-2 p-3 border rounded-xl bg-slate-50 min-h-[50px]">
+                      {availableServices.map((service) => (
+                        <button
+                          key={service}
+                          type="button"
+                          onClick={() => {
+                            const isSelected = newLead.services.includes(service)
+                            setNewLead({
+                              ...newLead,
+                              services: isSelected 
+                                ? newLead.services.filter(s => s !== service)
+                                : [...newLead.services, service]
+                            })
+                          }}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all",
+                            newLead.services.includes(service) 
+                              ? "bg-indigo-600 text-white shadow-md" 
+                              : "bg-white text-slate-500 border border-slate-200 hover:border-indigo-300"
+                          )}
+                        >
+                          {service}
+                          {newLead.services.includes(service) && <Check className="w-3 h-3" />}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Next Follow Up</Label>
-                    <Input type="date" value={newLead.next_follow_up} onChange={e => setNewLead({ ...newLead, next_follow_up: e.target.value })} />
-                    {errors.next_follow_up && <p className="text-red-500 text-xs">{errors.next_follow_up}</p>}
-                  </div>
-                  {/* Status & Assignment */}
-                  <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Status</Label>
-                    <Select value={newLead.status} onValueChange={v => setNewLead({ ...newLead, status: v })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="font-bold text-slate-600">Assigned To</Label>
-                    <Select value={newLead.assigned_to || ""} onValueChange={v => setNewLead({ ...newLead, assigned_to: v === "none" ? null : v })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select user" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {users.map(u => <SelectItem key={u._id} value={u._id}>{u.name || u.username}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {/* Services & Notes */}
+
                   <div className="md:col-span-2 space-y-1">
-                    <Label className="font-bold text-slate-600">Services (comma separated)</Label>
-                    <Input
-                      placeholder="Website Development, SEO, Google Ads"
-                      value={newLead.services?.join(", ") || ""}
-                      onChange={e => setNewLead({
-                        ...newLead,
-                        services: e.target.value.split(",").map(s => s.trim()).filter(Boolean)
-                      })}
-                    />
-                  </div>
-                  <div className="md:col-span-2 space-y-1">
-                    <Label className="font-bold text-slate-600">Notes</Label>
-                    <Textarea
-                      className="min-h-[110px] resize-y"
-                      placeholder="Lead came from LinkedIn. Interested in full digital marketing package..."
-                      value={newLead.notes}
-                      onChange={e => setNewLead({ ...newLead, notes: e.target.value })}
+                    <Label className="font-bold text-slate-600">Notes & Briefing</Label>
+                    <Textarea 
+                        value={newLead.notes} 
+                        onChange={e => setNewLead({ ...newLead, notes: e.target.value })} 
+                        placeholder="Add specific requirements or meeting outcomes..."
+                        className="min-h-[100px] rounded-xl"
                     />
                   </div>
                 </div>
-                <DialogFooter className="pt-6 border-t mt-4">
+
+                <DialogFooter>
                   <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-                  <Button onClick={handleSubmit} disabled={createLead.isLoading || updateLead.isLoading} className="bg-indigo-600 hover:bg-indigo-700">
-                    {createLead.isLoading || updateLead.isLoading ? "Saving..." : editingLead ? "Update Lead" : "Create Lead"}
+                  <Button onClick={handleSubmit} className="bg-indigo-600">
+                    {createLead.isLoading ? "Creating..." : "Save Lead"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>
         </div>
-        {/* STATUS STICKER BAR */}
-        <div className="sticky top-0 z-10 bg-[#F8FAFC]/90 backdrop-blur-sm flex items-center gap-4 py-1.5 px-3 text-xs overflow-x-auto max-w-full scrollbar-hide border-b border-slate-100">
-          <button
-            onClick={() => setStatusFilter("all")}
-            className={`flex items-center gap-3 shrink-0 py-1.5 px-3 text-xs transition-all rounded-full ${statusFilter === "all" ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
-          >
-            <span className="text-sm font-bold uppercase tracking-widest">All</span>
-            <div className="text-white text-[10px] font-black h-4 min-w-[22px] px-2 flex items-center justify-center rounded-full bg-indigo-600">
-              {counts.all}
-            </div>
-          </button>
-          {PIPELINE_STAGES.map((stage) => (
-            <button
-              key={stage.id}
-              onClick={() => setStatusFilter(stage.id)}
-              className={`flex items-center gap-3 shrink-0 py-1.5 px-3 text-xs transition-all rounded-full ${statusFilter === stage.id ? stage.color : 'text-slate-500 hover:bg-slate-100'}`}
-            >
-              <span className="text-sm font-bold uppercase tracking-widest">
-                {stage.label}
-              </span>
-              <div className="text-white text-[10px] font-black h-4 min-w-[22px] px-2 flex items-center justify-center rounded-full bg-slate-600">
-                {counts[stage.id] || 0}
-              </div>
-            </button>
-          ))}
-        </div>
-        {/* FILTER & TOOLS AREA */}
+
+        {/* SEARCH & FILTERS */}
         <div className="flex flex-col md:flex-row gap-4 items-center">
-          <div className="flex-1 relative group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
+          <div className="flex-1 relative group w-full">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500" />
             <Input
-              className="pl-10 h-10 bg-white border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-50 transition-all text-sm"
-              placeholder="Search by company, contact, email or services..."
+              className="pl-10 h-12 bg-white rounded-2xl border-none shadow-sm focus:ring-2 focus:ring-indigo-100 transition-all"
+              placeholder="Search across pipeline..."
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[150px] h-10 rounded-xl">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="company_name">Company Name</SelectItem>
-              <SelectItem value="quotation_amount">Quote Amount</SelectItem>
-              <SelectItem value="created_at">Created Date</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={sortOrder} onValueChange={setSortOrder}>
-            <SelectTrigger className="w-[110px] h-10 rounded-xl">
-              <SelectValue placeholder="Order" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="asc">Ascending</SelectItem>
-              <SelectItem value="desc">Descending</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" className="h-10 px-4 rounded-xl border-slate-200 bg-white text-sm font-medium">
-            <Filter className="w-4 h-4 mr-2" /> More Filters
-          </Button>
+          
+          <div className="flex gap-2 w-full md:w-auto">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full md:w-[160px] h-12 rounded-2xl bg-white border-none shadow-sm">
+                    <SelectValue placeholder="All Stages" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All Stages</SelectItem>
+                    {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+          </div>
         </div>
+
         {/* DATA GRID */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
           <AnimatePresence mode='popLayout'>
             {filteredLeads.map((lead) => (
-              <motion.div
-                key={lead.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-              >
-                <Card className="group h-full border-none shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ring-1 ring-slate-200/60 bg-white rounded-[24px] overflow-hidden">
-                  <CardHeader className="p-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100">
+              <motion.div key={lead.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <Card className="h-full border-none shadow-md hover:shadow-xl transition-all rounded-[24px] bg-white overflow-hidden group">
+                  <CardHeader className="p-5 bg-slate-50/50 border-b border-slate-100">
                     <div className="flex justify-between items-start">
-                      <div className="space-y-1 max-w-[70%]">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
-                          <CardTitle className="text-base font-black text-slate-800 truncate tracking-tight">{lead.company_name}</CardTitle>
-                        </div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-tighter">{lead.contact_name}</p>
+                      <div className="max-w-[70%]">
+                        <CardTitle className="text-base font-black truncate">{lead.company_name}</CardTitle>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{lead.contact_name}</p>
                       </div>
-                      <Badge className={cn("px-3 py-1 text-[10px] font-black uppercase", PIPELINE_STAGES.find(s => s.id === lead.status)?.color || "bg-gray-100 text-gray-700")}>
-                        {PIPELINE_STAGES.find(s => s.id === lead.status)?.label}
+                      <Badge className={cn("text-[9px] font-black uppercase px-2 py-1", PIPELINE_STAGES.find(s => s.id === lead.status)?.color)}>
+                        {lead.status}
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="p-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Phone</span>
-                        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                          <Phone className="w-3.5 h-3.5 text-indigo-400" />
-                          {lead.phone}
+                  <CardContent className="p-5 space-y-4">
+                    <div className="flex items-center justify-between text-lg font-black text-emerald-600">
+                        <span>₹{(Number(lead.quotation_amount) || 0).toLocaleString()}</span>
+                        <TrendingUp className="w-4 h-4" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                            <Phone className="w-3.5 h-3.5 text-indigo-400" /> {lead.phone || "No Phone"}
                         </div>
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Email</span>
-                        <div className="flex items-center gap-2 text-sm font-bold text-slate-700 truncate">
-                          <Mail className="w-3.5 h-3.5 text-indigo-400" />
-                          {lead.email || "N/A"}
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-600 truncate">
+                            <Mail className="w-3.5 h-3.5 text-indigo-400" /> {lead.email || "No Email"}
                         </div>
-                      </div>
                     </div>
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Valuation</span>
-                      <div className="text-lg font-black text-emerald-600">
-                        ₹{(Number(lead.quotation_amount) || 0).toLocaleString()}
-                      </div>
+
+                    <div className="flex flex-wrap gap-1">
+                        {lead.services?.map((s, i) => (
+                            <Badge key={i} variant="outline" className="text-[8px] font-bold border-slate-200">
+                                {s}
+                            </Badge>
+                        ))}
                     </div>
-                    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 group-hover:bg-white transition-colors duration-300">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
-                          <History className="w-3 h-3 text-indigo-500" /> Latest Note
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-300 italic">{format(new Date(lead.updated_at || lead.created_at), "MMM d, yyyy")}</span>
-                      </div>
-                      <p className="text-[13px] text-slate-600 leading-relaxed line-clamp-3">
-                        {lead.notes || "No specific briefing notes attached to this lead profile."}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {lead.services?.map((s, i) => (
-                        <Badge key={i} variant="secondary" className="text-[9px] font-black px-2 py-0.5 rounded-full">
-                          {s}
-                        </Badge>
-                      )) || <span className="text-slate-400 text-xs">No services specified</span>}
-                    </div>
-                    <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <button className="text-slate-400 hover:text-indigo-600 transition-all transform hover:scale-110">
-                          <MessageSquare className="w-5 h-5" />
-                        </button>
-                        <button className="text-slate-400 hover:text-indigo-600 transition-all transform hover:scale-110">
-                          <Calendar className="w-5 h-5" />
-                        </button>
-                        <button onClick={() => handleEdit(lead)} className="text-slate-400 hover:text-indigo-600 transition-all transform hover:scale-110">
-                          <Edit2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl"
-                        onClick={() => { if(window.confirm("Permanently delete this lead?")) deleteLead.mutate(lead.id) }}
-                      >
-                        <Trash2 className="w-4.5 h-4.5" />
-                      </Button>
+
+                    <div className="pt-4 border-t flex justify-between">
+                         <Button variant="ghost" size="icon" onClick={() => handleEdit(lead)} className="text-slate-400 hover:text-indigo-600">
+                             <Edit2 className="w-4 h-4" />
+                         </Button>
+                         <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => { if(window.confirm("Delete lead?")) deleteLead.mutate(lead.id) }} 
+                            className="text-slate-400 hover:text-red-500"
+                        >
+                             <Trash2 className="w-4 h-4" />
+                         </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -564,18 +459,6 @@ export default function LeadsPage() {
             ))}
           </AnimatePresence>
         </div>
-        {/* EMPTY STATE */}
-        {filteredLeads.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-32 space-y-4">
-            <div className="bg-white p-6 rounded-full shadow-sm ring-1 ring-slate-100">
-              <Search className="w-10 h-10 text-slate-200" />
-            </div>
-            <div className="text-center">
-              <h3 className="text-xl font-bold text-slate-800">No matching leads found</h3>
-              <p className="text-slate-400 max-w-xs mx-auto">Adjust your search or filters to find what you're looking for.</p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
