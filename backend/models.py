@@ -4,7 +4,6 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, model_validator
 from typing import Any
-from typing import Optional, List, Any
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 
 # Timezone Configuration
@@ -77,7 +76,6 @@ class User(BaseModel):
         return v
 
 class UserCreate(BaseModel):
-    email: str
     full_name: str
     password: str
     role: str = "staff"
@@ -85,6 +83,7 @@ class UserCreate(BaseModel):
     phone: Optional[str] = None
     birthday: Optional[date] = None
     telegram_id: Optional[int] = None
+    email: Optional[str] = None
     permissions: Dict[str, Any] = {}
 
 class UserLogin(BaseModel):
