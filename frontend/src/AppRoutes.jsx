@@ -18,7 +18,7 @@ const Clients = lazy(() => import("@/pages/Clients"));
 const Users = lazy(() => import("@/pages/Users"));
 const DueDates = lazy(() => import("@/pages/DueDates"));
 const StaffActivity = lazy(() => import("@/pages/StaffActivity"));
-const LeadsPage = lazy(() => import("@/pages/LeadsPage"));
+const LeadsPage = lazy(() => import("@/pages/Leads"));
 
 
 /* Route Guards */
