@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+
 // Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -28,6 +29,7 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
 };
+
 // Department categories with colors (Synced with backend logic)
 const DEPARTMENTS = [
   { value: 'GST', label: 'GST', color: '#1E3A8A' },
@@ -41,14 +43,17 @@ const DEPARTMENTS = [
   { value: 'DSC', label: 'DSC', color: '#3F3F46' },
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
+
 const DeptPill = ({ dept, size = 'sm' }) => {
   const deptInfo = DEPARTMENTS.find(d => d.value === dept);
   if (!deptInfo) return null;
@@ -67,6 +72,7 @@ const DeptPill = ({ dept, size = 'sm' }) => {
     </span>
   );
 };
+
 const UserCard = ({
   userData,
   onEdit,
@@ -80,6 +86,7 @@ const UserCard = ({
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
+
   const getRoleIcon = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -87,6 +94,7 @@ const UserCard = ({
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
+
   const getRoleStyle = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -94,7 +102,9 @@ const UserCard = ({
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
+
   const roleStyle = getRoleStyle(userData.role);
+
   return (
     <motion.div
       variants={itemVariants}
@@ -131,6 +141,7 @@ const UserCard = ({
           </button>
         )}
       </div>
+
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -163,6 +174,7 @@ const UserCard = ({
           </div>
         </div>
       </div>
+
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => (
@@ -170,6 +182,7 @@ const UserCard = ({
           ))}
         </div>
       )}
+
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -199,12 +212,18 @@ const UserCard = ({
     </motion.div>
   );
 };
+
 export default function Users() {
   const { user, hasPermission, refreshUser } = useAuth();
   const isAdmin = user?.role === "admin";
-  const canViewUserPage = hasPermission("can_view_user_page") || isAdmin;
-  const canEditUsers = hasPermission("can_edit_users") || isAdmin;
-  const canManagePermissions = hasPermission("can_manage_users") || isAdmin;
+
+  // ────────────────────────────────────────────────
+  //  Changed: Users list & permission editing → Admin only
+  // ────────────────────────────────────────────────
+  const canViewUserPage      = isAdmin;
+  const canEditUsers         = isAdmin;
+  const canManagePermissions = isAdmin;
+
   const [users, setUsers] = useState([]);
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,6 +232,7 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
+
   // Form State (Synced with Backend User Model)
   const [formData, setFormData] = useState({
     full_name: '',
@@ -229,6 +249,7 @@ export default function Users() {
     telegram_id: null,
     is_active: true
   });
+
   // Permissions State (Synced with Backend UserPermissions Model)
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
@@ -261,17 +282,20 @@ export default function Users() {
     can_edit_clients: false,
     can_use_chat: false,
     can_view_all_leads: false,
-    can_edit_leads: false,
+    // can_edit_leads: false,           ← REMOVED
     can_manage_settings: false,
   });
+
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+
   useEffect(() => {
     if (canViewUserPage) {
       fetchUsers();
       fetchClients();
     }
   }, [canViewUserPage]);
+
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -280,6 +304,7 @@ export default function Users() {
       toast.error('Failed to fetch users');
     }
   };
+
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -288,6 +313,7 @@ export default function Users() {
       console.error('Failed to fetch clients');
     }
   };
+
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
@@ -300,10 +326,12 @@ export default function Users() {
       toast.error("Using default permission template");
     }
   };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
+
   const handleDepartmentChange = (dept) => {
     setFormData(prev => ({
       ...prev,
@@ -312,6 +340,7 @@ export default function Users() {
         : [...prev.departments, dept]
     }));
   };
+
   const handleProfilePictureChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -325,18 +354,17 @@ export default function Users() {
       toast.error('Failed to process image');
     }
   };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
       if (selectedUser) {
-        // 1. Clean the payload: Replace empty strings with null for backend compatibility
         const updatePayload = {
           full_name: formData.full_name,
           role: formData.role,
           departments: formData.departments,
           phone: formData.phone || null,
-          // Crucial: FastAPI 'date' fields usually hate empty strings
-          birthday: formData.birthday || null, 
+          birthday: formData.birthday || null,
           punch_in_time: formData.punch_in_time || null,
           grace_time: formData.grace_time || null,
           punch_out_time: formData.punch_out_time || null,
@@ -344,13 +372,11 @@ export default function Users() {
           profile_picture: formData.profile_picture || null
         };
 
-        // 2. Perform the update
         await api.put(`/users/${selectedUser.id}`, updatePayload);
-        
+       
         if (selectedUser.id === user.id) {
           await refreshUser();
         }
-
         toast.success('User profile successfully synchronized');
       } else {
         await api.post('/auth/register', formData);
@@ -359,7 +385,6 @@ export default function Users() {
       setDialogOpen(false);
       fetchUsers();
     } catch (error) {
-      // This will now catch the specific error message from your FastAPI backend
       const errorDetail = error.response?.data?.detail;
       toast.error(typeof errorDetail === 'string' ? errorDetail : 'Failed to save user');
       console.error("Update Error:", error.response?.data);
@@ -367,6 +392,7 @@ export default function Users() {
       setLoading(false);
     }
   };
+
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
@@ -376,9 +402,9 @@ export default function Users() {
       role: userData.role,
       departments: userData.departments || [],
       phone: userData.phone || '',
-     birthday: userData.birthday && userData.birthday !== ""
-       ? format(new Date(userData.birthday), "yyyy-MM-dd")
-       : "",
+      birthday: userData.birthday && userData.birthday !== ""
+        ? format(new Date(userData.birthday), "yyyy-MM-dd")
+        : "",
       profile_picture: userData.profile_picture || '',
       punch_in_time: userData.punch_in_time || '',
       grace_time: userData.grace_time || '',
@@ -387,6 +413,7 @@ export default function Users() {
     });
     setDialogOpen(true);
   };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure? This will permanently delete the user and their logs.')) return;
     try {
@@ -397,17 +424,18 @@ export default function Users() {
       toast.error(error.response?.data?.detail || 'Failed to delete user');
     }
   };
+
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPermissions(userData);
     await fetchPermissions(userData.id);
     setPermissionsDialogOpen(true);
   };
+
   const handleSavePermissions = async () => {
     setLoading(true);
     try {
       await api.put(`/users/${selectedUserForPermissions.id}/permissions`, permissions);
-     
-      // Refresh session if editing self
+    
       if (selectedUserForPermissions.id === user.id) {
         await refreshUser();
       }
@@ -419,23 +447,26 @@ export default function Users() {
       setLoading(false);
     }
   };
+
   const filteredUsers = users.filter(u => {
     const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = activeTab === 'all' || u.role?.toLowerCase() === activeTab;
     return matchesSearch && matchesTab;
   });
+
   if (!canViewUserPage) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
         <Card className="p-8 text-center max-w-md shadow-lg border-red-100">
           <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-800">Permission Denied</h2>
-          <p className="text-slate-500 mt-2">You don't have the "can_view_user_page" permission required for this module.</p>
+          <h2 className="text-2xl font-bold text-slate-800">Admin Access Required</h2>
+          <p className="text-slate-500 mt-2">The user directory is restricted to administrators only.</p>
         </Card>
       </div>
     );
   }
+
   return (
     <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
       {/* Header Section */}
@@ -489,6 +520,7 @@ export default function Users() {
                   </label>
                 </div>
               </div>
+
               {/* Identity Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
@@ -500,6 +532,7 @@ export default function Users() {
                   <Input type="email" placeholder="name@firm.com" name="email" value={formData.email} onChange={handleInputChange} disabled={!!selectedUser} className="rounded-xl" />
                 </div>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Contact Number</Label>
@@ -518,7 +551,8 @@ export default function Users() {
                   </div>
                 )}
               </div>
-              {/* Shift Timing Details (Crucial for Attendance Logic) */}
+
+              {/* Shift Timing Details */}
               <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
                 <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
                   <Calendar className="h-4 w-4" /> Duty Shift Parameters
@@ -538,6 +572,7 @@ export default function Users() {
                   </div>
                 </div>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Birthdate</Label>
@@ -555,6 +590,7 @@ export default function Users() {
                   </Select>
                 </div>
               </div>
+
               {/* Department Multi-Select */}
               <div className="space-y-3">
                 <Label className="text-slate-700 font-semibold">Assigned Departments</Label>
@@ -577,6 +613,7 @@ export default function Users() {
                 </div>
               </div>
             </div>
+
             <DialogFooter className="gap-3 border-t pt-5">
               <Button variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl h-12">Discard</Button>
               <Button
@@ -591,6 +628,7 @@ export default function Users() {
           </DialogContent>
         </Dialog>
       </div>
+
       {/* Navigation & Search */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
@@ -611,6 +649,7 @@ export default function Users() {
           </TabsList>
         </Tabs>
       </div>
+
       {/* Grid Display */}
       <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredUsers.length === 0 ? (
@@ -635,7 +674,8 @@ export default function Users() {
           ))
         )}
       </motion.div>
-      {/* Permissions Dialog (Synced with UserPermissions Model) */}
+
+      {/* Permissions Dialog */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
@@ -650,10 +690,10 @@ export default function Users() {
             </div>
             <Button variant="ghost" className="rounded-xl" onClick={() => setPermissionsDialogOpen(false)}>Close</Button>
           </div>
+
           <div className="p-6 space-y-6">
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
-             
-              {/* Data Access Section */}
+              {/* Global Visibility */}
               <AccordionItem value="global" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Eye className="h-5 w-5 text-blue-500" /> Global Visibility</div>
@@ -669,7 +709,7 @@ export default function Users() {
                     { key: 'can_view_todo_dashboard', label: 'Todo Dashboard', desc: 'Access to global team todo overview' },
                     { key: 'can_view_audit_logs', label: 'System Audit Trail', desc: 'View activity logs and record histories' },
                     { key: 'can_view_all_leads', label: 'Leads Pipeline Access', desc: 'Can view the global leads and sales dashboard' },
-                    { key: 'can_edit_leads', label: 'Lead Management', desc: 'Permission to modify lead details and status' }
+                    // can_edit_leads removed
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
@@ -681,7 +721,8 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-              {/* Operations & Management */}
+
+              {/* Operational Powers */}
               <AccordionItem value="management" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Settings className="h-5 w-5 text-purple-500" /> Operational Powers</div>
@@ -693,7 +734,8 @@ export default function Users() {
                     { key: 'can_view_attendance', label: 'Attendance Management', desc: 'Review punch timings and late reports' },
                     { key: 'can_view_staff_activity', label: 'Staff Monitoring', desc: 'View app usage and screen activity logs' },
                     { key: 'can_send_reminders', label: 'Automated Reminders', desc: 'Trigger email/notification reminders' },
-                    { key: 'can_download_reports', label: 'Export Data', desc: 'Download CSV/PDF versions of reports' }
+                    { key: 'can_download_reports', label: 'Export Data', desc: 'Download CSV/PDF versions of reports' },
+                    { key: 'can_manage_settings', label: 'System Settings', desc: 'Modify global system configuration' },
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
@@ -705,7 +747,8 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-              {/* Editing & Deletion */}
+
+              {/* Edit & Modification */}
               <AccordionItem value="edits" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Edit className="h-5 w-5 text-orange-500" /> Edit & Modification</div>
@@ -729,7 +772,8 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
-              {/* CROSS-USER VISIBILITY (NEW BACKEND LOGIC) */}
+
+              {/* Cross-User Visibility */}
               <AccordionItem value="cross-user" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><UsersIcon className="h-5 w-5 text-emerald-500" /> Cross-User Visibility</div>
@@ -760,7 +804,7 @@ export default function Users() {
                                     ...prev,
                                     [section.key]: isSelected
                                       ? prev[section.key].filter(id => id !== u.id)
-                                      : [...prev[section.key], u.id]
+                                      : [...(prev[section.key] || []), u.id]
                                   }))
                                 }
                                 className={`cursor-pointer px-3 py-1.5 rounded-lg border-2 transition-all ${
@@ -779,6 +823,7 @@ export default function Users() {
                   ))}
                 </AccordionContent>
               </AccordionItem>
+
               {/* Client Assignment */}
               <AccordionItem value="clients" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
@@ -807,7 +852,7 @@ export default function Users() {
                                 ...prev,
                                 assigned_clients: isAssigned
                                   ? prev.assigned_clients.filter(id => id !== client.id)
-                                  : [...prev.assigned_clients, client.id]
+                                  : [...(prev.assigned_clients || []), client.id]
                               }));
                             }}
                             className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
@@ -826,6 +871,7 @@ export default function Users() {
               </AccordionItem>
             </Accordion>
           </div>
+
           <div className="sticky bottom-0 p-6 bg-slate-50 border-t flex justify-end gap-3">
             <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermissionsDialogOpen(false)}>Discard</Button>
             <Button
