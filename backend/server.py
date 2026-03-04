@@ -29,7 +29,7 @@ from bson import ObjectId
 from dotenv import load_dotenv
 
 # Internal Project Imports
-# Since you don't want a separate schemas file, we only import from models.py
+# Removed 'schemas' because it is defined locally in this file
 from backend.models import (
     Token, User, UserCreate, UserLogin, UserPermissions,
     Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
