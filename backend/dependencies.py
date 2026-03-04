@@ -1,7 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -116,7 +115,7 @@ def check_permission(required_permission: str):
         has_permission = False
 
         if perms:
-            if hasattr(perms, "model_dump"):           # Pydantic v2+
+            if hasattr(perms, "model_dump"):  # Pydantic v2+
                 has_permission = getattr(perms, required_permission, False)
             elif isinstance(perms, dict):
                 has_permission = perms.get(required_permission, False)
@@ -134,13 +133,37 @@ def check_permission(required_permission: str):
     return permission_checker
 
 # ==========================================================
+# ROLE CHECK HELPERS
+# ==========================================================
+def require_admin():
+    async def checker(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required"
+            )
+        return current_user
+    return checker
+
+
+def require_manager_or_admin():
+    async def checker(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in ["admin", "manager"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Manager or Admin access required"
+            )
+        return current_user
+    return checker
+
+# ==========================================================
 # DATA SCOPE & TEAM HELPERS
 # ==========================================================
 async def get_team_user_ids(manager_id: str) -> List[str]:
     """
     Returns list of user IDs that this manager should have access to.
     Current naive implementation: all non-admin users except self.
-    
+
     Recommended improvements:
     • Add manager_id field to User
     • Add department / team field
@@ -150,7 +173,6 @@ async def get_team_user_ids(manager_id: str) -> List[str]:
         {"role": {"$ne": "admin"}},
         {"id": 1}
     ).to_list(length=2000)
-
     return [u["id"] for u in users if u["id"] != manager_id]
 
 
@@ -160,7 +182,6 @@ async def apply_data_scope(
 ) -> Dict[str, Any]:
     """
     Returns MongoDB query filter that implements row-level security based on role.
-
     Usage example:
         filter_ = await apply_data_scope(current_user, "assigned_to")
         tasks = await db.tasks.find(filter_).to_list(None)
@@ -179,6 +200,77 @@ async def apply_data_scope(
 
     # Regular user / staff → only own records
     return {record_user_field: current_user.id}
+
+# ==========================================================
+# RECORD ACCESS VALIDATION
+# ==========================================================
+async def verify_record_access(
+    current_user: User,
+    record_owner_id: str
+) -> bool:
+    # Admin → always allowed
+    if current_user.role == "admin":
+        return True
+
+    # Owner access
+    if record_owner_id == current_user.id:
+        return True
+
+    # Manager → team access
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        if record_owner_id in team_ids:
+            return True
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have access to this resource"
+    )
+
+# ==========================================================
+# CLIENT ACCESS CONTROL
+# ==========================================================
+async def verify_client_access(
+    current_user: User,
+    client_assigned_to: Optional[str]
+) -> bool:
+    if current_user.role == "admin":
+        return True
+
+    # Owner
+    if client_assigned_to == current_user.id:
+        return True
+
+    # Manager team access
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        if client_assigned_to in team_ids:
+            return True
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to access this client"
+    )
+
+# ==========================================================
+# STAFF ACTIVITY ACCESS
+# ==========================================================
+async def verify_activity_access(
+    current_user: User,
+    activity_user_id: str
+) -> bool:
+    if current_user.role == "admin":
+        return True
+
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        if activity_user_id in team_ids:
+            return True
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You are not allowed to view this activity"
+    )
 
 # ==========================================================
 # AUDIT LOGGING
