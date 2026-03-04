@@ -316,7 +316,7 @@ class ClientBase(BaseModel):
         pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$"
     )
     contact_persons: List[ContactPerson] = Field(default_factory=list)
-    email: EmailStr
+   email: Optional[EmailStr] = None
     phone: str = Field(..., min_length=10, max_length=20)
     date_of_incorporation: Optional[date] = None
     birthday: Optional[date] = None
@@ -358,7 +358,7 @@ class MasterClientForm(BaseModel):
     """Expanded model to capture ALL details from the sheet and form"""
     company_name: str
     client_type: str  # pvt_ltd, llp, proprietor, etc.
-    email: Optional[EmailStr] = None # Changed to Optional to prevent crashes on missing email
+    email: Optional[EmailStr] = None 
     phone: str
     date_of_incorporation: Optional[date] = None
     gst_number: Optional[str] = None
