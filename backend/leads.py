@@ -24,100 +24,44 @@ class LeadBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     # ---------------- BASIC DETAILS ---------------- #
-    company_name: str = Field(
-        ..., 
-        min_length=1,
-        description="Name of the company or business"
-    )
+    company_name: str = Field(..., description="Name of the company or business")
+    contact_name: Optional[str] = Field(None)
+    email: Optional[EmailStr] = Field(None)
+    phone: Optional[str] = Field(None)
 
-    contact_name: Optional[str] = Field(
-        None, 
-        description="Primary contact person for the lead"
-    )
+    # ---------------- SERVICES & DEAL ---------------- #
+    services: List[str] = Field(default_factory=list)
+    quotation_amount: Optional[float] = Field(None)
 
-    email: Optional[EmailStr] = Field(
-        None, 
-        description="Contact email address"
-    )
+    # ---------------- PIPELINE STATUS ---------------- #
+    status: Literal["new", "contacted", "meeting", "proposal", "negotiation", "on_hold", "won", "lost"] = "new"
+    source: Optional[str] = "direct"
 
-    phone: Optional[str] = Field(
-        None, 
-        description="Contact phone number"
-    )
+    # ---------------- DATES & ASSIGNMENT ---------------- #
+    date_of_meeting: Optional[datetime] = None
+    next_follow_up: Optional[datetime] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    converted_client_id: Optional[str] = None
+    closure_probability: Optional[float] = None
 
-    # ---------------- SERVICES ---------------- #
-    services: List[str] = Field(
-        default_factory=list,
-        description="List of services requested (GST, ROC, etc.)"
-    )
-
-    # ---------------- QUOTATION ---------------- #
-    quotation_amount: Optional[float] = Field(
-        None,
-        description="Quotation amount given to the client"
-    )
-
-    # ---------------- PIPELINE & STATUS ---------------- #
-    status: Literal[
-        "new", "contacted", "meeting", "proposal", 
-        "negotiation", "on_hold", "won", "lost"
-    ] = Field(
-        "new",
-        description="Current pipeline stage of the lead"
-    )
-
-    source: Literal[
-        "direct", "website", "referral", "social_media", "event", "other"
-    ] = Field(
-        "direct",
-        description="Where the lead originated"
-    )
-
-    # ---------------- DATES ---------------- #
-    date_of_meeting: Optional[datetime] = Field(
-        None,
-        description="Date of meeting scheduled with lead"
-    )
-
-    next_follow_up: Optional[datetime] = Field(
-        None,
-        description="Next scheduled follow-up date"
-    )
-
-    # ---------------- ADDITIONAL INFO ---------------- #
-    notes: Optional[str] = Field(
-        None,
-        description="Additional notes about the lead"
-    )
-
-    assigned_to: Optional[str] = Field(
-        None,
-        description="Staff user ID assigned to this lead"
-    )
-
-    converted_client_id: Optional[str] = Field(
-        None,
-        description="Client ID created after lead conversion"
-    )
-
-    closure_probability: Optional[float] = Field(
-        None,
-        description="AI predicted probability of closing this lead"
-    )
-
-    # ====================== VALIDATORS (THE FIX) ======================
+    # ====================== VALIDATORS (The Fix) ======================
 
     @field_validator('quotation_amount', 'assigned_to', 'contact_name', 'email', 'phone', mode='before')
     @classmethod
     def empty_string_to_none(cls, v):
-        """
-        Prevents 422 errors by converting empty strings from the 
-        frontend form into None values.
-        """
+        """Converts empty strings from the frontend to None to avoid validation errors."""
         if v == "" or v is None:
             return None
         return v
 
+    @field_validator('services', mode='before')
+    @classmethod
+    def ensure_list_format(cls, v):
+        """Converts comma-separated strings into a list if necessary."""
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(',') if s.strip()]
+        return v or []
     @field_validator('services', mode='before')
     @classmethod
     def ensure_list_format(cls, v):
