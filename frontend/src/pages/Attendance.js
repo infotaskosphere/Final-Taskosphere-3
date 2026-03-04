@@ -392,15 +392,15 @@ export default function Attendance() {
         </TooltipContent>
       </Tooltip>
     );
-  };
-  return (
-    <TooltipProvider> {/* ADD THIS HERE */}
-      <motion.div
-        className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
+    }
+return (
+  <TooltipProvider>
+    <motion.div
+      className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
         {/* ... all your existing code ... */}
 
       </motion.div>
