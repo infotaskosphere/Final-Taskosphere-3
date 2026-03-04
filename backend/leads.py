@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
 from typing import List, Optional, Literal
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -194,13 +194,8 @@ def calculate_closure_probability(notes: str) -> float:
 # ====================== ROUTES ======================
 @router.get("/meta/services", response_model=List[str])
 async def get_unique_services(current_user=Depends(get_current_user)):
-    """Fetches all unique services from Leads and Clients for the dropdown."""
-    # Get services from Leads
     lead_services = await db.leads.distinct("services")
-    # Get services from Clients (since converted leads live there)
     client_services = await db.clients.distinct("services")
-    
-    # Merge and add standard defaults
     defaults = ["GST Registration", "Trademark", "ROC Compliance", "Income Tax", "Audit"]
     combined = list(set(lead_services + client_services + defaults))
     return sorted([s for s in combined if s])
