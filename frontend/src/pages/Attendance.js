@@ -131,7 +131,7 @@ export default function Attendance() {
         setLiveDuration(getTodayLiveDuration());
       }, 60000);
       setLiveDuration(getTodayLiveDuration()); // initial
-      ) => clearInterval(interval);
+      return () => clearInterval(interval);
     }
   }, [todayAttendance]);
   useEffect(() => {
