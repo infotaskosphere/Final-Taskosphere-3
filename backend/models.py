@@ -77,13 +77,22 @@ class User(BaseModel):
 
 class UserCreate(BaseModel):
     full_name: str
+    email: Optional[str] = None
     password: str
     role: str = "staff"
+
     departments: List[str] = []
     phone: Optional[str] = None
     birthday: Optional[date] = None
     telegram_id: Optional[int] = None
-    email: Optional[str] = None
+
+    punch_in_time: Optional[str] = None
+    grace_time: Optional[str] = "00:15"
+    punch_out_time: Optional[str] = None
+
+    profile_picture: Optional[str] = None
+    is_active: bool = True
+
     permissions: Dict[str, Any] = {}
 
 class UserLogin(BaseModel):
