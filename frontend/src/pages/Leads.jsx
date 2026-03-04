@@ -190,17 +190,28 @@ const handleSubmit = () => {
         return;
     }
 
+const handleSubmit = () => {
+    // 1. UI Validation for mandatory field
+    if (!newLead.company_name?.trim()) {
+        setErrors({ company_name: "Company name is required" });
+        return;
+    }
+
+    // 2. Data Sanitization to prevent 422 errors
     const payload = {
         ...newLead,
-        // Ensure this is an array for the backend's List[str] requirement
+        // Convert empty string "" to null so Pydantic float validation passes
+        quotation_amount: newLead.quotation_amount === "" ? null : parseFloat(newLead.quotation_amount),
+        // Ensure services is always sent as an array [ "item" ]
         services: Array.isArray(newLead.services) ? newLead.services : [],
-        quotation_amount: newLead.quotation_amount ? parseFloat(newLead.quotation_amount) : null
+        // Clean up assignment
+        assigned_to: newLead.assigned_to === "none" || newLead.assigned_to === "" ? null : newLead.assigned_to
     };
 
     if (editingLead) {
         updateLead.mutate({ id: editingLead.id, data: payload });
     } else {
-        // Use the trailing slash to avoid 307 redirects shown in your logs
+        // Trigger create mutation
         createLead.mutate(payload);
     }
 };
