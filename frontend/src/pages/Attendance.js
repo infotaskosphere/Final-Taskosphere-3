@@ -7,7 +7,6 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { format, startOfMonth, endOfMonth, parseISO, isBefore, isAfter, isToday as dateFnsIsToday, startOfDay } from 'date-fns';
