@@ -15,32 +15,36 @@ logger = logging.getLogger(__name__)
 class LeadBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     company_name: str
-    contact_person: Optional[str] = None
+    contact_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    services: List[str] = []
+    approx_quote: Optional[float] = None
+    date_of_meeting: Optional[datetime] = None
     status: Literal["new", "contacted", "qualified", "won", "lost"] = "new"
     source: Literal["direct", "website", "referral", "social_media", "event"] = "direct"
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     converted_client_id: Optional[str] = None
-    closure_probability: Optional[float] = None  # Added for AI closure chance
-    service: Optional[Literal["gst", "income_tax", "accounts", "tds", "roc", "trademark", "msme_smadhan", "fema", "dsc", "other"]] = None  # Added service field
+    closure_probability: Optional[float] = None # Added for AI closure chance
 class LeadCreate(LeadBase):
     pass
 class LeadUpdate(BaseModel):
     company_name: Optional[str] = None
-    contact_person: Optional[str] = None
+    contact_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    services: Optional[List[str]] = None
+    approx_quote: Optional[float] = None
+    date_of_meeting: Optional[datetime] = None
     status: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = None
     source: Optional[Literal["direct", "website", "referral", "social_media", "event"]] = None
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     converted_client_id: Optional[str] = None
-    closure_probability: Optional[float] = None  # Allow updating probability
-    service: Optional[Literal["gst", "income_tax", "accounts", "tds", "roc", "trademark", "msme_smadhan", "fema", "dsc", "other"]] = None  # Allow updating service
+    closure_probability: Optional[float] = None # Allow updating probability
 class Lead(LeadBase):
     id: str
     created_by: str
@@ -59,7 +63,7 @@ def normalize_lead_doc(doc: dict) -> dict:
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
     # Ensure these fields exist before passing to safe_dt
-    for field in ["created_at", "updated_at", "next_follow_up"]:
+    for field in ["created_at", "updated_at", "next_follow_up", "date_of_meeting"]:
         if field in doc:
             doc[field] = safe_dt(doc.get(field))
     return doc
@@ -71,7 +75,6 @@ def validate_obj_id(id_str: str):
             detail="Invalid Lead ID format",
         )
     return ObjectId(id_str)
-
 # ✅ NEW: Simple AI-like closure probability calculator based on predefined keywords
 def calculate_closure_probability(notes: str) -> float:
     if not notes:
@@ -83,11 +86,10 @@ def calculate_closure_probability(notes: str) -> float:
     negative_count = sum(1 for kw in negative_keywords if kw in notes_lower)
     total = positive_count + negative_count
     if total == 0:
-        return 0.5  # Neutral if no keywords
+        return 0.5 # Neutral if no keywords
     score = (positive_count - negative_count) / total
-    probability = max(0.0, min(1.0, 0.5 + score * 0.5))  # Scale to 0-1
-    return round(probability * 100, 2)  # Return as percentage
-
+    probability = max(0.0, min(1.0, 0.5 + score * 0.5)) # Scale to 0-1
+    return round(probability * 100, 2) # Return as percentage
 # ====================== ROUTES ======================
 @router.post("/", response_model=Lead)
 async def create_lead(
@@ -161,6 +163,8 @@ async def update_lead(
                     status_code=400,
                     detail="Follow-up date cannot be in the past"
                 )
+        if update_dict.get("date_of_meeting"):
+            pass  # No specific validation for meeting date, can be past
         # ✅ NEW: Recalculate probability if notes changed
         if "notes" in update_dict:
             update_dict["closure_probability"] = calculate_closure_probability(update_dict["notes"])
@@ -194,8 +198,10 @@ async def convert_lead_to_client(
     client_data = {
         "id": client_id,
         "company_name": lead["company_name"],
+        "contact_name": lead.get("contact_name"),
         "email": lead.get("email"),
         "phone": lead.get("phone") or "0000000000",
+        "services": lead.get("services", []),
         "client_type": "other",
         "assigned_to": lead.get("assigned_to") or current_user.id,
         "created_by": current_user.id,
@@ -222,7 +228,7 @@ async def convert_lead_to_client(
         old_data=None,
         new_data={"client_id": client_id},
     )
-    # ✅ OPTIONAL PROFESSIONAL IMPROVEMENT: Notification
+    # ✅ OPTIONAL OPTIONAL PROFESSIONAL IMPROVEMENT: Notification
     await create_notification(
         user_id=current_user.id,
         title="Lead Converted",
@@ -246,7 +252,6 @@ async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
     return {"status": "success", "message": "Lead permanently removed"}
-
 # ✅ NEW: Endpoint to predict closure probability (can be called separately if needed)
 @router.post("/{lead_id}/predict_closure")
 async def predict_lead_closure(
