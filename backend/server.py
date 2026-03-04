@@ -1,130 +1,89 @@
-from backend.models import (
-    # Auth & Users
-    Token,
-    User,
-    UserCreate,
-    UserLogin,
-    UserPermissions,
-  
-    # Todos & Tasks
-    Todo,
-    TodoCreate,
-    Task,
-    TaskCreate,
-    BulkTaskCreate,
-  
-    # Clients
-    Client,
-    ClientCreate,
-    MasterClientForm,
-  
-    # Attendance & Activity
-    Attendance,
-    StaffActivityLog,
-    StaffActivityCreate,
-    PerformanceMetric,
-  
-    # Due Dates
-    DueDate,
-    DueDateCreate,
-  
-    # DSC (Digital Signature)
-    DSC,
-    DSCCreate,
-    DSCListResponse,
-    DSCMovementRequest,
-    MovementUpdateRequest,
-  
-    # Documents
-    Document,
-    DocumentCreate,
-    DocumentMovementRequest,
-  
-    # Reports & Metrics
-    PerformanceMetric,
-    DashboardStats,
-    AuditLog,
-  
-    # Holidays
-    HolidayResponse,
-    HolidayCreate
-)
-from passlib.context import CryptContext
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from backend import models, schemas
-from .database import get_db
-from .auth import get_current_active_user
-from backend.leads import router as leads_router
-from backend.dependencies import get_current_user, create_access_token, db, client
+import os
+import re
+import csv
+import uuid
+import logging
+import pytz
+import asyncio
+import calendar
+import requests
+import pandas as pd
+from datetime import datetime, date, timezone, timedelta
+from zoneinfo import ZoneInfo
+from pathlib import Path
+from io import StringIO, BytesIO
+from typing import List, Optional, Dict, Any
+
+# FastAPI & Security
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
-from datetime import datetime, date, timezone, timedelta
-from zoneinfo import ZoneInfo
-india_tz = ZoneInfo("Asia/Kolkata")
-import pytz
-from dateutil import parser
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+from passlib.context import CryptContext
+
+# Database & Data Validation
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
 from bson import ObjectId
-import os
-from pathlib import Path
 from dotenv import load_dotenv
-import uuid
-import logging
-import re
-import csv
-from backend.models import Todo, TodoCreate
-from io import StringIO, BytesIO
-import pandas as pd
-from zoneinfo import ZoneInfo
-india_time = datetime.now(ZoneInfo("Asia/Kolkata"))
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+
+# Internal Project Imports
+# Since you don't want a separate schemas file, we only import from models.py
 from backend.models import (
-    User,
-    UserPermissions,
-    Todo,
-    Task,
-    Client,
-    Attendance,
+    Token, User, UserCreate, UserLogin, UserPermissions,
+    Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
+    Client, ClientCreate, MasterClientForm,
+    Attendance, StaffActivityLog, StaffActivityCreate, PerformanceMetric,
+    DueDate, DueDateCreate,
+    DSC, DSCCreate, DSCListResponse, DSCMovementRequest, MovementUpdateRequest,
+    Document, DocumentCreate, DocumentMovementRequest,
+    DashboardStats, AuditLog,
+    HolidayResponse, HolidayCreate
 )
-from fpdf import FPDF
+from .database import get_db
+from .auth import get_current_active_user
+from backend.leads import router as leads_router
+from backend.dependencies import get_current_user, create_access_token, db, client
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
-import requests
+
+# External Services
+from fpdf import FPDF
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from apscheduler.schedulers.background import BackgroundScheduler
-import asyncio
-import calendar
+
 # ====================== CONFIG ======================
 IST = pytz.timezone('Asia/Kolkata')
+india_tz = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
 # ====================== SECURITY CONFIG ===========================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # ====================== APP + FIXED CORS (MUST BE FIRST) ===========
 app = FastAPI(title="Taskosphere Backend")
+
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
- CORSMiddleware,
- allow_origins=[
-  "https://final-taskosphere-frontend.onrender.com",
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "https://final-taskosphere-backend.onrender.com",
- ],
- allow_credentials=True,
- allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
- allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
- expose_headers=["*"],
- max_age=3600,
+    CORSMiddleware,
+    allow_origins=[
+        "https://final-taskosphere-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://final-taskosphere-backend.onrender.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 # ====================== HEALTH + STARTUP (your original code) ======================
 @app.get("/health")
