@@ -100,7 +100,7 @@ const DashboardLayout = ({ children }) => {
     { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
     { path: '/reports', icon: BarChart3, label: 'Reports' },
     { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
-    { path: '/leads', icon: Target, label: 'Leads Management', permission: 'can_view_all_leads' },
+    { path: '/leads', icon: Target, label: 'Lead Management', permission: 'can_view_all_leads' },
     { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
   ];
 
