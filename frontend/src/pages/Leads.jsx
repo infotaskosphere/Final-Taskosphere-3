@@ -353,8 +353,20 @@ function LeadCard({ lead, users, isAdmin, onAssign, onOpenDetails }) {
 // ─────────────────────────────────────────────────────────────
 function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, onCloseAsLost, onPredict }) {
   const [editMode, setEditMode] = useState(false);
-  const [formData, setFormData] = useState(lead || {});
-  const [date, setDate] = useState(lead?.next_follow_up ? new Date(lead.next_follow_up) : undefined);
+  const [formData, setFormData] = useState({});
+  const [date, setDate] = useState(undefined);
+
+  // Sync state when lead changes or modal opens
+  React.useEffect(() => {
+    if (lead) {
+      setFormData(lead);
+      setDate(lead.next_follow_up ? new Date(lead.next_follow_up) : undefined);
+    } else {
+      setFormData({});
+      setDate(undefined);
+    }
+    setEditMode(false); // Reset edit mode on lead change
+  }, [lead, isOpen]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -366,27 +378,31 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
     setEditMode(false);
   };
 
+  if (!lead) return null;
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>{formData.company_name}</DialogTitle>
-          <DialogDescription>Lead details and management.</DialogDescription>
+          <DialogTitle>{formData.company_name || 'Lead Details'}</DialogTitle>
+          <DialogDescription>View or manage lead information and conversion.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
+        
+        <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-1">
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="company_name" className="text-right">Company</Label>
+            <Label htmlFor="company_name" className="text-right font-semibold">Company</Label>
             <Input
               id="company_name"
               name="company_name"
-              value={formData.company_name}
+              value={formData.company_name || ''}
               onChange={handleChange}
               disabled={!editMode}
               className="col-span-3"
             />
           </div>
+          
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="contact_person" className="text-right">Contact</Label>
+            <Label htmlFor="contact_person" className="text-right font-semibold">Contact</Label>
             <Input
               id="contact_person"
               name="contact_person"
@@ -396,19 +412,22 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               className="col-span-3"
             />
           </div>
+          
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="email" className="text-right">Email</Label>
+            <Label htmlFor="email" className="text-right font-semibold">Email</Label>
             <Input
               id="email"
               name="email"
+              type="email"
               value={formData.email || ''}
               onChange={handleChange}
               disabled={!editMode}
               className="col-span-3"
             />
           </div>
+          
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="phone" className="text-right">Phone</Label>
+            <Label htmlFor="phone" className="text-right font-semibold">Phone</Label>
             <Input
               id="phone"
               name="phone"
@@ -418,9 +437,9 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               className="col-span-3"
             />
           </div>
-          {/* ✅ NEW: Service Field */}
+
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="service" className="text-right">Service</Label>
+            <Label htmlFor="service" className="text-right font-semibold">Service</Label>
             <Select
               value={formData.service || ''}
               onValueChange={(val) => setFormData(prev => ({ ...prev, service: val }))}
@@ -443,10 +462,11 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               </SelectContent>
             </Select>
           </div>
+
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="status" className="text-right">Status</Label>
+            <Label htmlFor="status" className="text-right font-semibold">Status</Label>
             <Select
-              value={formData.status}
+              value={formData.status || ''}
               onValueChange={(val) => setFormData(prev => ({ ...prev, status: val }))}
               disabled={!editMode}
             >
@@ -462,27 +482,9 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               </SelectContent>
             </Select>
           </div>
+
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="source" className="text-right">Source</Label>
-            <Select
-              value={formData.source}
-              onValueChange={(val) => setFormData(prev => ({ ...prev, source: val }))}
-              disabled={!editMode}
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="direct">Direct</SelectItem>
-                <SelectItem value="website">Website</SelectItem>
-                <SelectItem value="referral">Referral</SelectItem>
-                <SelectItem value="social_media">Social Media</SelectItem>
-                <SelectItem value="event">Event</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="assigned_to" className="text-right">Assigned To</Label>
+            <Label htmlFor="assigned_to" className="text-right font-semibold">Assigned To</Label>
             <Select
               value={formData.assigned_to || ''}
               onValueChange={(val) => setFormData(prev => ({ ...prev, assigned_to: val }))}
@@ -493,15 +495,14 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               </SelectTrigger>
               <SelectContent>
                 {users.map(u => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.full_name}
-                  </SelectItem>
+                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="next_follow_up" className="text-right">Next Follow Up</Label>
+            <Label className="text-right font-semibold">Next Follow Up</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -517,45 +518,47 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  initialFocus
-                />
+                <Calendar mode="single" selected={date} onSelect={setDate} initialFocus />
               </PopoverContent>
             </Popover>
           </div>
+
           <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="notes" className="text-right pt-2">Notes</Label>
+            <Label htmlFor="notes" className="text-right pt-2 font-semibold">Notes</Label>
             <Textarea
               id="notes"
               name="notes"
               value={formData.notes || ''}
               onChange={handleChange}
               disabled={!editMode}
-              className="col-span-3"
+              className="col-span-3 min-h-[100px]"
             />
           </div>
-          {/* ✅ NEW: AI Closure Probability Section */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Close Chance</Label>
+
+          <div className="grid grid-cols-4 items-center gap-4 pt-2 border-t">
+            <Label className="text-right font-semibold">Close Chance</Label>
             <div className="col-span-3 flex items-center gap-4">
-              {formData.closure_probability !== null ? (
+              {formData.closure_probability !== undefined && formData.closure_probability !== null ? (
                 <div className="flex-1">
-                  <Progress value={formData.closure_probability} className="w-full" />
-                  <p className="text-sm text-slate-600 mt-1">{formData.closure_probability}%</p>
+                  <Progress value={formData.closure_probability} className="w-full h-2" />
+                  <p className="text-xs text-slate-500 mt-1">{formData.closure_probability}% Probability</p>
                 </div>
               ) : (
-                <p className="text-sm text-slate-600">Not calculated</p>
+                <p className="text-sm text-slate-400">Not analyzed</p>
               )}
-              <Button variant="outline" onClick={() => onPredict(formData.id)} disabled={editMode || !formData.notes}>
-                <Brain className="mr-2 h-4 w-4" /> Calculate AI Probability
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => onPredict(formData.id)} 
+                disabled={editMode || !formData.notes}
+              >
+                <Brain className="mr-2 h-4 w-4 text-purple-500" /> Analyze
               </Button>
             </div>
           </div>
         </div>
-        <DialogFooter>
+
+        <DialogFooter className="gap-2 sm:gap-0">
           {!editMode ? (
             <>
               <Button variant="outline" onClick={() => setEditMode(true)}>
@@ -563,11 +566,11 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               </Button>
               {formData.status !== 'won' && formData.status !== 'lost' && (
                 <>
-                  <Button variant="success" onClick={() => onConvert(formData.id)}>
+                  <Button variant="success" className="bg-green-600 hover:bg-green-700" onClick={() => onConvert(formData.id)}>
                     <CheckCircle className="mr-2 h-4 w-4" /> Convert to Won
                   </Button>
                   <Button variant="destructive" onClick={() => onCloseAsLost(formData.id)}>
-                    <XCircle className="mr-2 h-4 w-4" /> Close as Lost
+                    <XCircle className="mr-2 h-4 w-4" /> Lost
                   </Button>
                 </>
               )}
@@ -577,7 +580,7 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
               <Button variant="outline" onClick={() => setEditMode(false)}>
                 <X className="mr-2 h-4 w-4" /> Cancel
               </Button>
-              <Button onClick={handleSubmit}>
+              <Button onClick={handleSubmit} className="bg-blue-600 hover:bg-blue-700">
                 <Save className="mr-2 h-4 w-4" /> Save Changes
               </Button>
             </>
@@ -587,7 +590,6 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
     </Dialog>
   );
 }
-
 // ─────────────────────────────────────────────────────────────
 // Lead Creation Modal
 // ─────────────────────────────────────────────────────────────
