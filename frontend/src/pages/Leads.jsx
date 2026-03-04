@@ -976,7 +976,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   );
 }
 // ── Main Dashboard Component ────────────────────────────────────────────────
-export default function Dashboard() {
+export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
