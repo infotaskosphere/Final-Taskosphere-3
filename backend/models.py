@@ -94,6 +94,21 @@ class UserCreate(BaseModel):
     is_active: bool = True
 
     permissions: Dict[str, Any] = {}
+    
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    departments: Optional[List[str]] = []
+    phone: Optional[str] = None
+    birthday: Optional[date] = None  # Handles 'YYYY-MM-DD' or null
+    punch_in_time: Optional[str] = None # Or use 'time' type
+    grace_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    is_active: Optional[bool] = True
+    profile_picture: Optional[str] = None # Base64 string
+
+    class Config:
+        from_attributes = True
 
 class UserLogin(BaseModel):
     email: EmailStr
