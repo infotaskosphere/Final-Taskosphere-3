@@ -50,6 +50,11 @@ from backend.models import (
     HolidayCreate
 )
 from passlib.context import CryptContext
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from . import models, schemas
+from .database import get_db
+from .auth import get_current_active_user
 from backend.leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
@@ -721,7 +726,51 @@ async def get_me(current_user: User = Depends(get_current_user)):
   "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
   "is_active": current_user.is_active
  }, current_user)
+#============================================================
+# User editing
+#=============================================================
+@api_router.put("/users/{user_id}", response_model=User)
+async def update_user(
+    user_id: str,  # Changed from int to str to support UUIDs
+    user_data: dict, 
+    current_user: User = Depends(get_current_user) # Standardized dependency
+):
+    # 1. Admin only check
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin clearance required for profile modification.")
+
+    # 2. Find existing user in MongoDB
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+
+    # 3. Explicitly define allowed fields (Security best practice)
+    allowed_fields = [
+        "full_name", "role", "departments", "phone", 
+        "birthday", "punch_in_time", "grace_time", 
+        "punch_out_time", "is_active", "profile_picture"
+    ]
+
+    # 4. Filter and clean the payload
+    update_payload = {}
+    for key in allowed_fields:
+        if key in user_data:
+            val = user_data[key]
+            # Convert empty strings to None for DB consistency
+            update_payload[key] = val if val != "" else None
+
+    # 5. Execute Update
+    await db.users.update_one({"id": user_id}, {"$set": update_payload})
+
+    # 6. Log the change for Audit
+    await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
+
+    # 7. Return fresh record
+    updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    return updated_user
+#====================================================================================
 # ATTENDANCE ROUTE - FIXED: punch_in and punch_out now correctly inside one function
+#=====================================================================================
 def get_real_client_ip(request: Request):
  # 1️⃣ Try Render / proxy header first
  x_forwarded_for = request.headers.get("x-forwarded-for")
