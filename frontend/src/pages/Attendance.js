@@ -705,13 +705,13 @@ export default function Attendance() {
               <Calendar
                 mode="single"
                 selected={selectedDate}
-                onSelect={date => date && setSelectedDate(date)}
+                onSelect={(date) => date && setSelectedDate(date)}
                 modifiers={modifiers}
                 modifiersStyles={modifiersStyles}
                 className="rounded-xl border"
                 showOutsideDays={false}
-                components={{ Day: CustomDay }}
               />
+              
 
               {/* Legend */}
               <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
