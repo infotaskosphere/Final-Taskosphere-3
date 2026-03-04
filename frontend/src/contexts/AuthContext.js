@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   /* ============================================================
-      Restore Session On Mount
+      Restore Session On Mount + Token Validation
      ============================================================ */
   useEffect(() => {
     const restoreSession = async () => {
@@ -61,11 +61,17 @@ export const AuthProvider = ({ children }) => {
       try {
         const parsedUser = JSON.parse(storedUser);
         parsedUser.permissions = normalizePermissions(parsedUser.permissions);
+
         api.defaults.headers.common.Authorization = `Bearer ${token}`;
+
+        // Validate token by calling protected endpoint
+        await api.get("/auth/me");
+
         setUser(parsedUser);
       } catch (error) {
-        console.error("Session restore failed:", error);
+        console.error("Session restore failed or token invalid:", error);
         clearStorage();
+        setUser(null);
       } finally {
         setLoading(false);
       }
@@ -104,19 +110,20 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await api.get("/auth/me");
       const updatedUser = response.data;
-
       updatedUser.permissions = normalizePermissions(updatedUser.permissions);
 
-      // We update the existing storage (Local or Session) automatically
+      // Update whichever storage is currently in use
       const isLocal = !!localStorage.getItem("token");
       const storage = isLocal ? localStorage : sessionStorage;
-      
+
       storage.setItem("user", JSON.stringify(updatedUser));
       setUser(updatedUser);
-      
+
       console.log("User context synchronized with database.");
     } catch (error) {
       console.error("Failed to refresh user:", error);
+      // Optional: you may want to logout here in some cases
+      // logout();
     }
   }, []);
 
@@ -126,20 +133,25 @@ export const AuthProvider = ({ children }) => {
   const hasPermission = (permission) => {
     if (!user) return false;
 
-    // Admin always has full access
+    // Admin bypass
     if (user.role?.toLowerCase() === "admin") return true;
 
     const perms = user.permissions || {};
-    
-    // Check if key exists and is true
-    if (perms[permission] === true) return true;
 
-    // Support for list-based permissions
-    if (Array.isArray(perms[permission])) {
-      return perms[permission].length > 0;
+    // Strict boolean check only — arrays are NOT treated as global allow
+    if (typeof perms[permission] === "boolean") {
+      return perms[permission];
     }
 
     return false;
+  };
+
+  const hasAnyPermission = (...permissionList) => {
+    if (!user) return false;
+
+    if (user.role?.toLowerCase() === "admin") return true;
+
+    return permissionList.some((p) => user.permissions?.[p] === true);
   };
 
   const canAccessUser = (permissionKey, targetUserId) => {
@@ -152,6 +164,11 @@ export const AuthProvider = ({ children }) => {
     return Array.isArray(allowedIds) && allowedIds.includes(targetUserId);
   };
 
+  const isOwner = (ownerId) => {
+    if (!user) return false;
+    return ownerId === user.id;
+  };
+
   const value = {
     user,
     loading,
@@ -159,7 +176,9 @@ export const AuthProvider = ({ children }) => {
     logout,
     refreshUser,
     hasPermission,
+    hasAnyPermission,
     canAccessUser,
+    isOwner,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
