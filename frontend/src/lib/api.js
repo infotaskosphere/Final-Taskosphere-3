@@ -1,22 +1,17 @@
 import axios from "axios";
-import "react-day-picker/dist/style.css";
-import { TooltipProvider } from "@/components/ui/tooltip"
 
-function App() {
-  return (
-    <TooltipProvider>
-      <YourRoutes OrComponents />
-    </TooltipProvider>
-  );
-}
+const BACKEND =
+  process.env.REACT_APP_BACKEND_URL ||
+  "https://final-taskosphere-backend.onrender.com";
 
-const BASE_URL =
-  process.env.REACT_APP_BACKEND_URL
-    ? `${process.env.REACT_APP_BACKEND_URL}/api`
-    : "https://final-taskosphere-backend.onrender.com/api";
+const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api`;
+
+const getToken = () =>
+  localStorage.getItem("token") || sessionStorage.getItem("token");
 
 const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 20000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -28,20 +23,15 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     try {
-      const token =
-        localStorage.getItem("token") ||
-        sessionStorage.getItem("token");
-
+      const token = getToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-
       if (process.env.NODE_ENV === "development") {
         console.log(
           `[API Outgoing] ${config.method?.toUpperCase()} ${config.url}`
         );
       }
-
       return config;
     } catch (err) {
       console.error("Request interceptor error:", err);
@@ -58,15 +48,19 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    // Handle 401 Unauthorized
+
+    // NETWORK ERROR
+    if (!error.response) {
+      console.error("Network error:", error.message);
+      return Promise.reject(error);
+    }
+
+    // 401 Unauthorized
     if (status === 401) {
       console.warn("401 Unauthorized detected.");
 
-      const token =
-        localStorage.getItem("token") ||
-        sessionStorage.getItem("token");
+      const token = getToken();
 
-      // Only clear session if token actually exists
       if (token) {
         console.warn("Clearing invalid session...");
 
@@ -80,15 +74,15 @@ api.interceptors.response.use(
         }
       }
     }
-    // Optional: Handle 403 (Forbidden)
+
+    // 403 Forbidden
     if (status === 403) {
       console.warn("403 Forbidden: Insufficient permissions.");
     }
+
     return Promise.reject(error);
   }
 );
-
-export default api;
 
 /* ===============================
    Optional Helper Functions
@@ -97,3 +91,15 @@ export const fetchDashboardData = async () => {
   const response = await api.get("/dashboard/stats");
   return response.data;
 };
+
+export const safeApiCall = async (requestFn) => {
+  try {
+    const response = await requestFn();
+    return response.data;
+  } catch (err) {
+    console.error("API error:", err);
+    throw err;
+  }
+};
+
+export default api;
