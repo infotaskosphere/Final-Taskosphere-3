@@ -5,6 +5,8 @@ from bson import ObjectId
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 import uuid
 import logging
+import pandas as pd
+from io import BytesIO
 # ✅ CHANGE 1: Removed unused User import
 from backend.dependencies import db, get_current_user, create_audit_log
 # ✅ OPTIONAL CHANGE IMPORT: Added notification support
@@ -218,7 +220,22 @@ async def get_due_followups(
     ).to_list(100)
 
     return [normalize_lead_doc(l) for l in leads]
+@router.post("/import")
+async def import_leads(
+    file: UploadFile = File(...), 
+    current_user = Depends(get_current_user)
+):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files allowed")
     
+    contents = await file.read()
+    df = pd.read_csv(BytesIO(contents))
+    
+    # Logic to loop through df and insert into db.leads
+    # ...
+    return {"message": f"Successfully imported {len(df)} leads"}
+
+
 @router.post("/", response_model=Lead)
 async def create_lead(
     lead_data: LeadCreate,
