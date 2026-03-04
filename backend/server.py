@@ -924,34 +924,78 @@ async def get_permissions(user_id: str, current_user: User = Depends(get_current
 # Task routes
 @api_router.post("/tasks", response_model=Task)
 async def create_task(
- task_data: TaskCreate,
- current_user: User = Depends(get_current_user)
+    task_data: TaskCreate,
+    current_user: User = Depends(get_current_user)
 ):
- task = Task(**task_data.model_dump(), created_by=current_user.id)
- doc = task.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- doc["updated_at"] = doc["updated_at"].isoformat()
- if doc.get("due_date"):
-  doc["due_date"] = doc["due_date"].isoformat()
- await db.tasks.insert_one(doc)
- # Notify assigned user
- if task.assigned_to and task.assigned_to != current_user.id:
-  await create_notification(
-   user_id=task.assigned_to,
-   title="New Task Assigned",
-   message=f"You have been assigned task '{task.title}'"
-  )
- return task
+    # Initialize task with generated ID and ownership
+    task_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    
+    # Create Task object
+    task = Task(
+        **task_data.model_dump(),
+        id=task_id,
+        created_by=current_user.id,
+        created_at=now,
+        updated_at=now
+    )
+    
+    # Prepare document for MongoDB with ISO string conversion
+    doc = task.model_dump()
+    date_fields = ["created_at", "updated_at", "due_date", "recurrence_end_date"]
+    
+    for field in date_fields:
+        if doc.get(field) and isinstance(doc[field], datetime):
+            doc[field] = doc[field].isoformat()
+
+    # Insert into database
+    await db.tasks.insert_one(doc)
+    
+    # Notification logic for assigned users
+    if task.assigned_to and task.assigned_to != current_user.id:
+        await create_notification(
+            user_id=task.assigned_to,
+            title="New Task Assigned",
+            message=f"You have been assigned task '{task.title}'",
+            type="assignment"
+        )
+        
+    # Audit logging
+    await create_audit_log(
+        current_user=current_user,
+        action="CREATE_TASK",
+        module="tasks",
+        record_id=task_id,
+        new_data={"title": task.title}
+    )
+
+    return task
+
 @api_router.get("/tasks/{task_id}/comments")
 async def get_task_comments(
- task_id: str,
- current_user: User = Depends(get_current_user)
+    task_id: str,
+    current_user: User = Depends(get_current_user)
 ):
- task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- if not task:
-  raise HTTPException(status_code=404, detail="Task not found")
- comments = task.get("comments", [])
- return comments
+    # Fetch task and exclude MongoDB internal _id
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Basic permission check: Admin or involved parties
+    is_admin = getattr(current_user, "role", "").lower() == "admin"
+    is_involved = (
+        task.get("assigned_to") == current_user.id or 
+        task.get("created_by") == current_user.id
+    )
+    
+    if not is_admin and not is_involved:
+        raise HTTPException(
+            status_code=403, 
+            detail="Unauthorized to view these comments"
+        )
+
+    return task.get("comments", [])
 # =========================================================
 # BULK CREATE TASKS
 # =========================================================
