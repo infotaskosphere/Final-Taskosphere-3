@@ -316,7 +316,7 @@ class ClientBase(BaseModel):
         pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$"
     )
     contact_persons: List[ContactPerson] = Field(default_factory=list)
-   email: Optional[EmailStr] = None
+    email: Optional[EmailStr] = None
     phone: str = Field(..., min_length=10, max_length=20)
     date_of_incorporation: Optional[date] = None
     birthday: Optional[date] = None
