@@ -121,7 +121,7 @@ export default function Attendance() {
   }, [todayAttendance]);
   useEffect(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    if (todayAttendance?.date !== todayStr) {
+    if (todayAttendance && todayAttendance.date !== todayStr) {
       setIsLateToday(false);
       setLateByMinutesToday(0);
       setIsEarlyLeaveToday(false);
@@ -130,7 +130,7 @@ export default function Attendance() {
   }, [todayAttendance]);
   useEffect(() => {
     setLiveDuration(getTodayLiveDuration());
-    if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
+    if (todayAttendance && todayAttendance.punch_in && !todayAttendance.punch_out) {
       const interval = setInterval(() => {
         setLiveDuration(getTodayLiveDuration());
       }, 60000);
@@ -156,14 +156,14 @@ export default function Attendance() {
       ] = await Promise.all(requests);
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
-      if (user?.role === 'admin') {
+      if (user && user.role === 'admin') {
         setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
       }
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
       const rankingList = rankingRes.data.rankings || [];
-      const myEntry = rankingList.find(r => r.user_id === user?.id);
+      const myEntry = rankingList.find(r => r.user_id === (user && user.id));
       if (myEntry) setMyRank(`#${myEntry.rank}`);
       const completedCount = tasksRes.data.filter(t => t.status === 'completed').length;
       setTasksCompleted(completedCount);
@@ -197,7 +197,7 @@ export default function Attendance() {
       let lateByMinutes = 0;
       let isEarlyLeave = false;
       let earlyByMinutes = 0;
-      if (action === 'punch_in' && user?.punch_in_time) {
+      if (action === 'punch_in' && user && user.punch_in_time) {
         const [expH, expM] = user.punch_in_time.split(':').map(Number);
         const expected = new Date();
         expected.setHours(expH, expM, 0, 0);
@@ -214,7 +214,7 @@ export default function Attendance() {
             toast.warning(`Late by ${lateByMinutes} minutes (grace: ${grace} min)`, { duration: 6000 });
           }
         }
-      } else if (action === 'punch_out' && user?.punch_out_time && todayAttendance?.punch_in) {
+      } else if (action === 'punch_out' && user && user.punch_out_time && todayAttendance && todayAttendance.punch_in) {
         const [expH, expM] = user.punch_out_time.split(':').map(Number);
         const expectedOut = new Date();
         expectedOut.setHours(expH, expM, 0, 0);
@@ -235,7 +235,7 @@ export default function Attendance() {
       );
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to record attendance');
+      toast.error((error.response && error.response.data && error.response.data.detail) || 'Failed to record attendance');
     } finally {
       setLoading(false);
     }
@@ -270,7 +270,7 @@ export default function Attendance() {
     return `${h}h ${m}m`;
   };
   const getTodayLiveDuration = () => {
-    if (!todayAttendance?.punch_in) return "0h 0m";
+    if (!(todayAttendance && todayAttendance.punch_in)) return "0h 0m";
     if (todayAttendance.punch_out) return formatDuration(todayAttendance.duration_minutes);
     const start = new Date(todayAttendance.punch_in);
     let diffMs = Date.now() - start.getTime();
@@ -320,11 +320,11 @@ export default function Attendance() {
   const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late).length;
   const attendanceDates = [
     ...attendanceHistory.map(a => parseISO(a.date)),
-    ...(todayAttendance?.punch_in ? [parseISO(todayAttendance.date)] : [])
+    ...((todayAttendance && todayAttendance.punch_in) ? [parseISO(todayAttendance.date)] : [])
   ];
   const lateDates = [
     ...attendanceHistory.filter(a => a.is_late).map(a => parseISO(a.date)),
-    ...((isLateToday || todayAttendance?.is_late) && todayAttendance?.date ? [parseISO(todayAttendance.date)] : [])
+    ...((isLateToday || (todayAttendance && todayAttendance.is_late)) && todayAttendance && todayAttendance.date ? [parseISO(todayAttendance.date)] : [])
   ];
   const holidayDates = holidays.map(h => parseISO(h.date));
   const modifiers = {
@@ -398,16 +398,16 @@ export default function Attendance() {
                     {!isTodaySelected && (
                       <p className="text-blue-100 text-sm">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
                     )}
-                    {selectedAttendance?.punch_in && (
+                    {selectedAttendance && selectedAttendance.punch_in && (
                       <p className="text-sm text-blue-100/80">
                         In: {formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
-                        {selectedAttendance?.punch_out && (
+                        {selectedAttendance.punch_out && (
                           <> • Out: {formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}</>
                         )}
                       </p>
                     )}
                     <p className="text-sm text-blue-100/80 mt-1">
-                      Expected: In {user?.punch_in_time || 'N/A'} (Grace {user?.grace_time || 'N/A'}) • Out {user?.punch_out_time || 'N/A'}
+                      Expected: In {user && user.punch_in_time || 'N/A'} (Grace {user && user.grace_time || 'N/A'}) • Out {user && user.punch_out_time || 'N/A'}
                     </p>
                     {isLateToday && isTodaySelected && (
                       <div className="mt-2 inline-flex items-center gap-2 bg-red-500/30 backdrop-blur px-3 py-1 rounded-full">
@@ -424,7 +424,7 @@ export default function Attendance() {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  {!selectedAttendance?.punch_in ? (
+                  {!(selectedAttendance && selectedAttendance.punch_in) ? (
                     <div className="flex gap-3">
                       {isTodaySelected && (
                         <Button
@@ -441,7 +441,7 @@ export default function Attendance() {
                       )}
                     </div>
                   ) : (
-                    !selectedAttendance?.punch_out && isTodaySelected && (
+                    !(selectedAttendance && selectedAttendance.punch_out) && isTodaySelected && (
                       <Button
                         onClick={() => handlePunchAction('punch_out')}
                         disabled={loading}
@@ -452,7 +452,7 @@ export default function Attendance() {
                       </Button>
                     )
                   )}
-                  {selectedAttendance?.punch_out && (
+                  {(selectedAttendance && selectedAttendance.punch_out) && (
                     <Badge className="bg-white/20 text-white border-0">
                       {formatDuration(selectedAttendance.duration_minutes)}
                     </Badge>
@@ -463,7 +463,7 @@ export default function Attendance() {
           </Card>
         </motion.div>
         {/* Admin Pending Holiday Review */}
-        {user?.role === 'admin' && pendingHolidays.length > 0 && (
+        {user && user.role === 'admin' && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-6">
             <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
               <div className="bg-amber-100/80 px-4 py-2 border-b border-amber-200 flex items-center justify-between">
@@ -493,7 +493,6 @@ export default function Attendance() {
                         >
                           Yes (Closed)
                         </Button>
-
                         <Button
                           size="sm"
                           variant="outline"
@@ -518,7 +517,7 @@ export default function Attendance() {
                 <div>
                   <p className="text-xs font-medium text-slate-500 uppercase">This Month</p>
                   <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
-                    {mySummary?.current_month?.total_hours || '0h 0m'}
+                    {(mySummary && mySummary.current_month && mySummary.current_month.total_hours) || '0h 0m'}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">{monthDaysPresent} days present</p>
                 </div>
@@ -589,7 +588,7 @@ export default function Attendance() {
                   <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
                     {liveDuration}
                   </p>
-                  {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
+                  {todayAttendance && todayAttendance.punch_in && !todayAttendance.punch_out && (
                     <p className="text-xs text-emerald-600 mt-2 font-medium">LIVE • updates every minute</p>
                   )}
                 </div>
