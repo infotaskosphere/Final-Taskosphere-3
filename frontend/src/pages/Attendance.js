@@ -297,15 +297,15 @@ export default function Attendance() {
     }
   };
 
-  const handleHolidayDecision = async (holidayDate, decision) => {
-    try {
-      await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
-      toast.success(decision === 'confirmed' ? "Holiday confirmed" : "Holiday rejected");
-      fetchData();
-    } catch (err) {
-      toast.error("Failed to update holiday status");
-    }
-  };
+const handleHolidayDecision = async (holidayId, decision) => {
+  try {
+    await api.patch(`/holidays/${holidayId}/status`, { status: decision });
+    toast.success(decision === 'confirmed' ? "Holiday confirmed" : "Holiday rejected");
+    fetchData();
+  } catch (err) {
+    toast.error("Failed to update holiday status");
+  }
+};
 
   // ─── Utility Functions ───────────────────────────────────────
   const formatDuration = (minutes) => {
@@ -536,7 +536,8 @@ export default function Attendance() {
                         <Button
                           size="sm"
                           className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                          onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}
+                          onClick={() => handleHolidayDecision(holiday.id, 'confirmed')}
+                          onClick={() => handleHolidayDecision(holiday.id, 'rejected')}
                         >
                           Yes (Closed)
                         </Button>
