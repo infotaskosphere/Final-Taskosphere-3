@@ -3,6 +3,7 @@ import re
 import csv
 import uuid
 import logging
+logger = logging.getLogger(__name__)
 import pytz
 import asyncio
 import calendar
@@ -41,7 +42,7 @@ from backend.models import (
     DashboardStats, AuditLog,
     HolidayResponse, HolidayCreate
 )
-from backend.database import get_db
+from backend.dependencies import db
 from backend.auth import get_current_active_user
 from backend.leads import router as leads_router
 from backend.dependencies import get_current_user, create_access_token, db, client
