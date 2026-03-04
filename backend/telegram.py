@@ -82,32 +82,83 @@ async def telegram_webhook(request: Request):
             data = convo.get("data", {})
             convo_type = convo.get("type", "task") # NEW: type support for leads
             # ===============================
-            # LEAD ASSIGNEE CALLBACK (NEW)
+            # LEAD CALLBACKS (UPDATED FOR FULL FIELDS)
             # ===============================
-            if convo_type == "lead" and clicked.startswith("assign_"):
-                assignee_id = clicked.replace("assign_", "")
-                data["assigned_to"] = None if assignee_id == "unassigned" else assignee_id
-                user = await db.users.find_one({"telegram_id": chat_id})
-                new_lead = {
-                    "id": str(uuid.uuid4()),
-                    "company_name": data.get("client_name"),
-                    "phone": data.get("contact_number"),
-                    "assigned_to": data.get("assigned_to"),
-                    "source": "telegram",
-                    "status": "new",
-                    "created_by": user["id"] if user else "telegram_bot",
-                    "created_at": datetime.now(timezone.utc)
-                }
-                await db.leads.insert_one(new_lead)
-                await create_notification(
-                    user_id=data.get("assigned_to") or user["id"],
-                    title="New Lead Assigned",
-                    message=f"Lead '{new_lead['company_name']}' assigned to you",
-                    type="lead"
-                )
-                await db.telegram_conversations.delete_one({"telegram_id": chat_id})
-                await send_message(chat_id, f"✅ Lead '{new_lead['company_name']}' created and assigned!")
-                return {"status": "lead_created"}
+            if convo_type == "lead":
+                # SERVICE
+                if clicked.startswith("service_"):
+                    data["service"] = clicked.replace("service_", "")
+                    await db.telegram_conversations.update_one(
+                        {"telegram_id": chat_id},
+                        {"$set": {"step": "source", "data": data}}
+                    )
+                    await send_message(
+                        chat_id,
+                        "🌐 Select Source:",
+                        inline_keyboard([
+                            {"text": "Direct", "callback": "source_direct"},
+                            {"text": "Website", "callback": "source_website"},
+                            {"text": "Referral", "callback": "source_referral"},
+                            {"text": "Social Media", "callback": "source_social_media"},
+                            {"text": "Event", "callback": "source_event"},
+                        ])
+                    )
+                    return {"status": "service_selected"}
+                # SOURCE
+                if clicked.startswith("source_"):
+                    data["source"] = clicked.replace("source_", "")
+                    users = await db.users.find({"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1}).to_list(50)
+                    buttons = [
+                        {"text": u["full_name"], "callback": f"assign_{u['id']}"}
+                        for u in users
+                    ]
+                    buttons.append({"text": "Unassigned", "callback": "assign_unassigned"})
+                    await db.telegram_conversations.update_one(
+                        {"telegram_id": chat_id},
+                        {"$set": {"step": "lead_assign", "data": data}}
+                    )
+                    await send_message(chat_id, "👤 Assign this lead to:", inline_keyboard(buttons))
+                    return {"status": "source_selected"}
+                # ASSIGNEE
+                if clicked.startswith("assign_"):
+                    assignee_id = clicked.replace("assign_", "")
+                    data["assigned_to"] = None if assignee_id == "unassigned" else assignee_id
+                    await db.telegram_conversations.update_one(
+                        {"telegram_id": chat_id},
+                        {"$set": {"step": "next_follow_up", "data": data}}
+                    )
+                    await send_message(chat_id, "📅 Enter Next Follow-up Date (YYYY-MM-DD) or SKIP:")
+                    return {"status": "assignee_selected"}
+                # CONFIRM
+                if clicked == "confirm_lead":
+                    user = await db.users.find_one({"telegram_id": chat_id})
+                    new_lead = {
+                        "id": str(uuid.uuid4()),
+                        "company_name": data.get("company_name"),
+                        "contact_person": data.get("contact_person"),
+                        "email": data.get("email"),
+                        "phone": data.get("phone"),
+                        "service": data.get("service"),
+                        "status": "new",
+                        "source": data.get("source"),
+                        "next_follow_up": data.get("next_follow_up"),
+                        "notes": data.get("notes"),
+                        "assigned_to": data.get("assigned_to"),
+                        "created_by": user["id"] if user else "telegram_bot",
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                    await db.leads.insert_one(new_lead)
+                    if data.get("assigned_to"):
+                        await create_notification(
+                            user_id=data["assigned_to"],
+                            title="New Lead Assigned",
+                            message=f"Lead '{new_lead['company_name']}' assigned to you",
+                            type="lead"
+                        )
+                    await db.telegram_conversations.delete_one({"telegram_id": chat_id})
+                    await send_message(chat_id, f"✅ Lead '{new_lead['company_name']}' created!")
+                    return {"status": "lead_created"}
             # ===============================
             # EXISTING TASK CALLBACKS (100% unchanged from your original)
             # ===============================
@@ -252,7 +303,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "Enter recurrence interval (number):")
                 return {"status": "pattern_selected"}
-            # CONFIRM
+            # CONFIRM TASK
             if clicked == "confirm_task":
                 now = datetime.now(timezone.utc)
                 user = await db.users.find_one({"telegram_id": chat_id})
@@ -318,20 +369,20 @@ async def telegram_webhook(request: Request):
         # NEW: ADD LEAD COMMAND
         if text.lower() == "/addlead":
             user = await db.users.find_one({"telegram_id": chat_id})
-           
+            
             # Check if user is admin OR has permission to handle leads
             permissions = user.get("permissions", {}) if user else {}
             is_authorized = user and (user["role"] == "admin" or permissions.get("can_view_all_leads"))
-           
+            
             if not is_authorized:
                 await send_message(chat_id, "🚫 You do not have permission to add leads.")
                 return {"status": "unauthorized"}
             await db.telegram_conversations.update_one(
                 {"telegram_id": chat_id},
-                {"$set": {"step": "lead_name", "type": "lead", "data": {}}},
+                {"$set": {"step": "company_name", "type": "lead", "data": {}}},
                 upsert=True
             )
-            await send_message(chat_id, "👤 Enter Lead/Client Name:")
+            await send_message(chat_id, "🏢 Enter Company Name:")
             return {"status": "lead_started"}
         # START (original task flow)
         if text == "/start":
@@ -350,34 +401,104 @@ async def telegram_webhook(request: Request):
         data = convo.get("data", {})
         convo_type = convo.get("type", "task")
         # =====================================================
-        # LEAD FLOW STEPS (NEW)
+        # LEAD FLOW STEPS (UPDATED FOR FULL FORM)
         # =====================================================
         if convo_type == "lead":
-            if step == "lead_name":
-                data["client_name"] = text
+            if step == "company_name":
+                if not text:
+                    await send_message(chat_id, "Company name required.")
+                    return {"status": "invalid"}
+                data["company_name"] = text
                 await db.telegram_conversations.update_one(
                     {"telegram_id": chat_id},
-                    {"$set": {"step": "lead_phone", "data": data}}
+                    {"$set": {"step": "contact_person", "data": data}}
                 )
-                await send_message(chat_id, "📞 Enter Contact Number:")
-                return {"status": "name_saved"}
-            if step == "lead_phone":
-                if not text.isdigit() or len(text) < 10:
+                await send_message(chat_id, "👤 Enter Contact Person (or SKIP):")
+                return {"status": "company_name_saved"}
+            if step == "contact_person":
+                data["contact_person"] = None if text.lower() == "skip" else text
+                await db.telegram_conversations.update_one(
+                    {"telegram_id": chat_id},
+                    {"$set": {"step": "email", "data": data}}
+                )
+                await send_message(chat_id, "✉️ Enter Email (or SKIP):")
+                return {"status": "contact_person_saved"}
+            if step == "email":
+                data["email"] = None if text.lower() == "skip" else text
+                await db.telegram_conversations.update_one(
+                    {"telegram_id": chat_id},
+                    {"$set": {"step": "phone", "data": data}}
+                )
+                await send_message(chat_id, "📞 Enter Phone Number (or SKIP):")
+                return {"status": "email_saved"}
+            if step == "phone":
+                if text.lower() != "skip" and (not text.isdigit() or len(text) < 10):
                     await send_message(chat_id, "Invalid phone number.")
                     return {"status": "invalid_phone"}
-                data["contact_number"] = text
-                users = await db.users.find({"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1}).to_list(50)
-                buttons = [
-                    {"text": u["full_name"], "callback": f"assign_{u['id']}"}
-                    for u in users
-                ]
-                buttons.append({"text": "Unassigned", "callback": "assign_unassigned"})
+                data["phone"] = None if text.lower() == "skip" else text
                 await db.telegram_conversations.update_one(
                     {"telegram_id": chat_id},
-                    {"$set": {"step": "lead_assign", "data": data}}
+                    {"$set": {"step": "service", "data": data}}
                 )
-                await send_message(chat_id, "👤 Assign this lead to:", inline_keyboard(buttons))
+                await send_message(
+                    chat_id,
+                    "📂 Select Service:",
+                    inline_keyboard([
+                        {"text": "GST", "callback": "service_gst"},
+                        {"text": "INCOME TAX", "callback": "service_income_tax"},
+                        {"text": "ACCOUNTS", "callback": "service_accounts"},
+                        {"text": "TDS", "callback": "service_tds"},
+                        {"text": "ROC", "callback": "service_roc"},
+                        {"text": "TRADEMARK", "callback": "service_trademark"},
+                        {"text": "MSME SMADHAN", "callback": "service_msme_smadhan"},
+                        {"text": "FEMA", "callback": "service_fema"},
+                        {"text": "DSC", "callback": "service_dsc"},
+                        {"text": "OTHER", "callback": "service_other"},
+                    ])
+                )
                 return {"status": "phone_saved"}
+            if step == "next_follow_up":
+                if text.lower() != "skip":
+                    try:
+                        due = datetime.fromisoformat(text) if "T" in text else datetime.fromisoformat(text + "T00:00:00")
+                        data["next_follow_up"] = due.isoformat()
+                    except:
+                        await send_message(chat_id, "Invalid format. Use YYYY-MM-DD")
+                        return {"status": "invalid_date"}
+                else:
+                    data["next_follow_up"] = None
+                await db.telegram_conversations.update_one(
+                    {"telegram_id": chat_id},
+                    {"$set": {"step": "notes", "data": data}}
+                )
+                await send_message(chat_id, "📝 Enter Notes (or SKIP):")
+                return {"status": "next_follow_up_saved"}
+            if step == "notes":
+                data["notes"] = None if text.lower() == "skip" else text
+                summary = f"""
+✅ Confirm Lead Details
+🏢 Company: {data.get('company_name')}
+👤 Contact: {data.get('contact_person') or 'None'}
+✉️ Email: {data.get('email') or 'None'}
+📞 Phone: {data.get('phone') or 'None'}
+📂 Service: {data.get('service') or 'None'}
+🌐 Source: {data.get('source') or 'None'}
+👤 Assigned: {data.get('assigned_to') or 'Unassigned'}
+📅 Follow-up: {data.get('next_follow_up') or 'None'}
+📝 Notes: {data.get('notes') or 'None'}
+"""
+                await db.telegram_conversations.update_one(
+                    {"telegram_id": chat_id},
+                    {"$set": {"step": "confirm", "data": data}}
+                )
+                await send_message(
+                    chat_id,
+                    summary,
+                    inline_keyboard([
+                        {"text": "Confirm ✅", "callback": "confirm_lead"}
+                    ])
+                )
+                return {"status": "notes_saved"}
         # =====================================================
         # TASK FLOW STEPS (your original logic – unchanged)
         # =====================================================
