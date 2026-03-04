@@ -921,10 +921,12 @@ const handleHolidayDecision = async (holidayId, decision) => {
                     <label className="text-sm font-medium text-slate-700 mb-2 block">From</label>
                     <Calendar
                       mode="single"
-                      selected={leaveFrom}
-                      onSelect={setLeaveFrom}
-                      disabled={{ before: new Date() }}
-                      className="rounded-2xl border shadow-sm"
+                      selected={selectedDate}
+                      onSelect={(date) => date && setSelectedDate(date)}
+                      modifiers={modifiers}
+                      modifiersStyles={modifiersStyles}
+                      className="rounded-xl border"
+                      showOutsideDays={false}
                     />
                   </div>
                   <div>
