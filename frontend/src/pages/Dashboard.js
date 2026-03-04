@@ -1119,7 +1119,7 @@ useEffect(() => {
  </motion.div>
 
  {/* Quick Access Tiles */}
- <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={itemVariants}>
+ <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4" variants={itemVariants}>
 
  <motion.div
     whileHover={{ y: -5, scale: 1.01 }}
