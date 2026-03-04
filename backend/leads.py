@@ -63,15 +63,6 @@ def normalize_lead_doc(doc: dict) -> dict:
         if field in doc:
             doc[field] = safe_dt(doc.get(field))
     return doc
-def normalize_lead_doc(doc: dict) -> dict:
-    from backend.dependencies import safe_dt
-    if not doc:
-        return doc
-    if "_id" in doc:
-        doc["id"] = str(doc["_id"])
-    for field in ["created_at", "updated_at", "next_follow_up"]:
-        doc[field] = safe_dt(doc.get(field))
-    return doc
 def validate_obj_id(id_str: str):
     if not ObjectId.is_valid(id_str):
         raise HTTPException(
