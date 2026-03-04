@@ -14,7 +14,6 @@ import {
  useUpcomingDueDates,
  useTodayAttendance,
 } from "@/hooks/useDashboard";
-
 import {
  Card,
  CardContent,
@@ -29,7 +28,6 @@ import {
  PopoverContent,
  PopoverTrigger,
 } from "@/components/ui/popover";
-
 import {
  CheckSquare,
  FileText,
@@ -48,7 +46,6 @@ import {
  Target,
  Activity,
 } from 'lucide-react';
-
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
  deepBlue: '#0D3B66',
@@ -58,7 +55,6 @@ const COLORS = {
  coral: '#FF6B6B',
  amber: '#F59E0B',
 };
-
 // ── Spring Physics (for Framer Motion) ──────────────────────────────────────
 const springPhysics = {
  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
@@ -67,7 +63,6 @@ const springPhysics = {
  icon: { type: "spring", stiffness: 450, damping: 25 },
  tap: { type: "spring", stiffness: 500, damping: 30 }
 };
-
 // ── Animation Variants ──────────────────────────────────────────────────────
 const containerVariants = {
  hidden: { opacity: 0 },
@@ -76,7 +71,6 @@ const containerVariants = {
  transition: { staggerChildren: 0.06, delayChildren: 0.1 }
  }
 };
-
 const itemVariants = {
  hidden: { opacity: 0, y: 24 },
  visible: {
@@ -85,8 +79,7 @@ const itemVariants = {
  transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] }
  },
  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } }
-};
-
+ };
 // ── Priority Stripe Helper ──────────────────────────────────────────────────
 const getPriorityStripeClass = (priority) => {
  const p = (priority || '').toLowerCase().trim();
@@ -96,13 +89,11 @@ const getPriorityStripeClass = (priority) => {
  if (p === 'low') return 'border-l-8 border-l-blue-500';
  return 'border-l-8 border-l-slate-300';
 };
-
 // ── Task Strip Component ────────────────────────────────────────────────────
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
  const status = task.status || 'pending';
  const isCompleted = status === 'completed';
  const isInProgress = status === 'in_progress';
-
  return (
  <motion.div
  whileHover={{ y: -6, scale: 1.01, transition: springPhysics.lift }}
@@ -123,7 +114,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
  {task.client_name ? ` – ${task.client_name}` : ''}
  </p>
  </div>
-
  {isToMe && (
  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
  {/* Start / In Progress */}
@@ -144,7 +134,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
  >
  {isInProgress ? '✓ In Progress' : 'Start'}
  </motion.button>
-
  {/* Done / Completed */}
  <motion.button
  whileHover={{ scale: 1.05 }}
@@ -166,7 +155,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
  </div>
  )}
  </div>
-
  {/* Meta Info */}
  <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
  <span>
@@ -187,29 +175,23 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
  </motion.div>
  );
 }
-
 // ── Main Dashboard Component ────────────────────────────────────────────────
 export default function Dashboard() {
  const { user } = useAuth();
  const navigate = useNavigate();
  const queryClient = useQueryClient();
-
  const [loading, setLoading] = useState(false);
  const [rankings, setRankings] = useState([]);
  const [rankingPeriod, setRankingPeriod] = useState("monthly");
-
  const [newTodo, setNewTodo] = useState('');
  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
  const [selectedDueDate, setSelectedDueDate] = useState(undefined);
  const [mustPunchIn, setMustPunchIn] = useState(false);
-
  const { data: tasks = [] } = useTasks();
  const { data: stats } = useDashboardStats();
  const { data: upcomingDueDates = [] } = useUpcomingDueDates();
  const { data: todayAttendance } = useTodayAttendance();
-
  const updateTaskMutation = useUpdateTask();
-
  // Todos (personal)
  const { data: todosRaw = [] } = useQuery({
  queryKey: ["todos"],
@@ -218,7 +200,6 @@ export default function Dashboard() {
  return res.data;
  },
  });
-
  const todos = useMemo(() =>
  todosRaw.map(todo => ({
  ...todo,
@@ -226,23 +207,19 @@ export default function Dashboard() {
  })),
  [todosRaw]
  );
-
  const tasksAssignedToMe = useMemo(() =>
  tasks
  .filter(t => t.assigned_to === user?.id && t.status !== "completed")
  .slice(0, 6),
  [tasks, user?.id]
  );
-
  const tasksAssignedByMe = useMemo(() =>
  tasks
  .filter(t => t.created_by === user?.id && t.assigned_to !== user?.id)
  .slice(0, 6),
  [tasks, user?.id]
  );
-
  const recentTasks = useMemo(() => tasks.slice(0, 5), [tasks]);
-
  // Rankings (star performers)
  useEffect(() => {
  async function fetchRankings() {
@@ -259,8 +236,7 @@ export default function Dashboard() {
  }
  fetchRankings();
  }, [rankingPeriod]);
-
- // ── Mutations 
+ // ── Mutations
  const createTodo = useMutation({
  mutationFn: data => api.post("/todos", data),
  onSuccess: () => {
@@ -269,12 +245,10 @@ export default function Dashboard() {
  },
  onError: () => toast.error("Failed to add todo"),
  });
-
  const updateTodo = useMutation({
  mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: newStatus === "completed" }),
  onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
  });
-
  const deleteTodo = useMutation({
  mutationFn: id => api.delete(`/todos/${id}`),
  onSuccess: () => {
@@ -283,7 +257,6 @@ export default function Dashboard() {
  },
  onError: () => toast.error("Failed to delete todo"),
  });
-
  // ── Handlers ────────────────────────────────────────────────────────────────
  const addTodo = () => {
  if (!newTodo.trim()) return;
@@ -295,18 +268,15 @@ export default function Dashboard() {
  setNewTodo("");
  setSelectedDueDate(undefined);
  };
-
  const handleToggleTodo = (id) => {
  const todo = todosRaw.find(t => t.id === id || t._id === id);
  if (!todo) return;
  const newStatus = todo.status === "completed" ? "pending" : "completed";
  updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
  };
-
  const handleDeleteTodo = (id) => {
  deleteTodo.mutate(id);
  };
-
  const updateAssignedTaskStatus = (taskId, newStatus) => {
  updateTaskMutation.mutate(
  {
@@ -334,22 +304,18 @@ export default function Dashboard() {
  setLoading(true);
  try {
  await api.post('/attendance', { action });
-
  toast.success(
  action === 'punch_in'
  ? 'Punched in successfully!'
  : 'Punched out successfully!'
  );
-
  queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
-
  } catch (err) {
  toast.error(err.response?.data?.detail || 'Attendance action failed');
  } finally {
  setLoading(false);
  }
 };
-
  // ── Utility Helpers ─────────────────────────────────────────────────────────
  const getTodayDuration = () => {
  if (!todayAttendance?.punch_in) return "0h 0m";
@@ -362,22 +328,17 @@ export default function Dashboard() {
  const m = Math.floor((diffMs % 3600000) / 60000);
  return `${h}h ${m}m`;
  };
-
  const completionRate = stats?.total_tasks > 0
  ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
  : 0;
-
  const nextDeadline = upcomingDueDates.length > 0
  ? upcomingDueDates.reduce((prev, curr) =>
  prev.days_remaining < curr.days_remaining ? prev : curr
  )
  : null;
-
  const isAdmin = user?.role === 'admin';
  const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-
  const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
-
  const getStatusStyle = (status) => {
  const styles = {
  completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -386,7 +347,6 @@ export default function Dashboard() {
  };
  return styles[status] || styles.pending;
  };
-
  const getPriorityStyle = (priority) => {
  const styles = {
  high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -395,35 +355,36 @@ export default function Dashboard() {
  };
  return styles[priority?.toLowerCase()] || styles.medium;
  };
-
  const getDeadlineColor = (daysLeft) => {
  if (daysLeft <= 0) return { bg: 'bg-red-50 border-red-200 hover:bg-red-100', badge: 'bg-red-500 text-white', text: 'text-red-600' };
  if (daysLeft <= 7) return { bg: 'bg-orange-50 border-orange-200 hover:bg-orange-100', badge: 'bg-orange-500 text-white', text: 'text-orange-600' };
  if (daysLeft <= 15) return { bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', badge: 'bg-yellow-500 text-white', text: 'text-yellow-600' };
  return { bg: 'bg-green-50 border-green-200 hover:bg-green-100', badge: 'bg-green-600 text-white', text: 'text-green-700' };
  };
-
+ const formatToLocalTime = (dateString) => {
+   if (!dateString) return "--:--";
+   // Ensure the date string is treated as UTC
+   const date = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
+   return format(date, 'hh:mm a');
+ };
  // ── Ranking Item (Memoized) ─────────────────────────────────────────────────
  const RankingItem = React.memo(({ member, index, period }) => {
  const rank = index + 1;
  const isTop = index === 0;
  const isSecond = index === 1;
  const isThird = index === 2;
-
  const getMedal = () => {
  if (isTop) return '🥇';
  if (isSecond) return '🥈';
  if (isThird) return '🥉';
  return `#${rank}`;
  };
-
  const getBgClass = () => {
  if (isTop) return "bg-gradient-to-r from-yellow-100 via-amber-50 to-yellow-50 border-yellow-300 shadow-md";
  if (isSecond) return "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300";
  if (isThird) return "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300";
  return "bg-slate-50 border-slate-200 hover:bg-slate-100";
  };
-
  return (
  <motion.div
  whileHover={{ y: -4, scale: 1.01, transition: springPhysics.lift }}
@@ -467,31 +428,25 @@ export default function Dashboard() {
  </motion.div>
  );
  });
-
  const getGreeting = () => {
  const hour = new Date().getHours();
-
  if (hour < 12) return "Good Morning ☀️";
  if (hour < 17) return "Good Afternoon 🌤️";
  if (hour < 21) return "Good Evening 🌆";
  return "Working Late? 🌙";
 };
-
 useEffect(() => {
- 
   if (!todayAttendance) {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
-
   // 2. If user is on leave → no gate
   if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
-
   // 3. Only show gate if we have a valid response and punch_in is missing
   if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
     setMustPunchIn(true);
@@ -500,7 +455,6 @@ useEffect(() => {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
   }
-
   return () => {
     document.body.style.overflow = "auto";
   };
@@ -532,7 +486,6 @@ useEffect(() => {
  Here's what's happening today — {format(new Date(), 'MMMM d, yyyy')}
  </p>
  </div>
-
  {nextDeadline && (
  <motion.div
  whileHover={{ scale: 1.02, y: -2, transition: springPhysics.card }}
@@ -555,7 +508,6 @@ useEffect(() => {
  </CardContent>
  </Card>
  </motion.div>
-
  {/* Key Metrics */}
  <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4" variants={itemVariants}>
  {/* Total Tasks */}
@@ -583,7 +535,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  {/* Overdue Tasks */}
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
@@ -609,7 +560,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  {/* Completion Rate */}
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
@@ -635,7 +585,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  {/* DSC Alerts */}
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
@@ -664,7 +613,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  {/* Today's Attendance */}
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
@@ -691,7 +639,6 @@ useEffect(() => {
  </CardContent>
  </motion.div>
  </motion.div>
-
  {/* Recent Tasks + Deadlines + Attendance */}
  <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-4" variants={itemVariants}>
  {/* Recent Tasks */}
@@ -745,7 +692,6 @@ useEffect(() => {
  )}
  </CardContent>
  </Card>
-
  {/* Upcoming Deadlines */}
  <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
  <CardHeader className="pb-4 border-b px-6">
@@ -796,7 +742,6 @@ useEffect(() => {
  )}
  </CardContent>
  </Card>
-
  {/* Attendance */}
  <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
  <CardHeader className="pb-4 border-b px-6">
@@ -820,16 +765,15 @@ useEffect(() => {
  <LogIn className="h-4 w-4 text-green-500" />
  Punch In
  </div>
- <span className="font-medium">{format(new Date(todayAttendance.punch_in), 'hh:mm a')}</span>
- </div>
-
+ <span className="font-medium">{formatToLocalTime(todayAttendance.punch_in)}</span>
+</div>
  {todayAttendance.punch_out ? (
  <div className="flex items-center justify-between text-sm">
  <div className="flex items-center gap-2 text-slate-600">
  <LogOut className="h-4 w-4 text-red-500" />
  Punch Out
  </div>
- <span className="font-medium">{format(new Date(todayAttendance.punch_out), 'hh:mm a')}</span>
+ <span className="font-medium">{formatToLocalTime(todayAttendance.punch_out)}</span>
  </div>
  ) : (
  <Button
@@ -840,7 +784,6 @@ useEffect(() => {
  Punch Out
  </Button>
  )}
-
  <div className="text-center py-4 bg-slate-50 rounded-2xl">
  <p className="text-sm text-slate-500">Total Hours Today</p>
  <p className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>
@@ -861,7 +804,6 @@ useEffect(() => {
  </CardContent>
  </Card>
  </motion.div>
-
  {/* Assigned Tasks – Two Columns */}
  {showTaskSection && (
  <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -910,7 +852,6 @@ useEffect(() => {
  )}
  </CardContent>
  </Card>
-
  {/* Tasks Assigned by Me */}
  <Card
  className="flex flex-col border-slate-100 shadow-sm rounded-3xl overflow-hidden cursor-pointer hover:shadow-xl transition group"
@@ -958,7 +899,6 @@ useEffect(() => {
  </Card>
  </motion.div>
  )}
-
  {/* Star Performers + To-Do List */}
  <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4">
  {/* Star Performers */}
@@ -1008,7 +948,6 @@ useEffect(() => {
  )}
  </CardContent>
  </Card>
-
  {/* My To-Do List */}
  <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
  <CardHeader className="pb-4 border-b px-6">
@@ -1061,7 +1000,6 @@ useEffect(() => {
  </span>
  )}
  </div>
-
  {todos.length === 0 ? (
  <div className="text-center py-10 text-slate-400 text-sm">No todos yet</div>
  ) : (
@@ -1117,10 +1055,8 @@ useEffect(() => {
  </CardContent>
  </Card>
  </motion.div>
-
  {/* Quick Access Tiles */}
  <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4" variants={itemVariants}>
-
  <motion.div
     whileHover={{ y: -5, scale: 1.01 }}
     whileTap={{ scale: 0.985 }}
@@ -1137,7 +1073,7 @@ useEffect(() => {
       </div>
     </CardContent>
   </motion.div>
-  
+ 
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
  whileTap={{ scale: 0.985 }}
@@ -1154,7 +1090,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
  whileTap={{ scale: 0.985 }}
@@ -1171,7 +1106,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
  whileTap={{ scale: 0.985 }}
@@ -1188,7 +1122,6 @@ useEffect(() => {
  </div>
  </CardContent>
  </motion.div>
-
  {isAdmin && (
  <motion.div
  whileHover={{ y: -5, scale: 1.01 }}
@@ -1231,11 +1164,9 @@ useEffect(() => {
  >
  {getGreeting()}
  </motion.h2>
-
  <p className="text-slate-500 mb-8">
  Please punch in to begin your workday.
  </p>
-
 <motion.div
   initial={{ y: 0 }}
   animate={{ y: [0, -2, 0] }}
@@ -1254,7 +1185,6 @@ useEffect(() => {
     {loading ? "Punching In..." : "Punch In"}
   </Button>
 </motion.div>
-
 <div className="mt-4">
   <Button
     variant="secondary"
@@ -1263,11 +1193,8 @@ useEffect(() => {
       setLoading(true);
       try {
         await api.post("/attendance/mark-leave-today");
-
         toast.success("Marked on leave today");
-
         queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
-
         setMustPunchIn(false);
         document.body.style.overflow = "auto";
       } catch (err) {
