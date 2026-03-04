@@ -12,31 +12,121 @@ from backend.notifications import create_notification
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
 logger = logging.getLogger(__name__)
 # ====================== MODELS ======================
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from typing import Optional, List, Literal
+from datetime import datetime
+
+
 class LeadBase(BaseModel):
+
     model_config = ConfigDict(extra="ignore")
-    company_name: str
-    contact_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    services: List[str] = []
-    quotation_amount: Optional[float] = None
-    date_of_meeting: Optional[datetime] = None
+
+    # ---------------- BASIC DETAILS ---------------- #
+
+    company_name: str = Field(
+        ...,
+        description="Name of the company or business"
+    )
+
+    contact_name: Optional[str] = Field(
+        None,
+        description="Primary contact person for the lead"
+    )
+
+    email: Optional[EmailStr] = Field(
+        None,
+        description="Contact email address"
+    )
+
+    phone: Optional[str] = Field(
+        None,
+        description="Contact phone number"
+    )
+
+    # ---------------- SERVICES ---------------- #
+
+    services: List[str] = Field(
+        default_factory=list,
+        description="List of services requested (GST, ROC, etc.)"
+    )
+
+    # ---------------- QUOTATION ---------------- #
+
+    quotation_amount: Optional[float] = Field(
+        None,
+        description="Quotation amount given to the client"
+    )
+
+    # ---------------- MEETING ---------------- #
+
+    date_of_meeting: Optional[datetime] = Field(
+        None,
+        description="Date of meeting scheduled with lead"
+    )
+
+    # ---------------- PIPELINE STATUS ---------------- #
+
     status: Literal[
-    "new",
-    "contacted",
-    "meeting",
-    "proposal",
-    "negotiation",
-    "on_hold",
-    "won",
-    "lost"
-] = "new"
-    source: Literal["direct", "website", "referral", "social_media", "event"] = "direct"
-    next_follow_up: Optional[datetime] = None
-    notes: Optional[str] = None
-    assigned_to: Optional[str] = None
-    converted_client_id: Optional[str] = None
-    closure_probability: Optional[float] = None # Added for AI closure chance
+        "new",
+        "contacted",
+        "meeting",
+        "proposal",
+        "negotiation",
+        "on_hold",
+        "won",
+        "lost"
+    ] = Field(
+        "new",
+        description="Current pipeline stage of the lead"
+    )
+
+    # ---------------- LEAD SOURCE ---------------- #
+
+    source: Literal[
+        "direct",
+        "website",
+        "referral",
+        "social_media",
+        "event"
+    ] = Field(
+        "direct",
+        description="Where the lead originated"
+    )
+
+    # ---------------- FOLLOW UP ---------------- #
+
+    next_follow_up: Optional[datetime] = Field(
+        None,
+        description="Next scheduled follow-up date"
+    )
+
+    # ---------------- NOTES ---------------- #
+
+    notes: Optional[str] = Field(
+        None,
+        description="Additional notes about the lead"
+    )
+
+    # ---------------- ASSIGNMENT ---------------- #
+
+    assigned_to: Optional[str] = Field(
+        None,
+        description="Staff user ID assigned to this lead"
+    )
+
+    # ---------------- CONVERSION ---------------- #
+
+    converted_client_id: Optional[str] = Field(
+        None,
+        description="Client ID created after lead conversion"
+    )
+
+    # ---------------- AI PROBABILITY ---------------- #
+
+    closure_probability: Optional[float] = Field(
+        None,
+        description="AI predicted probability of closing this lead"
+    )
 class LeadCreate(LeadBase):
     pass
 class LeadUpdate(BaseModel):
@@ -100,6 +190,22 @@ def calculate_closure_probability(notes: str) -> float:
     probability = max(0.0, min(1.0, 0.5 + score * 0.5)) # Scale to 0-1
     return round(probability * 100, 2) # Return as percentage
 # ====================== ROUTES ======================
+@router.get("/followups")
+async def get_due_followups(
+    current_user=Depends(get_current_user)
+):
+
+    now = datetime.now(timezone.utc)
+
+    leads = await db.leads.find(
+        {
+            "next_follow_up": {"$lte": now},
+            "status": {"$nin": ["won", "lost"]}
+        }
+    ).to_list(100)
+
+    return [normalize_lead_doc(l) for l in leads]
+    
 @router.post("/", response_model=Lead)
 async def create_lead(
     lead_data: LeadCreate,
@@ -197,13 +303,31 @@ async def convert_lead_to_client(
     lead_id: str,
     current_user=Depends(get_current_user),
 ):
+
+    # ---------------- VALIDATE LEAD ---------------- #
+
     obj_id = validate_obj_id(lead_id)
+
     lead = await db.leads.find_one({"_id": obj_id})
+
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Lead not found"
+        )
+
     if lead.get("converted_client_id"):
-        raise HTTPException(status_code=400, detail="Lead already converted")
+        raise HTTPException(
+            status_code=400,
+            detail="Lead already converted"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # ---------------- CREATE CLIENT ---------------- #
+
     client_id = str(uuid.uuid4())
+
     client_data = {
         "id": client_id,
         "company_name": lead["company_name"],
@@ -214,21 +338,71 @@ async def convert_lead_to_client(
         "client_type": "other",
         "assigned_to": lead.get("assigned_to") or current_user.id,
         "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "created_at": now,
+        "updated_at": now,
         "notes": f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}",
     }
+
     await db.clients.insert_one(client_data)
+
+    # ---------------- UPDATE LEAD STATUS ---------------- #
+
     await db.leads.update_one(
         {"_id": obj_id},
         {
             "$set": {
                 "status": "won",
                 "converted_client_id": client_id,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": now,
             }
         },
     )
+
+    # ---------------- CREATE ONBOARDING TASK ---------------- #
+
+    task = {
+        "id": str(uuid.uuid4()),
+        "title": f"Client Onboarding - {lead['company_name']}",
+        "description": "Lead converted to client. Start onboarding process.",
+        "assigned_to": lead.get("assigned_to") or current_user.id,
+        "status": "pending",
+        "priority": "medium",
+        "created_by": current_user.id,
+        "client_id": client_id,
+        "lead_id": str(obj_id),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.tasks.insert_one(task)
+
+    # ---------------- AUDIT LOG ---------------- #
+
+    await create_audit_log(
+        current_user=current_user,
+        action="LEAD_CONVERTED",
+        module="leads",
+        record_id=lead_id,
+        old_data=None,
+        new_data={"client_id": client_id},
+    )
+
+    # ---------------- CREATE NOTIFICATION ---------------- #
+
+    await create_notification(
+        user_id=lead.get("assigned_to") or current_user.id,
+        title="Lead Converted",
+        message=f"{lead['company_name']} has been converted to a client",
+        type="lead"
+    )
+
+    # ---------------- RESPONSE ---------------- #
+
+    return {
+        "status": "success",
+        "message": "Lead successfully converted to client",
+        "client_id": client_id,
+    }
     await create_audit_log(
         current_user=current_user,
         action="LEAD_CONVERTED",
