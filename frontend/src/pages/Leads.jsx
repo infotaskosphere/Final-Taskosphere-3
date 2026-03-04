@@ -51,6 +51,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   UserPlus,
   Phone,
@@ -78,6 +79,12 @@ import {
   TrendingUp,
   DollarSign,
   Users as UsersIcon,
+  AlertCircle,
+  Clock,
+  LogIn,
+  LogOut,
+  Key as KeyIcon,
+  CheckSquare,
 } from 'lucide-react';
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -104,7 +111,6 @@ const containerVariants = {
     transition: { staggerChildren: 0.06, delayChildren: 0.1 }
   }
 };
-
 const itemVariants = {
   hidden: { opacity: 0, y: 24 },
   visible: {
@@ -257,7 +263,7 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
     setFormData(prev => ({ ...prev, phone: formatPhone(prev.phone) }));
   };
   const handleServiceToggle = (value) => {
-    setSelectedServices(prev => 
+    setSelectedServices(prev =>
       prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
     );
   };
@@ -293,9 +299,9 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
             <div className="col-span-3 grid gap-2" disabled={!editMode}>
               {DEPARTMENTS.map(d => (
                 <div key={d.value} className="flex items-center gap-2">
-                  <Checkbox 
-                    id={d.value} 
-                    checked={selectedServices.includes(d.value)} 
+                  <Checkbox
+                    id={d.value}
+                    checked={selectedServices.includes(d.value)}
                     onCheckedChange={() => handleServiceToggle(d.value)}
                     disabled={!editMode}
                   />
@@ -303,19 +309,19 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
                 </div>
               ))}
               <div className="flex items-center gap-2">
-                <Checkbox 
-                  id="other" 
-                  checked={otherChecked} 
+                <Checkbox
+                  id="other"
+                  checked={otherChecked}
                   onCheckedChange={setOtherChecked}
                   disabled={!editMode}
                 />
                 <label htmlFor="other" className="text-sm text-slate-700">Other</label>
               </div>
               {otherChecked && (
-                <Input 
-                  value={otherValue} 
-                  onChange={(e) => setOtherValue(e.target.value)} 
-                  placeholder="Specify other service" 
+                <Input
+                  value={otherValue}
+                  onChange={(e) => setOtherValue(e.target.value)}
+                  placeholder="Specify other service"
                   className="mt-2 rounded-2xl"
                   disabled={!editMode}
                 />
@@ -425,6 +431,148 @@ function LeadDetailsModal({ lead, users, isOpen, onClose, onUpdate, onConvert, o
   );
 }
 // ─────────────────────────────────────────────────────────────
+// Lead Creation Modal
+// ─────────────────────────────────────────────────────────────
+function LeadCreateModal({ isOpen, onClose, users, onCreate }) {
+  const [formData, setFormData] = useState({ company_name: '', contact_name: '', phone: '', services: [], approx_quote: '', notes: '' });
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [otherChecked, setOtherChecked] = useState(false);
+  const [otherValue, setOtherValue] = useState('');
+  const [dateOfMeeting, setDateOfMeeting] = useState(undefined);
+  const [nextFollowUp, setNextFollowUp] = useState(undefined);
+  const [assignedTo, setAssignedTo] = useState('unassigned');
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+  const handlePhoneBlur = () => {
+    setFormData(prev => ({ ...prev, phone: formatPhone(prev.phone) }));
+  };
+  const handleServiceToggle = (value) => {
+    setSelectedServices(prev =>
+      prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
+    );
+  };
+  const handleSubmit = () => {
+    if (!formData.company_name) return toast.error('Company name required');
+    if (!formData.phone) return toast.error('Phone number required');
+    if (selectedServices.length === 0 && (!otherChecked || !otherValue)) return toast.error('At least one service required');
+    const services = [...selectedServices];
+    if (otherChecked && otherValue) services.push(otherValue);
+    onCreate({ ...formData, services, date_of_meeting: dateOfMeeting, next_follow_up: nextFollowUp, assigned_to: assignedTo === 'unassigned' ? null : assignedTo });
+    onClose();
+  };
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[600px] rounded-3xl">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>Add Lead</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Company*</Label>
+            <Input name="company_name" value={formData.company_name} onChange={handleChange} className="col-span-3 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Name</Label>
+            <Input name="contact_name" value={formData.contact_name} onChange={handleChange} className="col-span-3 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Number*</Label>
+            <Input name="phone" value={formData.phone} onChange={handleChange} onBlur={handlePhoneBlur} className="col-span-3 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label className="text-right pt-2 font-medium text-slate-700">Services*</Label>
+            <div className="col-span-3 grid gap-2">
+              {DEPARTMENTS.map(d => (
+                <div key={d.value} className="flex items-center gap-2">
+                  <Checkbox
+                    id={d.value}
+                    checked={selectedServices.includes(d.value)}
+                    onCheckedChange={() => handleServiceToggle(d.value)}
+                  />
+                  <label htmlFor={d.value} className="text-sm text-slate-700">{d.label}</label>
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="other"
+                  checked={otherChecked}
+                  onCheckedChange={setOtherChecked}
+                />
+                <label htmlFor="other" className="text-sm text-slate-700">Other</label>
+              </div>
+              {otherChecked && (
+                <Input
+                  value={otherValue}
+                  onChange={(e) => setOtherValue(e.target.value)}
+                  placeholder="Specify other service"
+                  className="mt-2 rounded-2xl"
+                />
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Approx Quote</Label>
+            <Input name="approx_quote" type="number" value={formData.approx_quote} onChange={handleChange} className="col-span-3 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Date of Meeting</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={"outline"}
+                  className={cn("col-span-3 justify-start text-left font-normal rounded-2xl", !dateOfMeeting && "text-muted-foreground")}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateOfMeeting ? format(dateOfMeeting, "PPP") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar mode="single" selected={dateOfMeeting} onSelect={setDateOfMeeting} initialFocus />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Assigned To</Label>
+            <Select value={assignedTo} onValueChange={setAssignedTo}>
+              <SelectTrigger className="col-span-3 rounded-2xl"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {users.map(u => <SelectItem key={u.id} value={u.id.toString()}>{u.full_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right font-medium text-slate-700">Next Follow-up</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={"outline"}
+                  className={cn("col-span-3 justify-start text-left font-normal rounded-2xl", !nextFollowUp && "text-muted-foreground")}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {nextFollowUp ? format(nextFollowUp, "PPP") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar mode="single" selected={nextFollowUp} onSelect={setNextFollowUp} initialFocus />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label className="text-right pt-2 font-medium text-slate-700">Notes</Label>
+            <Textarea name="notes" value={formData.notes} onChange={handleChange} className="col-span-3 min-h-[100px] rounded-2xl" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button className="rounded-2xl" onClick={handleSubmit}><Plus className="mr-2 h-4 w-4" /> Create Lead</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+// ─────────────────────────────────────────────────────────────
 // Client Creation Modal
 // ─────────────────────────────────────────────────────────────
 function ClientCreateModal({ isOpen, onClose, lead, onCreate }) {
@@ -462,7 +610,7 @@ function ClientCreateModal({ isOpen, onClose, lead, onCreate }) {
     setFormData(prev => ({ ...prev, phone: formatPhone(prev.phone) }));
   };
   const handleServiceToggle = (value) => {
-    setSelectedServices(prev => 
+    setSelectedServices(prev =>
       prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
     );
   };
@@ -507,27 +655,27 @@ function ClientCreateModal({ isOpen, onClose, lead, onCreate }) {
             <div className="col-span-3 grid gap-2">
               {DEPARTMENTS.map(d => (
                 <div key={d.value} className="flex items-center gap-2">
-                  <Checkbox 
-                    id={d.value} 
-                    checked={selectedServices.includes(d.value)} 
+                  <Checkbox
+                    id={d.value}
+                    checked={selectedServices.includes(d.value)}
                     onCheckedChange={() => handleServiceToggle(d.value)}
                   />
                   <label htmlFor={d.value} className="text-sm text-slate-700">{d.label}</label>
                 </div>
               ))}
               <div className="flex items-center gap-2">
-                <Checkbox 
-                  id="other" 
-                  checked={otherChecked} 
+                <Checkbox
+                  id="other"
+                  checked={otherChecked}
                   onCheckedChange={setOtherChecked}
                 />
                 <label htmlFor="other" className="text-sm text-slate-700">Other</label>
               </div>
               {otherChecked && (
-                <Input 
-                  value={otherValue} 
-                  onChange={(e) => setOtherValue(e.target.value)} 
-                  placeholder="Specify other service" 
+                <Input
+                  value={otherValue}
+                  onChange={(e) => setOtherValue(e.target.value)}
+                  placeholder="Specify other service"
                   className="mt-2 rounded-2xl"
                 />
               )}
@@ -746,7 +894,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status = task.status || 'pending';
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
-
   return (
     <motion.div
       whileHover={{ y: -6, scale: 1.01, transition: springPhysics.lift }}
@@ -767,7 +914,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
             {task.client_name ? ` – ${task.client_name}` : ''}
           </p>
         </div>
-
         {isToMe && (
           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
             {/* Start / In Progress */}
@@ -788,7 +934,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
             >
               {isInProgress ? '✓ In Progress' : 'Start'}
             </motion.button>
-
             {/* Done / Completed */}
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -810,7 +955,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
           </div>
         )}
       </div>
-
       {/* Meta Info */}
       <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
         <span>
@@ -836,23 +980,18 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-
   const [loading, setLoading] = useState(false);
   const [rankings, setRankings] = useState([]);
   const [rankingPeriod, setRankingPeriod] = useState("monthly");
-
   const [newTodo, setNewTodo] = useState('');
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
   const [mustPunchIn, setMustPunchIn] = useState(false);
-
   const { data: tasks = [] } = useTasks();
   const { data: stats } = useDashboardStats();
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
   const { data: todayAttendance } = useTodayAttendance();
-
   const updateTaskMutation = useUpdateTask();
-
   // Todos (personal)
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos"],
@@ -861,7 +1000,6 @@ export default function Dashboard() {
       return res.data;
     },
   });
-
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
@@ -869,23 +1007,19 @@ export default function Dashboard() {
     })),
     [todosRaw]
   );
-
   const tasksAssignedToMe = useMemo(() =>
     tasks
       .filter(t => t.assigned_to === user?.id && t.status !== "completed")
       .slice(0, 6),
     [tasks, user?.id]
   );
-
   const tasksAssignedByMe = useMemo(() =>
     tasks
       .filter(t => t.created_by === user?.id && t.assigned_to !== user?.id)
       .slice(0, 6),
     [tasks, user?.id]
   );
-
   const recentTasks = useMemo(() => tasks.slice(0, 5), [tasks]);
-
   // Rankings (star performers)
   useEffect(() => {
     async function fetchRankings() {
@@ -902,8 +1036,7 @@ export default function Dashboard() {
     }
     fetchRankings();
   }, [rankingPeriod]);
-
-  // ── Mutations 
+  // ── Mutations
   const createTodo = useMutation({
     mutationFn: data => api.post("/todos", data),
     onSuccess: () => {
@@ -912,12 +1045,10 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to add todo"),
   });
-
   const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: newStatus === "completed" }),
+    mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { status }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
   });
-
   const deleteTodo = useMutation({
     mutationFn: id => api.delete(`/todos/${id}`),
     onSuccess: () => {
@@ -926,7 +1057,6 @@ export default function Dashboard() {
     },
     onError: () => toast.error("Failed to delete todo"),
   });
-
   // ── Handlers ────────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
@@ -938,18 +1068,15 @@ export default function Dashboard() {
     setNewTodo("");
     setSelectedDueDate(undefined);
   };
-
   const handleToggleTodo = (id) => {
     const todo = todosRaw.find(t => t.id === id || t._id === id);
     if (!todo) return;
     const newStatus = todo.status === "completed" ? "pending" : "completed";
     updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
   };
-
   const handleDeleteTodo = (id) => {
     deleteTodo.mutate(id);
   };
-
   const updateAssignedTaskStatus = (taskId, newStatus) => {
     updateTaskMutation.mutate(
       {
@@ -977,22 +1104,18 @@ export default function Dashboard() {
     setLoading(true);
     try {
       await api.post('/attendance', { action });
-
       toast.success(
         action === 'punch_in'
           ? 'Punched in successfully!'
           : 'Punched out successfully!'
       );
-
       queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
-
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Attendance action failed');
     } finally {
       setLoading(false);
     }
   };
-
   // ── Utility Helpers ─────────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
@@ -1005,22 +1128,17 @@ export default function Dashboard() {
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
   };
-
   const completionRate = stats?.total_tasks > 0
     ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
     : 0;
-
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) =>
         prev.days_remaining < curr.days_remaining ? prev : curr
       )
     : null;
-
   const isAdmin = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
-
   const getStatusStyle = (status) => {
     const styles = {
       completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -1029,7 +1147,6 @@ export default function Dashboard() {
     };
     return styles[status] || styles.pending;
   };
-
   const getPriorityStyle = (priority) => {
     const styles = {
       high: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
@@ -1038,35 +1155,30 @@ export default function Dashboard() {
     };
     return styles[priority?.toLowerCase()] || styles.medium;
   };
-
   const getDeadlineColor = (daysLeft) => {
     if (daysLeft <= 0) return { bg: 'bg-red-50 border-red-200 hover:bg-red-100', badge: 'bg-red-500 text-white', text: 'text-red-600' };
     if (daysLeft <= 7) return { bg: 'bg-orange-50 border-orange-200 hover:bg-orange-100', badge: 'bg-orange-500 text-white', text: 'text-orange-600' };
     if (daysLeft <= 15) return { bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', badge: 'bg-yellow-500 text-white', text: 'text-yellow-600' };
     return { bg: 'bg-green-50 border-green-200 hover:bg-green-100', badge: 'bg-green-600 text-white', text: 'text-green-700' };
   };
-
   // ── Ranking Item (Memoized) ─────────────────────────────────────────────────
   const RankingItem = React.memo(({ member, index, period }) => {
     const rank = index + 1;
     const isTop = index === 0;
     const isSecond = index === 1;
     const isThird = index === 2;
-
     const getMedal = () => {
       if (isTop) return '🥇';
       if (isSecond) return '🥈';
       if (isThird) return '🥉';
       return `#${rank}`;
     };
-
     const getBgClass = () => {
       if (isTop) return "bg-gradient-to-r from-yellow-100 via-amber-50 to-yellow-50 border-yellow-300 shadow-md";
       if (isSecond) return "bg-gradient-to-r from-slate-200 via-slate-100 to-gray-200 border-slate-300";
       if (isThird) return "bg-gradient-to-r from-amber-200 via-amber-100 to-orange-200 border-amber-300";
       return "bg-slate-50 border-slate-200 hover:bg-slate-100";
     };
-
     return (
       <motion.div
         whileHover={{ y: -4, scale: 1.01, transition: springPhysics.lift }}
@@ -1112,28 +1224,24 @@ export default function Dashboard() {
   });
   const getGreeting = () => {
     const hour = new Date().getHours();
-
     if (hour < 12) return "Good Morning ☀️";
     if (hour < 17) return "Good Afternoon 🌤️";
     if (hour < 21) return "Good Evening 🌆";
     return "Working Late? 🌙";
   };
-
 useEffect(() => {
-  
+ 
   if (!todayAttendance) {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
-
   // 2. If user is on leave → no gate
   if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
-
   // 3. Only show gate if we have a valid response and punch_in is missing
   if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
     setMustPunchIn(true);
@@ -1142,7 +1250,6 @@ useEffect(() => {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
   }
-
   return () => {
     document.body.style.overflow = "auto";
   };
@@ -1174,7 +1281,6 @@ useEffect(() => {
                   Here's what's happening today — {format(new Date(), 'MMMM d, yyyy')}
                 </p>
               </div>
-
               {nextDeadline && (
                 <motion.div
                   whileHover={{ scale: 1.02, y: -2, transition: springPhysics.card }}
@@ -1197,7 +1303,6 @@ useEffect(() => {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Key Metrics */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4" variants={itemVariants}>
         {/* Total Tasks */}
@@ -1225,7 +1330,6 @@ useEffect(() => {
             </div>
           </CardContent>
         </motion.div>
-
         {/* Overdue Tasks */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01 }}
@@ -1251,7 +1355,6 @@ useEffect(() => {
             </div>
           </CardContent>
         </motion.div>
-
         {/* Completion Rate */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01 }}
@@ -1277,7 +1380,6 @@ useEffect(() => {
             </div>
           </CardContent>
         </motion.div>
-
         {/* DSC Alerts */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01 }}
@@ -1297,7 +1399,7 @@ useEffect(() => {
                 </p>
               </div>
               <div className="p-3 rounded-2xl bg-red-100 group-hover:scale-125 transition-transform">
-                <Key className="h-6 w-6 text-red-600" />
+                <KeyIcon className="h-6 w-6 text-red-600" />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-4 text-xs text-slate-500 group-hover:text-slate-700">
@@ -1306,7 +1408,6 @@ useEffect(() => {
             </div>
           </CardContent>
         </motion.div>
-
         {/* Today's Attendance */}
         <motion.div
           whileHover={{ y: -5, scale: 1.01 }}
@@ -1333,7 +1434,6 @@ useEffect(() => {
           </CardContent>
         </motion.div>
       </motion.div>
-
       {/* Recent Tasks + Deadlines + Attendance */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-4" variants={itemVariants}>
         {/* Recent Tasks */}
@@ -1387,7 +1487,6 @@ useEffect(() => {
             )}
           </CardContent>
         </Card>
-
         {/* Upcoming Deadlines */}
         <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
           <CardHeader className="pb-4 border-b px-6">
@@ -1438,7 +1537,6 @@ useEffect(() => {
             )}
           </CardContent>
         </Card>
-
         {/* Attendance */}
         <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
           <CardHeader className="pb-4 border-b px-6">
@@ -1464,7 +1562,6 @@ useEffect(() => {
                     </div>
                     <span className="font-medium">{format(new Date(todayAttendance.punch_in), 'hh:mm a')}</span>
                   </div>
-
                   {todayAttendance.punch_out ? (
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2 text-slate-600">
@@ -1482,7 +1579,6 @@ useEffect(() => {
                       Punch Out
                     </Button>
                   )}
-
                   <div className="text-center py-4 bg-slate-50 rounded-2xl">
                     <p className="text-sm text-slate-500">Total Hours Today</p>
                     <p className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>
@@ -1503,7 +1599,6 @@ useEffect(() => {
           </CardContent>
         </Card>
       </motion.div>
-
       {/* Assigned Tasks – Two Columns */}
       {showTaskSection && (
         <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1552,7 +1647,6 @@ useEffect(() => {
               )}
             </CardContent>
           </Card>
-
           {/* Tasks Assigned by Me */}
           <Card
             className="flex flex-col border-slate-100 shadow-sm rounded-3xl overflow-hidden cursor-pointer hover:shadow-xl transition group"
@@ -1600,7 +1694,6 @@ useEffect(() => {
           </Card>
         </motion.div>
       )}
-
       {/* Star Performers + To-Do List */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Star Performers */}
@@ -1650,7 +1743,6 @@ useEffect(() => {
             )}
           </CardContent>
         </Card>
-
         {/* My To-Do List */}
         <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
           <CardHeader className="pb-4 border-b px-6">
@@ -1703,7 +1795,6 @@ useEffect(() => {
                 </span>
               )}
             </div>
-
             {todos.length === 0 ? (
               <div className="text-center py-10 text-slate-400 text-sm">No todos yet</div>
             ) : (
@@ -1760,7 +1851,6 @@ useEffect(() => {
           </CardContent>
         </Card>
       </motion.div>
-
 <AnimatePresence>
   {mustPunchIn && (
     <motion.div
@@ -1784,11 +1874,9 @@ useEffect(() => {
         >
           {getGreeting()}
         </motion.h2>
-
         <p className="text-slate-500 mb-8">
           Please punch in to begin your workday.
         </p>
-
 <motion.div
   initial={{ y: 0 }}
   animate={{ y: [0, -2, 0] }}
@@ -1807,7 +1895,6 @@ useEffect(() => {
     {loading ? "Punching In..." : "Punch In"}
   </Button>
 </motion.div>
-
 <div className="mt-4">
   <Button
     variant="secondary"
@@ -1816,11 +1903,8 @@ useEffect(() => {
       setLoading(true);
       try {
         await api.post("/attendance/mark-leave-today");
-
         toast.success("Marked on leave today");
-
         queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
-
         setMustPunchIn(false);
         document.body.style.overflow = "auto";
       } catch (err) {
