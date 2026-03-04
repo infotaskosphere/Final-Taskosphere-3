@@ -2958,11 +2958,7 @@ async def create_holiday(
         raise HTTPException(status_code=400, detail="Holiday already exists for this date")
     await db.holidays.insert_one(holiday_dict)
     return holiday_dict
-# Api Router
-api_router.include_router(telegram_router)
-api_router.include_router(leads_router)
-api_router.include_router(notification_router)
-app.include_router(api_router)
+
 import traceback
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
@@ -2978,3 +2974,9 @@ async def universal_exception_handler(request: Request, exc: Exception):
             "path": request.url.path
         }
     )
+# Api Router
+api_router.include_router(telegram_router)
+api_router.include_router(leads_router) 
+api_router.include_router(notification_router)
+
+app.include_router(api_router)
