@@ -883,7 +883,7 @@ export default function Attendance() {
                     <div>
                       <p className="text-sm text-slate-600">Total Duration</p>
                       <p className="text-3xl font-bold text-blue-700">
-                        {Math.max(1, leaveTo ? Math.ceil((leaveTo - leaveFrom) / 86400000) + 1 : 1)}
+                        {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)}
                         <span className="text-xl font-normal"> days</span>
                       </p>
                     </div>
