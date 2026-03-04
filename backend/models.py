@@ -4,19 +4,109 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
 from enum import Enum
-
 # Timezone Configuration
 india_tz = timezone(timedelta(hours=5, minutes=30))
-
 # ────────────────────────────────────────────────
-#                   ROLE ENUM
+# ROLE ENUM
 # ────────────────────────────────────────────────
 class UserRole(str, Enum):
     admin = "admin"
     manager = "manager"
     staff = "staff"
+# ────────────────────────────────────────────────
+#           DEFAULT ROLE PERMISSION TEMPLATES
+# ────────────────────────────────────────────────
+# These templates are used when a new user is created.
+# Server logic should copy these values into User.permissions
+# depending on the role selected.
 
+DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 
+    "admin": {
+        "can_view_all_tasks": True,
+        "can_view_all_clients": True,
+        "can_view_all_dsc": True,
+        "can_view_documents": True,
+        "can_view_all_duedates": True,
+        "can_view_reports": True,
+        "can_manage_users": True,
+        "can_assign_tasks": True,
+        "can_view_staff_activity": True,
+        "can_view_attendance": True,
+        "can_send_reminders": True,
+        "can_view_user_page": True,
+        "can_view_audit_logs": True,
+        "can_edit_tasks": True,
+        "can_edit_dsc": True,
+        "can_edit_documents": True,
+        "can_edit_due_dates": True,
+        "can_edit_users": True,
+        "can_download_reports": True,
+        "can_view_selected_users_reports": True,
+        "can_view_todo_dashboard": True,
+        "can_edit_clients": True,
+        "can_use_chat": True,
+        "can_view_all_leads": True,
+        "can_manage_settings": True
+    },
+
+    "manager": {
+        "can_view_all_tasks": False,
+        "can_view_all_clients": False,
+        "can_view_all_dsc": False,
+        "can_view_documents": True,
+        "can_view_all_duedates": False,
+        "can_view_reports": False,
+        "can_manage_users": False,
+        "can_assign_tasks": True,
+        "can_view_staff_activity": True,
+        "can_view_attendance": True,
+        "can_send_reminders": False,
+        "can_view_user_page": False,
+        "can_view_audit_logs": False,
+        "can_edit_tasks": True,
+        "can_edit_dsc": False,
+        "can_edit_documents": False,
+        "can_edit_due_dates": True,
+        "can_edit_users": False,
+        "can_download_reports": True,
+        "can_view_selected_users_reports": True,
+        "can_view_todo_dashboard": True,
+        "can_edit_clients": False,
+        "can_use_chat": True,
+        "can_view_all_leads": False,
+        "can_manage_settings": False
+    },
+
+    "staff": {
+        "can_view_all_tasks": False,
+        "can_view_all_clients": False,
+        "can_view_all_dsc": False,
+        "can_view_documents": False,
+        "can_view_all_duedates": False,
+        "can_view_reports": False,
+        "can_manage_users": False,
+        "can_assign_tasks": False,
+        "can_view_staff_activity": False,
+        "can_view_attendance": False,
+        "can_send_reminders": False,
+        "can_view_user_page": False,
+        "can_view_audit_logs": False,
+        "can_edit_tasks": False,
+        "can_edit_dsc": False,
+        "can_edit_documents": False,
+        "can_edit_due_dates": False,
+        "can_edit_users": False,
+        "can_download_reports": False,
+        "can_view_selected_users_reports": False,
+        "can_view_todo_dashboard": True,
+        "can_edit_clients": False,
+        "can_use_chat": True,
+        "can_view_all_leads": False,
+        "can_manage_settings": False
+    }
+
+}
 # ======================
 # CORE USER & PERMISSIONS
 # ======================
@@ -28,13 +118,11 @@ class UserPermissions(BaseModel):
     can_view_all_duedates: bool = False
     can_view_reports: bool = False
     can_manage_users: bool = False
-    can_assign_tasks: bool = False             # Can staff member assign tasks to others
+    can_assign_tasks: bool = False # Can staff member assign tasks to others
     can_view_staff_activity: bool = False
     can_view_attendance: bool = False
     can_send_reminders: bool = False
-
     assigned_clients: List[str] = Field(default_factory=list)
-
     can_view_user_page: bool = False
     can_view_audit_logs: bool = False
     can_edit_tasks: bool = False
@@ -45,24 +133,19 @@ class UserPermissions(BaseModel):
     can_download_reports: bool = False
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
-
     # Cross User Viewing
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
     view_other_todos: List[str] = Field(default_factory=list)
     view_other_activity: List[str] = Field(default_factory=list)
-
     # Admin-like Feature Grants
     can_edit_clients: bool = False
     can_use_chat: bool = False
     can_view_all_leads: bool = False
     can_manage_settings: bool = False
-
-
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     id: str
     email: str
     full_name: Optional[str] = None
@@ -79,15 +162,12 @@ class User(BaseModel):
     permissions: UserPermissions = Field(default_factory=UserPermissions)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
-
     @field_validator('birthday', mode='before')
     @classmethod
     def empty_string_to_none(cls, v):
         if v == "" or v is None:
             return None
         return v
-
-
 class UserCreate(BaseModel):
     full_name: str
     email: Optional[str] = None
@@ -103,8 +183,6 @@ class UserCreate(BaseModel):
     profile_picture: Optional[str] = None
     is_active: bool = True
     permissions: Dict[str, Any] = {}
-
-
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
@@ -116,21 +194,14 @@ class UserUpdate(BaseModel):
     punch_out_time: Optional[str] = None
     is_active: Optional[bool] = True
     profile_picture: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
-
-
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: User
-
-
 # ======================
 # TODOS & TASKS
 # ======================
@@ -145,22 +216,18 @@ class Todo(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
     completed_at: Optional[datetime] = None
-
-
 class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[datetime] = None
-
-
 class TaskBase(BaseModel):
     title: str
     description: Optional[str] = None
     assigned_to: Optional[str] = None
     sub_assignees: List[str] = Field(default_factory=list)
     due_date: Optional[datetime] = None
-    priority: str = "medium"                    # low, medium, high
-    status: str = "pending"                     # pending, in_progress, completed
+    priority: str = "medium" # low, medium, high
+    status: str = "pending" # pending, in_progress, completed
     category: str = "other"
     client_id: Optional[str] = None
     is_recurring: bool = False
@@ -168,16 +235,10 @@ class TaskBase(BaseModel):
     recurrence_interval: Optional[int] = 1
     recurrence_end_date: Optional[datetime] = None
     type: Optional[str] = None
-
-
 class TaskCreate(TaskBase):
     pass
-
-
 class BulkTaskCreate(BaseModel):
     tasks: List[TaskCreate]
-
-
 class Task(TaskBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -185,8 +246,6 @@ class Task(TaskBase):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     parent_task_id: Optional[str] = None
-
-
 # ======================
 # ATTENDANCE & ACTIVITY
 # ======================
@@ -200,17 +259,11 @@ class Attendance(BaseModel):
     punch_out: Optional[datetime] = None
     duration_minutes: Optional[int] = 0
     leave_reason: Optional[str] = None
-
-
 class AttendanceBase(BaseModel):
     punch_in: datetime
     punch_out: Optional[datetime] = None
-
-
 class AttendanceCreate(BaseModel):
-    action: str  # "punch_in" or "punch_out"
-
-
+    action: str # "punch_in" or "punch_out"
 class StaffActivityLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -220,8 +273,6 @@ class StaffActivityLog(BaseModel):
     category: str = "other"
     duration_seconds: int = 0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class StaffActivityCreate(BaseModel):
     app_name: Optional[str] = None
     window_title: Optional[str] = None
@@ -229,8 +280,6 @@ class StaffActivityCreate(BaseModel):
     category: Optional[str] = "other"
     duration_seconds: Optional[int] = 0
     idle: Optional[bool] = False
-
-
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -238,13 +287,9 @@ class ActivityLog(BaseModel):
     date: str
     screen_time_minutes: int = 0
     tasks_completed: int = 0
-
-
 class ActivityLogUpdate(BaseModel):
     screen_time_minutes: Optional[int] = None
     tasks_completed: Optional[int] = None
-
-
 # ======================
 # DSC MANAGEMENT
 # ======================
@@ -261,46 +306,32 @@ class DSCBase(BaseModel):
     taken_by: Optional[str] = None
     taken_date: Optional[datetime] = None
     movement_log: List[dict] = Field(default_factory=list)
-
-
 class DSCCreate(DSCBase):
     pass
-
-
 class DSC(DSCBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class DSCMovement(BaseModel):
     movement_type: str
     person_name: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
-
-
 class DSCListResponse(BaseModel):
     data: List[DSC]
     total: int
     page: int
     limit: int
-
-
 class DSCMovementRequest(BaseModel):
     movement_type: str
     person_name: str
     notes: Optional[str] = None
-
-
 class MovementUpdateRequest(BaseModel):
     movement_id: str
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
-
-
 # ======================
 # DOCUMENT MANAGEMENT
 # ======================
@@ -316,39 +347,27 @@ class DocumentBase(BaseModel):
     current_status: str = "IN"
     current_location: str = "with_company"
     movement_log: List[dict] = Field(default_factory=list)
-
-
 class DocumentCreate(DocumentBase):
     pass
-
-
 class Document(DocumentBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class DocumentMovement(BaseModel):
     movement_type: str
     person_name: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
-
-
 class DocumentMovementRequest(BaseModel):
     movement_type: str
     person_name: str
     notes: Optional[str] = None
-
-
 class DocumentMovementUpdateRequest(BaseModel):
     movement_id: str
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
-
-
 # ======================
 # CLIENT MANAGEMENT
 # ======================
@@ -359,16 +378,12 @@ class ContactPerson(BaseModel):
     designation: Optional[str] = None
     birthday: Optional[date] = None
     din: Optional[str] = None
-
-
 class ClientDSC(BaseModel):
     certificate_number: str
     holder_name: str
     issue_date: date
     expiry_date: date
     notes: Optional[str] = None
-
-
 class ClientBase(BaseModel):
     company_name: str = Field(..., min_length=3, max_length=255)
     client_type: str = Field(
@@ -384,7 +399,6 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
-
     @field_validator('phone')
     @classmethod
     def validate_phone(cls, v: str) -> str:
@@ -396,7 +410,6 @@ class ClientBase(BaseModel):
         if not (10 <= len(cleaned) <= 15):
             raise ValueError('Phone number must be 10-15 digits')
         return v
-
     @field_validator('company_name')
     @classmethod
     def validate_company_name(cls, v: str) -> str:
@@ -404,19 +417,13 @@ class ClientBase(BaseModel):
         if len(v) < 3:
             raise ValueError('Company name must be at least 3 characters long')
         return v
-
-
 class ClientCreate(ClientBase):
     pass
-
-
 class Client(ClientBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class MasterClientForm(BaseModel):
     company_name: str
     client_type: str
@@ -430,7 +437,6 @@ class MasterClientForm(BaseModel):
     services: List[str] = Field(default_factory=list)
     contact_persons: List[Any] = Field(default_factory=list)
     notes: Optional[str] = None
-
     @model_validator(mode='before')
     @classmethod
     def clean_empty_strings(cls, data: Any) -> Any:
@@ -439,8 +445,6 @@ class MasterClientForm(BaseModel):
                 if v == "":
                     data[k] = None
         return data
-
-
 # ======================
 # DUE DATES & REMINDERS
 # ======================
@@ -454,40 +458,28 @@ class DueDateBase(BaseModel):
     assigned_to: Optional[str] = None
     client_id: Optional[str] = None
     status: str = "pending"
-
-
 class DueDateCreate(DueDateBase):
     pass
-
-
 class DueDate(DueDateBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class BirthdayEmailRequest(BaseModel):
     client_id: str
-
-
 # ======================
 # NOTIFICATIONS & AUDIT
 # ======================
 class NotificationBase(BaseModel):
     title: str
     message: str
-    type: str  # "task", "dsc", "system"
-
-
+    type: str # "task", "dsc", "system"
 class Notification(NotificationBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     is_read: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class AuditLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -498,8 +490,6 @@ class AuditLog(BaseModel):
     old_data: Optional[dict] = None
     new_data: Optional[dict] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 # ======================
 # DASHBOARD & METRICS
 # ======================
@@ -517,8 +507,6 @@ class DashboardStats(BaseModel):
     team_workload: List[dict]
     compliance_status: dict
     expired_dsc_count: int = 0
-
-
 class PerformanceMetric(BaseModel):
     user_id: str
     user_name: str
@@ -531,8 +519,6 @@ class PerformanceMetric(BaseModel):
     overall_score: float = 0.0
     rank: int = 0
     badge: str = "Good Performer"
-
-
 # ======================
 # HOLIDAY MODELS
 # ======================
@@ -540,8 +526,6 @@ class HolidayCreate(BaseModel):
     date: date
     name: str
     description: Optional[str] = None
-
-
 class HolidayResponse(BaseModel):
     date: date
     name: str
