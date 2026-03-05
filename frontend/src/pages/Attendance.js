@@ -347,16 +347,30 @@ export default function Attendance() {
     ? todayAttendance
     : attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
-  const CustomDay = ({ date, ...props }) => {
+  const CustomDay = ({ date, displayMonth, ...props }) => {
     const status = getDateStatus(date);
+  
+    // Extract the actual day number (1, 2, 3...) from the date object
+    const dayNumber = date.getDate();
+
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <button {...props} />
+          {/* MUST include {dayNumber} inside the button tags */}
+          <button 
+            {...props} 
+            className={`${props.className} relative w-full h-full flex items-center justify-center min-h-[40px] transition-all hover:bg-slate-100 rounded-lg`}
+          >
+            {dayNumber} 
+          </button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{format(date, 'MMMM d, yyyy')}</p>
-          <p className="font-medium">{status}</p>
+          <div className="text-xs">
+             <p className="font-bold border-b border-slate-200 pb-1 mb-1">
+               {format(date, 'MMMM d, yyyy')}
+             </p>
+             <p className="font-medium text-blue-600">{status}</p>
+          </div>
         </TooltipContent>
       </Tooltip>
     );
