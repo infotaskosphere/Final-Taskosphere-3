@@ -9,6 +9,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import api from '@/lib/api';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
 import {
   format,
   startOfMonth,
@@ -349,19 +350,17 @@ export default function Attendance() {
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
   const CustomDay = ({ date, displayMonth, ...props }) => {
     const status = getDateStatus(date);
-  
     // Extract the actual day number (1, 2, 3...) from the date object
     const dayNumber = date.getDate();
-
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           {/* MUST include {dayNumber} inside the button tags */}
-          <button 
-            {...props} 
+          <button
+            {...props}
             className={`${props.className} relative w-full h-full flex items-center justify-center min-h-[40px] transition-all hover:bg-slate-100 rounded-lg`}
           >
-            {dayNumber} 
+            {dayNumber}
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -380,6 +379,52 @@ export default function Attendance() {
     setLeaveTo(selectedDate);
     setShowLeaveForm(true);
   };
+  // Attendance Analytics Computations
+  const totalMinutesYTD = attendanceHistory.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) + (todayAttendance?.duration_minutes || 0);
+  const averageDailyMinutes = attendanceHistory.length > 0 ? totalMinutesYTD / (attendanceHistory.length + (todayAttendance ? 1 : 0)) : 0;
+  const attendancePercentage = ((attendanceHistory.length + (todayAttendance?.punch_in ? 1 : 0)) / (new Date().getDate())) * 100; // Simplified for current month
+  // Export Attendance Summary to PDF
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const brandColor = "#0D3B66";
+   
+    // Header
+    doc.setFillColor(13, 59, 102); // COLORS.deepBlue
+    doc.rect(0, 0, 210, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text('TASKOSPHERE ATTENDANCE REPORT', 10, 13);
+   
+    // Body Text
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.text(`Employee: ${user?.name || 'Staff Member'}`, 10, 30);
+    doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 40);
+   
+    // Stats Box
+    doc.setDrawColor(200, 200, 200);
+    doc.line(10, 45, 200, 45);
+    doc.text(`Total Monthly Hours: ${mySummary?.current_month?.total_hours || '0h 0m'}`, 10, 55);
+    doc.text(`Days Present: ${monthDaysPresent}`, 10, 65);
+    doc.text(`Late Arrivals: ${totalDaysLateThisMonth}`, 10, 75);
+    doc.line(10, 80, 200, 80);
+   
+    doc.setFont(undefined, 'bold');
+    doc.text('Detailed Logs (Last 15 Records):', 10, 95);
+    doc.setFont(undefined, 'normal');
+   
+    let y = 105;
+    attendanceHistory.slice(0, 15).forEach((record, index) => {
+      const dateStr = format(parseISO(record.date), 'MMM d, yyyy');
+      const timeStr = `${record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '--'} to ${record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}`;
+      doc.text(`${index + 1}. ${dateStr}`, 10, y);
+      doc.text(timeStr, 60, y);
+      doc.text(formatDuration(record.duration_minutes), 160, y);
+      y += 10;
+    });
+   
+    doc.save(`Attendance_${format(selectedDate, 'MMM_yyyy')}.pdf`);
+  };
   // ─── JSX Render ──────────────────────────────────────────────
   return (
     <TooltipProvider>
@@ -395,6 +440,9 @@ export default function Attendance() {
             <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>My Attendance</h1>
             <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
           </div>
+          <Button onClick={handleExportPDF} variant="outline">
+            Export PDF
+          </Button>
         </motion.div>
         {/* Today's / Selected Date Status Card */}
         <motion.div variants={itemVariants}>
@@ -646,119 +694,128 @@ export default function Attendance() {
             </CardContent>
           </Card>
         </motion.div>
-        {/* Calendar + History */}
-        <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={itemVariants}>
-          {/* Calendar */}
-          <Card className="border border-slate-200 shadow-sm lg:col-span-1">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                  <CalendarIcon className="h-5 w-5" /> Attendance Calendar
-                </CardTitle>
-                <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
-                  Today
-                </Button>
-              </div>
-              <CardDescription>Click date for details • Hover for info</CardDescription>
+        {/* Attendance Analytics Dashboard */}
+        <motion.div variants={itemVariants}>
+          <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                <TrendingUp className="h-5 w-5" /> Attendance Analytics Dashboard
+              </CardTitle>
+              <CardDescription>Year-to-Date Insights and Trends</CardDescription>
             </CardHeader>
-            <CardContent className="p-4">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={(date) => date && setSelectedDate(date)}
-                modifiers={modifiers}
-                modifiersStyles={modifiersStyles}
-                components={{ Day: CustomDay }}
-                className="rounded-xl border"
-                showOutsideDays={false}
-              />
-              {/* Legend */}
-              <div className="flex flex-wrap gap-x-6 gap-y-2 mt-6 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }} />
-                  <span>Present</span>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl p-5 border shadow-sm">
+                  <p className="text-xs text-slate-500 uppercase">Total Hours YTD</p>
+                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
+                    {formatDuration(totalMinutesYTD)}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500" />
-                  <span>Late</span>
+                <div className="bg-white rounded-xl p-5 border shadow-sm">
+                  <p className="text-xs text-slate-500 uppercase">Average Daily Hours</p>
+                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
+                    {formatDuration(averageDailyMinutes)}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#DAA520' }} />
-                  <span>Holiday</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full ring-2 ring-blue-500 ring-offset-2" style={{ backgroundColor: COLORS.deepBlue }} />
-                  <span>Today</span>
+                <div className="bg-white rounded-xl p-5 border shadow-sm">
+                  <p className="text-xs text-slate-500 uppercase">Attendance % (This Month)</p>
+                  <p className="text-2xl font-bold mt-1 text-blue-500">
+                    {attendancePercentage.toFixed(1)}%
+                  </p>
                 </div>
               </div>
-              {/* Selected Day Info */}
-              {selectedAttendance ? (
-                <div className="mt-6 p-5 rounded-2xl bg-slate-50 border border-slate-200">
-                  <p className="font-semibold text-slate-700 mb-4 text-lg">
-                    {format(selectedDate, 'EEEE, MMMM d')}
-                  </p>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Punch In</span>
-                      <span className="font-medium">
-                        {formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
-                      </span>
-                    </div>
-                    {selectedAttendance.punch_out && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-600">Punch Out</span>
-                        <span className="font-medium">
-                          {formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}
-                        </span>
-                      </div>
-                    )}
-                    <div className="pt-3 border-t flex justify-between items-center">
-                      <span className="font-medium">Duration</span>
-                      <Badge className="text-base px-3 py-1">
-                        {formatDuration(selectedAttendance.duration_minutes)}
-                      </Badge>
-                    </div>
-                    {selectedAttendance.is_late && (
-                      <Badge variant="destructive" className="mt-2">Late Arrival</Badge>
-                    )}
-                  </div>
-                </div>
-              ) : selectedHoliday ? (
-                <div className="mt-6 p-5 rounded-2xl bg-yellow-50 border border-yellow-200 text-center">
-                  <p className="text-yellow-700 font-medium">Holiday — {selectedHoliday.name}</p>
-                </div>
-              ) : (
-                <div className="mt-6 p-5 rounded-2xl bg-red-50 border border-red-100 text-center">
-                  <p className="text-red-600 font-medium">No record — Absent</p>
-                </div>
-              )}
-              {canViewRankings && isSelectedFuture && !selectedHoliday && (
-                <Button onClick={handleAddHoliday} className="mt-4 w-full" variant="outline">
-                  Add Holiday
-                </Button>
-              )}
+              <div className="mt-6 p-4 bg-slate-50 rounded-xl border text-center text-slate-500 text-sm italic">
+                Analytics are calculated based on your historical punch records.
+              </div>
             </CardContent>
           </Card>
-          {/* Recent History */}
-          <Card className="border border-slate-200 shadow-sm lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-lg" style={{ color: COLORS.deepBlue }}>Recent Attendance</CardTitle>
-            </CardHeader>
+        </motion.div>
+        {/* Calendar + History Container */}
+        <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-6" variants={itemVariants}>
+         
+          {/* Calendar & Selection Sidebar */}
+          <div className="xl:col-span-1 space-y-6">
+            <Card className="border border-slate-200 shadow-sm h-fit">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                    <CalendarIcon className="h-5 w-5" /> Attendance Calendar
+                  </CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
+                    Today
+                  </Button>
+                </div>
+                <CardDescription>Click date for details • Hover for info</CardDescription>
+              </CardHeader>
+             
+              <CardContent className="p-4">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => date && setSelectedDate(date)}
+                  modifiers={modifiers}
+                  modifiersStyles={modifiersStyles}
+                  components={{ Day: CustomDay }}
+                  className="rounded-xl border w-full flex justify-center shadow-sm"
+                  showOutsideDays={true}
+                  fixedWeeks
+                  classNames={{
+                    months: "w-full",
+                    month: "w-full space-y-4",
+                    table: "w-full border-collapse",
+                    head_row: "flex w-full justify-between mb-2",
+                    head_cell: "text-muted-foreground rounded-md w-9 font-medium text-[0.8rem] text-center",
+                    row: "flex w-full mt-2 justify-between",
+                    cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20",
+                    day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 hover:bg-slate-100 rounded-md transition-all flex items-center justify-center",
+                    day_today: "bg-slate-100 text-accent-foreground font-bold",
+                  }}
+                />
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-[11px] justify-center border-t pt-4">
+                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }} /><span>Present</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span>Late</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#DAA520' }} /><span>Holiday</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full ring-2 ring-blue-500 ring-offset-1" style={{ backgroundColor: COLORS.deepBlue }} /><span>Today</span></div>
+                </div>
+              </CardContent>
+            </Card>
+            {/* Selected Day Info Card */}
+            <Card className="border border-slate-200 shadow-sm overflow-hidden">
+                <CardContent className="p-0">
+                  {selectedAttendance ? (
+                    <div className="p-5 bg-slate-50 border-l-4 border-blue-500">
+                      <p className="font-bold text-slate-700 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d')}</p>
+                      <div className="space-y-3 text-sm">
+                        <div className="flex justify-between"><span className="text-slate-500">Punch In</span><span className="font-mono font-bold">{formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}</span></div>
+                        {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-500">Punch Out</span><span className="font-mono font-bold">{formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}</span></div>}
+                        <div className="pt-3 border-t flex justify-between items-center"><span className="font-bold">Total Duration</span><Badge className="px-3 py-1 font-mono">{formatDuration(selectedAttendance.duration_minutes)}</Badge></div>
+                      </div>
+                    </div>
+                  ) : selectedHoliday ? (
+                    <div className="p-5 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 text-sm font-medium">Holiday: {selectedHoliday.name}</div>
+                  ) : (
+                    <div className="p-5 bg-red-50 border-l-4 border-red-400 text-red-600 text-sm font-medium">No record / Absent for {format(selectedDate, 'MMM d')}</div>
+                  )}
+                </CardContent>
+            </Card>
+          </div>
+          {/* Recent History Table */}
+          <Card className="border border-slate-200 shadow-sm xl:col-span-2 h-fit">
+            <CardHeader><CardTitle className="text-lg" style={{ color: COLORS.deepBlue }}>Recent Attendance</CardTitle></CardHeader>
             <CardContent>
               {attendanceHistory.length === 0 ? (
                 <p className="text-center py-10 text-slate-500">No records yet</p>
               ) : (
-                <div className="space-y-4 max-h-96 overflow-y-auto">
-                  {attendanceHistory.slice(0, 10).map(record => (
-                    <div key={record.date} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border">
+                <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2">
+                  {attendanceHistory.slice(0, 15).map(record => (
+                    <div key={record.date} className="flex justify-between items-center p-4 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all shadow-sm">
                       <div>
-                        <p className="font-medium">{format(parseISO(record.date), 'MMM d, yyyy')}</p>
-                        <p className="text-sm text-slate-600">
-                          {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} —
-                          {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : '—'}
+                        <p className="font-bold text-slate-800">{format(parseISO(record.date), 'MMM d, yyyy')}</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} → {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}
                         </p>
                       </div>
-                      <Badge variant={record.duration_minutes > 0 ? "default" : "secondary"}>
+                      <Badge variant={record.duration_minutes > 0 ? "outline" : "secondary"} className={record.duration_minutes > 0 ? "border-emerald-200 text-emerald-700 bg-emerald-50 px-4 py-1" : ""}>
                         {formatDuration(record.duration_minutes)}
                       </Badge>
                     </div>
@@ -787,12 +844,8 @@ export default function Attendance() {
                   <LogIn className="h-9 w-9 text-emerald-600" />
                 </div>
               </div>
-              <h2 className="text-3xl font-bold mb-3" style={{ color: COLORS.deepBlue }}>
-                Good Morning!
-              </h2>
-              <p className="text-slate-600 text-lg mb-8">
-                Ready to start your day?<br />Let's punch in.
-              </p>
+              <h2 className="text-3xl font-bold mb-3" style={{ color: COLORS.deepBlue }}>Good Morning!</h2>
+              <p className="text-slate-600 text-lg mb-8">Ready to start your day?<br />Let's punch in.</p>
               <Button
                 onClick={() => { handlePunchAction('punch_in'); setShowPunchInModal(false); }}
                 disabled={loading}
@@ -801,10 +854,7 @@ export default function Attendance() {
               >
                 Punch In Now
               </Button>
-              <button
-                onClick={() => setShowPunchInModal(false)}
-                className="text-slate-500 hover:text-slate-700 text-sm underline"
-              >
+              <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline">
                 I'll do it later
               </button>
             </motion.div>
@@ -827,22 +877,10 @@ export default function Attendance() {
               >
                 <div className="flex justify-between items-start mb-8">
                   <div>
-                    <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>
-                      Request Leave
-                    </h2>
+                    <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>Request Leave</h2>
                     <p className="text-slate-500 mt-1">Select leave period</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setShowLeaveForm(false);
-                      setLeaveFrom(null);
-                      setLeaveTo(null);
-                      setLeaveReason("");
-                    }}
-                    className="text-slate-400 hover:text-slate-600 text-2xl"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl">✕</button>
                 </div>
                 {/* Quick Presets */}
                 <div className="mb-8">
@@ -916,9 +954,7 @@ export default function Attendance() {
                   />
                 </div>
                 <div className="flex justify-end gap-4 mt-8">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>
-                    Cancel
-                  </Button>
+                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
                   <Button
                     disabled={!leaveFrom}
                     onClick={async () => {
