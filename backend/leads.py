@@ -12,12 +12,11 @@ from backend.dependencies import (
     db,
     get_current_user,
     create_audit_log,
-    apply_data_scope,
-    verify_record_access,
-    verify_record_edit_access,
-    verify_record_delete_access,
-    has_permission,
-    get_team_user_ids
+    # Matrix-aware helpers — replaces the old apply_data_scope + verify_record_access
+    can_view_lead,
+    can_edit_lead,
+    can_delete_lead,
+    _get_perm,
 )
 
 from backend.notifications import create_notification
@@ -43,7 +42,10 @@ class LeadBase(BaseModel):
     quotation_amount: Optional[float] = Field(None)
 
     # ---------------- PIPELINE STATUS ----------------
-    status: Literal["new", "contacted", "meeting", "proposal", "negotiation", "on_hold", "won", "lost"] = "new"
+    status: Literal[
+        "new", "contacted", "meeting", "proposal",
+        "negotiation", "on_hold", "won", "lost"
+    ] = "new"
     source: Optional[str] = "direct"
 
     # ---------------- DATES & ASSIGNMENT ----------------
@@ -55,7 +57,10 @@ class LeadBase(BaseModel):
     closure_probability: Optional[float] = None
 
     # ====================== VALIDATORS ======================
-    @field_validator('quotation_amount', 'assigned_to', 'contact_name', 'email', 'phone', mode='before')
+    @field_validator(
+        'quotation_amount', 'assigned_to', 'contact_name',
+        'email', 'phone', mode='before'
+    )
     @classmethod
     def empty_string_to_none(cls, v):
         """Converts empty strings from frontend to None"""
@@ -84,8 +89,14 @@ class LeadUpdate(BaseModel):
     services: Optional[List[str]] = None
     quotation_amount: Optional[float] = None
     date_of_meeting: Optional[datetime] = None
-    status: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = None
-    source: Optional[Literal["direct", "website", "referral", "social_media", "event"]] = None
+    # Covers all valid statuses from LeadBase + qualified for compatibility
+    status: Optional[Literal[
+        "new", "contacted", "meeting", "proposal",
+        "negotiation", "on_hold", "qualified", "won", "lost"
+    ]] = None
+    source: Optional[Literal[
+        "direct", "website", "referral", "social_media", "event"
+    ]] = None
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
@@ -96,30 +107,39 @@ class LeadUpdate(BaseModel):
 class Lead(LeadBase):
     id: str
     created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # ====================== HELPERS ======================
 
 def normalize_lead_doc(doc: dict) -> dict:
-    """Normalize MongoDB document for API response"""
+    """Normalises a raw MongoDB lead document for API response."""
     if not doc:
         return doc
 
+    # Ensure string id is always present
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
 
-    # Safely convert datetime fields
+    # Safely convert datetime fields to ISO strings
     for field in ["created_at", "updated_at", "next_follow_up", "date_of_meeting"]:
         if field in doc and doc[field]:
-            doc[field] = doc[field].isoformat() if hasattr(doc[field], 'isoformat') else doc[field]
+            doc[field] = (
+                doc[field].isoformat()
+                if hasattr(doc[field], 'isoformat')
+                else doc[field]
+            )
 
     return doc
 
 
-def validate_obj_id(id_str: str):
-    """Validate MongoDB ObjectId format"""
+def validate_obj_id(id_str: str) -> ObjectId:
+    """Validates and returns a MongoDB ObjectId, raising 400 on bad format."""
     if not ObjectId.is_valid(id_str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -129,12 +149,18 @@ def validate_obj_id(id_str: str):
 
 
 def calculate_closure_probability(notes: str) -> float:
-    """Calculate lead closure probability based on notes sentiment"""
+    """Estimates closure probability from keywords in notes."""
     if not notes:
         return 0.0
     notes_lower = notes.lower()
-    positive_keywords = ["interested", "yes", "proceed", "deal", "sign", "agree", "excited", "good", "positive"]
-    negative_keywords = ["no", "not interested", "decline", "reject", "bad", "negative", "issue", "problem"]
+    positive_keywords = [
+        "interested", "yes", "proceed", "deal", "sign",
+        "agree", "excited", "good", "positive"
+    ]
+    negative_keywords = [
+        "no", "not interested", "decline", "reject",
+        "bad", "negative", "issue", "problem"
+    ]
     positive_count = sum(1 for kw in positive_keywords if kw in notes_lower)
     negative_count = sum(1 for kw in negative_keywords if kw in notes_lower)
     total = positive_count + negative_count
@@ -145,33 +171,69 @@ def calculate_closure_probability(notes: str) -> float:
     return round(probability * 100, 2)
 
 
+def _build_lead_query(current_user) -> dict:
+    """
+    LEADS – View query builder.
+    Matrix evaluation order:
+      1. Admin         → all records
+      2. Universal     → can_view_all_leads → all records
+      3. Ownership     → assigned_to == user OR created_by == user
+      4. Deny          (empty result set via impossible filter)
+    """
+    if current_user.role == "admin":
+        return {}
+
+    if _get_perm(current_user, "can_view_all_leads"):
+        return {}
+
+    # Ownership: own assigned or own created
+    return {
+        "$or": [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+        ]
+    }
+
+
 # ====================== ROUTES ======================
 
 @router.get("/meta/services", response_model=List[str])
 async def get_unique_services(current_user=Depends(get_current_user)):
-    """Get list of all available services"""
+    """Returns distinct services from leads + clients combined."""
     lead_services = await db.leads.distinct("services")
     client_services = await db.clients.distinct("services")
-    defaults = ["GST Registration", "Trademark", "ROC Compliance", "Income Tax", "Audit"]
+    defaults = [
+        "GST Registration", "Trademark", "ROC Compliance",
+        "Income Tax", "Audit"
+    ]
     combined = list(set(lead_services + client_services + defaults))
     return sorted([s for s in combined if s])
 
 
 @router.get("/followups")
 async def get_due_followups(current_user=Depends(get_current_user)):
-    """Get leads with overdue follow-ups"""
+    """
+    Returns leads with follow-up dates that are due.
+    Matrix: Admin → can_view_all_leads → ownership (assigned_to / created_by)
+    """
     now = datetime.now(timezone.utc)
 
-    scope_filter = await apply_data_scope(current_user, "assigned_to")
+    # Build scope filter using the matrix
+    scope_filter = _build_lead_query(current_user)
 
     query = {
         "next_follow_up": {"$lte": now},
-        "status": {"$nin": ["won", "lost"]}
+        "status": {"$nin": ["won", "lost"]},
     }
-    query.update(scope_filter)
+    if scope_filter:
+        # Merge scope filter safely
+        if "$or" in scope_filter:
+            query["$or"] = scope_filter["$or"]
+        else:
+            query.update(scope_filter)
 
     leads = await db.leads.find(query).to_list(100)
-    return [normalize_lead_doc(l) for l in leads]
+    return [normalize_lead_doc(lead) for lead in leads]
 
 
 @router.post("/import")
@@ -179,7 +241,10 @@ async def import_leads(
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
-    """Import leads from CSV file"""
+    """
+    CSV import for leads.
+    Matrix: Any authenticated user can import (leads are auto-assigned to creator).
+    """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files allowed")
 
@@ -187,10 +252,6 @@ async def import_leads(
     df = pd.read_csv(BytesIO(contents))
 
     # TODO: implement proper import logic with validation + assigned_to mapping
-    # count = 0
-    # for _, row in df.iterrows():
-    #     ...
-
     return {"message": f"Imported {len(df)} leads (processing logic pending)"}
 
 
@@ -200,11 +261,8 @@ async def create_lead(
     current_user=Depends(get_current_user),
 ):
     """
-    CREATE LEAD
-    
-    PERMISSION HIERARCHY:
-    • Any authenticated user can create leads
-    • Leads are assigned to creator by default
+    Create a new lead.
+    Matrix: Any authenticated user can create leads (they become the creator).
     """
     now = datetime.now(timezone.utc)
     lead_dict = lead_data.model_dump()
@@ -218,13 +276,12 @@ async def create_lead(
     result = await db.leads.insert_one(lead_dict)
     lead_dict["_id"] = result.inserted_id
 
-    # Audit log
     await create_audit_log(
         current_user=current_user,
         action="CREATE_LEAD",
         module="leads",
         record_id=str(result.inserted_id),
-        new_data=lead_dict,
+        new_data={"company_name": lead_dict.get("company_name")},
     )
 
     return normalize_lead_doc(lead_dict)
@@ -232,33 +289,20 @@ async def create_lead(
 
 @router.get("/", response_model=List[Lead])
 async def get_leads(
-    status_filter: Optional[Literal["new", "contacted", "qualified", "won", "lost"]] = Query(None, alias="status"),
+    status_filter: Optional[Literal[
+        "new", "contacted", "meeting", "proposal",
+        "negotiation", "on_hold", "qualified", "won", "lost"
+    ]] = Query(None, alias="status"),
     current_user=Depends(get_current_user),
 ):
     """
-    VIEW LEADS
-    
-    PERMISSION HIERARCHY:
-    1. Admin → all leads
-    2. Universal permission (can_view_all_leads) → all leads
-    3. Default (assigned_to or created_by) → own leads
-    
-    Frontend Note: Manager can view team's leads by default
+    List leads.
+    Matrix:
+      1. Admin → all leads
+      2. Universal: can_view_all_leads → all leads
+      3. Ownership: assigned_to == user OR created_by == user
     """
-    query = {}
-    
-    # Apply data scope based on role and permissions
-    # Admins see all leads
-    if current_user.role == "admin":
-        scope_filter = {}
-    # Check universal permission
-    elif has_permission(current_user, "can_view_all_leads"):
-        scope_filter = {}
-    # Default: own leads (handles manager team access)
-    else:
-        scope_filter = await apply_data_scope(current_user, "assigned_to")
-    
-    query.update(scope_filter)
+    query = _build_lead_query(current_user)
 
     if status_filter:
         query["status"] = status_filter
@@ -266,18 +310,18 @@ async def get_leads(
     cursor = db.leads.find(query).sort("updated_at", -1)
     leads_raw = await cursor.to_list(length=1000)
 
-    return [normalize_lead_doc(l) for l in leads_raw]
+    return [normalize_lead_doc(lead) for lead in leads_raw]
 
 
 @router.get("/{lead_id}", response_model=Lead)
 async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     """
-    VIEW SINGLE LEAD
-    
-    PERMISSION HIERARCHY:
-    1. Admin → all leads
-    2. Universal permission (can_view_all_leads) → all leads
-    3. Ownership (assigned_to or created_by) → own leads
+    Get a single lead by ID.
+    Matrix:
+      1. Admin → allow
+      2. Universal: can_view_all_leads → allow
+      3. Ownership: assigned_to == user OR created_by == user → allow
+      4. Deny
     """
     obj_id = validate_obj_id(lead_id)
 
@@ -285,17 +329,12 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     if not raw_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Admin bypass
-    if current_user.role != "admin":
-        # Check universal permission
-        if not has_permission(current_user, "can_view_all_leads"):
-            # Fall back to ownership check
-            await verify_record_access(
-                current_user,
-                record_owner_id=raw_lead.get("assigned_to"),
-                record_created_by=raw_lead.get("created_by"),
-                module="leads"
-            )
+    # Enforce matrix view check
+    if not can_view_lead(current_user, raw_lead):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this lead"
+        )
 
     return normalize_lead_doc(raw_lead)
 
@@ -307,12 +346,11 @@ async def update_lead(
     current_user=Depends(get_current_user),
 ):
     """
-    EDIT LEAD
-    
-    PERMISSION HIERARCHY:
-    1. Admin → edit all
-    2. Universal permission (can_edit_tasks) → edit all
-    3. Ownership (assigned_to or created_by) → can edit own
+    Update a lead.
+    Matrix:
+      1. Admin → allow
+      2. Ownership: assigned_to == user OR created_by == user → allow
+      3. Deny
     """
     obj_id = validate_obj_id(lead_id)
 
@@ -320,32 +358,31 @@ async def update_lead(
     if not existing:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Verify edit permission
-    await verify_record_edit_access(
-        current_user,
-        record_owner_id=existing.get("assigned_to"),
-        record_created_by=existing.get("created_by"),
-        module="leads"
-    )
+    # Matrix: Admin OR assigned_to OR created_by
+    if not can_edit_lead(current_user, existing):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to edit this lead"
+        )
 
     update_dict = updates.model_dump(exclude_unset=True)
     if not update_dict:
         return normalize_lead_doc(existing)
 
-    # Assignee validation
+    # Validate assignee exists
     if update_dict.get("assigned_to"):
         user_exists = await db.users.find_one({"id": update_dict["assigned_to"]})
         if not user_exists:
             raise HTTPException(status_code=400, detail="Assigned user not found")
 
-    # Protect won status transition
+    # Guard won status — must go through the /convert endpoint
     if update_dict.get("status") == "won" and not existing.get("converted_client_id"):
         raise HTTPException(
             status_code=400,
-            detail="Use convert endpoint to mark lead as won"
+            detail="Use the /convert endpoint to mark a lead as won"
         )
 
-    # Future follow-up date validation
+    # Reject past follow-up dates
     if update_dict.get("next_follow_up"):
         if update_dict["next_follow_up"] < datetime.now(timezone.utc):
             raise HTTPException(
@@ -353,18 +390,16 @@ async def update_lead(
                 detail="Follow-up date cannot be in the past"
             )
 
-    # Auto-calculate probability when notes are updated
+    # Auto-recalculate closure probability when notes change
     if "notes" in update_dict:
-        update_dict["closure_probability"] = calculate_closure_probability(update_dict["notes"])
+        update_dict["closure_probability"] = calculate_closure_probability(
+            update_dict["notes"]
+        )
 
     update_dict["updated_at"] = datetime.now(timezone.utc)
 
-    await db.leads.update_one(
-        {"_id": obj_id},
-        {"$set": update_dict}
-    )
+    await db.leads.update_one({"_id": obj_id}, {"$set": update_dict})
 
-    # Audit log
     await create_audit_log(
         current_user=current_user,
         action="UPDATE_LEAD",
@@ -384,11 +419,8 @@ async def convert_lead_to_client(
     current_user=Depends(get_current_user),
 ):
     """
-    CONVERT LEAD TO CLIENT
-    
-    PERMISSION HIERARCHY:
-    1. Admin → convert any lead
-    2. Ownership (assigned_to or created_by) → convert own leads
+    Convert a lead to a client.
+    Matrix: Admin OR assigned_to OR created_by (same as edit).
     """
     obj_id = validate_obj_id(lead_id)
 
@@ -396,20 +428,19 @@ async def convert_lead_to_client(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Verify access
-    await verify_record_access(
-        current_user,
-        record_owner_id=lead.get("assigned_to"),
-        record_created_by=lead.get("created_by"),
-        module="leads"
-    )
+    # Matrix: Admin OR assigned_to OR created_by
+    if not can_edit_lead(current_user, lead):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to convert this lead"
+        )
 
     if lead.get("converted_client_id"):
         raise HTTPException(status_code=400, detail="Lead already converted")
 
     now = datetime.now(timezone.utc)
 
-    # Create client
+    # Build client record from lead data
     client_id = str(uuid.uuid4())
     client_data = {
         "id": client_id,
@@ -423,12 +454,14 @@ async def convert_lead_to_client(
         "created_by": current_user.id,
         "created_at": now,
         "updated_at": now,
-        "notes": f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}",
+        "notes": (
+            f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}"
+        ),
     }
 
     await db.clients.insert_one(client_data)
 
-    # Update lead
+    # Mark lead as won
     await db.leads.update_one(
         {"_id": obj_id},
         {
@@ -440,7 +473,7 @@ async def convert_lead_to_client(
         }
     )
 
-    # Create onboarding task
+    # Create an onboarding task for the assigned user
     task = {
         "id": str(uuid.uuid4()),
         "title": f"Client Onboarding - {lead['company_name']}",
@@ -456,7 +489,7 @@ async def convert_lead_to_client(
     }
     await db.tasks.insert_one(task)
 
-    # Audit + Notifications
+    # Audit log
     await create_audit_log(
         current_user=current_user,
         action="LEAD_CONVERTED",
@@ -466,6 +499,7 @@ async def convert_lead_to_client(
         new_data={"client_id": client_id},
     )
 
+    # Notifications
     target_user = lead.get("assigned_to") or current_user.id
 
     await create_notification(
@@ -493,36 +527,30 @@ async def convert_lead_to_client(
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
     """
-    DELETE LEAD
-    
-    PERMISSION HIERARCHY:
-    1. Admin only
-    2. Creator (created_by) only
+    Delete a lead permanently.
+    Matrix: Admin OR can_manage_users
     """
+    # Matrix: Admin OR can_manage_users
+    if not can_delete_lead(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin or users with manage_users permission can delete leads"
+        )
+
     obj_id = validate_obj_id(lead_id)
 
-    existing = await db.leads.find_one({"_id": obj_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    # Verify delete permission (admin or creator only)
-    await verify_record_delete_access(
-        current_user,
-        record_created_by=existing.get("created_by"),
-        module="leads"
-    )
+    existing = await db.leads.find_one({"_id": obj_id}, {"_id": 0, "company_name": 1})
 
     result = await db.leads.delete_one({"_id": obj_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Audit log
     await create_audit_log(
         current_user=current_user,
         action="DELETE_LEAD",
         module="leads",
         record_id=lead_id,
-        old_data=None,
+        old_data=existing,
         new_data=None
     )
 
@@ -535,10 +563,8 @@ async def predict_lead_closure(
     current_user=Depends(get_current_user),
 ):
     """
-    PREDICT LEAD CLOSURE
-    
-    PERMISSION HIERARCHY:
-    Same as VIEW (user must be able to view the lead to predict closure)
+    Predict closure probability for a lead.
+    Matrix: Same as view — Admin OR can_view_all_leads OR ownership.
     """
     obj_id = validate_obj_id(lead_id)
 
@@ -546,13 +572,12 @@ async def predict_lead_closure(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Verify access (same as view)
-    await verify_record_access(
-        current_user,
-        record_owner_id=lead.get("assigned_to"),
-        record_created_by=lead.get("created_by"),
-        module="leads"
-    )
+    # Matrix: Admin → can_view_all_leads → ownership → deny
+    if not can_view_lead(current_user, lead):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this lead"
+        )
 
     probability = calculate_closure_probability(lead.get("notes", ""))
 
