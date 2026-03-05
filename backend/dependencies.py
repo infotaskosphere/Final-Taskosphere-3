@@ -34,6 +34,18 @@ if not JWT_SECRET:
 security = HTTPBearer()
 
 # ==========================================================
+# PERMISSION HIERARCHY - EVALUATION ORDER
+# ==========================================================
+"""
+Permission Decision Flow:
+1. Admin override → Allow all
+2. Universal permission → Allow all records in module
+3. Specific access permission → Allow specific users/clients
+4. Ownership → Allow if user owns the record
+5. Deny
+"""
+
+# ==========================================================
 # TOKEN UTILITIES
 # ==========================================================
 def create_access_token(data: dict) -> str:
@@ -95,12 +107,43 @@ async def get_current_user(
     try:
         return User(**user_dict)
     except Exception as e:
-        # In production → use proper logger
         print(f"User validation failed for {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User profile data is corrupted (check birthday, phone, etc.)"
         )
+
+# ==========================================================
+# PERMISSION HELPER - CHECK IF USER HAS PERMISSION
+# ==========================================================
+def has_permission(user: User, permission_key: str) -> bool:
+    """
+    Check if user has a specific permission.
+    Returns True if:
+    1. User is admin
+    2. User has the permission in their permissions object
+    """
+    if user.role == "admin":
+        return True
+    
+    if not user.permissions:
+        return False
+    
+    try:
+        if hasattr(user.permissions, "model_dump"):
+            # Pydantic v2+
+            perms_dict = user.permissions.model_dump()
+            return perms_dict.get(permission_key, False)
+        elif hasattr(user.permissions, "dict"):
+            # Pydantic v1
+            perms_dict = user.permissions.dict()
+            return perms_dict.get(permission_key, False)
+        elif isinstance(user.permissions, dict):
+            return user.permissions.get(permission_key, False)
+        else:
+            return False
+    except Exception:
+        return False
 
 # ==========================================================
 # PERMISSION DEPENDENCY FACTORY
@@ -111,18 +154,7 @@ def check_permission(required_permission: str):
         if current_user.role == "admin":
             return current_user
 
-        perms = getattr(current_user, "permissions", None)
-        has_permission = False
-
-        if perms:
-            if hasattr(perms, "model_dump"):  # Pydantic v2+
-                has_permission = getattr(perms, required_permission, False)
-            elif isinstance(perms, dict):
-                has_permission = perms.get(required_permission, False)
-            elif isinstance(perms, list):
-                has_permission = required_permission in perms
-
-        if not has_permission:
+        if not has_permission(current_user, required_permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Required permission: {required_permission}"
@@ -162,12 +194,13 @@ def require_manager_or_admin():
 async def get_team_user_ids(manager_id: str) -> List[str]:
     """
     Returns list of user IDs that this manager should have access to.
-    Current naive implementation: all non-admin users except self.
-
-    Recommended improvements:
-    • Add manager_id field to User
+    Retrieves all non-admin users except the manager themselves.
+    
+    Future improvements:
+    • Add manager_id field to User model
     • Add department / team field
     • Add explicit team_members array on manager
+    • Filter by department assignment
     """
     users = await db.users.find(
         {"role": {"$ne": "admin"}},
@@ -182,6 +215,11 @@ async def apply_data_scope(
 ) -> Dict[str, Any]:
     """
     Returns MongoDB query filter that implements row-level security based on role.
+    
+    Admin: No filter (sees all records)
+    Manager: Own records + team member records
+    Staff: Only own records
+    
     Usage example:
         filter_ = await apply_data_scope(current_user, "assigned_to")
         tasks = await db.tasks.find(filter_).to_list(None)
@@ -202,29 +240,139 @@ async def apply_data_scope(
     return {record_user_field: current_user.id}
 
 # ==========================================================
-# RECORD ACCESS VALIDATION
+# PERMISSION HIERARCHY - RECORD ACCESS VALIDATION
 # ==========================================================
+"""
+Tasks/Leads/Records Access Logic:
+
+View Permission:
+1. Admin → all
+2. Universal permission (can_view_all_tasks) → all
+3. Specific permission (view_other_tasks) → if in list
+4. Ownership (assigned_to or created_by) → if owner
+5. Deny
+
+Edit Permission:
+1. Admin → all
+2. Universal permission (can_edit_tasks) → all
+3. Ownership (created_by or assigned_to) → if owner
+4. Deny
+
+Delete Permission:
+1. Admin only
+2. Creator (created_by) only
+"""
+
 async def verify_record_access(
     current_user: User,
-    record_owner_id: str
+    record_owner_id: str = None,
+    record_created_by: str = None,
+    module: str = "tasks"
 ) -> bool:
-    # Admin → always allowed
+    """
+    STEP 1: Admin Check
+    Admin users can access any record
+    """
     if current_user.role == "admin":
         return True
 
-    # Owner access
-    if record_owner_id == current_user.id:
+    # Use created_by as fallback if owner_id not provided
+    owner_id = record_owner_id or record_created_by
+
+    """
+    STEP 4: Ownership Check
+    Users always have access to their own records
+    """
+    if owner_id and owner_id == current_user.id:
         return True
 
-    # Manager → team access
+    """
+    STEP 3: Manager Team Access
+    Managers can view team member records
+    """
     if current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
-        if record_owner_id in team_ids:
+        if owner_id and owner_id in team_ids:
             return True
 
+    """
+    STEP 5: Deny
+    If no condition matches, deny access
+    """
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have access to this resource"
+    )
+
+
+async def verify_record_edit_access(
+    current_user: User,
+    record_owner_id: str = None,
+    record_created_by: str = None,
+    record_sub_assignees: List[str] = None,
+    module: str = "tasks"
+) -> bool:
+    """
+    EDIT ACCESS HIERARCHY:
+    1. Admin → edit all
+    2. Universal permission (can_edit_tasks) → edit all
+    3. Ownership (created_by or assigned_to or sub_assignees) → can edit
+    4. Deny
+    """
+    # Step 1: Admin check
+    if current_user.role == "admin":
+        return True
+
+    # Step 2: Universal edit permission
+    edit_permission_key = f"can_edit_{module}"
+    if has_permission(current_user, edit_permission_key):
+        return True
+
+    # Step 3: Ownership check (creator, assignee, or sub-assignee)
+    record_sub_assignees = record_sub_assignees or []
+    if (
+        (record_created_by and record_created_by == current_user.id) or
+        (record_owner_id and record_owner_id == current_user.id) or
+        (current_user.id in record_sub_assignees)
+    ):
+        return True
+
+    # Step 4: Deny
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"You do not have permission to edit this {module}"
+    )
+
+
+async def verify_record_delete_access(
+    current_user: User,
+    record_created_by: str = None,
+    module: str = "tasks"
+) -> bool:
+    """
+    DELETE ACCESS HIERARCHY:
+    1. Admin only
+    2. Creator only (for some modules like tasks)
+    3. Permission-based (can_manage_users for certain modules)
+    4. Deny
+    """
+    # Step 1: Admin check
+    if current_user.role == "admin":
+        return True
+
+    # Step 2: Creator check (applies to tasks, leads, etc.)
+    if record_created_by and record_created_by == current_user.id:
+        return True
+
+    # Step 3: Special permission check
+    delete_permission_key = f"can_manage_{module}"
+    if has_permission(current_user, delete_permission_key):
+        return True
+
+    # Step 4: Deny
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"You do not have permission to delete this {module}"
     )
 
 # ==========================================================
@@ -232,21 +380,65 @@ async def verify_record_access(
 # ==========================================================
 async def verify_client_access(
     current_user: User,
-    client_assigned_to: Optional[str]
+    client_assigned_to: Optional[str] = None,
+    action: str = "view"
 ) -> bool:
+    """
+    CLIENT ACCESS HIERARCHY:
+    
+    View Permission:
+    1. Admin → all
+    2. Universal (can_view_all_clients) → all
+    3. Specific (assigned_clients list) → if in list
+    4. Ownership (assigned_to) → if owner
+    5. Deny
+    
+    Edit Permission:
+    1. Admin → all
+    2. Universal (can_edit_clients) → all
+    3. Specific (assigned_clients list) → if in list
+    4. Ownership (assigned_to) → if owner
+    5. Deny
+    """
+    # Step 1: Admin check
     if current_user.role == "admin":
         return True
 
-    # Owner
-    if client_assigned_to == current_user.id:
+    # Determine permission key based on action
+    if action == "view":
+        universal_perm = "can_view_all_clients"
+    elif action == "edit":
+        universal_perm = "can_edit_clients"
+    else:
+        universal_perm = f"can_{action}_clients"
+
+    # Step 2: Universal permission check
+    if has_permission(current_user, universal_perm):
         return True
 
-    # Manager team access
-    if current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        if client_assigned_to in team_ids:
-            return True
+    # Step 3: Specific access permission check
+    if current_user.permissions:
+        try:
+            if hasattr(current_user.permissions, "assigned_clients"):
+                assigned_clients = current_user.permissions.assigned_clients
+            elif hasattr(current_user.permissions, "model_dump"):
+                perms_dict = current_user.permissions.model_dump()
+                assigned_clients = perms_dict.get("assigned_clients", [])
+            elif isinstance(current_user.permissions, dict):
+                assigned_clients = current_user.permissions.get("assigned_clients", [])
+            else:
+                assigned_clients = []
 
+            if client_assigned_to and client_assigned_to in assigned_clients:
+                return True
+        except Exception:
+            pass
+
+    # Step 4: Ownership check
+    if client_assigned_to and client_assigned_to == current_user.id:
+        return True
+
+    # Step 5: Deny
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to access this client"
@@ -259,31 +451,201 @@ async def verify_activity_access(
     current_user: User,
     activity_user_id: str
 ) -> bool:
+    """
+    ACTIVITY ACCESS HIERARCHY:
+    1. Admin → all
+    2. Manager → team member activity
+    3. User → own activity only
+    """
+    # Step 1: Admin check
     if current_user.role == "admin":
         return True
 
+    # Step 2: Manager team access
     if current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
         if activity_user_id in team_ids:
             return True
 
+    # Step 3: Own activity
+    if activity_user_id == current_user.id:
+        return True
+
+    # Deny
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You are not allowed to view this activity"
     )
 
 # ==========================================================
+# ATTENDANCE ACCESS
+# ==========================================================
+async def verify_attendance_access(
+    current_user: User,
+    attendance_user_id: str
+) -> bool:
+    """
+    ATTENDANCE ACCESS HIERARCHY:
+    1. Admin → all
+    2. Universal permission (can_view_attendance) → all
+    3. Specific (view_other_attendance) → if in list
+    4. Own attendance
+    5. Deny
+    """
+    # Step 1: Admin check
+    if current_user.role == "admin":
+        return True
+
+    # Step 2: Universal permission
+    if has_permission(current_user, "can_view_attendance"):
+        return True
+
+    # Step 3: Specific access
+    if current_user.permissions:
+        try:
+            if hasattr(current_user.permissions, "view_other_attendance"):
+                view_list = current_user.permissions.view_other_attendance
+            elif hasattr(current_user.permissions, "model_dump"):
+                perms_dict = current_user.permissions.model_dump()
+                view_list = perms_dict.get("view_other_attendance", [])
+            elif isinstance(current_user.permissions, dict):
+                view_list = current_user.permissions.get("view_other_attendance", [])
+            else:
+                view_list = []
+
+            if attendance_user_id in view_list:
+                return True
+        except Exception:
+            pass
+
+    # Step 4: Own attendance
+    if attendance_user_id == current_user.id:
+        return True
+
+    # Step 5: Deny
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to view this attendance"
+    )
+
+# ==========================================================
+# REPORT ACCESS
+# ==========================================================
+async def verify_report_access(
+    current_user: User,
+    report_user_id: str,
+    action: str = "view"
+) -> bool:
+    """
+    REPORT ACCESS HIERARCHY:
+    1. Admin → all
+    2. Universal permission (can_view_reports) → all
+    3. Specific (view_other_reports) → if in list
+    4. Own reports
+    5. Deny
+    """
+    # Step 1: Admin check
+    if current_user.role == "admin":
+        return True
+
+    # Step 2: Universal permission
+    if action == "download":
+        perm_key = "can_download_reports"
+    else:
+        perm_key = "can_view_reports"
+
+    if has_permission(current_user, perm_key):
+        return True
+
+    # Step 3: Specific access
+    if current_user.permissions:
+        try:
+            if hasattr(current_user.permissions, "view_other_reports"):
+                view_list = current_user.permissions.view_other_reports
+            elif hasattr(current_user.permissions, "model_dump"):
+                perms_dict = current_user.permissions.model_dump()
+                view_list = perms_dict.get("view_other_reports", [])
+            elif isinstance(current_user.permissions, dict):
+                view_list = current_user.permissions.get("view_other_reports", [])
+            else:
+                view_list = []
+
+            if report_user_id in view_list:
+                return True
+        except Exception:
+            pass
+
+    # Step 4: Own report
+    if report_user_id == current_user.id:
+        return True
+
+    # Step 5: Deny
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to access this report"
+    )
+
+# ==========================================================
+# TODO ACCESS
+# ==========================================================
+async def verify_todo_access(
+    current_user: User,
+    todo_user_id: str
+) -> bool:
+    """
+    TODO ACCESS HIERARCHY:
+    1. Admin → all
+    2. Specific (view_other_todos) → if in list
+    3. Own todos
+    4. Deny
+    """
+    # Step 1: Admin check
+    if current_user.role == "admin":
+        return True
+
+    # Step 2: Specific access
+    if current_user.permissions:
+        try:
+            if hasattr(current_user.permissions, "view_other_todos"):
+                view_list = current_user.permissions.view_other_todos
+            elif hasattr(current_user.permissions, "model_dump"):
+                perms_dict = current_user.permissions.model_dump()
+                view_list = perms_dict.get("view_other_todos", [])
+            elif isinstance(current_user.permissions, dict):
+                view_list = current_user.permissions.get("view_other_todos", [])
+            else:
+                view_list = []
+
+            if todo_user_id in view_list:
+                return True
+        except Exception:
+            pass
+
+    # Step 3: Own todos
+    if todo_user_id == current_user.id:
+        return True
+
+    # Step 4: Deny
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to access this todo"
+    )
+
+# ==========================================================
 # AUDIT LOGGING
 # ==========================================================
 async def create_audit_log(
-    current_user: Any,  # Any → avoids import-time circular issues
+    current_user: Any,
     action: str,
     module: str,
-    record_id: str,
+    record_id: str = None,
     old_data: Optional[dict] = None,
     new_data: Optional[dict] = None
 ) -> None:
-    from backend.models import AuditLog  # late import
+    """
+    Creates an audit log entry for tracking changes.
+    """
+    from backend.models import AuditLog
 
     log_entry = AuditLog(
         user_id=current_user.id,
