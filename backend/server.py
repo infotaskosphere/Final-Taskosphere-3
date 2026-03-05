@@ -49,32 +49,7 @@ from backend.dependencies import (
     require_admin,
     require_manager_or_admin,
     verify_record_access,
-    verify_client_access,
-    # Matrix-aware permission helpers
-    _get_perm,
-    can_view_task,
-    can_edit_task,
-    can_delete_task,
-    can_view_todo,
-    can_edit_todo,
-    can_view_client,
-    can_edit_client,
-    can_delete_client,
-    can_view_report,
-    can_download_report,
-    can_view_attendance,
-    can_view_activity,
-    can_view_lead,
-    can_edit_lead,
-    can_delete_lead,
-    can_manage_user,
-    # Query builder helpers
-    build_task_query,
-    build_todo_query,
-    build_client_query,
-    build_attendance_query,
-    build_report_query,
-    get_team_user_ids,
+    verify_client_access
 )
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
@@ -351,8 +326,14 @@ async def get_task_analytics(
  current_user: User = Depends(get_current_user)
 ):
  """ Get task analytics for a specific month (YYYY-MM) """
- # Use permission matrix query builder
- query = build_task_query(current_user)
+ # Fetch tasks (role-based filtering same as your /tasks endpoint)
+ query = {}
+ if current_user.role != "admin":
+  query["$or"] = [
+   {"assigned_to": current_user.id},
+   {"sub_assignees": current_user.id},
+   {"created_by": current_user.id}
+  ]
  tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
  total = 0
  completed = 0
@@ -450,8 +431,20 @@ async def get_todos(
  user_id: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- # Matrix: Admin → specific (view_other_todos) → ownership
- query = build_todo_query(current_user, target_user_id=user_id)
+ if current_user.role == "admin":
+    query = {} if not user_id else {"user_id": user_id}
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+    if user_id:
+        if user_id not in team_ids and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not allowed")
+        query = {"user_id": user_id}
+    else:
+        query = {"user_id": {"$in": team_ids + [current_user.id]}}
+ else:
+    if user_id and user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    query = {"user_id": current_user.id}
  todos = await db.todos.find(query).to_list(1000)
  # Convert ObjectId safely
  for t in todos:
@@ -479,20 +472,31 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
    "grouped_todos": grouped_todos
   }
  # =========================
- # NON-ADMIN VIEW
- # Matrix: specific (view_other_todos) → ownership
+ # STAFF VIEW (OWN + ALLOWED)
  # =========================
- allowed_users = _get_perm(current_user, "view_other_todos", []) or []
- or_clauses = [{"user_id": current_user.id}]
- if allowed_users:
-  or_clauses.append({"user_id": {"$in": allowed_users}})
- todos = await db.todos.find({"$or": or_clauses}).to_list(2000)
- for todo in todos:
-  todo["_id"] = str(todo["_id"])
- return {
-  "role": current_user.role,
-  "todos": todos
- }
+ else:
+  # Safely extract permissions
+  if current_user.permissions:
+   permissions = current_user.permissions.model_dump()
+  else:
+   permissions = {}
+  allowed_users = permissions.get("view_other_todos", [])
+  # Always ensure list
+  if not isinstance(allowed_users, list):
+   allowed_users = []
+  todos = await db.todos.find({
+   "$or": [
+    {"user_id": current_user.id},
+    {"user_id": {"$in": allowed_users}}
+   ]
+  }).to_list(2000)
+  # Convert ObjectId safely
+  for todo in todos:
+   todo["_id"] = str(todo["_id"])
+  return {
+   "role": "staff",
+   "todos": todos
+  }
 # ==========================================================
 # PROMOTE TODO TO TASK (ADMIN + OWNER ONLY)
 # ==========================================================
@@ -543,8 +547,7 @@ async def delete_todo(
  todo = await db.todos.find_one({"_id": obj_id})
  if not todo:
   raise HTTPException(status_code=404, detail="Todo not found")
- # Matrix: Admin OR owner
- if not can_edit_todo(current_user, todo):
+ if current_user.role != "admin" and todo["user_id"] != current_user.id:
   raise HTTPException(status_code=403, detail="Not authorized")
  await db.todos.delete_one({"_id": obj_id})
  return {"message": "Todo deleted successfully"}
@@ -560,8 +563,7 @@ async def update_todo(
   raise HTTPException(status_code=400, detail="Invalid Todo ID")
  if not todo:
   raise HTTPException(status_code=404, detail="Todo not found")
- # Matrix: Admin OR owner
- if not can_edit_todo(current_user, todo):
+ if current_user.role != "admin" and todo["user_id"] != current_user.id:
   raise HTTPException(status_code=403, detail="Not authorized")
  now = datetime.now(IST)
  if updates.get("is_completed") is True:
@@ -574,9 +576,8 @@ async def update_todo(
  return {"message": "Todo updated successfully"}
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
-    # Matrix: Admin OR can_manage_users
-    if not can_manage_user(current_user):
-        raise HTTPException(status_code=403, detail="Admin or user manager access required")
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
     
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
@@ -653,9 +654,8 @@ async def update_user(
     current_user: User = Depends(get_current_user)
 ):
     """Updates user profile data dynamically."""
-    # Matrix: Admin OR can_manage_users
-    if not can_manage_user(current_user):
-        raise HTTPException(status_code=403, detail="Admin or user manager access required")
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin clearance required.")
 
     existing = await db.users.find_one({"id": user_id})
     if not existing:
@@ -705,8 +705,7 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
 
 @api_router.get("/users/{user_id}/permissions")
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
-    # Matrix: Admin OR can_manage_users
-    if not can_manage_user(current_user):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed")
     user = await db.users.find_one({"id": user_id})
     if not user:
@@ -720,7 +719,6 @@ async def update_user_permissions(
     current_user: User = Depends(get_current_user)
 ):
     """Updates user permissions using a raw dictionary to support arrays properly."""
-    # Matrix: Admin only (permissions are sensitive — only admin should change them)
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
         
@@ -1089,13 +1087,25 @@ async def import_tasks_from_csv(
 # =========================================================
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
- # Build query using the 5-layer permission matrix
- base_query = build_task_query(current_user)
- # Exclude todo-type tasks regardless of permission
- if base_query:
-  query = {"$and": [{"type": {"$ne": "todo"}}, base_query]}
+ query = {"type": {"$ne": "todo"}}
+ # Admin → all
+ if current_user.role == "admin":
+  pass
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+    query["$or"] = [
+        {"assigned_to": current_user.id},
+        {"assigned_to": {"$in": team_ids}},
+        {"sub_assignees": current_user.id},
+        {"created_by": current_user.id}
+    ]
+ # Cross-user
  else:
-  query = {"type": {"$ne": "todo"}}
+  allowed_users = permissions.get("view_other_tasks", [])
+  query["$or"] = [
+   {"assigned_to": current_user.id},
+   {"assigned_to": {"$in": allowed_users}}
+  ]
  tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
  # Map user names
  user_ids = {
@@ -1125,9 +1135,15 @@ async def get_task(task_id: str, current_user: User = Depends(get_current_user))
  task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
  if not task:
   raise HTTPException(status_code=404, detail="Task not found")
- # Matrix: Admin → can_view_all_tasks → view_other_tasks → ownership → deny
- if not can_view_task(current_user, task):
-  raise HTTPException(status_code=403, detail="Not authorized to view this task")
+ permissions = current_user.permissions or {}
+ if current_user.role != "admin" and not permissions.get("can_view_all_tasks", False):
+  allowed_users = permissions.get("view_other_tasks", [])
+  if (
+   task.get("assigned_to") != current_user.id
+   and task.get("assigned_to") not in allowed_users
+   and current_user.id not in task.get("sub_assignees", [])
+  ):
+   raise HTTPException(status_code=403, detail="Not authorized")
  return Task(**task)
 # =========================================================
 # PATCH TASK (SECURE EDITING) - Fixes Dashboard & Task Page Errors
@@ -1141,8 +1157,14 @@ async def patch_task(
  existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
  if not existing_task:
   raise HTTPException(status_code=404, detail="Task not found")
- # Matrix: Admin → can_edit_tasks → ownership (created_by/assigned_to/sub_assignee) → deny
- if not can_edit_task(current_user, existing_task):
+ # 🔒 ACCESS LOGIC: Admin, Assigner (Creator), or Assigned User
+ is_authorized = (
+  current_user.role.lower() == "admin" or
+  existing_task.get("created_by") == current_user.id or
+  existing_task.get("assigned_to") == current_user.id or
+  current_user.id in existing_task.get("sub_assignees", [])
+ )
+ if not is_authorized:
   raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
  old_data = existing_task.copy()
  updates["updated_at"] = datetime.now(IST).isoformat()
@@ -1172,9 +1194,12 @@ async def delete_task(
  existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
  if not existing:
   raise HTTPException(status_code=404, detail="Task not found")
- # Matrix: Admin only OR task creator
- if not can_delete_task(current_user, existing):
-  raise HTTPException(status_code=403, detail="Only Admin or the task creator can delete tasks.")
+ # 🔒 DELETE LOGIC: Admin or explicit 'can_edit_tasks' permission
+ is_admin = current_user.role.lower() == "admin"
+ permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, 'model_dump') else current_user.permissions
+ has_delete_perm = permissions.get("can_edit_tasks", False) if isinstance(permissions, dict) else False
+ if not (is_admin or has_delete_perm):
+  raise HTTPException(status_code=403, detail="Only Admin or users with explicit permission can delete tasks.")
  await db.tasks.delete_one({"id": task_id})
  # 🔥 AUDIT LOG FOR DELETE
  await create_audit_log(
@@ -1664,13 +1689,25 @@ async def get_attendance_history(
  current_user: User = Depends(get_current_user)
 ):
  """
- Matrix:
- - Admin → all records (or filter by user_id)
- - Universal: can_view_attendance → all records
- - Specific: user_id in view_other_attendance → that user's records
- - Ownership: own records only
+ If:
+ - Admin → can see all
+ - Manager with permission → can see all
+ - Staff → can only see own
  """
- query = build_attendance_query(current_user, target_user_id=user_id)
+ query = {}
+ if current_user.role == "admin":
+    if user_id:
+        query["user_id"] = user_id
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+    if user_id:
+        if user_id not in team_ids and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        query["user_id"] = user_id
+    else:
+        query["user_id"] = {"$in": team_ids + [current_user.id]}
+ else:
+    query["user_id"] = current_user.id
  attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
  for attendance in attendance_list:
   attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
@@ -1729,9 +1766,15 @@ async def get_staff_attendance_report(
  month: Optional[str] = None,
  current_user: User = Depends(get_current_user)
 ):
- # Matrix: Admin → can_view_attendance → deny
- if current_user.role != "admin" and not _get_perm(current_user, "can_view_attendance"):
-  raise HTTPException(status_code=403, detail="Not allowed")
+ if current_user.role != "admin":
+  if isinstance(current_user.permissions, dict):
+   permissions = current_user.permissions
+  elif current_user.permissions:
+   permissions = current_user.permissions.model_dump()
+  else:
+   permissions = {}
+  if not permissions.get("can_view_attendance"):
+   raise HTTPException(status_code=403, detail="Not allowed")
  now = datetime.now(IST)
  target_month = month or now.strftime("%Y-%m")
  # Get all users
@@ -1942,63 +1985,48 @@ async def delete_due_date(
  if result.deleted_count == 0:
   raise HTTPException(status_code=404, detail="Due date not found")
  return {"message": "Due date deleted successfully"}
-#=========================================================
 # REPORTS ROUTES
-#=========================================================
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+ user_id: Optional[str] = None,
+ current_user: User = Depends(get_current_user)
 ):
-    # Determine target safely
-    target_id = user_id if (user_id and user_id != "all") else current_user.id
-    
-    # Permission Matrix Check
-    is_admin = current_user.role == "admin"
-    is_owner = target_id == current_user.id
-    # Safely check list existence
-    has_specific = hasattr(current_user.permissions, 'view_other_reports') and \
-                   target_id in current_user.permissions.view_other_reports
-    
-    if not (is_admin or is_owner or has_specific):
-        raise HTTPException(status_code=403, detail="Permission Denied")
-
-    try:
-        # Querying activity_logs
-        logs = await db.activity_logs.find({"user_id": target_id}).to_list(100)
-        
-        # Return structured data even if logs are empty to avoid frontend 500 errors
-        return {
-            "user": {"id": target_id, "full_name": current_user.full_name if is_owner else "Staff Member"},
-            "total_screen_time": sum(l.get("screen_time_minutes", 0) for l in logs) if logs else 0,
-            "total_tasks_completed": sum(l.get("tasks_completed", 0) for l in logs) if logs else 0,
-            "logs": logs or []
-        }
-    except Exception as e:
-        # This prevents the '500 Internal Server Error' by providing a readable error
-        print(f"Database Error: {e}")
-        raise HTTPException(status_code=500, detail="Database connection failed"))
-    #===========================================================================
-    # DB QUERY
-    #===========================================================================
-    # Note: If Admin/Universal wants 'all', you'd query without user_id filter
-    query = {"user_id": target_id}
-    
-    logs = await db.activity_logs.find(query, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
-    
-    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
-    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
-    
-    return {
-        "user": {
-            "id": target_id,
-            "full_name": current_user.full_name if is_owner else "Team Member" # Simplified for this snippet
-        },
-        "total_screen_time": total_screen_time,
-        "total_tasks_completed": total_tasks_completed,
-        "logs": logs
-    }
- 
+ """
+ Access Rules:
+ - Everyone can view their own report
+ - Admin can view anyone
+ - Staff/Manager need can_view_reports permission to view others
+ """
+ # Default to own report
+ target_user_id = user_id or current_user.id
+ # 🔐 Access Control
+ if target_user_id != current_user.id:
+  if current_user.role != "admin":
+   if isinstance(current_user.permissions, dict):
+    permissions = current_user.permissions
+   elif current_user.permissions:
+    permissions = current_user.permissions.model_dump()
+   else:
+    permissions = {}
+   allowed_users = permissions.get("view_other_reports", [])
+   if target_user_id not in allowed_users:
+    raise HTTPException(
+     status_code=403,
+     detail="Not authorized to view other users' reports"
+    )
+ # Fetch logs
+ logs = await db.activity_logs.find(
+  {"user_id": target_user_id},
+  {"_id": 0}
+ ).sort("date", -1).limit(30).to_list(100)
+ total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+ total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+ return {
+  "user_id": target_user_id,
+  "total_screen_time": total_screen_time,
+  "total_tasks_completed": total_tasks_completed,
+  "days_logged": len(logs)
+ }
 @api_router.get("/reports/export")
 async def export_reports(
  format: str = "csv",
@@ -2006,18 +2034,27 @@ async def export_reports(
  current_user: User = Depends(get_current_user)
 ):
  """
- Matrix:
- - Admin OR can_download_reports → export anyone
- - Otherwise: can only export own report
+ Access Rules:
+ - Everyone can export their own report
+ - Admin can export anyone
+ - Staff/Manager need can_view_reports permission for others
  """
- # Resolve target and validate view permission
- target_user_id = build_report_query(current_user, target_user_id=user_id)
- # Additional check: downloading requires can_download_reports (unless own report)
- if target_user_id != current_user.id and not can_download_report(current_user):
-  raise HTTPException(
-   status_code=403,
-   detail="You do not have permission to download other users' reports"
-  )
+ # Default to own report
+ target_user_id = user_id or current_user.id
+ # 🔐 Access Control
+ if target_user_id != current_user.id:
+  if current_user.role != "admin":
+   permissions = (
+    current_user.permissions.model_dump()
+    if current_user.permissions
+    else {}
+   )
+   allowed_users = permissions.get("view_other_reports", [])
+   if target_user_id not in allowed_users:
+    raise HTTPException(
+     status_code=403,
+     detail="Not authorized to access other users' reports"
+    )
  # Fetch logs
  logs = await db.activity_logs.find(
   {"user_id": target_user_id},
@@ -2138,7 +2175,8 @@ async def get_performance_rankings(
    1
   ) if days_present else 0
   # ----------------------------
-  # Tasks % ✅ FIXED: datetime comparison (no isoformat)
+  # Tasks %
+  # ✅ FIXED: datetime comparison (no isoformat)
   # ----------------------------
   tasks_assigned = await db.tasks.count_documents({
    "assigned_to": uid,
@@ -2354,8 +2392,14 @@ async def create_client(client_data: ClientCreate, current_user: User = Depends(
  return client
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
- # Matrix: Admin → can_view_all_clients → assigned_clients → assigned_to == user
- query = build_client_query(current_user)
+ query = {}
+ if current_user.role == "admin":
+    query = {}
+ elif current_user.role == "manager":
+    team_ids = await get_team_user_ids(current_user.id)
+    query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
+ else:
+    query = {"assigned_to": current_user.id}
  clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
  for client in clients:
   if isinstance(client["created_at"], str):
@@ -2368,9 +2412,6 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
  client = await db.clients.find_one({"id": client_id}, {"_id": 0})
  if not client:
   raise HTTPException(status_code=404, detail="Client not found")
- # Matrix: Admin → can_view_all_clients → assigned_clients → assigned_to == user → deny
- if not can_view_client(current_user, client):
-  raise HTTPException(status_code=403, detail="Not authorized to view this client")
  if isinstance(client["created_at"], str):
   client["created_at"] = datetime.fromisoformat(client["created_at"])
  if client.get("birthday") and isinstance(client["birthday"], str):
@@ -2381,8 +2422,7 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
  existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
  if not existing:
   raise HTTPException(status_code=404, detail="Client not found")
- # Matrix: Admin → can_edit_clients → assigned_clients → assigned_to == user → deny
- if not can_edit_client(current_user, existing):
+ if current_user.role != "admin" and existing.get("assigned_to") != current_user.id:
   raise HTTPException(status_code=403, detail="Not authorized to edit this client")
  update_data = client_data.model_dump()
  if update_data.get("birthday"):
@@ -2407,9 +2447,8 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
  existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
  if not existing:
   raise HTTPException(status_code=404, detail="Client not found")
- # Matrix: Admin OR can_edit_clients
- if not can_delete_client(current_user):
-  raise HTTPException(status_code=403, detail="Not authorized to delete clients")
+ if current_user.role != "admin" and existing.get("assigned_to") != current_user.id:
+  raise HTTPException(status_code=403, detail="Not authorized to delete this client")
  await create_audit_log(
   current_user,
   action="DELETE_CLIENT",
@@ -2579,12 +2618,23 @@ async def import_clients_from_file(
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
  """Get comprehensive dashboard statistics"""
  now = datetime.now(IST)
- # Task statistics — use permission matrix query builder
- task_query = build_task_query(current_user)
- if task_query:
-  task_query = {"$and": [{"type": {"$ne": "todo"}}, task_query]}
- else:
-  task_query = {"type": {"$ne": "todo"}}
+ # Task statistics
+ task_query = {}
+ if current_user.role != "admin":
+  if isinstance(current_user.permissions, dict):
+   permissions = current_user.permissions
+  elif current_user.permissions:
+   permissions = current_user.permissions.model_dump()
+  else:
+   permissions = {}
+  if not permissions.get("can_view_all_tasks", False):
+   allowed_users = permissions.get("view_other_tasks", [])
+   task_query["$or"] = [
+    {"assigned_to": current_user.id},
+    {"assigned_to": {"$in": allowed_users}},
+    {"sub_assignees": current_user.id},
+    {"created_by": current_user.id}
+   ]
  tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
  total_tasks = len(tasks)
  completed_tasks = len([t for t in tasks if t["status"] == "completed"])
@@ -2621,8 +2671,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     "days_left": days_left,
     "status": "expired" if days_left < 0 else "expiring"
    })
- # Client statistics — use permission matrix query builder
- client_query = build_client_query(current_user)
+ # Client statistics
+ client_query = {} if current_user.role != "staff" else {"assigned_to": current_user.id}
  clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
  total_clients = len(clients)
  # Upcoming birthdays (next 7 days)
@@ -2722,14 +2772,11 @@ async def get_activity_summary(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     """Get staff activity summary"""
-    # Matrix: Admin → allow all; others need can_view_staff_activity AND
-    # the specific user must be in view_other_activity (or user_id is omitted)
-    if current_user.role != "admin":
-        if user_id and not can_view_activity(current_user, user_id):
-            raise HTTPException(
-                status_code=403,
-                detail="You do not have access to this user's activity"
-            )
+    # ------------------------------------------------------
+    # Permission Check
+    # ------------------------------------------------------
+    if current_user.role == "staff":
+        raise HTTPException(status_code=403, detail="Not allowed")
     # ------------------------------------------------------
     # Build Mongo Query
     # ------------------------------------------------------
@@ -2831,11 +2878,10 @@ async def get_user_activity(
     current_user: User = Depends(check_permission("can_view_staff_activity"))
 ):
     """Get detailed activity for one user"""
-    # Matrix: Admin → allow; others need user_id in view_other_activity
-    if not can_view_activity(current_user, user_id):
+    if current_user.role not in ["admin", "manager"]:
         raise HTTPException(
             status_code=403,
-            detail="You do not have access to this user's activity"
+            detail="Admin access required"
         )
     activities = await db.staff_activity.find(
         {"user_id": user_id},
