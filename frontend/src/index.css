@@ -167,3 +167,35 @@ code {
         border-bottom-color: inherit;
     }
 }
+
+/* index.css */
+
+/* Force the calendar grid to expand and show text */
+.rdp {
+  --rdp-cell-size: 45px; /* Increase cell size to prevent squashing */
+  width: 100% !important;
+}
+
+.rdp-day {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #0D3B66 !important; /* Force Brand Deep Blue */
+  font-weight: 600 !important;
+  visibility: visible !important;
+}
+
+/* Ensure the 'Today' circle doesn't hide the number */
+.rdp-day_today {
+  border: 2px solid #1F6FB2 !important;
+  font-weight: 800 !important;
+}
+
+/* Fix the table layout so it fills the card width */
+.rdp-table {
+  width: 100% !important;
+  max-width: none !important;
+  border-collapse: separate !important;
+  border-spacing: 0 5px !important;
+}
