@@ -1945,32 +1945,49 @@ async def delete_due_date(
 # REPORTS ROUTES
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
- user_id: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- """
- Matrix:
- - Admin → view anyone
- - Universal: can_view_reports → view anyone
- - Specific: target_user_id in view_other_reports → view that user
- - Ownership: own report always allowed
- - Deny otherwise
- """
- # Resolves target and raises 403 if not permitted
- target_user_id = build_report_query(current_user, target_user_id=user_id)
- # Fetch logs
- logs = await db.activity_logs.find(
-  {"user_id": target_user_id},
-  {"_id": 0}
- ).sort("date", -1).limit(30).to_list(100)
- total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
- total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
- return {
-  "user_id": target_user_id,
-  "total_screen_time": total_screen_time,
-  "total_tasks_completed": total_tasks_completed,
-  "days_logged": len(logs)
- }
+    """
+    5-Layer Permission Matrix Implementation:
+    1. Admin -> Full Access
+    2. Universal (can_view_reports) -> Access All
+    3. Specific (view_other_reports) -> Access Listed IDs
+    4. Ownership -> Access Own ID
+    """
+    
+    # Identify who we are looking for
+    target_id = user_id or current_user.id
+    
+    # PERMISSION CHECK
+    is_admin = current_user.role == UserRole.admin
+    has_universal = current_user.permissions.can_view_reports
+    has_specific = target_id in current_user.permissions.view_other_reports
+    is_owner = target_id == current_user.id
+
+    # Layer 5: Deny if none of the above match
+    if not (is_admin or has_universal or has_specific or is_owner):
+        raise HTTPException(status_code=403, detail="You do not have permission to view this report.")
+
+    # DB QUERY
+    # Note: If Admin/Universal wants 'all', you'd query without user_id filter
+    query = {"user_id": target_id}
+    
+    logs = await db.activity_logs.find(query, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
+    
+    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+    
+    return {
+        "user": {
+            "id": target_id,
+            "full_name": current_user.full_name if is_owner else "Team Member" # Simplified for this snippet
+        },
+        "total_screen_time": total_screen_time,
+        "total_tasks_completed": total_tasks_completed,
+        "logs": logs
+    }
+ 
 @api_router.get("/reports/export")
 async def export_reports(
  format: str = "csv",
