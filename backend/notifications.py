@@ -165,7 +165,33 @@ async def get_unread_count(current_user=Depends(get_current_user)):
     })
     return {"unread_count": count}
 
+@router.put("/read-all")
+async def mark_all_read(current_user=Depends(get_current_user)):
+    await db.notifications.update_many(
+        {
+            "user_id": current_user.id,
+            "is_read": False
+        },
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
 
+
+@router.put("/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user=Depends(get_current_user)):
+    result = await db.notifications.update_one(
+        {
+            "id": notification_id,
+            "user_id": current_user.id
+        },
+        {"$set": {"is_read": True}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+
+    return {"message": "Success"}
+    
 @router.put("/{notification_id}/read")
 async def mark_notification_read(notification_id: str, current_user=Depends(get_current_user)):
     """Marks a single notification as read."""
