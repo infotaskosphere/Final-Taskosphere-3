@@ -623,7 +623,7 @@ async def login(credentials: UserLogin):
   user["created_at"] = datetime.fromisoformat(user["created_at"])
  user_obj = User(**{k: v for k, v in user.items() if k != "password"})
  access_token = create_access_token({"sub": user_obj.id})
- return {"access_token": access_token, "token_type": "bearer", "user": user_obj
+ return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
         
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
