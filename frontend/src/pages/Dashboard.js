@@ -246,7 +246,7 @@ export default function Dashboard() {
  onError: () => toast.error("Failed to add todo"),
  });
  const updateTodo = useMutation({
- mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: newStatus === "completed" }),
+ mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: status === "completed" }),
  onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
  });
  const deleteTodo = useMutation({
@@ -293,7 +293,6 @@ export default function Dashboard() {
  queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
  },
  onError: (err) => {
- // This will help you see if it's still a 405 (Method) or 403 (Permission) error
  console.error("Update Error:", err);
  toast.error(err.response?.data?.detail || 'Failed to update task');
  },
@@ -315,7 +314,7 @@ export default function Dashboard() {
  } finally {
  setLoading(false);
  }
-};
+ };
  // ── Utility Helpers ─────────────────────────────────────────────────────────
  const getTodayDuration = () => {
  if (!todayAttendance?.punch_in) return "0h 0m";
@@ -363,7 +362,6 @@ export default function Dashboard() {
  };
  const formatToLocalTime = (dateString) => {
    if (!dateString) return "--:--";
-   // Ensure the date string is treated as UTC
    const date = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
    return format(date, 'hh:mm a');
  };
@@ -441,13 +439,11 @@ useEffect(() => {
     document.body.style.overflow = "auto";
     return;
   }
-  // 2. If user is on leave → no gate
   if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
     setMustPunchIn(false);
     document.body.style.overflow = "auto";
     return;
   }
-  // 3. Only show gate if we have a valid response and punch_in is missing
   if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
     setMustPunchIn(true);
     document.body.style.overflow = "hidden";
@@ -766,7 +762,7 @@ useEffect(() => {
  Punch In
  </div>
  <span className="font-medium">{formatToLocalTime(todayAttendance.punch_in)}</span>
-</div>
+ </div>
  {todayAttendance.punch_out ? (
  <div className="flex items-center justify-between text-sm">
  <div className="flex items-center gap-2 text-slate-600">
