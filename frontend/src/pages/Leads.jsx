@@ -27,11 +27,38 @@ const PIPELINE_STAGES = [
   { id: "lost", label: "Lost", color: "bg-red-100 text-red-700" }
 ]
 
-const LEAD_SOURCES = ["Website", "Referral", "LinkedIn", "Cold Call", "Event", "Social Media", "Other"]
+// Must match backend LeadUpdate source Literal exactly (lowercased on send)
+const LEAD_SOURCES = [
+  { label: "Direct",       value: "direct"       },
+  { label: "Website",      value: "website"      },
+  { label: "Referral",     value: "referral"     },
+  { label: "Social Media", value: "social_media" },
+  { label: "Event",        value: "event"        },
+]
 
 export default function LeadsPage() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
+
+  // ─────────────────────────────────────────────────────────────
+  // Permission Matrix — mirrors backend leads.py helpers:
+  //   canDeleteLead  → Admin OR can_manage_users
+  //                    (backend DELETE /leads requires Admin OR can_manage_users)
+  //   canViewAll     → Admin OR can_view_all_leads
+  //                    (backend _build_lead_query — non-admins without this flag
+  //                     only see leads they are assigned_to OR created_by)
+  //   canEditLead()  → Admin OR lead.assigned_to === user.id OR lead.created_by === user.id
+  //                    (backend can_edit_lead — ownership check per record)
+  // ─────────────────────────────────────────────────────────────
+  const isAdmin      = user?.role === 'admin';
+  const perms        = user?.permissions || {};
+  const canDeleteLead = isAdmin || !!perms.can_manage_users;
+  const canViewAll    = isAdmin || !!perms.can_view_all_leads;
+  // Per-record edit: admin always, otherwise ownership (assigned_to or created_by)
+  const canEditLead = (lead) =>
+    isAdmin ||
+    (lead?.assigned_to && lead.assigned_to === user?.id) ||
+    (lead?.created_by  && lead.created_by  === user?.id);
 
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
@@ -50,7 +77,9 @@ export default function LeadsPage() {
     source: "direct",
     notes: null,
     assigned_to: null,
-    status: "new"
+    status: "new",
+    next_follow_up: null,   // backend: rejects past dates
+    date_of_meeting: null,
   })
 
   useEffect(() => {
@@ -88,6 +117,19 @@ export default function LeadsPage() {
     onSuccess: () => queryClient.invalidateQueries(["leads"])
   })
 
+  // Convert lead → client (backend POST /leads/{id}/convert)
+  // Matrix: same as edit — Admin OR assigned_to OR created_by
+  const convertLead = useMutation({
+    mutationFn: (id) => api.post(`/leads/${id}/convert`),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries(["leads"])
+      toast.success("Lead converted to client successfully")
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.detail || "Failed to convert lead")
+    }
+  })
+
   const resetForm = () => {
     setNewLead({
       company_name: "",
@@ -99,7 +141,9 @@ export default function LeadsPage() {
       source: "direct",
       notes: null,
       assigned_to: null,
-      status: "new"
+      status: "new",
+      next_follow_up: null,
+      date_of_meeting: null,
     })
     setErrors({})
   }
@@ -114,16 +158,18 @@ export default function LeadsPage() {
   const handleEdit = (lead) => {
     setEditingLead(lead)
     setNewLead({
-      company_name: lead.company_name || "",
-      contact_name: lead.contact_name || null,
-      email: lead.email || null,
-      phone: lead.phone || null,
+      company_name:     lead.company_name || "",
+      contact_name:     lead.contact_name || null,
+      email:            lead.email || null,
+      phone:            lead.phone || null,
       quotation_amount: lead.quotation_amount || null,
-      services: Array.isArray(lead.services) ? lead.services : [],
-      source: lead.source || "direct",
-      notes: lead.notes || null,
-      assigned_to: lead.assigned_to || null,
-      status: lead.status || "new"
+      services:         Array.isArray(lead.services) ? lead.services : [],
+      source:           lead.source || "direct",
+      notes:            lead.notes || null,
+      assigned_to:      lead.assigned_to || null,
+      status:           lead.status || "new",
+      next_follow_up:   lead.next_follow_up || null,
+      date_of_meeting:  lead.date_of_meeting || null,
     })
     setShowCreate(true)
   }
@@ -135,16 +181,18 @@ export default function LeadsPage() {
     }
 
     const payload = {
-      company_name: newLead.company_name?.trim() || "",
-      contact_name: newLead.contact_name,
-      email: newLead.email,
-      phone: newLead.phone,
+      company_name:     newLead.company_name?.trim() || "",
+      contact_name:     newLead.contact_name   || null,
+      email:            newLead.email          || null,
+      phone:            newLead.phone          || null,
       quotation_amount: newLead.quotation_amount ? Number(newLead.quotation_amount) : null,
-      services: Array.isArray(newLead.services) ? newLead.services : [],
-      source: newLead.source || "direct",
-      notes: newLead.notes,
-      assigned_to: newLead.assigned_to,
-      status: newLead.status || "new"
+      services:         Array.isArray(newLead.services) ? newLead.services : [],
+      source:           newLead.source         || "direct",
+      notes:            newLead.notes          || null,
+      assigned_to:      newLead.assigned_to    || null,
+      status:           newLead.status         || "new",
+      next_follow_up:   newLead.next_follow_up || null,
+      date_of_meeting:  newLead.date_of_meeting|| null,
     }
 
     if (editingLead) {
@@ -246,8 +294,8 @@ export default function LeadsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {LEAD_SOURCES.map(s=>(
-                        <SelectItem key={s} value={s.toLowerCase()}>
-                          {s}
+                        <SelectItem key={s.value} value={s.value}>
+                          {s.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -284,20 +332,62 @@ export default function LeadsPage() {
                   </div>
                 </div>
 
+                <div>
+                  <Label>Next Follow-up Date</Label>
+                  {/* Backend rejects past dates for next_follow_up */}
+                  <Input
+                    type="datetime-local"
+                    value={newLead.next_follow_up
+                      ? newLead.next_follow_up.slice(0,16)
+                      : ""}
+                    onChange={e => handleChange("next_follow_up", e.target.value ? new Date(e.target.value).toISOString() : null)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Date of Meeting</Label>
+                  <Input
+                    type="datetime-local"
+                    value={newLead.date_of_meeting
+                      ? newLead.date_of_meeting.slice(0,16)
+                      : ""}
+                    onChange={e => handleChange("date_of_meeting", e.target.value ? new Date(e.target.value).toISOString() : null)}
+                  />
+                </div>
+
                 <div className="md:col-span-2">
                   <Label>Notes</Label>
                   <Textarea
                     value={newLead.notes || ""}
                     onChange={e=>handleChange("notes",e.target.value)}
+                    placeholder="Notes affect closure probability score automatically..."
                   />
                 </div>
 
               </div>
 
+              {/* Status selector — shown only on edit. "won" blocked by backend unless via /convert */}
+              {editingLead && (
+                <div className="px-1">
+                  <Label>Pipeline Stage</Label>
+                  <Select value={newLead.status} onValueChange={v => handleChange("status", v)}>
+                    <SelectTrigger><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      {PIPELINE_STAGES.filter(s => s.id !== 'won').map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    To mark as "Won" use the Convert button on the lead card.
+                  </p>
+                </div>
+              )}
+
               <DialogFooter>
                 <Button variant="outline" onClick={()=>setShowCreate(false)}>Cancel</Button>
-                <Button onClick={handleSubmit} className="bg-indigo-600">
-                  Save Lead
+                <Button onClick={handleSubmit} disabled={createLead.isPending || updateLead.isPending} className="bg-indigo-600">
+                  {createLead.isPending || updateLead.isPending ? "Saving..." : "Save Lead"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -317,6 +407,7 @@ export default function LeadsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
+              {/* Matches backend LeadBase status Literal exactly */}
               {PIPELINE_STAGES.map(s=>(
                 <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
               ))}
@@ -330,8 +421,13 @@ export default function LeadsPage() {
               <motion.div key={lead.id} layout>
                 <Card className="shadow-md">
                   <CardHeader>
-                    <CardTitle>{lead.company_name}</CardTitle>
-                    <Badge>{lead.status}</Badge>
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-base leading-tight">{lead.company_name}</CardTitle>
+                      {/* Color-coded stage badge using PIPELINE_STAGES config */}
+                      <Badge className={PIPELINE_STAGES.find(s=>s.id===lead.status)?.color || ''}>
+                        {PIPELINE_STAGES.find(s=>s.id===lead.status)?.label || lead.status}
+                      </Badge>
+                    </div>
                   </CardHeader>
 
                   <CardContent className="space-y-3">
@@ -343,18 +439,71 @@ export default function LeadsPage() {
                       <Mail className="w-4 h-4"/> {lead.email || "No Email"}
                     </div>
 
-                    <div className="font-bold text-green-600">
-                      ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
+                    {/* Follow-up date — backend stores as ISO datetime */}
+                    {lead.next_follow_up && (
+                      <div className={`flex items-center gap-2 text-xs font-medium ${
+                        new Date(lead.next_follow_up) < new Date() ? 'text-red-500' : 'text-slate-500'
+                      }`}>
+                        <span>📅 Follow-up: {format(new Date(lead.next_follow_up), 'dd MMM yyyy')}</span>
+                        {new Date(lead.next_follow_up) < new Date() && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full text-[10px] font-bold">OVERDUE</span>}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-green-600">
+                        ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
+                      </span>
+                      {/* Show closure_probability if available (backend auto-calculates from notes) */}
+                      {lead.closure_probability != null && (
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                          lead.closure_probability >= 70 ? 'bg-green-100 text-green-700'
+                          : lead.closure_probability >= 40 ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-red-100 text-red-600'
+                        }`}>
+                          {lead.closure_probability}% close
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex gap-2">
-                      <Button size="icon" variant="ghost" onClick={()=>handleEdit(lead)}>
-                        <Edit2 className="w-4 h-4"/>
-                      </Button>
+                    <div className="flex gap-2 flex-wrap">
+                      {/* Convert button — only shown when lead is not yet won/lost */}
+                      {canEditLead(lead) && !['won','lost'].includes(lead.status) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-emerald-600 border-emerald-300 hover:bg-emerald-50 text-xs"
+                          disabled={convertLead.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Convert "${lead.company_name}" to a client? This will mark the lead as Won.`)) {
+                              convertLead.mutate(lead.id)
+                            }
+                          }}
+                        >
+                          <TrendingUp className="w-3 h-3 mr-1"/> Convert
+                        </Button>
+                      )}
+                      {/* Matrix: Admin OR assigned_to OR created_by can edit */}
+                      {canEditLead(lead) && (
+                        <Button size="icon" variant="ghost" onClick={()=>handleEdit(lead)}>
+                          <Edit2 className="w-4 h-4"/>
+                        </Button>
+                      )}
 
-                      <Button size="icon" variant="ghost" onClick={()=>deleteLead.mutate(lead.id)}>
-                        <Trash2 className="w-4 h-4"/>
-                      </Button>
+                      {/* Matrix: Admin OR can_manage_users can delete leads */}
+                      {canDeleteLead && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-red-500 hover:bg-red-50"
+                          onClick={() => {
+                            if (window.confirm(`Delete lead "${lead.company_name}"? This cannot be undone.`)) {
+                              deleteLead.mutate(lead.id)
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4"/>
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
