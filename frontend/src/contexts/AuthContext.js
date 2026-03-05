@@ -12,6 +12,7 @@ return context;
 };
 
 export const AuthProvider = ({ children }) => {
+
 const [user, setUser] = useState(null);
 const [loading, setLoading] = useState(true);
 
@@ -27,9 +28,18 @@ return {};
 };
 
 const getStoredAuth = () => {
-const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
+const token =
+localStorage.getItem("token") ||
+sessionStorage.getItem("token");
+
+```
+const storedUser =
+  localStorage.getItem("user") ||
+  sessionStorage.getItem("user");
+
 return { token, storedUser };
+```
+
 };
 
 const persistAuth = (token, userData, rememberMe = false) => {
@@ -39,7 +49,7 @@ const storage = rememberMe ? localStorage : sessionStorage;
 storage.setItem("token", token);
 storage.setItem("user", JSON.stringify(userData));
 
-api.defaults.headers.common.Authorization = `Bearer ${token}`;
+api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 ```
 
 };
@@ -52,60 +62,67 @@ localStorage.removeItem("user");
 sessionStorage.removeItem("token");
 sessionStorage.removeItem("user");
 
-delete api.defaults.headers.common.Authorization;
+delete api.defaults.headers.common["Authorization"];
 ```
 
 };
 
 /* ============================================================
-Restore Session on App Load
+Restore Session
 ============================================================ */
 
 useEffect(() => {
-const restoreSession = async () => {
-const { token, storedUser } = getStoredAuth();
 
 ```
+const restoreSession = async () => {
+
+  const { token, storedUser } = getStoredAuth();
+
   if (!token || !storedUser) {
     setLoading(false);
     return;
   }
 
   try {
+
     const parsedUser = JSON.parse(storedUser);
     parsedUser.permissions = normalizePermissions(parsedUser.permissions);
 
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-    // Validate token with backend
     await api.get("/auth/me");
 
     setUser(parsedUser);
+
   } catch (error) {
 
-    // Backend unreachable (Render cold start / network error)
     if (error.message === "Network Error") {
+
       console.warn("Backend unreachable, keeping stored session.");
 
       const parsedUser = JSON.parse(storedUser);
       parsedUser.permissions = normalizePermissions(parsedUser.permissions);
 
       setUser(parsedUser);
-    }
 
-    // Token expired or invalid
-    else if (error.response && error.response.status === 401) {
-      console.warn("Token expired. Logging out.");
+    } else if (error.response && error.response.status === 401) {
+
+      console.warn("Token expired.");
       clearStorage();
       setUser(null);
+
+    } else {
+
+      console.error("Session restore error:", error);
+
     }
 
-    else {
-      console.error("Session restore error:", error);
-    }
   } finally {
+
     setLoading(false);
+
   }
+
 };
 
 restoreSession();
@@ -118,12 +135,18 @@ Login
 ============================================================ */
 
 const login = (responseData, rememberMe = false) => {
-const token = responseData?.access_token || responseData?.token;
-const userData = responseData?.user || responseData?.data?.user;
 
 ```
+const token =
+  responseData?.access_token ||
+  responseData?.token;
+
+const userData =
+  responseData?.user ||
+  responseData?.data?.user;
+
 if (!token || !userData) {
-  console.error("Invalid login response structure:", responseData);
+  console.error("Invalid login response:", responseData);
   return false;
 }
 
@@ -147,15 +170,17 @@ setUser(null);
 };
 
 /* ============================================================
-Refresh User (sync with backend)
+Refresh User
 ============================================================ */
 
 const refreshUser = useCallback(async () => {
-try {
-const response = await api.get("/auth/me");
 
 ```
+try {
+
+  const response = await api.get("/auth/me");
   const updatedUser = response.data;
+
   updatedUser.permissions = normalizePermissions(updatedUser.permissions);
 
   const isLocal = !!localStorage.getItem("token");
@@ -166,8 +191,11 @@ const response = await api.get("/auth/me");
   setUser(updatedUser);
 
   console.log("User context synchronized with database.");
+
 } catch (error) {
+
   console.error("Failed to refresh user:", error);
+
 }
 ```
 
@@ -178,10 +206,13 @@ Permission Helpers
 ============================================================ */
 
 const hasPermission = (permission) => {
-if (!user) return false;
 
 ```
-if (user.role?.toLowerCase() === "admin") return true;
+if (!user) return false;
+
+if (user.role && user.role.toLowerCase() === "admin") {
+  return true;
+}
 
 const perms = user.permissions || {};
 
@@ -195,21 +226,27 @@ return false;
 };
 
 const hasAnyPermission = (...permissionList) => {
-if (!user) return false;
 
 ```
-if (user.role?.toLowerCase() === "admin") return true;
+if (!user) return false;
 
-return permissionList.some((p) => user.permissions?.[p] === true);
+if (user.role && user.role.toLowerCase() === "admin") {
+  return true;
+}
+
+return permissionList.some((p) => user.permissions && user.permissions[p] === true);
 ```
 
 };
 
 const canAccessUser = (permissionKey, targetUserId) => {
-if (!user) return false;
 
 ```
-if (user.role?.toLowerCase() === "admin") return true;
+if (!user) return false;
+
+if (user.role && user.role.toLowerCase() === "admin") {
+  return true;
+}
 
 const perms = user.permissions || {};
 const allowedIds = perms[permissionKey];
@@ -240,5 +277,9 @@ canAccessUser,
 isOwner,
 };
 
-return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+return (
+<AuthContext.Provider value={value}>
+{children}
+</AuthContext.Provider>
+);
 };
