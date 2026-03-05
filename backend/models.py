@@ -26,9 +26,7 @@ class UserRole(str, Enum):
 #   Layer 5: Deny (fallback)
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
-    # Admin: all permissions enabled (admin bypass handles this at route level too)
     "admin": {
-        # Universal permissions
         "can_view_all_tasks": True,
         "can_view_all_clients": True,
         "can_view_all_dsc": True,
@@ -46,7 +44,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": True,
         "can_manage_settings": True,
-        # Feature flags
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": True,
@@ -55,7 +52,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # Specific access (admin sees all, but lists default to empty — admin bypass handles it)
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -63,19 +59,14 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "view_other_activity": [],
         "assigned_clients": [],
     },
-
-    # Manager: own data + team data via specific-access permissions
-    # Per matrix: view_other_tasks, view_other_reports, view_other_attendance,
-    #             view_other_activity, can_view_reports, can_view_attendance
     "manager": {
-        # Universal permissions — managers do NOT get blanket view-all by default
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": True,
         "can_view_all_duedates": False,
-        "can_view_reports": True,       # managers can view reports
-        "can_view_attendance": True,    # managers can view attendance
+        "can_view_reports": True,
+        "can_view_attendance": True,
         "can_view_all_leads": False,
         "can_edit_tasks": True,
         "can_edit_clients": False,
@@ -86,7 +77,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": False,
         "can_manage_settings": False,
-        # Feature flags
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": False,
@@ -95,8 +85,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # Specific access — populated when manager is set up; defaults to empty lists
-        # At runtime, these lists are populated with the IDs of their team members
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -104,17 +92,14 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "view_other_activity": [],
         "assigned_clients": [],
     },
-
-    # Staff: own data only
     "staff": {
-        # Universal permissions — staff has none by default
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": False,
         "can_view_all_duedates": False,
-        "can_view_reports": False,
-        "can_view_attendance": False,
+        "can_view_reports": True,
+        "can_view_attendance": True,
         "can_view_all_leads": False,
         "can_edit_tasks": False,
         "can_edit_clients": False,
@@ -125,16 +110,14 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": False,
         "can_manage_users": False,
         "can_manage_settings": False,
-        # Feature flags
         "can_assign_tasks": False,
         "can_view_staff_activity": False,
         "can_send_reminders": False,
         "can_view_user_page": False,
         "can_view_audit_logs": False,
         "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True,   # Staff can use their own todo dashboard
+        "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # Specific access — staff has none by default
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -143,7 +126,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
 }
-
 # ======================
 # CORE USER & PERMISSIONS
 # ======================
