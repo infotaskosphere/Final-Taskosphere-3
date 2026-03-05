@@ -26,7 +26,6 @@ async def send_message(chat_id: int, text: str, keyboard=None):
     async with httpx.AsyncClient() as client:
         await client.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
-# UPDATED: Generic cancel callback (works for both tasks and leads)
 def inline_keyboard(buttons, include_cancel=True):
     keyboard_buttons = [
         [{"text": b["text"], "callback_data": b["callback"]}]
@@ -49,6 +48,7 @@ async def telegram_webhook(request: Request):
             return {"status": "unauthorized"}
 
         payload = await request.json()
+
         # =====================================================
         # HANDLE CALLBACK BUTTONS
         # =====================================================
@@ -61,28 +61,33 @@ async def telegram_webhook(request: Request):
                     f"{TELEGRAM_API}/answerCallbackQuery",
                     json={"callback_query_id": callback["id"]}
                 )
+
             # ===============================
-            # GENERIC CANCEL (works for Task & Lead)
+            # GENERIC CANCEL
             # ===============================
             if clicked == "cancel_convo":
                 await db.telegram_conversations.delete_many({"telegram_id": chat_id})
                 await send_message(chat_id, "❌ Action cancelled.")
                 return {"status": "cancelled"}
+
             # ===============================
-            # DELETE TASK (kept exactly as original)
+            # DELETE TASK
             # ===============================
             if clicked.startswith("delete_"):
                 task_id = clicked.replace("delete_", "")
                 await db.tasks.delete_one({"id": task_id})
                 await send_message(chat_id, "🗑 Task deleted successfully.")
                 return {"status": "task_deleted"}
+
             convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
             if not convo:
                 return {"status": "no_convo"}
             data = convo.get("data", {})
-            convo_type = convo.get("type", "task") # NEW: type support for leads
+            convo_type = convo.get("type", "task")
+
             # ===============================
-            # LEAD CALLBACKS (UPDATED FOR FULL FIELDS)
+            # LEAD CALLBACKS
+            # FIX: Use "lead_assign_" prefix to avoid collision with task "assign_"
             # ===============================
             if convo_type == "lead":
                 # SERVICE
@@ -96,49 +101,53 @@ async def telegram_webhook(request: Request):
                         chat_id,
                         "🌐 Select Source:",
                         inline_keyboard([
-                            {"text": "Direct", "callback": "source_direct"},
-                            {"text": "Website", "callback": "source_website"},
-                            {"text": "Referral", "callback": "source_referral"},
+                            {"text": "Direct",       "callback": "source_direct"},
+                            {"text": "Website",      "callback": "source_website"},
+                            {"text": "Referral",     "callback": "source_referral"},
                             {"text": "Social Media", "callback": "source_social_media"},
-                            {"text": "Event", "callback": "source_event"},
+                            {"text": "Event",        "callback": "source_event"},
                         ])
                     )
                     return {"status": "service_selected"}
+
                 # SOURCE
                 if clicked.startswith("source_"):
                     data["source"] = clicked.replace("source_", "")
-                    users = await db.users.find({"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1}).to_list(50)
+                    users = await db.users.find(
+                        {"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1}
+                    ).to_list(50)
+                    # FIX: use "lead_assign_" prefix so lead assignee callbacks don't
+                    # accidentally fire the task "assign_" handler below
                     buttons = [
-                        {"text": u["full_name"], "callback": f"assign_{u['id']}"}
+                        {"text": u["full_name"], "callback": f"lead_assign_{u['id']}"}
                         for u in users
                     ]
-                    buttons.append({"text": "Unassigned", "callback": "assign_unassigned"})
+                    buttons.append({"text": "Unassigned", "callback": "lead_assign_unassigned"})
                     await db.telegram_conversations.update_one(
                         {"telegram_id": chat_id},
                         {"$set": {"step": "lead_assign", "data": data}}
                     )
                     await send_message(chat_id, "👤 Assign this lead to:", inline_keyboard(buttons))
                     return {"status": "source_selected"}
-                # ASSIGNEE
-                if clicked.startswith("assign_"):
-                    assignee_id = clicked.replace("assign_", "")
+
+                # LEAD ASSIGNEE — FIX: renamed from assign_ to lead_assign_
+                if clicked.startswith("lead_assign_"):
+                    assignee_id = clicked.replace("lead_assign_", "")
                     data["assigned_to"] = None if assignee_id == "unassigned" else assignee_id
                     await db.telegram_conversations.update_one(
                         {"telegram_id": chat_id},
                         {"$set": {"step": "next_follow_up", "data": data}}
                     )
                     await send_message(chat_id, "📅 Enter Next Follow-up Date (YYYY-MM-DD) or SKIP:")
-                    return {"status": "assignee_selected"}
+                    return {"status": "lead_assignee_selected"}
 
             # ===============================
             # CONFIRM LEAD
             # ===============================
             if clicked == "confirm_lead":
-
                 user = await db.users.find_one({"telegram_id": chat_id})
                 now = datetime.now(timezone.utc)
 
-                # convert follow-up to datetime
                 follow_up = None
                 if data.get("next_follow_up"):
                     try:
@@ -147,36 +156,27 @@ async def telegram_webhook(request: Request):
                         follow_up = None
 
                 new_lead = {
-                    "company_name": data.get("company_name"),
-                    "contact_name": data.get("contact_person"),
-                    "email": data.get("email"),
-                    "phone": data.get("phone"),
-
-                    # services must always be list
-                    "services": [data["service"]] if data.get("service") else [],
-
+                    "company_name":    data.get("company_name"),
+                    "contact_name":    data.get("contact_person"),
+                    "email":           data.get("email"),
+                    "phone":           data.get("phone"),
+                    "services":        [data["service"]] if data.get("service") else [],
                     "quotation_amount": float(data["quotation_amount"]) if data.get("quotation_amount") else None,
-
-                    "status": "new",
-                    "source": data.get("source"),
-
+                    "status":          "new",
+                    "source":          data.get("source"),
                     "date_of_meeting": data.get("date_of_meeting"),
-
-                    "next_follow_up": follow_up,
-
-                    "notes": data.get("notes"),
-
-                    "assigned_to": data.get("assigned_to") or None,
-
-                    "created_by": str(user["_id"]) if user else "telegram_bot",
-
-                    "created_at": now,
-                    "updated_at": now
+                    "next_follow_up":  follow_up,
+                    "notes":           data.get("notes"),
+                    "assigned_to":     data.get("assigned_to") or None,
+                    # FIX: was str(user["_id"]) which gives MongoDB ObjectId string
+                    # — must use user["id"] (the UUID string used everywhere else)
+                    "created_by":      user["id"] if user else "telegram_bot",
+                    "created_at":      now,
+                    "updated_at":      now,
                 }
 
                 result = await db.leads.insert_one(new_lead)
 
-                # create notification if assigned
                 if new_lead["assigned_to"]:
                     await create_notification(
                         user_id=new_lead["assigned_to"],
@@ -185,18 +185,12 @@ async def telegram_webhook(request: Request):
                         type="lead"
                     )
 
-                # delete telegram conversation
                 await db.telegram_conversations.delete_one({"telegram_id": chat_id})
-
-                await send_message(
-                    chat_id,
-                    f"✅ Lead '{new_lead['company_name']}' created successfully!"
-                )
-
+                await send_message(chat_id, f"✅ Lead '{new_lead['company_name']}' created successfully!")
                 return {"status": "lead_created", "lead_id": str(result.inserted_id)}
-            
+
             # ===============================
-            # EXISTING TASK CALLBACKS (100% unchanged from your original)
+            # TASK CALLBACKS (unchanged)
             # ===============================
             # DEPARTMENT
             if clicked.startswith("dept_"):
@@ -213,6 +207,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "🏢 Select Client:", inline_keyboard(buttons))
                 return {"status": "department_selected"}
+
             # CLIENT
             if clicked.startswith("client_"):
                 client = clicked.replace("client_", "")
@@ -229,7 +224,8 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "👤 Select Assignee:", inline_keyboard(buttons))
                 return {"status": "client_selected"}
-            # ASSIGNEE
+
+            # TASK ASSIGNEE
             if clicked.startswith("assign_"):
                 assignee = clicked.replace("assign_", "")
                 data["assigned_to"] = None if assignee == "unassigned" else assignee
@@ -246,6 +242,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "Select Sub-Assignees:", inline_keyboard(buttons))
                 return {"status": "assignee_selected"}
+
             # SUB ASSIGNEES
             if clicked.startswith("sub_"):
                 uid = clicked.replace("sub_", "")
@@ -258,9 +255,9 @@ async def telegram_webhook(request: Request):
                         chat_id,
                         "⚡ Select Priority:",
                         inline_keyboard([
-                            {"text": "Low", "callback": "priority_low"},
-                            {"text": "Medium", "callback": "priority_medium"},
-                            {"text": "High", "callback": "priority_high"},
+                            {"text": "Low",      "callback": "priority_low"},
+                            {"text": "Medium",   "callback": "priority_medium"},
+                            {"text": "High",     "callback": "priority_high"},
                             {"text": "Critical", "callback": "priority_critical"},
                         ])
                     )
@@ -272,6 +269,7 @@ async def telegram_webhook(request: Request):
                     {"$set": {"data": data}}
                 )
                 return {"status": "sub_added"}
+
             # PRIORITY
             if clicked.startswith("priority_"):
                 data["priority"] = clicked.replace("priority_", "")
@@ -283,12 +281,13 @@ async def telegram_webhook(request: Request):
                     chat_id,
                     "📌 Select Status:",
                     inline_keyboard([
-                        {"text": "To Do", "callback": "status_pending"},
+                        {"text": "To Do",       "callback": "status_pending"},
                         {"text": "In Progress", "callback": "status_in_progress"},
-                        {"text": "Completed", "callback": "status_completed"},
+                        {"text": "Completed",   "callback": "status_completed"},
                     ])
                 )
                 return {"status": "priority_selected"}
+
             # STATUS
             if clicked.startswith("status_"):
                 data["status"] = clicked.replace("status_", "")
@@ -301,10 +300,11 @@ async def telegram_webhook(request: Request):
                     "🔁 Is this recurring?",
                     inline_keyboard([
                         {"text": "Yes", "callback": "rec_yes"},
-                        {"text": "No", "callback": "rec_no"},
+                        {"text": "No",  "callback": "rec_no"},
                     ])
                 )
                 return {"status": "status_selected"}
+
             # RECURRING
             if clicked == "rec_yes":
                 data["is_recurring"] = True
@@ -316,13 +316,14 @@ async def telegram_webhook(request: Request):
                     chat_id,
                     "Repeat Pattern:",
                     inline_keyboard([
-                        {"text": "Daily", "callback": "pattern_daily"},
-                        {"text": "Weekly", "callback": "pattern_weekly"},
+                        {"text": "Daily",   "callback": "pattern_daily"},
+                        {"text": "Weekly",  "callback": "pattern_weekly"},
                         {"text": "Monthly", "callback": "pattern_monthly"},
-                        {"text": "Yearly", "callback": "pattern_yearly"},
+                        {"text": "Yearly",  "callback": "pattern_yearly"},
                     ])
                 )
                 return {"status": "recurring_yes"}
+
             if clicked == "rec_no":
                 data["is_recurring"] = False
                 await db.telegram_conversations.update_one(
@@ -331,6 +332,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "📅 Enter Due Date (YYYY-MM-DD):")
                 return {"status": "recurring_no"}
+
             if clicked.startswith("pattern_"):
                 data["recurrence_pattern"] = clicked.replace("pattern_", "")
                 await db.telegram_conversations.update_one(
@@ -339,6 +341,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "Enter recurrence interval (number):")
                 return {"status": "pattern_selected"}
+
             # CONFIRM TASK
             if clicked == "confirm_task":
                 now = datetime.now(timezone.utc)
@@ -346,40 +349,59 @@ async def telegram_webhook(request: Request):
                 if not user:
                     return {"status": "user_not_found"}
                 new_task = {
-                    "id": str(uuid.uuid4()),
-                    "title": data.get("title"),
-                    "description": data.get("description"),
-                    "assigned_to": data.get("assigned_to") or None,
-                    "sub_assignees": data.get("sub_assignees", []),
-                    "priority": data.get("priority", "medium"),
-                    "status": data.get("status", "pending"),
-                    "category": data.get("category"),
-                    "client_id": data.get("client_id"),
-                    "is_recurring": data.get("is_recurring", False),
+                    # FIX: ensure id is always set as UUID string so GET /tasks finds it
+                    "id":                 str(uuid.uuid4()),
+                    "title":              data.get("title"),
+                    "description":        data.get("description"),
+                    "assigned_to":        data.get("assigned_to") or None,
+                    "sub_assignees":      data.get("sub_assignees", []),
+                    "priority":           data.get("priority", "medium"),
+                    "status":             data.get("status", "pending"),
+                    "category":           data.get("category"),
+                    "client_id":          data.get("client_id"),
+                    "is_recurring":       data.get("is_recurring", False),
                     "recurrence_pattern": data.get("recurrence_pattern"),
                     "recurrence_interval": data.get("recurrence_interval", 1),
-                    "created_by": user["id"],
-                    "created_at": now,
-                    "updated_at": now,
-                    "due_date": data.get("due_date")
+                    # FIX: use user["id"] (UUID) not str(user["_id"]) (ObjectId)
+                    # so the created_by field matches the id field in GET /tasks
+                    "created_by":         user["id"],
+                    "created_at":         now,
+                    "updated_at":         now,
+                    "due_date":           data.get("due_date"),
+                    # Ensure task is NOT marked as todo so GET /tasks filter passes
+                    "type":               "task",
                 }
                 await db.tasks.insert_one(new_task)
                 await db.telegram_conversations.delete_many({"telegram_id": chat_id})
+
+                # Notify assignee if set
+                if new_task["assigned_to"]:
+                    await create_notification(
+                        user_id=new_task["assigned_to"],
+                        title="New Task Assigned",
+                        message=f"Task '{new_task['title']}' has been assigned to you via Telegram",
+                        type="assignment"
+                    )
+
                 await send_message(chat_id, "✅ Task Created Successfully!")
                 return {"status": "task_created"}
+
         # =====================================================
         # NORMAL MESSAGE FLOW
         # =====================================================
         if "message" not in payload:
             return {"status": "ignored"}
+
         message = payload["message"]
         chat_id = message["chat"]["id"]
         text = message.get("text", "").strip()
+
         # CANCEL VIA COMMAND
         if text.lower() == "/cancel":
             await db.telegram_conversations.delete_many({"telegram_id": chat_id})
             await send_message(chat_id, "❌ Action cancelled.")
             return {"status": "cancelled"}
+
         # SHOW MY TASKS
         if text.lower() == "/mytasks":
             user = await db.users.find_one({"telegram_id": chat_id})
@@ -389,8 +411,8 @@ async def telegram_webhook(request: Request):
             tasks = await db.tasks.find(
                 {
                     "$or": [
-                        {"created_by": user["id"]},
-                        {"assigned_to": user["id"]},
+                        {"created_by":   user["id"]},
+                        {"assigned_to":  user["id"]},
                         {"sub_assignees": user["id"]}
                     ]
                 },
@@ -408,14 +430,14 @@ async def telegram_webhook(request: Request):
                     ])
                 )
             return {"status": "tasks_listed"}
-        # NEW: ADD LEAD COMMAND
+
+        # ADD LEAD COMMAND
         if text.lower() == "/addlead":
             user = await db.users.find_one({"telegram_id": chat_id})
-            
-            # Check if user is admin OR has permission to handle leads
             permissions = user.get("permissions", {}) if user else {}
-            is_authorized = user and (user["role"] == "admin" or permissions.get("can_view_all_leads"))
-            
+            is_authorized = user and (
+                user["role"] == "admin" or permissions.get("can_view_all_leads")
+            )
             if not is_authorized:
                 await send_message(chat_id, "🚫 You do not have permission to add leads.")
                 return {"status": "unauthorized"}
@@ -426,7 +448,8 @@ async def telegram_webhook(request: Request):
             )
             await send_message(chat_id, "🏢 Enter Company Name:")
             return {"status": "lead_started"}
-        # START (original task flow)
+
+        # START (task flow)
         if text == "/start":
             await db.telegram_conversations.update_one(
                 {"telegram_id": chat_id},
@@ -435,15 +458,18 @@ async def telegram_webhook(request: Request):
             )
             await send_message(chat_id, "📝 Enter Task Title:")
             return {"status": "started"}
+
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
         if not convo:
             await send_message(chat_id, "Send /start to create task or /addlead to add a lead.")
             return {"status": "no_convo"}
+
         step = convo.get("step")
         data = convo.get("data", {})
         convo_type = convo.get("type", "task")
+
         # =====================================================
-        # LEAD FLOW STEPS (UPDATED FOR FULL FORM)
+        # LEAD FLOW STEPS
         # =====================================================
         if convo_type == "lead":
             if step == "company_name":
@@ -457,6 +483,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "👤 Enter Contact Person (or SKIP):")
                 return {"status": "company_name_saved"}
+
             if step == "contact_person":
                 data["contact_person"] = None if text.lower() == "skip" else text
                 await db.telegram_conversations.update_one(
@@ -465,6 +492,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "✉️ Enter Email (or SKIP):")
                 return {"status": "contact_person_saved"}
+
             if step == "email":
                 data["email"] = None if text.lower() == "skip" else text
                 await db.telegram_conversations.update_one(
@@ -473,9 +501,10 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "📞 Enter Phone Number (or SKIP):")
                 return {"status": "email_saved"}
+
             if step == "phone":
                 if text.lower() != "skip" and (not text.isdigit() or len(text) < 10):
-                    await send_message(chat_id, "Invalid phone number.")
+                    await send_message(chat_id, "Invalid phone number. Enter 10+ digits or SKIP.")
                     return {"status": "invalid_phone"}
                 data["phone"] = None if text.lower() == "skip" else text
                 await db.telegram_conversations.update_one(
@@ -486,26 +515,31 @@ async def telegram_webhook(request: Request):
                     chat_id,
                     "📂 Select Service:",
                     inline_keyboard([
-                        {"text": "GST", "callback": "service_gst"},
-                        {"text": "INCOME TAX", "callback": "service_income_tax"},
-                        {"text": "ACCOUNTS", "callback": "service_accounts"},
-                        {"text": "TDS", "callback": "service_tds"},
-                        {"text": "ROC", "callback": "service_roc"},
-                        {"text": "TRADEMARK", "callback": "service_trademark"},
+                        {"text": "GST",          "callback": "service_gst"},
+                        {"text": "INCOME TAX",   "callback": "service_income_tax"},
+                        {"text": "ACCOUNTS",     "callback": "service_accounts"},
+                        {"text": "TDS",          "callback": "service_tds"},
+                        {"text": "ROC",          "callback": "service_roc"},
+                        {"text": "TRADEMARK",    "callback": "service_trademark"},
                         {"text": "MSME SMADHAN", "callback": "service_msme_smadhan"},
-                        {"text": "FEMA", "callback": "service_fema"},
-                        {"text": "DSC", "callback": "service_dsc"},
-                        {"text": "OTHER", "callback": "service_other"},
+                        {"text": "FEMA",         "callback": "service_fema"},
+                        {"text": "DSC",          "callback": "service_dsc"},
+                        {"text": "OTHER",        "callback": "service_other"},
                     ])
                 )
                 return {"status": "phone_saved"}
+
             if step == "next_follow_up":
                 if text.lower() != "skip":
                     try:
-                        due = datetime.fromisoformat(text) if "T" in text else datetime.fromisoformat(text + "T00:00:00")
+                        due = (
+                            datetime.fromisoformat(text)
+                            if "T" in text
+                            else datetime.fromisoformat(text + "T00:00:00")
+                        )
                         data["next_follow_up"] = due.isoformat()
-                    except:
-                        await send_message(chat_id, "Invalid format. Use YYYY-MM-DD")
+                    except Exception:
+                        await send_message(chat_id, "Invalid format. Use YYYY-MM-DD or SKIP.")
                         return {"status": "invalid_date"}
                 else:
                     data["next_follow_up"] = None
@@ -515,20 +549,21 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "📝 Enter Notes (or SKIP):")
                 return {"status": "next_follow_up_saved"}
+
             if step == "notes":
                 data["notes"] = None if text.lower() == "skip" else text
-                summary = f"""
-✅ Confirm Lead Details
-🏢 Company: {data.get('company_name')}
-👤 Contact: {data.get('contact_person') or 'None'}
-✉️ Email: {data.get('email') or 'None'}
-📞 Phone: {data.get('phone') or 'None'}
-📂 Service: {data.get('service') or 'None'}
-🌐 Source: {data.get('source') or 'None'}
-👤 Assigned: {data.get('assigned_to') or 'Unassigned'}
-📅 Follow-up: {data.get('next_follow_up') or 'None'}
-📝 Notes: {data.get('notes') or 'None'}
-"""
+                summary = (
+                    f"✅ Confirm Lead Details\n"
+                    f"🏢 Company: {data.get('company_name')}\n"
+                    f"👤 Contact: {data.get('contact_person') or 'None'}\n"
+                    f"✉️ Email: {data.get('email') or 'None'}\n"
+                    f"📞 Phone: {data.get('phone') or 'None'}\n"
+                    f"📂 Service: {data.get('service') or 'None'}\n"
+                    f"🌐 Source: {data.get('source') or 'None'}\n"
+                    f"👤 Assigned: {data.get('assigned_to') or 'Unassigned'}\n"
+                    f"📅 Follow-up: {data.get('next_follow_up') or 'None'}\n"
+                    f"📝 Notes: {data.get('notes') or 'None'}"
+                )
                 await db.telegram_conversations.update_one(
                     {"telegram_id": chat_id},
                     {"$set": {"step": "confirm", "data": data}}
@@ -536,13 +571,12 @@ async def telegram_webhook(request: Request):
                 await send_message(
                     chat_id,
                     summary,
-                    inline_keyboard([
-                        {"text": "Confirm ✅", "callback": "confirm_lead"}
-                    ])
+                    inline_keyboard([{"text": "Confirm ✅", "callback": "confirm_lead"}])
                 )
                 return {"status": "notes_saved"}
+
         # =====================================================
-        # TASK FLOW STEPS (your original logic – unchanged)
+        # TASK FLOW STEPS (unchanged from original)
         # =====================================================
         if convo_type == "task":
             if step == "title":
@@ -553,6 +587,7 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "Enter Description (or type SKIP):")
                 return {"status": "title_saved"}
+
             if step == "description":
                 data["description"] = None if text.lower() == "skip" else text
                 await db.telegram_conversations.update_one(
@@ -563,22 +598,23 @@ async def telegram_webhook(request: Request):
                     chat_id,
                     "📂 Select Department:",
                     inline_keyboard([
-                        {"text": "GST", "callback": "dept_gst"},
+                        {"text": "GST",        "callback": "dept_gst"},
                         {"text": "INCOME TAX", "callback": "dept_income_tax"},
-                        {"text": "ACCOUNTS", "callback": "dept_accounts"},
-                        {"text": "TDS", "callback": "dept_tds"},
-                        {"text": "ROC", "callback": "dept_roc"},
-                        {"text": "TRADEMARK", "callback": "dept_trademark"},
-                        {"text": "OTHER", "callback": "dept_other"},
+                        {"text": "ACCOUNTS",   "callback": "dept_accounts"},
+                        {"text": "TDS",        "callback": "dept_tds"},
+                        {"text": "ROC",        "callback": "dept_roc"},
+                        {"text": "TRADEMARK",  "callback": "dept_trademark"},
+                        {"text": "OTHER",      "callback": "dept_other"},
                     ])
                 )
                 return {"status": "description_saved"}
+
             if step == "interval":
                 try:
                     interval = int(text)
                     if interval <= 0:
-                        raise Exception()
-                except:
+                        raise ValueError()
+                except (ValueError, TypeError):
                     await send_message(chat_id, "Enter valid number (e.g., 1)")
                     return {"status": "invalid_interval"}
                 data["recurrence_interval"] = interval
@@ -588,10 +624,15 @@ async def telegram_webhook(request: Request):
                 )
                 await send_message(chat_id, "📅 Enter Due Date (YYYY-MM-DD):")
                 return {"status": "interval_saved"}
+
             if step == "due_date":
                 try:
-                    due = datetime.fromisoformat(text) if "T" in text else datetime.fromisoformat(text + "T00:00:00")
-                except:
+                    due = (
+                        datetime.fromisoformat(text)
+                        if "T" in text
+                        else datetime.fromisoformat(text + "T00:00:00")
+                    )
+                except Exception:
                     await send_message(chat_id, "Invalid format. Use YYYY-MM-DD")
                     return {"status": "invalid_date"}
                 data["due_date"] = due.isoformat()
@@ -599,26 +640,26 @@ async def telegram_webhook(request: Request):
                     {"telegram_id": chat_id},
                     {"$set": {"step": "confirm", "data": data}}
                 )
-                summary = f"""
-📋 Confirm Task Details
-📝 Title: {data.get('title')}
-📂 Department: {data.get('category')}
-🏢 Client: {data.get('client_id')}
-👤 Assignee: {data.get('assigned_to')}
-⚡ Priority: {data.get('priority')}
-📌 Status: {data.get('status')}
-🔁 Recurring: {data.get('is_recurring')}
-📅 Due Date: {text}
-"""
+                summary = (
+                    f"📋 Confirm Task Details\n"
+                    f"📝 Title: {data.get('title')}\n"
+                    f"📂 Department: {data.get('category')}\n"
+                    f"🏢 Client: {data.get('client_id')}\n"
+                    f"👤 Assignee: {data.get('assigned_to')}\n"
+                    f"⚡ Priority: {data.get('priority')}\n"
+                    f"📌 Status: {data.get('status')}\n"
+                    f"🔁 Recurring: {data.get('is_recurring')}\n"
+                    f"📅 Due Date: {text}"
+                )
                 await send_message(
                     chat_id,
                     summary,
-                    inline_keyboard([
-                        {"text": "Confirm ✅", "callback": "confirm_task"}
-                    ])
+                    inline_keyboard([{"text": "Confirm ✅", "callback": "confirm_task"}])
                 )
                 return {"status": "awaiting_confirm"}
+
         return {"status": "unknown"}
+
     except Exception as e:
         print("Telegram Error:", e)
         return {"status": "error"}
