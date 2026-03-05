@@ -21,37 +21,115 @@ class UserRole(str, Enum):
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
     "admin": {
-        "can_view_all_tasks": True, "can_view_all_clients": True, "can_view_all_dsc": True,
-        "can_view_documents": True, "can_view_all_duedates": True, "can_view_reports": True,
-        "can_manage_users": True, "can_assign_tasks": True, "can_view_staff_activity": True,
-        "can_view_attendance": True, "can_send_reminders": True, "can_view_user_page": True,
-        "can_view_audit_logs": True, "can_edit_tasks": True, "can_edit_dsc": True,
-        "can_edit_documents": True, "can_edit_due_dates": True, "can_edit_users": True,
-        "can_download_reports": True, "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True, "can_edit_clients": True, "can_use_chat": True,
-        "can_view_all_leads": True, "can_manage_settings": True
+        # Universal permissions
+        "can_view_all_tasks": True,
+        "can_view_all_clients": True,
+        "can_view_all_dsc": True,
+        "can_view_documents": True,
+        "can_view_all_duedates": True,
+        "can_view_reports": True,
+        "can_view_all_leads": True,
+        "can_view_attendance": True,
+        "can_edit_tasks": True,
+        "can_edit_dsc": True,
+        "can_edit_documents": True,
+        "can_edit_due_dates": True,
+        "can_edit_clients": True,
+        "can_download_reports": True,
+        # Permission management
+        "can_manage_users": True,
+        "can_manage_settings": True,
+        "can_view_audit_logs": True,
+        # Other permissions
+        "can_assign_tasks": True,
+        "can_view_staff_activity": True,
+        "can_send_reminders": True,
+        "can_view_user_page": True,
+        "can_edit_users": True,
+        "can_view_selected_users_reports": True,
+        "can_view_todo_dashboard": True,
+        "can_use_chat": True,
+        # Specific access (empty for admin - they see all)
+        "assigned_clients": [],
+        "view_other_tasks": [],
+        "view_other_attendance": [],
+        "view_other_reports": [],
+        "view_other_todos": [],
+        "view_other_activity": [],
     },
     "manager": {
-        "can_view_all_tasks": False, "can_view_all_clients": False, "can_view_all_dsc": False,
-        "can_view_documents": True, "can_view_all_duedates": False, "can_view_reports": False,
-        "can_manage_users": False, "can_assign_tasks": True, "can_view_staff_activity": True,
-        "can_view_attendance": True, "can_send_reminders": False, "can_view_user_page": False,
-        "can_view_audit_logs": False, "can_edit_tasks": True, "can_edit_dsc": False,
-        "can_edit_documents": False, "can_edit_due_dates": True, "can_edit_users": False,
-        "can_download_reports": True, "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True, "can_edit_clients": False, "can_use_chat": True,
-        "can_view_all_leads": False, "can_manage_settings": False
+        # Universal permissions (limited)
+        "can_view_all_tasks": False,
+        "can_view_all_clients": False,
+        "can_view_all_dsc": False,
+        "can_view_documents": True,
+        "can_view_all_duedates": False,
+        "can_view_reports": True,  # Universal - see all reports
+        "can_view_all_leads": False,
+        "can_view_attendance": True,  # Universal - see all attendance
+        "can_edit_tasks": True,  # Universal - edit all tasks
+        "can_edit_dsc": False,
+        "can_edit_documents": False,
+        "can_edit_due_dates": True,  # Can edit due dates
+        "can_edit_clients": False,
+        "can_download_reports": True,
+        # Permission management
+        "can_manage_users": False,
+        "can_manage_settings": False,
+        "can_view_audit_logs": False,
+        # Other permissions
+        "can_assign_tasks": True,
+        "can_view_staff_activity": True,  # See team activity
+        "can_send_reminders": False,
+        "can_view_user_page": False,
+        "can_edit_users": False,
+        "can_view_selected_users_reports": True,
+        "can_view_todo_dashboard": True,
+        "can_use_chat": True,
+        # Specific access (populated when assigning team members)
+        "assigned_clients": [],  # Populated per manager
+        "view_other_tasks": [],  # Will be auto-populated with team user IDs
+        "view_other_attendance": [],  # Will be auto-populated with team user IDs
+        "view_other_reports": [],  # Will be auto-populated with team user IDs
+        "view_other_todos": [],  # Will be auto-populated with team user IDs
+        "view_other_activity": [],  # Will be auto-populated with team user IDs
     },
     "staff": {
-        "can_view_all_tasks": False, "can_view_all_clients": False, "can_view_all_dsc": False,
-        "can_view_documents": False, "can_view_all_duedates": False, "can_view_reports": False,
-        "can_manage_users": False, "can_assign_tasks": False, "can_view_staff_activity": False,
-        "can_view_attendance": False, "can_send_reminders": False, "can_view_user_page": False,
-        "can_view_audit_logs": False, "can_edit_tasks": False, "can_edit_dsc": False,
-        "can_edit_documents": False, "can_edit_due_dates": False, "can_edit_users": False,
-        "can_download_reports": False, "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True, "can_edit_clients": False, "can_use_chat": True,
-        "can_view_all_leads": False, "can_manage_settings": False
+        # Universal permissions (none for staff)
+        "can_view_all_tasks": False,
+        "can_view_all_clients": False,
+        "can_view_all_dsc": False,
+        "can_view_documents": False,
+        "can_view_all_duedates": False,
+        "can_view_reports": False,
+        "can_view_all_leads": False,
+        "can_view_attendance": False,
+        "can_edit_tasks": False,
+        "can_edit_dsc": False,
+        "can_edit_documents": False,
+        "can_edit_due_dates": False,
+        "can_edit_clients": False,
+        "can_download_reports": False,
+        # Permission management
+        "can_manage_users": False,
+        "can_manage_settings": False,
+        "can_view_audit_logs": False,
+        # Other permissions
+        "can_assign_tasks": False,
+        "can_view_staff_activity": False,
+        "can_send_reminders": False,
+        "can_view_user_page": False,
+        "can_edit_users": False,
+        "can_view_selected_users_reports": False,
+        "can_view_todo_dashboard": True,  # Can see own todos
+        "can_use_chat": True,
+        # Specific access (staff doesn't have any by default)
+        "assigned_clients": [],
+        "view_other_tasks": [],
+        "view_other_attendance": [],
+        "view_other_reports": [],
+        "view_other_todos": [],
+        "view_other_activity": [],
     }
 }
 
@@ -59,40 +137,68 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # CORE USER & PERMISSIONS
 # ======================
 class UserPermissions(BaseModel):
+    """
+    Permission model with 5-layer hierarchy:
+    1. Admin override (role == admin)
+    2. Universal permissions (can_view_all_*, can_edit_*, etc.)
+    3. Specific access (assigned_clients, view_other_*, etc.)
+    4. Ownership (assigned_to, created_by, user_id)
+    5. Deny
+    """
+    
+    # ========== UNIVERSAL PERMISSIONS ==========
+    # These allow access to ALL records in a module
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
     can_view_documents: bool = False
     can_view_all_duedates: bool = False
     can_view_reports: bool = False
-    can_manage_users: bool = False
-    can_assign_tasks: bool = False 
-    can_view_staff_activity: bool = False
+    can_view_all_leads: bool = False
     can_view_attendance: bool = False
-    can_send_reminders: bool = False
-    assigned_clients: List[str] = Field(default_factory=list)
-    can_view_user_page: bool = False
-    can_view_audit_logs: bool = False
     can_edit_tasks: bool = False
     can_edit_dsc: bool = False
     can_edit_documents: bool = False
     can_edit_due_dates: bool = False
-    can_edit_users: bool = False
+    can_edit_clients: bool = False
     can_download_reports: bool = False
+    
+    # ========== PERMISSION MANAGEMENT ==========
+    can_manage_users: bool = False
+    can_manage_settings: bool = False
+    can_view_audit_logs: bool = False
+    
+    # ========== OTHER PERMISSIONS ==========
+    can_assign_tasks: bool = False
+    can_view_staff_activity: bool = False
+    can_send_reminders: bool = False
+    can_view_user_page: bool = False
+    can_edit_users: bool = False
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
-    view_other_tasks: List[str] = Field(default_factory=list)
-    view_other_attendance: List[str] = Field(default_factory=list)
-    view_other_reports: List[str] = Field(default_factory=list)
-    view_other_todos: List[str] = Field(default_factory=list)
-    view_other_activity: List[str] = Field(default_factory=list)
-    can_edit_clients: bool = False
     can_use_chat: bool = False
-    can_view_all_leads: bool = False
-    can_manage_settings: bool = False
+    
+    # ========== SPECIFIC ACCESS PERMISSIONS ==========
+    # These allow access to SPECIFIC users/clients only
+    assigned_clients: List[str] = Field(default_factory=list)  # Client IDs this user can access
+    view_other_tasks: List[str] = Field(default_factory=list)  # User IDs whose tasks this user can view
+    view_other_attendance: List[str] = Field(default_factory=list)  # User IDs whose attendance this user can view
+    view_other_reports: List[str] = Field(default_factory=list)  # User IDs whose reports this user can view
+    view_other_todos: List[str] = Field(default_factory=list)  # User IDs whose todos this user can view
+    view_other_activity: List[str] = Field(default_factory=list)  # User IDs whose activity this user can view
+
 
 class User(BaseModel):
+    """
+    User model with role-based access control.
+    
+    ROLE DEFAULTS:
+    • Admin: All permissions enabled
+    • Manager: Team access (own + team member records) + reports/attendance
+    • Staff: Own records only + chat
+    """
     model_config = ConfigDict(extra="ignore")
+    
     id: str
     email: str
     full_name: Optional[str] = None
@@ -229,52 +335,34 @@ class AttendanceBase(BaseModel):
 class AttendanceCreate(BaseModel):
     action: str 
 
+class AttendanceUpdate(BaseModel):
+    punch_out: Optional[datetime] = None
+    status: Optional[str] = None
+    leave_reason: Optional[str] = None
+
 class StaffActivityLog(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    app_name: str
-    window_title: Optional[str] = None
-    url: Optional[str] = None
-    category: str = "other"
-    duration_seconds: int = 0
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StaffActivityCreate(BaseModel):
-    app_name: Optional[str] = None
-    window_title: Optional[str] = None
-    website: Optional[str] = None
-    category: Optional[str] = "other"
-    duration_seconds: Optional[int] = 0
-    idle: Optional[bool] = False
-
-class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    date: str
-    screen_time_minutes: int = 0
-    tasks_completed: int = 0
+    action: str
+    description: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class ActivityLogUpdate(BaseModel):
-    screen_time_minutes: Optional[int] = None
-    tasks_completed: Optional[int] = None
+class StaffActivityCreate(BaseModel):
+    action: str
+    description: Optional[str] = None
 
 # ======================
 # DSC MANAGEMENT
 # ======================
 class DSCBase(BaseModel):
+    certificate_number: str
     holder_name: str
-    dsc_type: Optional[str] = None
-    dsc_password: Optional[str] = None
-    associated_with: Optional[str] = None
-    entity_type: str = "firm"
-    issue_date: datetime
-    expiry_date: datetime
+    issue_date: date
+    expiry_date: date
+    key_file_location: Optional[str] = None
+    key_password: Optional[str] = None
     notes: Optional[str] = None
-    current_location: str = "with_company"
-    taken_by: Optional[str] = None
-    taken_date: Optional[datetime] = None
-    movement_log: List[dict] = Field(default_factory=list)
 
 class DSCCreate(DSCBase):
     pass
@@ -285,17 +373,12 @@ class DSC(DSCBase):
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class DSCMovement(BaseModel):
-    movement_type: str
-    person_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    notes: Optional[str] = None
-
 class DSCListResponse(BaseModel):
-    data: List[DSC]
-    total: int
-    page: int
-    limit: int
+    total_dsc: int
+    expired_dsc: int
+    expiring_soon: int
+    active_dsc: int
+    dsc_list: List[DSC] = []
 
 class DSCMovementRequest(BaseModel):
     movement_type: str
