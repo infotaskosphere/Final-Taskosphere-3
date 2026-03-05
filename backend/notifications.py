@@ -4,16 +4,20 @@ from typing import List, Optional
 import uuid
 import logging
 
-from backend.dependencies import db, get_current_user, require_admin
+from backend.dependencies import (
+    db,
+    get_current_user,
+    require_admin,
+    safe_dt
+)
 from pydantic import BaseModel, Field, ConfigDict
-from backend.dependencies import safe_dt
 from backend.models import User
 
 logger = logging.getLogger(__name__)
 
 # ====================== RESILIENT MODELS ======================
 class NotificationBase(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Permanently prevents crashes on schema drift
+    model_config = ConfigDict(extra="ignore")
     title: str
     message: str
     type: str = "system"  # task | dsc | system | lead
@@ -62,7 +66,12 @@ async def create_notification(
     message: str,
     type: str = "system"
 ):
-    """Internal function used by other modules to trigger alerts."""
+    """
+    Internal function used by other modules to trigger notifications.
+    
+    This is called from other routers (leads, tasks, etc.) to notify users.
+    No permission check needed as it's internal.
+    """
     try:
         notification = Notification(
             user_id=user_id,
@@ -85,13 +94,17 @@ async def create_notification(
 @router.post("/send")
 async def send_notification(
     payload: AdminNotificationRequest,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_admin())
 ):
     """
-    Admin endpoint to send notifications.
+    ADMIN ENDPOINT - Send notifications
+    
+    PERMISSION HIERARCHY:
+    • Admin only
+    
     Supports:
-    • single user notification (provide user_id)
-    • broadcast notification (set broadcast=true)
+    • Single user notification (provide user_id)
+    • Broadcast notification (set broadcast=true)
     """
     now = datetime.now(timezone.utc)
 
@@ -148,7 +161,14 @@ async def send_notification(
 # ====================== API ROUTES ======================
 @router.get("/", response_model=List[Notification])
 async def get_my_notifications(current_user=Depends(get_current_user)):
-    """Fetches user notifications, sorted by newest first."""
+    """
+    GET MY NOTIFICATIONS
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can view their own notifications
+    
+    Returns user's notifications sorted by newest first.
+    """
     cursor = db.notifications.find({"user_id": current_user.id}, {"_id": 0})
     notifications_raw = await cursor.sort("created_at", -1).to_list(500)
 
@@ -158,43 +178,54 @@ async def get_my_notifications(current_user=Depends(get_current_user)):
 
 @router.get("/unread-count")
 async def get_unread_count(current_user=Depends(get_current_user)):
-    """Lightweight endpoint for navbar badges."""
+    """
+    GET UNREAD NOTIFICATION COUNT
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can check their own count
+    
+    Lightweight endpoint for navbar badges.
+    """
     count = await db.notifications.count_documents({
         "user_id": current_user.id,
         "is_read": False
     })
     return {"unread_count": count}
 
+
 @router.put("/read-all")
 async def mark_all_read(current_user=Depends(get_current_user)):
-    await db.notifications.update_many(
-        {
-            "user_id": current_user.id,
-            "is_read": False
-        },
-        {"$set": {"is_read": True}}
-    )
-    return {"message": "All notifications marked as read"}
-
-
-@router.put("/{notification_id}/read")
-async def mark_notification_read(notification_id: str, current_user=Depends(get_current_user)):
-    result = await db.notifications.update_one(
-        {
-            "id": notification_id,
-            "user_id": current_user.id
-        },
-        {"$set": {"is_read": True}}
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Notification not found")
-
-    return {"message": "Success"}
+    """
+    MARK ALL NOTIFICATIONS AS READ
     
+    PERMISSION HIERARCHY:
+    • Any authenticated user can mark their own notifications as read
+    
+    Bulk updates all unread notifications for the user.
+    """
+    await db.notifications.update_many(
+        {
+            "user_id": current_user.id,
+            "is_read": False
+        },
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
+
 @router.put("/{notification_id}/read")
-async def mark_notification_read(notification_id: str, current_user=Depends(get_current_user)):
-    """Marks a single notification as read."""
+async def mark_notification_read(
+    notification_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    MARK SINGLE NOTIFICATION AS READ
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can mark their own notifications as read
+    
+    Marks a single notification as read.
+    """
     result = await db.notifications.update_one(
         {
             "id": notification_id,
@@ -205,24 +236,21 @@ async def mark_notification_read(notification_id: str, current_user=Depends(get_
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"message": "Success"}
-
-
-@router.put("/read-all")
-async def mark_all_read(current_user=Depends(get_current_user)):
-    """Bulk updates all unread notifications for the user."""
-    await db.notifications.update_many(
-        {
-            "user_id": current_user.id,
-            "is_read": False
-        },
-        {"$set": {"is_read": True}}
-    )
-    return {"message": "All notifications marked as read"}
 
 
 @router.delete("/{notification_id}")
-async def delete_notification(notification_id: str, current_user=Depends(get_current_user)):
-    """Secure deletion of a notification."""
+async def delete_notification(
+    notification_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    DELETE NOTIFICATION
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can delete their own notifications
+    
+    Secure deletion of a notification.
+    """
     result = await db.notifications.delete_one({
         "id": notification_id,
         "user_id": current_user.id
