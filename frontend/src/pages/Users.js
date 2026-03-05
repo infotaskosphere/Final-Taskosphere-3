@@ -360,15 +360,12 @@ export default function Users() {
     try {
       if (selectedUser) {
         const updatePayload = {
-          full_name: formData.full_name,
-          role: formData.role,
-          departments: formData.departments,
+          ...formData,
           phone: formData.phone || null,
           birthday: formData.birthday || null,
           punch_in_time: formData.punch_in_time || null,
           grace_time: formData.grace_time || null,
           punch_out_time: formData.punch_out_time || null,
-          is_active: formData.is_active,
           profile_picture: formData.profile_picture || null
         };
 
