@@ -17,7 +17,7 @@ class UserRole(str, Enum):
     staff = "staff"
 
 # ────────────────────────────────────────────────
-#           DEFAULT ROLE PERMISSION TEMPLATES
+# DEFAULT ROLE PERMISSION TEMPLATES
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
     "admin": {
