@@ -868,19 +868,20 @@ async def handle_attendance(
         punch_out_dt = datetime.now(timezone.utc)
     
         # Calculate duration in minutes
-        delta = punch_out_dt - punch_in_dt
+        delta = punch_out_dt.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc)
         duration_minutes = int(delta.total_seconds() / 60)
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
                 "$set": {
                     "punch_out": punch_out_dt,
-                    "duration_minutes": duration_minutes
+                    "duration_minutes": max(0, duration_minutes)
                 }
             }
         )
-        return {"message": "Punched out successfully", "duration": duration_minutes}
 
+        return {"message": "Punched out successfully", "duration": duration_minutes}
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
