@@ -753,61 +753,55 @@ def get_real_client_ip(request: Request):
  return None
 # ── UPDATE EXISTING /attendance ENDPOINT ───────────────────────────────
 @api_router.post("/attendance")
-async def handle_attendance(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    today_str = today.isoformat() # Standardize to string "YYYY-MM-DD"
-    # FIX: Query using the string today_str to match database format
+async def handle_attendance(data: dict, current_user: User = Depends(get_current_user)):
+    # 1. Standardize the date
+    today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    
+    # 2. Holiday Check
     holiday = await db.holidays.find_one({"date": today_str, "status": "confirmed"})
     if holiday:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Today is a holiday ({holiday.get('name')}). Office is closed."
-        )
+        raise HTTPException(status_code=400, detail=f"Holiday: {holiday.get('name')}")
+
     action = data.get("action")
-    if action not in ["punch_in", "punch_out"]:
-        raise HTTPException(status_code=400, detail="Invalid action")
-    attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str}
-    )
+    attendance = await db.attendance.find_one({"user_id": current_user.id, "date": today_str})
+
+    # PUNCH IN
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Already punched in")
+        
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
-            {
-                "$set": {
-                    "status": "present",
-                    "punch_in": datetime.now(timezone.utc),
-                    "leave_reason": None
-                }
-            },
+            {"$set": {
+                "status": "present",
+                "punch_in": datetime.now(timezone.utc).isoformat(), # Store as ISO string for safety
+                "leave_reason": None
+            }},
             upsert=True
         )
         return {"message": "Punched in successfully"}
-#=================PUNCH OUT==================================
+
+    # PUNCH OUT
     if action == "punch_out":
         if not attendance or not attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Not punched in yet")
-        if attendance.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out")
-    
-        punch_in_dt = attendance.get("punch_in")
-        punch_out_dt = datetime.now(timezone.utc)
-    
-        # Calculate duration in minutes
-        delta = punch_out_dt - punch_in_dt
-        duration_minutes = int(delta.total_seconds() / 60)
+        
+        # SAFE PARSING: Ensure we are dealing with a datetime object
+        p_in = attendance.get("punch_in")
+        if isinstance(p_in, str):
+            p_in = datetime.fromisoformat(p_in)
+            
+        p_out = datetime.now(timezone.utc)
+        
+        # Calculate duration
+        duration_minutes = int((p_out - p_in).total_seconds() / 60)
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
-            {
-                "$set": {
-                    "punch_out": punch_out_dt,
-                    "duration_minutes": duration_minutes
-                }
-            }
+            {"$set": {
+                "punch_out": p_out.isoformat(),
+                "duration_minutes": duration_minutes
+            }}
         )
         return {"message": "Punched out successfully", "duration": duration_minutes}
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
