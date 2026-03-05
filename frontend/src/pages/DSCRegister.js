@@ -73,6 +73,7 @@ export default function DSCRegister() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setLoading(true);
     try {
       const dscData = {
@@ -99,6 +100,7 @@ export default function DSCRegister() {
 
   const handleMovement = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setLoading(true);
     try {
       await api.post(`/dsc/${selectedDSC.id}/movement`, movementData);
@@ -130,7 +132,8 @@ export default function DSCRegister() {
     return dsc.current_location === 'with_company' ? 'IN' : 'OUT';
   };
 
-  const handleMovementInModal = async () => {
+  const handleMovementInModal = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     if (!editingDSC || !movementData.person_name) return;
     setLoading(true);
     try {
@@ -159,7 +162,7 @@ export default function DSCRegister() {
   };
 
   const handleUpdateMovement = async (movementId) => {
-    if (!editingDSC || !editMovementData.person_name) return;
+    if (!editingDSC || !editMovementData.person_name || !movementId) return;
     setLoading(true);
     try {
       await api.put(`/dsc/${editingDSC.id}/movement/${movementId}`, {
@@ -186,7 +189,8 @@ export default function DSCRegister() {
   };
 
   const startEditingMovement = (movement) => {
-    setEditingMovement(movement.id || movement.timestamp);
+    const key = movement.id || movement.timestamp;
+    setEditingMovement(key);
     setEditMovementData({
       movement_type: movement.movement_type,
       person_name: movement.person_name,
@@ -387,7 +391,10 @@ export default function DSCRegister() {
               Add DSC
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border-gray-200 dark:border-gray-700">
+          <DialogContent
+            className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border-gray-200 dark:border-gray-700"
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <DialogHeader className="pb-2">
               <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
                 {editingDSC ? 'Edit DSC Certificate' : 'Add New DSC Certificate'}
@@ -443,7 +450,7 @@ export default function DSCRegister() {
                     <h4 className="font-semibold text-sm text-gray-900 dark:text-white mb-3">
                       {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT (Issue)' : 'Mark as IN (Return)'}
                     </h4>
-                    <form onSubmit={(e) => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
+                    <form onSubmit={handleMovementInModal} className="space-y-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                           {getDSCInOutStatus(editingDSC) === 'IN' ? 'Taken By *' : 'Delivered By *'}
@@ -517,7 +524,7 @@ export default function DSCRegister() {
                                   <Button type="button" size="sm"
                                     className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
                                     onClick={() => handleUpdateMovement(movement.id)}
-                                    disabled={loading || !editMovementData.person_name}>
+                                    disabled={loading || !editMovementData.person_name || !movement.id}>
                                     {loading ? 'Saving...' : 'Save'}
                                   </Button>
                                 </div>
@@ -679,7 +686,10 @@ export default function DSCRegister() {
 
       {/* ── Movement Dialog ── */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
-        <DialogContent className="rounded-2xl border-gray-200 dark:border-gray-700">
+        <DialogContent
+          className="rounded-2xl border-gray-200 dark:border-gray-700"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
               Mark DSC as {movementData.movement_type}
