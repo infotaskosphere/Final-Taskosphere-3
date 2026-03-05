@@ -49,6 +49,14 @@ export default function DocumentRegister() {
     notes: '',
   });
 
+  const getErrorMessage = (error) => {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map((err) => err.msg || err.message || JSON.stringify(err)).join(', ');
+    if (detail && typeof detail === 'object') return detail.msg || detail.message || JSON.stringify(detail);
+    return null;
+  };
+
   useEffect(() => { fetchDocuments(); }, []);
 
   const fetchDocuments = async () => {
@@ -62,6 +70,7 @@ export default function DocumentRegister() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setLoading(true);
     try {
       const documentData = { ...formData, issue_date: new Date(formData.issue_date).toISOString() };
@@ -84,6 +93,7 @@ export default function DocumentRegister() {
 
   const handleMovement = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setLoading(true);
     try {
       await api.post(`/documents/${selectedDocument.id}/movement`, movementData);
@@ -100,7 +110,7 @@ export default function DocumentRegister() {
 
   const openMovementDialog = (document, type) => {
     setSelectedDocument(document);
-    setMovementData({ ...movementData, movement_type: type });
+    setMovementData({ movement_type: type, person_name: '', notes: '' });
     setMovementDialogOpen(true);
   };
 
@@ -142,7 +152,7 @@ export default function DocumentRegister() {
   };
 
   const handleUpdateMovement = async (movementId) => {
-    if (!editingDocument || !editMovementData.person_name) return;
+    if (!editingDocument || !editMovementData.person_name || !movementId) return;
     setLoading(true);
     try {
       await api.put(`/documents/${editingDocument.id}/movement/${movementId}`, {
@@ -165,7 +175,8 @@ export default function DocumentRegister() {
   };
 
   const startEditingMovement = (movement) => {
-    setEditingMovement(movement.id || movement.timestamp);
+    const key = movement.id || movement.timestamp;
+    setEditingMovement(key);
     setEditMovementData({
       movement_type: movement.movement_type,
       person_name: movement.person_name,
@@ -227,14 +238,6 @@ export default function DocumentRegister() {
   const inDocuments = documentList.filter(doc => getDocumentInOutStatus(doc) === 'IN' && filterBySearch(doc));
   const outDocuments = documentList.filter(doc => getDocumentInOutStatus(doc) === 'OUT' && filterBySearch(doc));
 
-  const getErrorMessage = (error) => {
-    const detail = error.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail)) return detail.map((err) => err.msg || err.message || JSON.stringify(err)).join(', ');
-    if (detail && typeof detail === 'object') return detail.msg || detail.message || JSON.stringify(detail);
-    return null;
-  };
-
   const docTypeOptions = [
     "Agreement", "NDA", "Purchase Order", "Invoice", "Cheque", "PanCard", "Aadhar",
     "GST Certificate", "Incorporation", "MOA", "AOA", "Bank Statement", "Balance Sheet",
@@ -276,7 +279,10 @@ export default function DocumentRegister() {
               Add Document
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border-gray-200 dark:border-gray-700">
+          <DialogContent
+            className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border-gray-200 dark:border-gray-700"
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <DialogHeader className="pb-2">
               <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
                 {editingDocument ? 'Edit Document' : 'Add New Document'}
@@ -466,7 +472,10 @@ export default function DocumentRegister() {
 
       {/* ── Movement Dialog ── */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
-        <DialogContent className="rounded-2xl border-gray-200 dark:border-gray-700">
+        <DialogContent
+          className="rounded-2xl border-gray-200 dark:border-gray-700"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
               Mark Document as {movementData.movement_type}
