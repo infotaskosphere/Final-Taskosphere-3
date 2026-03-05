@@ -774,7 +774,7 @@ async def handle_attendance(data: dict, current_user: User = Depends(get_current
             {"user_id": current_user.id, "date": today_str},
             {"$set": {
                 "status": "present",
-                "punch_in": datetime.now(timezone.utc).isoformat(), # Store as ISO string for safety
+                "punch_in": datetime.now(timezone.utc).isoformat(),
                 "leave_reason": None
             }},
             upsert=True
@@ -804,6 +804,8 @@ async def handle_attendance(data: dict, current_user: User = Depends(get_current
             }}
         )
         return {"message": "Punched out successfully", "duration": duration_minutes}
+    
+    raise HTTPException(status_code=400, detail="Invalid action. Use 'punch_in' or 'punch_out'")
 # ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
