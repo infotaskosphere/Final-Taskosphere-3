@@ -1088,22 +1088,32 @@ async def import_tasks_from_csv(
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
  query = {"type": {"$ne": "todo"}}
- # Admin → all
+ # Admin → all tasks
  if current_user.role == "admin":
   pass
  elif current_user.role == "manager":
-    team_ids = await get_team_user_ids(current_user.id)
-    query["$or"] = [
-        {"assigned_to": current_user.id},
-        {"assigned_to": {"$in": team_ids}},
-        {"sub_assignees": current_user.id},
-        {"created_by": current_user.id}
-    ]
- # Cross-user
- else:
-  allowed_users = permissions.get("view_other_tasks", [])
+  team_ids = await get_team_user_ids(current_user.id)
   query["$or"] = [
    {"assigned_to": current_user.id},
+   {"assigned_to": {"$in": team_ids}},
+   {"sub_assignees": current_user.id},
+   {"created_by": current_user.id}
+  ]
+ # Staff / regular user — own tasks + cross-user grants
+ else:
+  # FIX: safely derive permissions dict (was undefined — caused 500 for all staff)
+  if isinstance(current_user.permissions, dict):
+   _perms = current_user.permissions
+  elif current_user.permissions:
+   _perms = current_user.permissions.model_dump()
+  else:
+   _perms = {}
+  allowed_users = _perms.get("view_other_tasks", [])
+  # FIX: include sub_assignees + created_by so own/assigned tasks always show
+  query["$or"] = [
+   {"assigned_to": current_user.id},
+   {"sub_assignees": current_user.id},
+   {"created_by": current_user.id},
    {"assigned_to": {"$in": allowed_users}}
   ]
  tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
@@ -2021,8 +2031,15 @@ async def get_efficiency_report(
  ).sort("date", -1).limit(30).to_list(100)
  total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
  total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+ # FIX: include user object so frontend r.user?.id / r.user?.full_name works
+ target_user_doc = await db.users.find_one({"id": target_user_id}, {"_id": 0, "password": 0})
+ user_info = {
+  "id": target_user_id,
+  "full_name": target_user_doc.get("full_name", "Unknown") if target_user_doc else "Unknown"
+ }
  return {
   "user_id": target_user_id,
+  "user": user_info,
   "total_screen_time": total_screen_time,
   "total_tasks_completed": total_tasks_completed,
   "days_logged": len(logs)
