@@ -4,627 +4,536 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2, AlertTriangle, Target } from 'lucide-react';
+import {
+  BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
+  AlertTriangle, Target, Download, RefreshCw, ChevronRight,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  Legend,
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, AreaChart, Area, Legend,
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// Brand color palette
-const COLORS = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D'];
-const CHART_COLORS = {
-  primary: '#0D3B66',
-  secondary: '#1F6FB2',
-  success: '#1FAF5A',
-  warning: '#5CCB5F',
-  accent: '#0A2D4D',
+// ─── Brand palette ─────────────────────────────────────────────────────────────
+const COLORS = {
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
+};
+const CHART_PALETTE = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#0A2D4D', '#2E86AB'];
+
+const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.08 } } };
+const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.35 } } };
+
+// ─── Reusable KPI tile ─────────────────────────────────────────────────────────
+const KpiTile = ({ label, value, sub, color, icon: Icon, trend }) => (
+  <motion.div variants={itemVariants}>
+    <Card className="rounded-xl border border-slate-200 hover:shadow-md transition-all duration-200 overflow-hidden">
+      <div className="h-0.5 w-full" style={{ background: color }} />
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</p>
+            <p className="text-3xl font-bold font-outfit" style={{ color }}>{value}</p>
+            {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+          </div>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${color}15` }}>
+            <Icon className="w-5 h-5" style={{ color }} />
+          </div>
+        </div>
+        {trend != null && (
+          <div className={`mt-3 flex items-center gap-1 text-xs font-medium ${trend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+            <TrendingUp className="w-3.5 h-3.5" />
+            {trend >= 0 ? '+' : ''}{trend}% this week
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  </motion.div>
+);
+
+// ─── Custom tooltip ────────────────────────────────────────────────────────────
+const ChartTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-xl text-sm">
+      <p className="font-semibold text-slate-800 mb-1">{label}</p>
+      {payload.map((e, i) => (
+        <p key={i} className="flex items-center gap-2" style={{ color: e.color }}>
+          <span className="w-2 h-2 rounded-full inline-block" style={{ background: e.color }} />
+          {e.name}: <span className="font-bold ml-1">{e.value}</span>
+        </p>
+      ))}
+    </div>
+  );
 };
 
-// Animation variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
-};
+// ─── Section wrapper ───────────────────────────────────────────────────────────
+const Section = ({ title, desc, children, action }) => (
+  <motion.div variants={itemVariants}>
+    <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
+      <CardHeader className="pb-3 pt-5 px-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base font-bold text-slate-800">{title}</CardTitle>
+            {desc && <CardDescription className="text-xs mt-0.5">{desc}</CardDescription>}
+          </div>
+          {action}
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">{children}</CardContent>
+    </Card>
+  </motion.div>
+);
 
+// ─── Main component ────────────────────────────────────────────────────────────
 export default function Reports() {
   const { user, hasPermission } = useAuth();
-  const canViewReports = hasPermission("can_view_reports") || user?.role === 'staff';
-  const canDownloadReports = hasPermission("can_download_reports");
-  const isAdmin = user?.role === "admin";
+
+  // ── Permission matrix ──────────────────────────────────────────────────────
+  // FIX: canViewReports was incorrectly allowing staff with NO permission.
+  // Backend allows everyone to view their OWN report, so this flag should
+  // only gate viewing OTHER users' reports (admin panel sections).
+  // All authenticated users land here and always see their own data.
+  const isAdmin           = user?.role === 'admin';
+  const canViewReports    = isAdmin || hasPermission('can_view_reports');
+  const canDownloadReports = isAdmin || hasPermission('can_download_reports');
+  // Cross-user report access: admin sees all, others see explicitly granted users
   const canSeeOthers = isAdmin || (user?.permissions?.view_other_reports?.length > 0);
 
-  const [reportData, setReportData] = useState([]);
+  const [reportData,     setReportData]     = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedUserId, setSelectedUserId] = useState("all");
+  const [tasks,          setTasks]          = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState('all');
   const [starPerformers, setStarPerformers] = useState([]);
-  const [rankingPeriod, setRankingPeriod] = useState("monthly");
+  const [rankingPeriod,  setRankingPeriod]  = useState('monthly');
 
   useEffect(() => {
-    if (user) {
-      fetchAllData();
-    }
+    if (user) fetchAllData();
   }, [user]);
-  // Star Performers fetch
+
   useEffect(() => {
     const fetchStarPerformers = async () => {
       try {
-        const rankingsRes = await api.get('/reports/performance-rankings', {
-          params: { period: rankingPeriod === "all" ? "all_time" : rankingPeriod },
+        const r = await api.get('/reports/performance-rankings', {
+          params: { period: rankingPeriod === 'all' ? 'all_time' : rankingPeriod },
         });
-        setStarPerformers(rankingsRes.data || []);
-      } catch (error) {
-        console.warn("Failed to fetch star performers:", error);
+        setStarPerformers(r.data || []);
+      } catch {
         setStarPerformers([]);
       }
     };
     fetchStarPerformers();
   }, [rankingPeriod]);
 
-  const fetchAllData = async () => {
+  const fetchAllData = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
     try {
-      const reportRequests = [];
-      // Always fetch own report
-      reportRequests.push(api.get('/reports/efficiency'));
-      // Fetch cross-user reports (if any)
+      // FIX: Always fetch own report first (works for ALL authenticated users)
+      const reportRequests = [api.get('/reports/efficiency')];
+
+      // Additional cross-user reports if granted
       const allowedUsers = user?.permissions?.view_other_reports || [];
-      allowedUsers.forEach((id) => {
-        reportRequests.push(
-          api.get('/reports/efficiency', {
-            params: { user_id: id }
-          })
-        );
+      allowedUsers.forEach(id => {
+        reportRequests.push(api.get('/reports/efficiency', { params: { user_id: id } }));
       });
+
       const reportResponses = await Promise.all(reportRequests);
-      const combinedReports = reportResponses
-        .map(res => res.data)
-        .filter(Boolean);
-      setReportData(combinedReports);
+      // FIX: backend now returns { user: { id, full_name }, ... } so r.data.user works
+      const combined = reportResponses.map(r => r.data).filter(Boolean);
+      setReportData(combined);
+
       const [statsRes, tasksRes] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/tasks'),
       ]);
       setDashboardStats(statsRes.data);
       setTasks(tasksRes.data);
-    } catch (error) {
+    } catch {
       toast.error('Failed to fetch reports');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  // Filtering logic
-  const filteredReportData =
-    selectedUserId === "all"
-      ? reportData
-      : reportData.filter(r => r.user?.id === selectedUserId);
+  // ── Derived data ───────────────────────────────────────────────────────────
+  const filteredReportData = selectedUserId === 'all'
+    ? reportData
+    : reportData.filter(r => r.user?.id === selectedUserId || r.user_id === selectedUserId);
+
   const uniqueUsers = Array.from(
-    new Map(reportData.map(r => [r.user?.id, r.user])).values()
+    new Map(reportData.map(r => [r.user?.id || r.user_id, r.user || { id: r.user_id, full_name: 'Me' }])).values()
   );
 
-  const formatTime = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
+  const formatTime = (min) => `${Math.floor(min / 60)}h ${min % 60}m`;
+  const getAvgScreenTime = () => {
+    if (!filteredReportData.length) return 0;
+    return Math.round(filteredReportData.reduce((s, i) => s + (i.total_screen_time || 0), 0) / filteredReportData.length);
   };
+  const getTotalCompleted = () => filteredReportData.reduce((s, i) => s + (i.total_tasks_completed || 0), 0);
 
-  const getAverageScreenTime = () => {
-    if (filteredReportData.length === 0) return 0;
-    const total = filteredReportData.reduce(
-      (sum, item) => sum + item.total_screen_time,
-      0
-    );
-    return Math.round(total / filteredReportData.length);
-  };
-
-  const getTotalTasksCompleted = () => {
-    return filteredReportData.reduce(
-      (sum, item) => sum + item.total_tasks_completed,
-      0
-    );
-  };
-
-  // Task Status Distribution
   const getTaskStatusData = () => {
-    const pending = tasks.filter(t => t.status === 'pending').length;
-    const inProgress = tasks.filter(t => t.status === 'in_progress').length;
-    const completed = tasks.filter(t => t.status === 'completed').length;
+    const p = tasks.filter(t => t.status === 'pending').length;
+    const w = tasks.filter(t => t.status === 'in_progress').length;
+    const c = tasks.filter(t => t.status === 'completed').length;
     return [
-      { name: 'Pending', value: pending, color: CHART_COLORS.warning },
-      { name: 'In Progress', value: inProgress, color: CHART_COLORS.primary },
-      { name: 'Completed', value: completed, color: CHART_COLORS.success },
-    ].filter(item => item.value > 0);
+      { name: 'To Do',      value: p, color: '#dc2626' },
+      { name: 'In Progress', value: w, color: '#d97706' },
+      { name: 'Completed',  value: c, color: COLORS.mediumBlue },
+    ].filter(d => d.value > 0);
   };
 
-  // Task Category Distribution
   const getTaskCategoryData = () => {
-    const categoryCount = {};
-    tasks.forEach(task => {
-      const category = task.category || 'Other';
-      categoryCount[category] = (categoryCount[category] || 0) + 1;
-    });
-    return Object.entries(categoryCount)
-      .map(([name, count], index) => ({
-        name: name.toUpperCase().replace('_', ' '),
-        tasks: count,
-        fill: COLORS[index % COLORS.length],
-      }))
-      .sort((a, b) => b.tasks - a.tasks)
-      .slice(0, 6);
+    const cc = {};
+    tasks.forEach(t => { const c = t.category || 'Other'; cc[c] = (cc[c] || 0) + 1; });
+    return Object.entries(cc)
+      .map(([name, count], i) => ({ name: name.toUpperCase().replace('_', ' '), tasks: count, fill: CHART_PALETTE[i % CHART_PALETTE.length] }))
+      .sort((a, b) => b.tasks - a.tasks).slice(0, 6);
   };
 
-  // Employee Performance / Star Performers
- const getEmployeePerformanceData = () => {
-  if (!isAdmin) {
-    if (filteredReportData.length > 0) {
-      const item = filteredReportData[0];
-      return [{
-        name: 'You',
-        tasks: item.total_tasks_completed,
-        hours: Math.round(item.total_screen_time / 60),
-        fill: COLORS[0],
-      }];
+  const getEmployeePerformanceData = () => {
+    if (!isAdmin) {
+      if (filteredReportData.length > 0) {
+        const d = filteredReportData[0];
+        return [{ name: 'You', tasks: d.total_tasks_completed || 0, hours: Math.round((d.total_screen_time || 0) / 60), fill: COLORS.deepBlue }];
+      }
+      return [];
     }
-    return [];
-  }
-
-  return (starPerformers || [])
-    .slice(0, 5)
-    .map((member, index) => {
-      const score = Number(member?.overall_score);
-      const hours = Number(member?.total_hours);
-
-      return {
-        name: member?.user_name?.split(' ')[0] || 'User',
-        tasks: Number.isFinite(score) ? Math.round(score) : 0,
-        hours: Number.isFinite(hours) ? Math.round(hours) : 0,
-        fill: COLORS[index % COLORS.length],
-      };
-    });
-};
-  const getStartOfDay = (date) => {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return (starPerformers || []).slice(0, 5).map((m, i) => ({
+      name:  m?.user_name?.split(' ')[0] || 'User',
+      tasks: Number.isFinite(+m?.overall_score) ? Math.round(+m.overall_score) : 0,
+      hours: Number.isFinite(+m?.total_hours)   ? Math.round(+m.total_hours)   : 0,
+      fill:  CHART_PALETTE[i % CHART_PALETTE.length],
+    }));
   };
 
   const getWeeklyTrendData = () => {
     const today = new Date();
-    const diff = today.getDay() - 1;
-    const monday = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate() - (diff >= 0 ? diff : diff + 7)
-    );
-    const startOfWeek = getStartOfDay(monday);
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const day = new Date(startOfWeek);
-      day.setDate(startOfWeek.getDate() + i);
-      days.push({
-        name: day.toLocaleDateString('en-us', { weekday: 'short' }),
-        completed: 0,
-        pending: 0,
-      });
-    }
-    tasks.forEach((task) => {
-      if (task.status === 'completed' && task.completed_at) {
-        const compDate = getStartOfDay(new Date(task.completed_at));
-        const dayIndex = Math.floor((compDate - startOfWeek) / 86400000);
-        if (dayIndex >= 0 && dayIndex < 7) {
-          days[dayIndex].completed += 1;
-        }
+    const diff  = today.getDay() - 1;
+    const mon   = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (diff >= 0 ? diff : diff + 7));
+    mon.setHours(0, 0, 0, 0);
+    const days  = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(mon); d.setDate(mon.getDate() + i);
+      return { name: d.toLocaleDateString('en-US', { weekday: 'short' }), completed: 0, pending: 0 };
+    });
+    tasks.forEach(t => {
+      const getStart = (ds) => { const d = new Date(ds); d.setHours(0,0,0,0); return d; };
+      if (t.status === 'completed' && t.completed_at) {
+        const idx = Math.floor((getStart(t.completed_at) - mon) / 86400000);
+        if (idx >= 0 && idx < 7) days[idx].completed += 1;
       }
-      if (task.status !== 'completed' && task.created_at) {
-        const createDate = getStartOfDay(new Date(task.created_at));
-        const dayIndex = Math.floor((createDate - startOfWeek) / 86400000);
-        if (dayIndex >= 0 && dayIndex < 7) {
-          days[dayIndex].pending += 1;
-        }
+      if (t.status !== 'completed' && t.created_at) {
+        const idx = Math.floor((getStart(t.created_at) - mon) / 86400000);
+        if (idx >= 0 && idx < 7) days[idx].pending += 1;
       }
     });
     return days;
   };
 
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white p-3 shadow-lg rounded-lg border border-slate-200">
-          <p className="font-medium text-slate-900">{label}</p>
-          {payload.map((entry, index) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
-              {entry.name}: {entry.value}
-            </p>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
-
-  const handleDownloadReports = () => {
-    const headers = ['User', 'Total Tasks Completed', 'Total Screen Time (minutes)'];
-    const csvData = filteredReportData.map(item => [
-      item.user?.full_name || 'Unknown',
-      item.total_tasks_completed,
-      item.total_screen_time
+  // ── Export ─────────────────────────────────────────────────────────────────
+  const handleDownloadCsv = () => {
+    const headers = ['User', 'Total Tasks Completed', 'Screen Time (min)', 'Days Logged'];
+    const rows    = filteredReportData.map(d => [
+      d.user?.full_name || 'Unknown', d.total_tasks_completed, d.total_screen_time, d.days_logged
     ]);
-    const csvContent = [headers, ...csvData]
-      .map(row => row.join(','))
-      .join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'efficiency_reports.csv');
-    link.click();
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const a   = document.createElement('a');
+    a.href    = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'efficiency_reports.csv';
+    a.click();
   };
 
-  const handleExportPDF = () => {
+  const handleExportPdf = () => {
     const doc = new jsPDF();
     doc.text('Efficiency Reports', 10, 10);
-    const tableData = filteredReportData.map(item => [
-      item.user?.full_name || 'Unknown',
-      item.total_tasks_completed || 0,
-      item.total_screen_time || 0
-    ]);
     doc.autoTable({
-      head: [['User', 'Total Tasks Completed', 'Total Screen Time (minutes)']],
-      body: tableData,
+      head: [['User', 'Tasks Completed', 'Screen Time (min)', 'Days Logged']],
+      body: filteredReportData.map(d => [d.user?.full_name || 'Unknown', d.total_tasks_completed || 0, d.total_screen_time || 0, d.days_logged || 0]),
       startY: 20,
     });
     doc.save('efficiency_reports.pdf');
   };
 
-  if (!canViewReports) {
-    return <div className="flex justify-center items-center h-screen text-xl text-red-500">You do not have permission to view reports.</div>;
-  }
-
+  // ── Access gate ────────────────────────────────────────────────────────────
+  // All authenticated users can see this page (own data always available)
+  // Only the cross-user "admin panel" sections are gated by canViewReports
   if (loading) {
-    return <div className="flex justify-center items-center h-screen text-xl">Loading reports...</div>;
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-full border-4 border-slate-200 border-t-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-slate-500 font-medium">Loading reports…</p>
+        </div>
+      </div>
+    );
   }
 
+  const completionRate = tasks.length > 0
+    ? Math.round((tasks.filter(t => t.status === 'completed').length / tasks.length) * 100)
+    : 0;
+
+  const pendingCount = tasks.filter(t => t.status !== 'completed').length;
+
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6 p-6">
-      {/* Header */}
+    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-5 p-4 md:p-6">
+
+      {/* ── Header ── */}
       <motion.div variants={itemVariants}>
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-2xl font-outfit">Reports Dashboard</CardTitle>
-            <CardDescription>Performance and efficiency insights</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            {uniqueUsers.length > 1 && (
-              <select
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-                className="border border-slate-300 p-2 rounded-md bg-white text-slate-900"
-              >
-                <option value="all">All Users</option>
-                {uniqueUsers.map(u => (
-                  <option key={u?.id} value={u?.id}>{u?.full_name || 'Unknown'}</option>
-                ))}
-              </select>
-            )}
-            {canDownloadReports && (
-              <div className="flex gap-2">
-                <Button onClick={handleDownloadReports}>Download CSV</Button>
-                <Button onClick={handleExportPDF}>Export PDF</Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Stats Cards */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Total Tasks</CardTitle>
-            <Target className="h-4 w-4 text-slate-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">{tasks.length}</div>
-          </CardContent>
-        </Card>
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Tasks Completed</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-slate-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">{getTotalTasksCompleted()}</div>
-          </CardContent>
-        </Card>
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Average Screen Time</CardTitle>
-            <Clock className="h-4 w-4 text-slate-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">{formatTime(getAverageScreenTime())}</div>
-          </CardContent>
-        </Card>
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Pending Tasks</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-slate-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">{tasks.filter(t => t.status !== 'completed').length}</div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Charts Row 1 */}
-      <motion.div
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-        variants={itemVariants}
-      >
-        {/* Task Status Pie Chart */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader>
-            <CardTitle className="text-xl font-outfit">
-              Task Status Distribution
-            </CardTitle>
-            <CardDescription>
-              Overview of task statuses
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {getTaskStatusData().length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={getTaskStatusData()}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                    label={({ name, percent }) =>
-                      `${name} ${(percent * 100).toFixed(0)}%`
-                    }
-                  >
-                    {getTaskStatusData().map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-64 text-slate-500">
-                No task data available
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        {/* Task Category Bar Chart */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader>
-            <CardTitle className="text-xl font-outfit">
-              Tasks by Category
-            </CardTitle>
-            <CardDescription>
-              Distribution across service categories
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {getTaskCategoryData().length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={getTaskCategoryData()} layout="vertical">
-                  <XAxis type="number" />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    width={80}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="tasks" radius={[0, 8, 8, 0]}>
-                    {getTaskCategoryData().map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-64 text-slate-500">
-                No category data available
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-      {/* Charts Row 2 */}
-      <motion.div
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-        variants={itemVariants}
-      >
-        {/* Star Performers / Your Performance */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader>
-            <div className="flex items-center justify-between">
+        <Card className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
+          <CardContent className="p-4 md:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-xl font-outfit">
-                  {isAdmin ? "Star Performers" : "Your Performance"}
-                </CardTitle>
-                <CardDescription>
-                  {isAdmin
-                    ? "Top ranked by overall performance score"
-                    : "Your performance metrics"}
-                </CardDescription>
+                <h1 className="text-xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Reports & Analytics</h1>
+                <p className="text-sm text-slate-500 mt-0.5">Performance insights and efficiency metrics</p>
               </div>
-              {isAdmin && (
-                <div className="flex gap-1">
-                  {["all", "monthly", "weekly"].map(p => (
-                    <Button
-                      key={p}
-                      variant={rankingPeriod === p ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setRankingPeriod(p)}
-                      className="text-xs px-3 py-1"
-                    >
-                      {p.toUpperCase()}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {getEmployeePerformanceData().length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={getEmployeePerformanceData()}>
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar
-                    dataKey="tasks"
-                    name="Performance Score"
-                    radius={[8, 8, 0, 0]}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* User filter — only shown when multiple report data available */}
+                {uniqueUsers.length > 1 && (
+                  <select
+                    value={selectedUserId}
+                    onChange={e => setSelectedUserId(e.target.value)}
+                    className="h-8 px-3 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {getEmployeePerformanceData().map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    <option value="all">All Users</option>
+                    {uniqueUsers.map(u => (
+                      <option key={u?.id} value={u?.id}>{u?.full_name || 'Unknown'}</option>
                     ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-64 text-slate-500">
-                No performance data available
+                  </select>
+                )}
+                <Button variant="outline" size="sm" className="h-8 rounded-xl text-xs gap-1.5"
+                  onClick={() => fetchAllData(true)} disabled={refreshing}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+                </Button>
+                {canDownloadReports && (
+                  <>
+                    <Button size="sm" className="h-8 rounded-xl text-xs gap-1.5 bg-slate-800 hover:bg-slate-900 text-white" onClick={handleDownloadCsv}>
+                      <Download className="h-3.5 w-3.5" /> CSV
+                    </Button>
+                    <Button size="sm" className="h-8 rounded-xl text-xs gap-1.5" style={{ background: COLORS.deepBlue }} onClick={handleExportPdf}>
+                      <Download className="h-3.5 w-3.5" /> PDF
+                    </Button>
+                  </>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
-        {/* Weekly Trend */}
-        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader>
-            <CardTitle className="text-xl font-outfit">
-              Weekly Activity Trend
-            </CardTitle>
-            <CardDescription>
-              Task completion pattern this week
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={getWeeklyTrendData()}>
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-                <Area
-                  type="monotone"
-                  dataKey="completed"
-                  stroke={CHART_COLORS.success}
-                  fillOpacity={0.3}
-                  fill={CHART_COLORS.success}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="pending"
-                  stroke={CHART_COLORS.warning}
-                  fillOpacity={0.3}
-                  fill={CHART_COLORS.warning}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
-      {/* Team Workload Table */}
+
+      {/* ── KPI tiles ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiTile
+          label="Total Tasks"
+          value={tasks.length}
+          sub="All assigned tasks"
+          color={COLORS.deepBlue}
+          icon={Target}
+        />
+        <KpiTile
+          label="Completed"
+          value={getTotalCompleted()}
+          sub={`${completionRate}% completion rate`}
+          color={COLORS.emeraldGreen}
+          icon={CheckCircle2}
+        />
+        <KpiTile
+          label="Avg Screen Time"
+          value={formatTime(getAvgScreenTime())}
+          sub="Per session average"
+          color={COLORS.mediumBlue}
+          icon={Clock}
+        />
+        <KpiTile
+          label="Pending Work"
+          value={pendingCount}
+          sub="Tasks not yet done"
+          color="#d97706"
+          icon={AlertTriangle}
+        />
+      </div>
+
+      {/* ── Charts row 1 ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section title="Task Status Overview" desc="Distribution of current task states">
+          {getTaskStatusData().length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
+                <Pie data={getTaskStatusData()} cx="50%" cy="50%" innerRadius={65} outerRadius={105}
+                  paddingAngle={4} dataKey="value"
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                >
+                  {getTaskStatusData().map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip />} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-slate-400">No task data</div>
+          )}
+        </Section>
+
+        <Section title="Tasks by Department" desc="Volume per service category">
+          {getTaskCategoryData().length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={getTaskCategoryData()} layout="vertical">
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis dataKey="name" type="category" width={90} tick={{ fontSize: 11 }} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="tasks" radius={[0, 6, 6, 0]}>
+                  {getTaskCategoryData().map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-slate-400">No category data</div>
+          )}
+        </Section>
+      </div>
+
+      {/* ── Charts row 2 ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section
+          title={isAdmin ? 'Star Performers' : 'Your Performance'}
+          desc={isAdmin ? 'Top ranked by overall performance score' : 'Your efficiency metrics'}
+          action={isAdmin && (
+            <div className="flex gap-1">
+              {['all', 'monthly', 'weekly'].map(p => (
+                <Button key={p} variant={rankingPeriod === p ? 'default' : 'outline'} size="sm"
+                  onClick={() => setRankingPeriod(p)}
+                  className="h-7 px-3 text-xs rounded-lg"
+                  style={rankingPeriod === p ? { background: COLORS.deepBlue } : {}}
+                >
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </Button>
+              ))}
+            </div>
+          )}
+        >
+          {getEmployeePerformanceData().length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={getEmployeePerformanceData()}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="tasks" name="Performance Score" radius={[6, 6, 0, 0]}>
+                  {getEmployeePerformanceData().map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-slate-400">No performance data</div>
+          )}
+        </Section>
+
+        <Section title="Weekly Activity Trend" desc="Task completion pattern this week">
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={getWeeklyTrendData()}>
+              <defs>
+                <linearGradient id="gradCompleted" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={COLORS.emeraldGreen} stopOpacity={0.35} />
+                  <stop offset="100%" stopColor={COLORS.emeraldGreen} stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="gradPending" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend />
+              <Area type="monotone" dataKey="completed" stroke={COLORS.emeraldGreen} strokeWidth={2} fill="url(#gradCompleted)" />
+              <Area type="monotone" dataKey="pending"   stroke={COLORS.mediumBlue}   strokeWidth={2} fill="url(#gradPending)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Section>
+      </div>
+
+      {/* ── Team Workload table — admin only ── */}
       {isAdmin && dashboardStats?.team_workload && (
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm">
-            <CardHeader className="bg-slate-50 border-b border-slate-200">
-              <CardTitle className="text-sm font-medium text-slate-600 uppercase tracking-wider flex items-center gap-2">
-                <BarChart3 className="h-4 w-4" />
-                Team Workload Distribution
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Employee
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Total Tasks
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Pending
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Completed
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Progress
-                      </th>
+        <Section title="Team Workload Distribution" desc="Individual breakdown across all staff">
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  {['Employee', 'Total', 'Pending', 'Completed', 'Progress'].map(h => (
+                    <th key={h} className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {dashboardStats.team_workload.map(m => {
+                  const pct = m.total_tasks > 0 ? Math.round((m.completed_tasks / m.total_tasks) * 100) : 0;
+                  return (
+                    <tr key={m.user_id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-3.5 font-medium text-slate-800">{m.user_name}</td>
+                      <td className="px-5 py-3.5 font-bold" style={{ color: COLORS.deepBlue }}>{m.total_tasks}</td>
+                      <td className="px-5 py-3.5 text-amber-600 font-medium">{m.pending_tasks}</td>
+                      <td className="px-5 py-3.5 text-emerald-600 font-medium">{m.completed_tasks}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: pct >= 70 ? COLORS.emeraldGreen : pct >= 40 ? '#d97706' : '#dc2626' }} />
+                          </div>
+                          <span className="text-xs font-semibold text-slate-600 w-10 text-right">{pct}%</span>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {dashboardStats.team_workload.map((member, index) => {
-                      const progress =
-                        member.total_tasks > 0
-                          ? Math.round(
-                              (member.completed_tasks /
-                                member.total_tasks) *
-                                100
-                            )
-                          : 0;
-                      return (
-                        <tr key={member.user_id}>
-                          <td className="px-6 py-4">
-                            {member.user_name}
-                          </td>
-                          <td className="px-6 py-4 font-semibold">
-                            {member.total_tasks}
-                          </td>
-                          <td className="px-6 py-4">
-                            {member.pending_tasks}
-                          </td>
-                          <td className="px-6 py-4">
-                            {member.completed_tasks}
-                          </td>
-                          <td className="px-6 py-4">
-                            {progress}%
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+
+      {/* ── Individual efficiency cards ── */}
+      {filteredReportData.length > 0 && (
+        <Section
+          title={canSeeOthers ? 'Efficiency Breakdown' : 'Your Efficiency Summary'}
+          desc="Detailed activity log metrics"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredReportData.map((d, i) => {
+              const name = d.user?.full_name || (d.user_id === user?.id ? 'You' : 'User');
+              const pct  = d.days_logged > 0 ? Math.round((d.total_tasks_completed / Math.max(d.days_logged, 1)) * 100) / 100 : 0;
+              return (
+                <div key={i} className="border border-slate-200 rounded-xl p-4 hover:shadow-sm transition-all">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white text-sm" style={{ background: CHART_PALETTE[i % CHART_PALETTE.length] }}>
+                      {name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800 text-sm">{name}</p>
+                      <p className="text-xs text-slate-400">{d.days_logged} days logged</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 rounded-lg p-2.5">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase">Completed</p>
+                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.emeraldGreen }}>{d.total_tasks_completed}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2.5">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase">Screen Time</p>
+                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.mediumBlue }}>{formatTime(d.total_screen_time || 0)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
       )}
     </motion.div>
   );
