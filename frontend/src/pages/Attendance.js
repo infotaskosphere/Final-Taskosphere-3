@@ -236,7 +236,9 @@ export default function Attendance() {
       );
       fetchData();
     } catch (error) {
-      toast.error((error.response && error.response.data && error.response.data.detail) || 'Failed to record attendance');
+      const errorMsg = error.response?.data?.detail || error.message || 'Failed to record attendance';
+      toast.error(errorMsg);
+      console.error('Punch action error:', error);
     } finally {
       setLoading(false);
     }
@@ -398,7 +400,7 @@ export default function Attendance() {
     // Body Text
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
-    doc.text(`Employee: ${user?.name || 'Staff Member'}`, 10, 30);
+    doc.text(`Employee: ${user?.full_name || 'Staff Member'}`, 10, 30);
     doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 40);
    
     // Stats Box
@@ -491,13 +493,14 @@ export default function Attendance() {
                       {isTodaySelected && (
                         <Button
                           onClick={() => { handlePunchAction("punch_in"); setShowPunchInModal(false); }}
+                          disabled={loading}
                           className="bg-green-600 hover:bg-green-700"
                         >
                           Punch In
                         </Button>
                       )}
                       {(!isSelectedPast || isTodaySelected) && (
-                        <Button variant="outline" onClick={handleApplyLeaveClick}>
+                        <Button variant="outline" onClick={handleApplyLeaveClick} disabled={loading}>
                           Apply For Leave
                         </Button>
                       )}
@@ -510,7 +513,7 @@ export default function Attendance() {
                         className="bg-white/20 backdrop-blur text-white hover:bg-white/30 rounded-xl px-8"
                       >
                         <LogOut className="mr-2 h-5 w-5" />
-                        Punch Out
+                        {loading ? "Punching Out..." : "Punch Out"}
                       </Button>
                     )
                   )}
@@ -552,6 +555,7 @@ export default function Attendance() {
                           size="sm"
                           className="flex-1 bg-emerald-600 hover:bg-emerald-700"
                           onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}
+                          disabled={loading}
                         >
                           Yes (Closed)
                         </Button>
@@ -560,6 +564,7 @@ export default function Attendance() {
                           variant="outline"
                           className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
                           onClick={() => handleHolidayDecision(holiday.date, 'rejected')}
+                          disabled={loading}
                         >
                           No (Working)
                         </Button>
@@ -852,7 +857,7 @@ export default function Attendance() {
                 className="w-full mb-4 py-7 text-lg rounded-2xl"
                 style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`, color: 'white' }}
               >
-                Punch In Now
+                {loading ? "Punching In..." : "Punch In Now"}
               </Button>
               <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline">
                 I'll do it later
@@ -898,6 +903,7 @@ export default function Attendance() {
                           setLeaveFrom(from);
                           setLeaveTo(to);
                         }}
+                        disabled={loading}
                       >
                         {days === 1 ? "1 Day" : `${days} Days`}
                       </Button>
@@ -951,12 +957,13 @@ export default function Attendance() {
                     onChange={e => setLeaveReason(e.target.value)}
                     placeholder="Reason for leave..."
                     className="w-full min-h-[110px] p-4 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    disabled={loading}
                   />
                 </div>
                 <div className="flex justify-end gap-4 mt-8">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
+                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)} disabled={loading}>Cancel</Button>
                   <Button
-                    disabled={!leaveFrom}
+                    disabled={!leaveFrom || loading}
                     onClick={async () => {
                       if (!leaveFrom) return;
                       try {
