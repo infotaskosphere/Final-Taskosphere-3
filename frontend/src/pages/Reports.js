@@ -48,10 +48,11 @@ const itemVariants = {
 
 export default function Reports() {
   const { user, hasPermission } = useAuth();
-  // ✅ FIXED: removed duplicate line
-  const canViewReports = hasPermission("can_view_reports");
+  const canViewReports = hasPermission("can_view_reports") || user?.role === 'staff';
   const canDownloadReports = hasPermission("can_download_reports");
   const isAdmin = user?.role === "admin";
+  const canSeeOthers = isAdmin || (user?.permissions?.view_other_reports?.length > 0);
+
   const [reportData, setReportData] = useState([]);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -60,13 +61,11 @@ export default function Reports() {
   const [starPerformers, setStarPerformers] = useState([]);
   const [rankingPeriod, setRankingPeriod] = useState("monthly");
 
-  // ✅ FIXED: wait for user before fetching
   useEffect(() => {
     if (user) {
       fetchAllData();
     }
   }, [user]);
-
   // Star Performers fetch
   useEffect(() => {
     const fetchStarPerformers = async () => {
