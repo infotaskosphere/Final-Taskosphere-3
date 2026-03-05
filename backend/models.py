@@ -1,613 +1,260 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+from typing import List, Optional
 import uuid
-import re
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
-from enum import Enum
+import logging
 
-# Timezone Configuration
-india_tz = timezone(timedelta(hours=5, minutes=30))
+from backend.dependencies import (
+    db,
+    get_current_user,
+    require_admin,
+    safe_dt
+)
+from pydantic import BaseModel, Field, ConfigDict
+from backend.models import User
 
-# ────────────────────────────────────────────────
-# ROLE ENUM
-# ────────────────────────────────────────────────
-class UserRole(str, Enum):
-    admin = "admin"
-    manager = "manager"
-    staff = "staff"
+logger = logging.getLogger(__name__)
 
-# ────────────────────────────────────────────────
-# DEFAULT ROLE PERMISSION TEMPLATES
-# ────────────────────────────────────────────────
-DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
-    "admin": {
-        # Universal permissions
-        "can_view_all_tasks": True,
-        "can_view_all_clients": True,
-        "can_view_all_dsc": True,
-        "can_view_documents": True,
-        "can_view_all_duedates": True,
-        "can_view_reports": True,
-        "can_view_all_leads": True,
-        "can_view_attendance": True,
-        "can_edit_tasks": True,
-        "can_edit_dsc": True,
-        "can_edit_documents": True,
-        "can_edit_due_dates": True,
-        "can_edit_clients": True,
-        "can_download_reports": True,
-        # Permission management
-        "can_manage_users": True,
-        "can_manage_settings": True,
-        "can_view_audit_logs": True,
-        # Other permissions
-        "can_assign_tasks": True,
-        "can_view_staff_activity": True,
-        "can_send_reminders": True,
-        "can_view_user_page": True,
-        "can_edit_users": True,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True,
-        "can_use_chat": True,
-        # Specific access (empty for admin - they see all)
-        "assigned_clients": [],
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-    },
-    "manager": {
-        # Universal permissions (limited)
-        "can_view_all_tasks": False,
-        "can_view_all_clients": False,
-        "can_view_all_dsc": False,
-        "can_view_documents": True,
-        "can_view_all_duedates": False,
-        "can_view_reports": True,  # Universal - see all reports
-        "can_view_all_leads": False,
-        "can_view_attendance": True,  # Universal - see all attendance
-        "can_edit_tasks": True,  # Universal - edit all tasks
-        "can_edit_dsc": False,
-        "can_edit_documents": False,
-        "can_edit_due_dates": True,  # Can edit due dates
-        "can_edit_clients": False,
-        "can_download_reports": True,
-        # Permission management
-        "can_manage_users": False,
-        "can_manage_settings": False,
-        "can_view_audit_logs": False,
-        # Other permissions
-        "can_assign_tasks": True,
-        "can_view_staff_activity": True,  # See team activity
-        "can_send_reminders": False,
-        "can_view_user_page": False,
-        "can_edit_users": False,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard": True,
-        "can_use_chat": True,
-        # Specific access (populated when assigning team members)
-        "assigned_clients": [],  # Populated per manager
-        "view_other_tasks": [],  # Will be auto-populated with team user IDs
-        "view_other_attendance": [],  # Will be auto-populated with team user IDs
-        "view_other_reports": [],  # Will be auto-populated with team user IDs
-        "view_other_todos": [],  # Will be auto-populated with team user IDs
-        "view_other_activity": [],  # Will be auto-populated with team user IDs
-    },
-    "staff": {
-        # Universal permissions (none for staff)
-        "can_view_all_tasks": False,
-        "can_view_all_clients": False,
-        "can_view_all_dsc": False,
-        "can_view_documents": False,
-        "can_view_all_duedates": False,
-        "can_view_reports": False,
-        "can_view_all_leads": False,
-        "can_view_attendance": False,
-        "can_edit_tasks": False,
-        "can_edit_dsc": False,
-        "can_edit_documents": False,
-        "can_edit_due_dates": False,
-        "can_edit_clients": False,
-        "can_download_reports": False,
-        # Permission management
-        "can_manage_users": False,
-        "can_manage_settings": False,
-        "can_view_audit_logs": False,
-        # Other permissions
-        "can_assign_tasks": False,
-        "can_view_staff_activity": False,
-        "can_send_reminders": False,
-        "can_view_user_page": False,
-        "can_edit_users": False,
-        "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True,  # Can see own todos
-        "can_use_chat": True,
-        # Specific access (staff doesn't have any by default)
-        "assigned_clients": [],
-        "view_other_tasks": [],
-        "view_other_attendance": [],
-        "view_other_reports": [],
-        "view_other_todos": [],
-        "view_other_activity": [],
-    }
-}
-
-# ======================
-# CORE USER & PERMISSIONS
-# ======================
-class UserPermissions(BaseModel):
-    """
-    Permission model with 5-layer hierarchy:
-    1. Admin override (role == admin)
-    2. Universal permissions (can_view_all_*, can_edit_*, etc.)
-    3. Specific access (assigned_clients, view_other_*, etc.)
-    4. Ownership (assigned_to, created_by, user_id)
-    5. Deny
-    """
-    
-    # ========== UNIVERSAL PERMISSIONS ==========
-    # These allow access to ALL records in a module
-    can_view_all_tasks: bool = False
-    can_view_all_clients: bool = False
-    can_view_all_dsc: bool = False
-    can_view_documents: bool = False
-    can_view_all_duedates: bool = False
-    can_view_reports: bool = False
-    can_view_all_leads: bool = False
-    can_view_attendance: bool = False
-    can_edit_tasks: bool = False
-    can_edit_dsc: bool = False
-    can_edit_documents: bool = False
-    can_edit_due_dates: bool = False
-    can_edit_clients: bool = False
-    can_download_reports: bool = False
-    
-    # ========== PERMISSION MANAGEMENT ==========
-    can_manage_users: bool = False
-    can_manage_settings: bool = False
-    can_view_audit_logs: bool = False
-    
-    # ========== OTHER PERMISSIONS ==========
-    can_assign_tasks: bool = False
-    can_view_staff_activity: bool = False
-    can_send_reminders: bool = False
-    can_view_user_page: bool = False
-    can_edit_users: bool = False
-    can_view_selected_users_reports: bool = False
-    can_view_todo_dashboard: bool = False
-    can_use_chat: bool = False
-    
-    # ========== SPECIFIC ACCESS PERMISSIONS ==========
-    # These allow access to SPECIFIC users/clients only
-    assigned_clients: List[str] = Field(default_factory=list)  # Client IDs this user can access
-    view_other_tasks: List[str] = Field(default_factory=list)  # User IDs whose tasks this user can view
-    view_other_attendance: List[str] = Field(default_factory=list)  # User IDs whose attendance this user can view
-    view_other_reports: List[str] = Field(default_factory=list)  # User IDs whose reports this user can view
-    view_other_todos: List[str] = Field(default_factory=list)  # User IDs whose todos this user can view
-    view_other_activity: List[str] = Field(default_factory=list)  # User IDs whose activity this user can view
-
-
-class User(BaseModel):
-    """
-    User model with role-based access control.
-    
-    ROLE DEFAULTS:
-    • Admin: All permissions enabled
-    • Manager: Team access (own + team member records) + reports/attendance
-    • Staff: Own records only + chat
-    """
-    model_config = ConfigDict(extra="ignore")
-    
-    id: str
-    email: str
-    full_name: Optional[str] = None
-    role: UserRole = UserRole.staff
-    password: Optional[str] = None
-    departments: List[str] = Field(default_factory=list)
-    phone: Optional[str] = None
-    birthday: Optional[date] = None
-    profile_picture: Optional[str] = None
-    punch_in_time: Optional[str] = "10:30"
-    grace_time: Optional[str] = "00:15"
-    punch_out_time: Optional[str] = "19:00"
-    telegram_id: Optional[int] = None
-    permissions: UserPermissions = Field(default_factory=UserPermissions)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    is_active: bool = True
-
-    @field_validator('birthday', mode='before')
-    @classmethod
-    def empty_string_to_none(cls, v):
-        if v == "" or v is None:
-            return None
-        return v
-
-class UserCreate(BaseModel):
-    full_name: str
-    email: str
-    password: str
-    role: UserRole = UserRole.staff
-    departments: List[str] = Field(default_factory=list)
-    phone: Optional[str] = None
-    birthday: Optional[date] = None
-    telegram_id: Optional[int] = None
-    punch_in_time: Optional[str] = "10:30"
-    grace_time: Optional[str] = "00:15"
-    punch_out_time: Optional[str] = "19:00"
-    profile_picture: Optional[str] = None
-    is_active: bool = True
-    permissions: Optional[Dict[str, Any]] = None
-
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-    password: Optional[str] = None
-    role: Optional[UserRole] = None
-    departments: Optional[List[str]] = None
-    phone: Optional[str] = None
-    birthday: Optional[date] = None
-    punch_in_time: Optional[str] = None
-    grace_time: Optional[str] = None
-    punch_out_time: Optional[str] = None
-    is_active: Optional[bool] = None
-    profile_picture: Optional[str] = None
-    telegram_id: Optional[int] = None
-    model_config = ConfigDict(from_attributes=True, extra="ignore")
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    user: User
-
-# ======================
-# TODOS & TASKS
-# ======================
-class Todo(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    title: str
-    description: Optional[str] = None
-    is_completed: bool = False
-    due_date: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(india_tz))
-    completed_at: Optional[datetime] = None
-
-class TodoCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    due_date: Optional[datetime] = None
-
-class TaskBase(BaseModel):
-    title: str
-    description: Optional[str] = None
-    assigned_to: Optional[str] = None
-    sub_assignees: List[str] = Field(default_factory=list)
-    due_date: Optional[datetime] = None
-    priority: str = "medium" 
-    status: str = "pending" 
-    category: str = "other"
-    client_id: Optional[str] = None
-    is_recurring: bool = False
-    recurrence_pattern: Optional[str] = "monthly"
-    recurrence_interval: Optional[int] = 1
-    recurrence_end_date: Optional[datetime] = None
-    type: Optional[str] = None
-
-class TaskCreate(TaskBase):
-    pass
-
-class BulkTaskCreate(BaseModel):
-    tasks: List[TaskCreate]
-
-class Task(TaskBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    parent_task_id: Optional[str] = None
-
-# ======================
-# ATTENDANCE & ACTIVITY
-# ======================
-class Attendance(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    date: str
-    status: str = "absent"
-    punch_in: Optional[datetime] = None
-    punch_out: Optional[datetime] = None
-    duration_minutes: Optional[int] = 0
-    leave_reason: Optional[str] = None
-
-class AttendanceBase(BaseModel):
-    punch_in: datetime
-    punch_out: Optional[datetime] = None
-
-class AttendanceCreate(BaseModel):
-    action: str 
-
-class AttendanceUpdate(BaseModel):
-    punch_out: Optional[datetime] = None
-    status: Optional[str] = None
-    leave_reason: Optional[str] = None
-
-class StaffActivityLog(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    action: str
-    description: Optional[str] = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StaffActivityCreate(BaseModel):
-    action: str
-    description: Optional[str] = None
-
-# ======================
-# DSC MANAGEMENT
-# ======================
-class DSCBase(BaseModel):
-    certificate_number: str
-    holder_name: str
-    issue_date: date
-    expiry_date: date
-    key_file_location: Optional[str] = None
-    key_password: Optional[str] = None
-    notes: Optional[str] = None
-
-class DSCCreate(DSCBase):
-    pass
-
-class DSC(DSCBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class DSCListResponse(BaseModel):
-    total_dsc: int
-    expired_dsc: int
-    expiring_soon: int
-    active_dsc: int
-    dsc_list: List[DSC] = []
-
-class DSCMovementRequest(BaseModel):
-    movement_type: str
-    person_name: str
-    notes: Optional[str] = None
-
-class MovementUpdateRequest(BaseModel):
-    movement_id: str
-    movement_type: str
-    person_name: Optional[str] = None
-    notes: Optional[str] = None
-
-# ======================
-# DOCUMENT MANAGEMENT
-# ======================
-class DocumentBase(BaseModel):
-    document_name: Optional[str] = None
-    document_type: Optional[str] = None
-    holder_name: Optional[str] = None
-    associated_with: Optional[str] = None
-    entity_type: str = "firm"
-    issue_date: Optional[datetime] = None
-    valid_upto: Optional[datetime] = None
-    notes: Optional[str] = None
-    current_status: str = "IN"
-    current_location: str = "with_company"
-    movement_log: List[dict] = Field(default_factory=list)
-
-class DocumentCreate(DocumentBase):
-    pass
-
-class Document(DocumentBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class DocumentMovement(BaseModel):
-    movement_type: str
-    person_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    notes: Optional[str] = None
-
-class DocumentMovementRequest(BaseModel):
-    movement_type: str
-    person_name: str
-    notes: Optional[str] = None
-
-class DocumentMovementUpdateRequest(BaseModel):
-    movement_id: str
-    movement_type: str
-    person_name: Optional[str] = None
-    notes: Optional[str] = None
-
-# ======================
-# CLIENT MANAGEMENT
-# ======================
-class ContactPerson(BaseModel):
-    name: str
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    designation: Optional[str] = None
-    birthday: Optional[date] = None
-    din: Optional[str] = None
-
-class ClientDSC(BaseModel):
-    certificate_number: str
-    holder_name: str
-    issue_date: date
-    expiry_date: date
-    notes: Optional[str] = None
-
-class ClientBase(BaseModel):
-    company_name: str = Field(..., min_length=3, max_length=255)
-    client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
-    contact_persons: List[ContactPerson] = Field(default_factory=list)
-    email: Optional[EmailStr] = None
-    phone: str = Field(..., min_length=10, max_length=20)
-    date_of_incorporation: Optional[date] = None
-    birthday: Optional[date] = None
-    services: List[str] = Field(default_factory=list)
-    dsc_details: List[ClientDSC] = Field(default_factory=list)
-    assigned_to: Optional[str] = None
-    notes: Optional[str] = None
-
-    @field_validator('phone')
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError('Phone number is required')
-        cleaned = re.sub(r"\s|-|\+", "", str(v))
-        if not cleaned.isdigit():
-            raise ValueError('Phone number must contain only digits')
-        if not (10 <= len(cleaned) <= 15):
-            raise ValueError('Phone number must be 10-15 digits')
-        return v
-
-    @field_validator('company_name')
-    @classmethod
-    def validate_company_name(cls, v: str) -> str:
-        v = str(v).strip()
-        if len(v) < 3:
-            raise ValueError('Company name must be at least 3 characters long')
-        return v
-
-class ClientCreate(ClientBase):
-    pass
-
-class Client(ClientBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class MasterClientForm(BaseModel):
-    company_name: str
-    client_type: str
-    email: Optional[EmailStr] = None
-    phone: str
-    date_of_incorporation: Optional[date] = None
-    gst_number: Optional[str] = None
-    pan_number: Optional[str] = None
-    tan_number: Optional[str] = None
-    assigned_to: Optional[str] = None
-    services: List[str] = Field(default_factory=list)
-    contact_persons: List[Any] = Field(default_factory=list)
-    notes: Optional[str] = None
-
-    @model_validator(mode='before')
-    @classmethod
-    def clean_empty_strings(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if v == "":
-                    data[k] = None
-        return data
-
-# ======================
-# DUE DATES & REMINDERS
-# ======================
-class DueDateBase(BaseModel):
-    title: str
-    description: Optional[str] = None
-    due_date: datetime
-    reminder_days: int = 30
-    category: Optional[str] = None
-    department: str
-    assigned_to: Optional[str] = None
-    client_id: Optional[str] = None
-    status: str = "pending"
-
-class DueDateCreate(DueDateBase):
-    pass
-
-class DueDate(DueDateBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class BirthdayEmailRequest(BaseModel):
-    client_id: str
-
-# ======================
-# NOTIFICATIONS & AUDIT
-# ======================
+# ====================== RESILIENT MODELS ======================
 class NotificationBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     title: str
     message: str
-    type: str
+    type: str = "system"  # task | dsc | system | lead
+
 
 class Notification(NotificationBase):
-    model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     is_read: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class AuditLog(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    user_name: str
-    action: str
-    module: str
-    record_id: Optional[str] = None
-    old_data: Optional[dict] = None
-    new_data: Optional[dict] = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# ======================
-# DASHBOARD & METRICS
-# ======================
-class DashboardStats(BaseModel):
-    total_tasks: int
-    completed_tasks: int
-    pending_tasks: int
-    overdue_tasks: int
-    total_dsc: int
-    expiring_dsc_count: int
-    expiring_dsc_list: List[dict]
-    total_clients: int
-    upcoming_birthdays: int
-    upcoming_due_dates: int
-    team_workload: List[dict]
-    compliance_status: dict
-    expired_dsc_count: int = 0
+# ====================== ADMIN SEND MODEL ======================
+class AdminNotificationRequest(BaseModel):
+    title: str
+    message: str
+    type: str = "system"
+    user_id: Optional[str] = None
+    broadcast: bool = False
 
-class PerformanceMetric(BaseModel):
-    user_id: str
-    user_name: str
-    profile_picture: Optional[str] = None
-    attendance_percent: float = 0.0
-    total_hours: float = 0.0
-    task_completion_percent: float = 0.0
-    todo_ontime_percent: float = 0.0
-    timely_punchin_percent: float = 0.0
-    overall_score: float = 0.0
-    rank: int = 0
-    badge: str = "Good Performer"
 
-# ======================
-# HOLIDAY MODELS
-# ======================
-class HolidayCreate(BaseModel):
-    date: date
-    name: str
-    description: Optional[str] = None
+# ====================== STABILITY HELPERS ======================
+def normalize_notification(doc: dict) -> dict:
+    """Standardizes MongoDB data to prevent Pydantic 500 errors."""
+    if not doc:
+        return doc
 
-class HolidayResponse(BaseModel):
-    date: date
-    name: str
-    description: Optional[str] = None
+    # 1. Ensure ID consistency (Check both 'id' and '_id')
+    if "_id" in doc and "id" not in doc:
+        doc["id"] = str(doc["_id"])
+
+    # 2. Safe Datetime normalization
+    doc["created_at"] = safe_dt(doc.get("created_at"))
+
+    return doc
+
+
+# ====================== ROUTER ======================
+router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+
+# ====================== INTERNAL LOGIC ======================
+async def create_notification(
+    user_id: str,
+    title: str,
+    message: str,
+    type: str = "system"
+):
+    """
+    Internal function used by other modules to trigger notifications.
+    
+    This is called from other routers (leads, tasks, etc.) to notify users.
+    No permission check needed as it's internal.
+    """
+    try:
+        notification = Notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            type=type
+        )
+        doc = notification.model_dump()
+        # Store dates as naive UTC datetime (MongoDB friendly)
+        doc["created_at"] = datetime.now(timezone.utc)
+
+        await db.notifications.insert_one(doc)
+        return notification
+    except Exception as e:
+        logger.error(f"Failed to create notification for {user_id}: {str(e)}")
+        return None
+
+
+# ====================== ADMIN SEND NOTIFICATION ======================
+@router.post("/send")
+async def send_notification(
+    payload: AdminNotificationRequest,
+    current_user: User = Depends(require_admin())
+):
+    """
+    ADMIN ENDPOINT - Send notifications
+    
+    PERMISSION HIERARCHY:
+    • Admin only
+    
+    Supports:
+    • Single user notification (provide user_id)
+    • Broadcast notification (set broadcast=true)
+    """
+    now = datetime.now(timezone.utc)
+
+    # Broadcast notification
+    if payload.broadcast:
+        users = await db.users.find({}, {"id": 1}).to_list(length=5000)
+
+        if not users:
+            return {"status": "success", "message": "No users found to broadcast to"}
+
+        notifications = []
+        for user in users:
+            notifications.append({
+                "id": str(uuid.uuid4()),
+                "user_id": user["id"],
+                "title": payload.title,
+                "message": payload.message,
+                "type": payload.type,
+                "is_read": False,
+                "created_at": now
+            })
+
+        if notifications:
+            await db.notifications.insert_many(notifications)
+
+        return {
+            "status": "success",
+            "message": f"Notification broadcasted to {len(notifications)} users"
+        }
+
+    # Single user notification
+    if payload.user_id:
+        result = await create_notification(
+            user_id=payload.user_id,
+            title=payload.title,
+            message=payload.message,
+            type=payload.type
+        )
+
+        if result:
+            return {"status": "success", "message": "Notification sent"}
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create notification"
+            )
+
+    raise HTTPException(
+        status_code=400,
+        detail="Provide user_id or set broadcast=true"
+    )
+
+
+# ====================== API ROUTES ======================
+@router.get("/", response_model=List[Notification])
+async def get_my_notifications(current_user=Depends(get_current_user)):
+    """
+    GET MY NOTIFICATIONS
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can view their own notifications
+    
+    Returns user's notifications sorted by newest first.
+    """
+    cursor = db.notifications.find({"user_id": current_user.id}, {"_id": 0})
+    notifications_raw = await cursor.sort("created_at", -1).to_list(500)
+
+    # Normalize every document before passing to the response_model
+    return [normalize_notification(n) for n in notifications_raw]
+
+
+@router.get("/unread-count")
+async def get_unread_count(current_user=Depends(get_current_user)):
+    """
+    GET UNREAD NOTIFICATION COUNT
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can check their own count
+    
+    Lightweight endpoint for navbar badges.
+    """
+    count = await db.notifications.count_documents({
+        "user_id": current_user.id,
+        "is_read": False
+    })
+    return {"unread_count": count}
+
+
+@router.put("/read-all")
+async def mark_all_read(current_user=Depends(get_current_user)):
+    """
+    MARK ALL NOTIFICATIONS AS READ
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can mark their own notifications as read
+    
+    Bulk updates all unread notifications for the user.
+    """
+    await db.notifications.update_many(
+        {
+            "user_id": current_user.id,
+            "is_read": False
+        },
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
+
+@router.put("/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    MARK SINGLE NOTIFICATION AS READ
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can mark their own notifications as read
+    
+    Marks a single notification as read.
+    """
+    result = await db.notifications.update_one(
+        {
+            "id": notification_id,
+            "user_id": current_user.id
+        },
+        {"$set": {"is_read": True}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"message": "Success"}
+
+
+@router.delete("/{notification_id}")
+async def delete_notification(
+    notification_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    DELETE NOTIFICATION
+    
+    PERMISSION HIERARCHY:
+    • Any authenticated user can delete their own notifications
+    
+    Secure deletion of a notification.
+    """
+    result = await db.notifications.delete_one({
+        "id": notification_id,
+        "user_id": current_user.id
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"message": "Notification removed"}
