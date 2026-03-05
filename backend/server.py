@@ -1942,34 +1942,45 @@ async def delete_due_date(
  if result.deleted_count == 0:
   raise HTTPException(status_code=404, detail="Due date not found")
  return {"message": "Due date deleted successfully"}
+#=========================================================
 # REPORTS ROUTES
+#=========================================================
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    5-Layer Permission Matrix Implementation:
-    1. Admin -> Full Access
-    2. Universal (can_view_reports) -> Access All
-    3. Specific (view_other_reports) -> Access Listed IDs
-    4. Ownership -> Access Own ID
-    """
+    # Determine target safely
+    target_id = user_id if (user_id and user_id != "all") else current_user.id
     
-    # Identify who we are looking for
-    target_id = user_id or current_user.id
-    
-    # PERMISSION CHECK
-    is_admin = current_user.role == UserRole.admin
-    has_universal = current_user.permissions.can_view_reports
-    has_specific = target_id in current_user.permissions.view_other_reports
+    # Permission Matrix Check
+    is_admin = current_user.role == "admin"
     is_owner = target_id == current_user.id
+    # Safely check list existence
+    has_specific = hasattr(current_user.permissions, 'view_other_reports') and \
+                   target_id in current_user.permissions.view_other_reports
+    
+    if not (is_admin or is_owner or has_specific):
+        raise HTTPException(status_code=403, detail="Permission Denied")
 
-    # Layer 5: Deny if none of the above match
-    if not (is_admin or has_universal or has_specific or is_owner):
-        raise HTTPException(status_code=403, detail="You do not have permission to view this report.")
-
+    try:
+        # Querying activity_logs
+        logs = await db.activity_logs.find({"user_id": target_id}).to_list(100)
+        
+        # Return structured data even if logs are empty to avoid frontend 500 errors
+        return {
+            "user": {"id": target_id, "full_name": current_user.full_name if is_owner else "Staff Member"},
+            "total_screen_time": sum(l.get("screen_time_minutes", 0) for l in logs) if logs else 0,
+            "total_tasks_completed": sum(l.get("tasks_completed", 0) for l in logs) if logs else 0,
+            "logs": logs or []
+        }
+    except Exception as e:
+        # This prevents the '500 Internal Server Error' by providing a readable error
+        print(f"Database Error: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed"))
+    #===========================================================================
     # DB QUERY
+    #===========================================================================
     # Note: If Admin/Universal wants 'all', you'd query without user_id filter
     query = {"user_id": target_id}
     
@@ -2127,8 +2138,7 @@ async def get_performance_rankings(
    1
   ) if days_present else 0
   # ----------------------------
-  # Tasks %
-  # ✅ FIXED: datetime comparison (no isoformat)
+  # Tasks % ✅ FIXED: datetime comparison (no isoformat)
   # ----------------------------
   tasks_assigned = await db.tasks.count_documents({
    "assigned_to": uid,
