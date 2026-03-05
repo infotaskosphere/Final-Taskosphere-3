@@ -24,9 +24,15 @@ class UserRole(str, Enum):
 #   Layer 3: Specific Access Permissions (view_other_*, assigned_clients)
 #   Layer 4: Ownership (handled at route level)
 #   Layer 5: Deny (fallback)
+#
+# OWNERSHIP RULE (Layer 4 — enforced at route level, not here):
+#   Every user always has full access to their OWN tasks, todos,
+#   attendance, reports, and any record where their user_id is stored.
+#   The flags below only govern access to OTHER users' data.
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
     "admin": {
+        # Admin is superuser — all flags true, all lists empty (route logic grants global access)
         "can_view_all_tasks": True,
         "can_view_all_clients": True,
         "can_view_all_dsc": True,
@@ -60,11 +66,16 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
     "manager": {
+        # Manager can view/edit their own data + their team's data (via departments).
+        # Universal "view_all_*" flags are False — team access is handled by route-level
+        # department/team logic, not by these flags.
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": True,
         "can_view_all_duedates": False,
+        # Own reports + attendance are always accessible (ownership rule).
+        # True here means they can also view team-level aggregated reports.
         "can_view_reports": True,
         "can_view_attendance": True,
         "can_view_all_leads": False,
@@ -93,21 +104,30 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
     "staff": {
+        # Staff can ALWAYS access their own tasks, todos, attendance, reports,
+        # and any record they own — this is enforced at the route level (Layer 4)
+        # and does NOT require any flag to be True here.
+        #
+        # All "can_view_all_*" and "can_edit_*" flags remain False so staff
+        # cannot browse other users' data unless explicitly granted via
+        # view_other_* lists below.
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": False,
         "can_view_all_duedates": False,
+        # Own report and own attendance are always visible (ownership rule).
+        # True here allows viewing the self-report endpoint without extra checks.
         "can_view_reports": True,
         "can_view_attendance": True,
         "can_view_all_leads": False,
-        "can_edit_tasks": False,
+        "can_edit_tasks": False,       # Cannot edit OTHER users' tasks
         "can_edit_clients": False,
         "can_edit_dsc": False,
         "can_edit_documents": False,
         "can_edit_due_dates": False,
         "can_edit_users": False,
-        "can_download_reports": False,
+        "can_download_reports": True,  # Can download their own report
         "can_manage_users": False,
         "can_manage_settings": False,
         "can_assign_tasks": False,
@@ -116,8 +136,10 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_user_page": False,
         "can_view_audit_logs": False,
         "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True,
+        "can_view_todo_dashboard": True,  # Can view their own todo dashboard
         "can_use_chat": True,
+        # These lists are empty by default.
+        # Admin can populate them to grant cross-user visibility.
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -140,6 +162,11 @@ class UserPermissions(BaseModel):
     Layer 3 — Specific access permissions (list of IDs):
         view_other_*   → grants access to records belonging to listed user IDs
         assigned_clients → grants access to records for listed client IDs
+
+    Layer 4 — Ownership (enforced at route level, NOT via flags):
+        Every user unconditionally accesses their own tasks, todos,
+        attendance, reports, and any record carrying their user_id.
+        No flag is needed for this — routes check ownership first.
     """
     # ── Universal boolean permissions ──
     can_view_all_tasks: bool = False
