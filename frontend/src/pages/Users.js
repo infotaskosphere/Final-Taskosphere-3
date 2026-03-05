@@ -44,6 +44,69 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
 
+// ─────────────────────────────────────────────────────────────
+// DEFAULT ROLE PERMISSIONS (mirrors backend DEFAULT_ROLE_PERMISSIONS)
+// Used to: (a) reset permissions state before loading a user's perms,
+//          (b) apply role-based defaults when role changes during edit.
+// ─────────────────────────────────────────────────────────────
+const DEFAULT_ROLE_PERMISSIONS = {
+  admin: {
+    can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
+    can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
+    can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
+    can_view_attendance: true, can_send_reminders: true, can_view_user_page: true,
+    can_view_audit_logs: true, can_edit_tasks: true, can_edit_dsc: true,
+    can_edit_documents: true, can_edit_due_dates: true, can_edit_users: true,
+    can_download_reports: true, can_view_selected_users_reports: true,
+    can_view_todo_dashboard: true, can_edit_clients: true, can_use_chat: true,
+    can_view_all_leads: true, can_manage_settings: true,
+    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
+    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  },
+  manager: {
+    can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
+    can_view_documents: true, can_view_all_duedates: false, can_view_reports: false,
+    can_manage_users: false, can_assign_tasks: true, can_view_staff_activity: true,
+    can_view_attendance: true, can_send_reminders: false, can_view_user_page: false,
+    can_view_audit_logs: false, can_edit_tasks: true, can_edit_dsc: false,
+    can_edit_documents: false, can_edit_due_dates: true, can_edit_users: false,
+    can_download_reports: true, can_view_selected_users_reports: true,
+    can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
+    can_view_all_leads: false, can_manage_settings: false,
+    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
+    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  },
+  staff: {
+    can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
+    can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
+    can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
+    can_view_attendance: false, can_send_reminders: false, can_view_user_page: false,
+    can_view_audit_logs: false, can_edit_tasks: false, can_edit_dsc: false,
+    can_edit_documents: false, can_edit_due_dates: false, can_edit_users: false,
+    can_download_reports: false, can_view_selected_users_reports: false,
+    can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
+    can_view_all_leads: false, can_manage_settings: false,
+    assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
+    view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  },
+};
+
+// Blank slate — prevents stale values from a previously edited user bleeding
+// through when the permissions dialog is opened for a different user.
+const EMPTY_PERMISSIONS = {
+  can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
+  can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
+  can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
+  can_view_attendance: false, can_send_reminders: false, can_view_user_page: false,
+  can_view_audit_logs: false, can_edit_tasks: false, can_edit_dsc: false,
+  can_edit_documents: false, can_edit_due_dates: false, can_edit_users: false,
+  can_download_reports: false, can_view_selected_users_reports: false,
+  can_view_todo_dashboard: false, can_edit_clients: false, can_use_chat: false,
+  can_view_all_leads: false, can_manage_settings: false,
+  assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
+  view_other_reports: [], view_other_todos: [], view_other_activity: [],
+};
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -217,11 +280,21 @@ export default function Users() {
   const { user, hasPermission, refreshUser } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // ────────────────────────────────────────────────
-  //  Changed: Users list & permission editing → Admin only
-  // ────────────────────────────────────────────────
-  const canViewUserPage      = isAdmin;
-  const canEditUsers         = isAdmin;
+  // ─────────────────────────────────────────────────────────────
+  // Permission Matrix — mirrors backend 5-layer evaluation:
+  //   Layer 1: Admin bypass   → always allowed
+  //   Layer 2: Universal flag → allowed if permission flag is true
+  //   Layer 4: Deny
+  //
+  // canViewUserPage      → Admin OR can_view_user_page
+  // canEditUsers         → Admin OR can_manage_users
+  //                        (backend PUT /users requires Admin OR can_manage_users)
+  // canManagePermissions → Admin only
+  //                        (backend PUT /users/{id}/permissions is Admin-only)
+  // ─────────────────────────────────────────────────────────────
+  const perms = user?.permissions || {};
+  const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
+  const canEditUsers         = isAdmin || !!perms.can_manage_users;
   const canManagePermissions = isAdmin;
 
   const [users, setUsers] = useState([]);
@@ -288,6 +361,33 @@ export default function Users() {
 
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  // Tracks when admin changes a user's role during edit so we can offer
+  // resetting their permissions to the new role's defaults.
+  const [roleChanged, setRoleChanged] = useState(false);
+
+  const handleRoleChange = (newRole) => {
+    if (selectedUser && newRole !== formData.role) {
+      setRoleChanged(true);
+    }
+    setFormData(prev => ({ ...prev, role: newRole }));
+  };
+
+  const handleResetPermissionsToRole = async () => {
+    if (!selectedUserForPermissions && !selectedUser) return;
+    const targetRole = formData.role;
+    const defaults = DEFAULT_ROLE_PERMISSIONS[targetRole] || EMPTY_PERMISSIONS;
+    setPermissions({ ...defaults });
+    const userId = selectedUserForPermissions?.id || selectedUser?.id;
+    if (userId) {
+      try {
+        await api.put(`/users/${userId}/permissions`, defaults);
+        toast.success(`Permissions reset to ${targetRole} defaults`);
+        setRoleChanged(false);
+      } catch {
+        toast.error('Failed to reset permissions');
+      }
+    }
+  };
 
   useEffect(() => {
     if (canViewUserPage) {
@@ -317,13 +417,17 @@ export default function Users() {
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
-      setPermissions(prev => ({
-        ...prev,
-        ...(response.data || {})
-      }));
+      // FIX: Reset to a clean slate first, THEN merge server data.
+      // Previously used spread-merge on prev state which caused stale values
+      // from a previously opened user to bleed into the next user's form.
+      setPermissions({
+        ...EMPTY_PERMISSIONS,
+        ...(response.data || {}),
+      });
     } catch (error) {
       console.error('Failed to fetch permissions');
       toast.error("Using default permission template");
+      setPermissions({ ...EMPTY_PERMISSIONS });
     }
   };
 
@@ -392,6 +496,7 @@ export default function Users() {
 
   const handleEdit = (userData) => {
     setSelectedUser(userData);
+    setRoleChanged(false);
     setFormData({
       full_name: userData.full_name,
       email: userData.email,
@@ -412,6 +517,11 @@ export default function Users() {
   };
 
   const handleDelete = async (id) => {
+    // Matrix guard: backend DELETE /users/{id} requires Admin OR can_manage_users
+    if (!canEditUsers) {
+      toast.error('You do not have permission to delete users');
+      return;
+    }
     if (!window.confirm('Are you sure? This will permanently delete the user and their logs.')) return;
     try {
       await api.delete(`/users/${id}`);
@@ -429,17 +539,32 @@ export default function Users() {
   };
 
   const handleSavePermissions = async () => {
+    // Matrix guard: backend PUT /users/{id}/permissions is Admin-only
+    if (!canManagePermissions) {
+      toast.error('Only administrators can update permissions');
+      return;
+    }
     setLoading(true);
     try {
-      await api.put(`/users/${selectedUserForPermissions.id}/permissions`, permissions);
-    
+      // Ensure list-type specific-access fields are always proper arrays (never undefined)
+      const payload = {
+        ...permissions,
+        assigned_clients:     Array.isArray(permissions.assigned_clients)     ? permissions.assigned_clients     : [],
+        view_other_tasks:     Array.isArray(permissions.view_other_tasks)     ? permissions.view_other_tasks     : [],
+        view_other_attendance:Array.isArray(permissions.view_other_attendance)? permissions.view_other_attendance: [],
+        view_other_reports:   Array.isArray(permissions.view_other_reports)   ? permissions.view_other_reports   : [],
+        view_other_todos:     Array.isArray(permissions.view_other_todos)     ? permissions.view_other_todos     : [],
+        view_other_activity:  Array.isArray(permissions.view_other_activity)  ? permissions.view_other_activity  : [],
+      };
+      await api.put(`/users/${selectedUserForPermissions.id}/permissions`, payload);
+
       if (selectedUserForPermissions.id === user.id) {
         await refreshUser();
       }
       toast.success('System access rules updated');
       setPermissionsDialogOpen(false);
     } catch (error) {
-      toast.error('Failed to update permissions');
+      toast.error(error.response?.data?.detail || 'Failed to update permissions');
     } finally {
       setLoading(false);
     }
@@ -457,8 +582,8 @@ export default function Users() {
       <div className="flex items-center justify-center h-screen bg-slate-50">
         <Card className="p-8 text-center max-w-md shadow-lg border-red-100">
           <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-800">Admin Access Required</h2>
-          <p className="text-slate-500 mt-2">The user directory is restricted to administrators only.</p>
+          <h2 className="text-2xl font-bold text-slate-800">Access Restricted</h2>
+          <p className="text-slate-500 mt-2">You need the <b>View User Directory</b> permission to access this page.</p>
         </Card>
       </div>
     );
@@ -480,11 +605,12 @@ export default function Users() {
                 style={{ background: COLORS.deepBlue }}
                 onClick={() => {
                   setSelectedUser(null);
+                  setRoleChanged(false);
                   setFormData({
                     full_name: '', email: '', password: '', role: 'staff',
                     departments: [], phone: '', birthday: '', profile_picture: '',
                     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
-                    is_active: true
+                    telegram_id: null, is_active: true
                   });
                 }}
               >
@@ -577,7 +703,7 @@ export default function Users() {
                 </div>
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Primary System Role</Label>
-                  <Select value={formData.role} onValueChange={(val) => setFormData({...formData, role: val})}>
+                  <Select value={formData.role} onValueChange={handleRoleChange}>
                     <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="staff">Staff</SelectItem>
@@ -585,6 +711,28 @@ export default function Users() {
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
+                  {/* Bug Fix: Role changed — offer to sync permissions to new role defaults */}
+                  {roleChanged && selectedUser && (
+                    <div className="mt-2 flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                      <span className="text-xs text-amber-700 font-semibold flex-1">
+                        Role changed to <b className="capitalize">{formData.role}</b>. Reset permissions to match new role defaults?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleResetPermissionsToRole}
+                        className="text-xs font-bold px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        Reset Permissions
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRoleChanged(false)}
+                        className="text-xs text-amber-500 hover:text-amber-700 font-semibold"
+                      >
+                        Keep current
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -689,6 +837,24 @@ export default function Users() {
           </div>
 
           <div className="p-6 space-y-6">
+            {/* Quick-reset banner — matches backend DEFAULT_ROLE_PERMISSIONS */}
+            <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+              <span className="text-sm text-amber-800 font-semibold flex-1">
+                Role: <b className="capitalize">{selectedUserForPermissions?.role}</b> — reset all toggles to that role's defaults?
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const role = selectedUserForPermissions?.role || 'staff';
+                  setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
+                  toast.info(`Permissions reset to ${role} defaults (not saved yet)`);
+                }}
+                className="text-xs font-bold px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl transition-colors whitespace-nowrap"
+              >
+                Reset to Role Defaults
+              </button>
+            </div>
+
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
               {/* Global Visibility */}
               <AccordionItem value="global" className="border rounded-2xl px-4 overflow-hidden shadow-sm">
@@ -706,6 +872,8 @@ export default function Users() {
                     { key: 'can_view_todo_dashboard', label: 'Todo Dashboard', desc: 'Access to global team todo overview' },
                     { key: 'can_view_audit_logs', label: 'System Audit Trail', desc: 'View activity logs and record histories' },
                     { key: 'can_view_all_leads', label: 'Leads Pipeline Access', desc: 'Can view the global leads and sales dashboard' },
+                    { key: 'can_view_user_page', label: 'User Directory Access', desc: 'Can view the team members directory page' },
+                    { key: 'can_view_selected_users_reports', label: 'Team Reports Access', desc: 'Can view reports for selected individual users' },
                     // can_edit_leads removed
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
@@ -733,6 +901,7 @@ export default function Users() {
                     { key: 'can_send_reminders', label: 'Automated Reminders', desc: 'Trigger email/notification reminders' },
                     { key: 'can_download_reports', label: 'Export Data', desc: 'Download CSV/PDF versions of reports' },
                     { key: 'can_manage_settings', label: 'System Settings', desc: 'Modify global system configuration' },
+                    { key: 'can_use_chat', label: 'In-App Chat', desc: 'Access the team messaging and chat feature' },
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
