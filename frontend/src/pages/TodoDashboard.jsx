@@ -211,11 +211,18 @@ export default function TodoDashboard() {
   const logSectionRef = useRef(null);
 
   // ── DATA FETCHING ─────────────────────────────────────────────────────────
+  // For admin: fetch own todos only (not all users' todos)
+  // For non-admin: fetch own todos
+  const todoQuery = isAdmin ? {} : {};
+  
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ["todos", selectedUser],
     queryFn: async () => {
       let endpoint = "/todos";
-      if (isAdmin && selectedUser !== "all") endpoint += `?user_id=${selectedUser}`;
+      // Admin only filters by selectedUser if explicitly chosen
+      if (isAdmin && selectedUser !== "all") {
+        endpoint += `?user_id=${selectedUser}`;
+      }
       const res = await api.get(endpoint);
       return res.data;
     },
@@ -244,14 +251,15 @@ export default function TodoDashboard() {
         .map(t => ({
           id: t.id || t._id,
           title: t.title || 'Untitled Todo',
-          action: 'Completed',
-          timestamp: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
-          due_date: t.due_date || null,
+          created_by: t.created_by || 'Unknown',
+          created_at: t.created_at || new Date().toISOString(),
+          completed_at: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
+          deleted_at: null,
         }));
       if (newEntries.length === 0) return prev;
       // Merge and sort by timestamp descending
       return [...newEntries, ...prev]
-        .sort((a, b) => b.timestamp - a.timestamp)
+        .sort((a, b) => b.completed_at - a.completed_at)
         .slice(0, 100);
     });
   }, [todos]);
@@ -295,10 +303,11 @@ export default function TodoDashboard() {
         setTodoLog(prev => [{
           id: todo.id || todo._id,
           title: todo.title || 'Untitled Todo',
-          action: wasCompleted ? 'Marked Pending' : 'Completed',
-          timestamp: new Date(),
-          due_date: todo.due_date || null,
-        }, ...prev].slice(0, 100)); // keep last 100 log entries
+          created_by: todo.created_by || 'Unknown',
+          created_at: todo.created_at || new Date().toISOString(),
+          completed_at: wasCompleted ? null : new Date(),
+          deleted_at: null,
+        }, ...prev].slice(0, 100));
       }
     },
   });
@@ -314,7 +323,18 @@ export default function TodoDashboard() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/todos/${id}`),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
+      const deletedTodo = todos.find(t => (t.id || t._id) === variables);
+      if (deletedTodo) {
+        setTodoLog(prev => [{
+          id: deletedTodo.id || deletedTodo._id,
+          title: deletedTodo.title || 'Untitled Todo',
+          created_by: deletedTodo.created_by || 'Unknown',
+          created_at: deletedTodo.created_at || new Date().toISOString(),
+          completed_at: null,
+          deleted_at: new Date(),
+        }, ...prev].slice(0, 100));
+      }
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo deleted");
     },
@@ -671,57 +691,53 @@ export default function TodoDashboard() {
                 {todoLog.length}
               </span>
             </div>
-            <span className="text-[11px] text-slate-400">Completed &amp; activity history</span>
+            <span className="text-[11px] text-slate-400">Completed, deleted &amp; activity history</span>
           </div>
 
           {todoLog.length === 0 ? (
             <div className="py-16 text-center">
               <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
               <p className="text-sm text-slate-400 font-medium">No activity yet</p>
-              <p className="text-xs text-slate-300 mt-1">Complete a todo and it will appear here</p>
+              <p className="text-xs text-slate-300 mt-1">Complete or delete a todo and it will appear here</p>
             </div>
           ) : (
             <div className="divide-y divide-slate-50">
               <AnimatePresence>
-                {todoLog.map((entry) => (
-                  <motion.div
-                    key={`${entry.id}-${entry.timestamp.getTime()}`}
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.2 }}
-                    className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/60 transition-colors"
-                  >
-                    {/* Status dot */}
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      entry.action === 'Completed' ? 'bg-emerald-500' : 'bg-amber-400'
-                    }`} />
-
-                    {/* Title + due date */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-700 truncate">{entry.title}</p>
-                      {entry.due_date && (
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Due: {format(parseISO(entry.due_date), 'MMM d, yyyy')}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Action badge */}
-                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded whitespace-nowrap ${
-                      entry.action === 'Completed'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}>
-                      {entry.action}
-                    </span>
-
-                    {/* Timestamp */}
-                    <span className="text-[11px] text-slate-400 whitespace-nowrap flex-shrink-0">
-                      {format(entry.timestamp, 'MMM d · hh:mm a')}
-                    </span>
-                  </motion.div>
-                ))}
+                {todoLog.map((entry, idx) => {
+                  // Format: "Title" by Creator on Created · [Completed on Date] [Deleted on Date]
+                  const createdDate = entry.created_at ? format(new Date(entry.created_at), 'MMM d, yyyy · hh:mm a') : 'Unknown date';
+                  const completedText = entry.completed_at ? `Completed on ${format(entry.completed_at, 'MMM d, yyyy · hh:mm a')}` : null;
+                  const deletedText = entry.deleted_at ? `Deleted on ${format(entry.deleted_at, 'MMM d, yyyy · hh:mm a')}` : null;
+                  
+                  return (
+                    <motion.div
+                      key={`${entry.id}-${idx}`}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center px-5 py-3.5 hover:bg-slate-50/60 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium text-slate-800">"{entry.title}"</p>
+                          <span className="text-xs text-slate-500">by {entry.created_by}</span>
+                          <span className="text-xs text-slate-400">on {createdDate}</span>
+                          {completedText && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                              ✓ {completedText}
+                            </span>
+                          )}
+                          {deletedText && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-red-100 text-red-700">
+                              ✕ {deletedText}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
             </div>
           )}
