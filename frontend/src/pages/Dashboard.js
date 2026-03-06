@@ -200,7 +200,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
 
 // ── Main Dashboard Component ────────────────────────────────────────────────
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -1073,7 +1073,7 @@ export default function Dashboard() {
             subtitle="Personal tasks"
             action={
               <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
-                onClick={() => navigate('/todo-list')}>
+                onClick={() => navigate('/todos')}>
                 View All
               </Button>
             }
