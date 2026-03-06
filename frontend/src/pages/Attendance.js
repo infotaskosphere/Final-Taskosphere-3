@@ -168,7 +168,7 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY COMPONENT
-// FIX: replace bottom dot with a colored ring/circle around the date number
+// Circle is sized to snugly wrap the date number (w-8 h-8 = 32px)
 // ═════════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dateStr = format(date, 'yyyy-MM-dd');
@@ -176,16 +176,20 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const holiday = holidays.find(h => h.date === dateStr);
 
   let ringColor = null;
+  let bgColor = null;
   let isSpecial = false;
 
   if (holiday) {
     ringColor = COLORS.amber;
+    bgColor = '#FEF3C720';
     isSpecial = true;
   } else if (dayRecord?.is_late) {
     ringColor = COLORS.red;
+    bgColor = '#FEE2E220';
     isSpecial = true;
   } else if (dayRecord?.punch_in) {
     ringColor = COLORS.emeraldGreen;
+    bgColor = '#D1FAE520';
   }
 
   const isTodayDate = dateFnsIsToday(date);
@@ -193,34 +197,38 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          className="relative w-full aspect-square flex items-center justify-center rounded-lg font-medium transition-all duration-200 hover:bg-slate-100 active:scale-95"
-        >
-          {/* Colored ring around the date for attendance status */}
+        {/* Outer button: full cell, no bg — just a click target */}
+        <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95">
+
+          {/* Circle snugly around the number */}
           {ringColor ? (
             <motion.span
-              className="absolute inset-0.5 rounded-full border-2"
-              style={{ borderColor: ringColor, backgroundColor: `${ringColor}12` }}
-              animate={isSpecial ? { scale: [1, 1.06, 1] } : { scale: 1 }}
-              transition={{ duration: 2, repeat: isSpecial ? Infinity : 0 }}
+              className="absolute flex items-center justify-center rounded-full border-2"
+              style={{
+                width: 30,
+                height: 30,
+                borderColor: ringColor,
+                backgroundColor: bgColor,
+              }}
+              animate={isSpecial ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+              transition={{ duration: 2.2, repeat: isSpecial ? Infinity : 0, ease: 'easeInOut' }}
+            />
+          ) : isTodayDate ? (
+            /* Today gets a solid deep-blue filled circle */
+            <span
+              className="absolute rounded-full"
+              style={{ width: 30, height: 30, backgroundColor: COLORS.deepBlue }}
             />
           ) : null}
 
-          {/* Today ring: bold blue outline */}
-          {isTodayDate && !ringColor && (
-            <span
-              className="absolute inset-0.5 rounded-full border-2"
-              style={{ borderColor: COLORS.deepBlue }}
-            />
-          )}
-          {isTodayDate && ringColor && (
-            <span
-              className="absolute inset-0 rounded-full border-2 border-dashed opacity-60"
-              style={{ borderColor: COLORS.deepBlue }}
-            />
-          )}
-
-          <span className={`relative z-10 text-sm ${isTodayDate ? 'font-black' : ''}`}>
+          <span
+            className={`relative z-10 text-[13px] leading-none select-none
+              ${isTodayDate && !ringColor ? 'text-white font-black' : ''}
+              ${isTodayDate && ringColor ? 'font-black' : ''}
+              ${!isTodayDate ? 'font-medium' : ''}
+            `}
+            style={isTodayDate && ringColor ? { color: COLORS.deepBlue } : undefined}
+          >
             {date.getDate()}
           </span>
         </button>
@@ -1107,6 +1115,56 @@ export default function Attendance() {
                 )}
               </CardContent>
             </Card>
+            {/* ── Holidays This Month Card ── */}
+            {(() => {
+              const monthHolidays = holidays.filter(h => {
+                try {
+                  return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM');
+                } catch { return false; }
+              });
+              return (
+                <Card className="border-0 shadow-md overflow-hidden">
+                  <CardHeader className="pb-3 border-b border-slate-100">
+                    <CardTitle className="text-sm flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                      <span className="text-base">🎉</span>
+                      Holidays — {format(selectedDate, 'MMMM yyyy')}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    {monthHolidays.length === 0 ? (
+                      <p className="text-xs text-slate-400 font-medium text-center py-3">
+                        No holidays this month
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {monthHolidays.map(h => (
+                          <div
+                            key={h.date}
+                            className="flex items-center gap-3 p-3 rounded-xl"
+                            style={{ backgroundColor: `${COLORS.amber}15`, border: `1.5px solid ${COLORS.amber}40` }}
+                          >
+                            {/* Amber circle with day number */}
+                            <div
+                              className="w-10 h-10 rounded-full flex flex-col items-center justify-center flex-shrink-0 text-white font-black"
+                              style={{ backgroundColor: COLORS.amber }}
+                            >
+                              <span className="text-xs leading-none">{format(parseISO(h.date), 'MMM')}</span>
+                              <span className="text-sm leading-none">{format(parseISO(h.date), 'd')}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-slate-800 truncate">{h.name}</p>
+                              <p className="text-xs text-slate-500 font-medium">
+                                {format(parseISO(h.date), 'EEEE')}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </motion.div>
 
           {/* Recent History Table — FIX: use formatAttendanceTime */}
