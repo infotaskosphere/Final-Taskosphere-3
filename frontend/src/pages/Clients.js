@@ -37,6 +37,41 @@ const SERVICES = [
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
 
+// ── Avatar gradient palette by first letter
+const AVATAR_GRADIENTS = [
+  ['#0D3B66', '#1F6FB2'], ['#065f46', '#059669'], ['#7c2d12', '#ea580c'],
+  ['#4c1d95', '#7c3aed'], ['#1e3a5f', '#2563eb'], ['#831843', '#db2777'],
+  ['#134e4a', '#0d9488'], ['#1e1b4b', '#4f46e5'],
+];
+const getAvatarGradient = (name = '') => {
+  const idx = (name.charCodeAt(0) || 0) % AVATAR_GRADIENTS.length;
+  return `linear-gradient(135deg, ${AVATAR_GRADIENTS[idx][0]}, ${AVATAR_GRADIENTS[idx][1]})`;
+};
+
+// ── Client type badge colors
+const TYPE_BADGE = {
+  pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
+  llp:         'bg-violet-50 text-violet-700 border-violet-200',
+  partnership: 'bg-amber-50 text-amber-700 border-amber-200',
+  huf:         'bg-teal-50 text-teal-700 border-teal-200',
+  trust:       'bg-rose-50 text-rose-700 border-rose-200',
+  proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
+};
+
+// ── Section heading used in dialog
+const SectionHeading = ({ icon, title, subtitle }) => (
+  <div className="flex items-center gap-3 mb-6">
+    <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
+      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+      {icon}
+    </div>
+    <div>
+      <h3 className="text-base font-semibold text-slate-800 leading-tight">{title}</h3>
+      {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+    </div>
+  </div>
+);
+
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
@@ -51,11 +86,9 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  // NEW PREVIEW STATES
   const [previewData, setPreviewData] = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen] = useState(false);
-  // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -74,16 +107,16 @@ export default function Clients() {
     notes: '',
     status: 'active',
   });
-  // ADVANCED VALIDATION STATES (added for refined form validation)
   const [formErrors, setFormErrors] = useState({});
   const [contactErrors, setContactErrors] = useState([]);
-  // Safe date formatter to prevent Invalid Date errors (fixes contact person upload issue)
+
   const safeDate = (dateStr) => {
     if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return null;
     const date = new Date(dateStr.trim());
     if (isNaN(date.getTime())) return null;
     return date.toISOString().split('T')[0];
   };
+
   useEffect(() => {
     fetchClients();
     if (canAssignClients) fetchUsers();
@@ -92,6 +125,7 @@ export default function Clients() {
       setDialogOpen(true);
     }
   }, [location]);
+
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
@@ -100,6 +134,7 @@ export default function Clients() {
       toast.error('Failed to fetch clients');
     }
   };
+
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
@@ -108,13 +143,13 @@ export default function Clients() {
       console.error('Failed to fetch users:', error);
     }
   };
-  // ==================== UTILS ====================
+
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
-  // ==================== MEMOIZED DATA ====================
+
   const stats = useMemo(() => {
     const totalClients = clients.length;
     const activeClients = clients.filter(c => (c?.status || 'active') === 'active').length;
@@ -129,6 +164,7 @@ export default function Clients() {
     });
     return { totalClients, activeClients, serviceCounts };
   }, [clients]);
+
   const todayReminders = useMemo(() => {
     const today = startOfDay(new Date());
     return clients.filter(c => {
@@ -143,6 +179,7 @@ export default function Clients() {
       }) ?? false;
     });
   }, [clients]);
+
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -155,35 +192,30 @@ export default function Clients() {
       return matchesSearch && matchesService && matchesStatus;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter]);
-  const getClientNumber = (index) =>
-    String(index + 1).padStart(3, '0');
-  // ==================== ADVANCED FORM VALIDATION ====================
+
+  const getClientNumber = (index) => String(index + 1).padStart(3, '0');
+
   const validateForm = () => {
     const errors = {};
     const cErrors = [];
-    // Company Name
     if (!formData.company_name?.trim() || formData.company_name.trim().length < 2) {
       errors.company_name = 'Company name must be at least 2 characters';
     }
-    // Email
     const trimmedEmail = formData.email?.trim();
     if (!trimmedEmail) {
       errors.email = 'Email address is required';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       errors.email = 'Please enter a valid email address';
     }
-    // Phone (exactly 10 digits)
     const cleanPhone = formData.phone.replace(/\D/g, '');
     if (!cleanPhone) {
       errors.phone = 'Phone number is required';
     } else if (cleanPhone.length !== 10) {
       errors.phone = 'Phone number must be exactly 10 digits';
     }
-    // Services
     if (formData.services.length === 0) {
       errors.services = 'At least one service must be selected';
     }
-    // Contact Persons
     let hasValidContact = false;
     formData.contact_persons.forEach((cp, idx) => {
       const contactErr = {};
@@ -209,7 +241,6 @@ export default function Clients() {
     if (!hasValidContact) {
       errors.contacts = 'At least one contact person with a valid name is required';
     }
-    // Duplicate email check
     const allEmails = new Set();
     if (trimmedEmail) allEmails.add(trimmedEmail.toLowerCase());
     formData.contact_persons.forEach(cp => {
@@ -222,7 +253,7 @@ export default function Clients() {
     setContactErrors(cErrors);
     return Object.keys(errors).length === 0 && cErrors.length === 0;
   };
-  // ==================== HANDLERS ====================
+
   const downloadTemplate = () => {
     const headers = [
       'company_name', 'client_type', 'email', 'phone', 'birthday', 'services',
@@ -239,7 +270,7 @@ export default function Clients() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-  // ALIGNED WITH BACKEND /clients/import (server-side validation + contact handling)
+
   const handleImportCSV = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -259,6 +290,7 @@ export default function Clients() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
   const handleImportExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -266,120 +298,78 @@ export default function Clients() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const workbook = XLSX.read(e.target.result, { type: 'binary' });
-    
-        // Existing general Excel import logic
-        const normalizeHeader = (header) => {
-          if (!header) return '';
-          return header.toString().toLowerCase().replace(/\s+/g, '*');
-        };
-        let combinedRows = [];
-        workbook.SheetNames.forEach(sheetName => {
-          const sheet = workbook.Sheets[sheetName];
-          const rawRows = XLSX.utils.sheet_to_json(sheet, {
-            header: 1,
-            defval: ''
+      const normalizeHeader = (header) => {
+        if (!header) return '';
+        return header.toString().toLowerCase().replace(/\s+/g, '*');
+      };
+      let combinedRows = [];
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (rawRows.length < 2) return;
+        const headers = rawRows[0].map(normalizeHeader);
+        for (let i = 1; i < rawRows.length; i++) {
+          const rowArray = rawRows[i];
+          if (rowArray.every(cell => cell === '')) continue;
+          let row = {};
+          headers.forEach((h, idx) => { row[h] = rowArray[idx]; });
+          const companyName = row.company_name || row.companyname || row['company name'] || '';
+          if (!companyName) continue;
+          const detectedType = detectClientTypeFromName(companyName);
+          combinedRows.push({
+            sheet: sheetName, company_name: companyName,
+            client_type: row.client_type || detectedType,
+            email: row.email || '', phone: row.phone || '',
+            birthday: row.birthday || '', services: row.services || '', notes: row.notes || ''
           });
-          if (rawRows.length < 2) return;
-          const headers = rawRows[0].map(normalizeHeader);
-          for (let i = 1; i < rawRows.length; i++) {
-            const rowArray = rawRows[i];
-            if (rowArray.every(cell => cell === '')) continue;
-            let row = {};
-            headers.forEach((h, idx) => {
-              row[h] = rowArray[idx];
-            });
-            const companyName =
-              row.company_name ||
-              row.companyname ||
-              row['company name'] ||
-              '';
-            if (!companyName) continue;
-            const detectedType = detectClientTypeFromName(companyName);
-            combinedRows.push({
-              sheet: sheetName,
-              company_name: companyName,
-              client_type: row.client_type || detectedType,
-              email: row.email || '',
-              phone: row.phone || '',
-              birthday: row.birthday || '',
-              services: row.services || '',
-              notes: row.notes || ''
-            });
-          }
-        });
-        setPreviewHeaders([
-          'sheet',
-          'company_name',
-          'client_type',
-          'email',
-          'phone',
-          'birthday',
-          'services',
-          'notes'
-        ]);
-        setPreviewData(combinedRows);
-        setPreviewOpen(true);
-        setImportLoading(false);
+        }
+      });
+      setPreviewHeaders(['sheet','company_name','client_type','email','phone','birthday','services','notes']);
+      setPreviewData(combinedRows);
+      setPreviewOpen(true);
+      setImportLoading(false);
     };
     reader.readAsBinaryString(file);
   };
-  // UPDATED handleSubmit with Advanced Validation + CLEANED DSC
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const isValid = validateForm();
-    if (!isValid) {
-      toast.error('Please fix the highlighted errors before saving');
-      return;
-    }
+    if (!isValid) { toast.error('Please fix the highlighted errors before saving'); return; }
     setLoading(true);
     try {
-      // Remove raw "Other" tag and construct final services array
       let finalServices = [...formData.services];
       finalServices = finalServices.filter(s => !s.startsWith("Other:"));
       if (otherService.trim() && formData.services.includes("Other")) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
-      // Clean main phone (digits only)
       const cleanPhone = formData.phone.replace(/\D/g, "");
-      // Clean contact persons (robust date handling)
       const cleanedContacts = formData.contact_persons.map(cp => ({
-        name: cp.name || "",
-        designation: cp.designation?.trim() || null,
+        name: cp.name || "", designation: cp.designation?.trim() || null,
         email: cp.email?.trim() ? cp.email.trim() : null,
         phone: cp.phone ? cp.phone.replace(/\D/g, "") : null,
-        birthday: safeDate(cp.birthday),
-        din: cp.din?.trim() || null
+        birthday: safeDate(cp.birthday), din: cp.din?.trim() || null
       }));
-      // CLEAN DSC DETAILS (aligned with backend ClientDSC)
       const cleanedDSC = formData.dsc_details.map(dsc => ({
         certificate_number: dsc.certificate_number?.trim() || "",
         holder_name: dsc.holder_name?.trim() || "",
-        issue_date: safeDate(dsc.issue_date),
-        expiry_date: safeDate(dsc.expiry_date),
+        issue_date: safeDate(dsc.issue_date), expiry_date: safeDate(dsc.expiry_date),
         notes: dsc.notes?.trim() || null
       }));
-      // Construct backend-safe payload
       const payload = {
-        company_name: formData.company_name.trim(),
-        client_type: formData.client_type,
-        email: formData.email?.trim(),
-        phone: cleanPhone,
-        birthday: safeDate(formData.birthday),
-        services: finalServices,
+        company_name: formData.company_name.trim(), client_type: formData.client_type,
+        email: formData.email?.trim(), phone: cleanPhone,
+        birthday: safeDate(formData.birthday), services: finalServices,
         notes: formData.notes?.trim() || null,
         assigned_to: formData.assigned_to === "unassigned" ? null : formData.assigned_to,
-        status: formData.status,
-        contact_persons: cleanedContacts,
-        dsc_details: cleanedDSC
+        status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC
       };
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
       } else {
         await api.post("/clients", payload);
       }
-      setDialogOpen(false);
-      resetForm();
-      fetchClients();
+      setDialogOpen(false); resetForm(); fetchClients();
       toast.success("Saved successfully!");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Error saving client");
@@ -387,14 +377,13 @@ export default function Clients() {
       setLoading(false);
     }
   };
+
   const handleEdit = (client) => {
     setEditingClient(client);
     setFormData({
       ...client,
       contact_persons: client?.contact_persons?.map(cp => ({
-        ...cp,
-        birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '',
-        din: cp?.din || ''
+        ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || ''
       })) || [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
       dsc_details: client?.dsc_details?.map(d => ({
@@ -402,51 +391,33 @@ export default function Clients() {
         issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '',
         expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '',
       })) || [],
-      status: client?.status || 'active',
-      assigned_to: client?.assigned_to || 'unassigned',
+      status: client?.status || 'active', assigned_to: client?.assigned_to || 'unassigned',
     });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true);
-    // Clear validation on edit
-    setFormErrors({});
-    setContactErrors([]);
+    setFormErrors({}); setContactErrors([]);
   };
+
   const resetForm = () => {
     setFormData({
-      company_name: '',
-      client_type: 'proprietor',
+      company_name: '', client_type: 'proprietor',
       contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
-      email: '',
-      phone: '',
-      birthday: '',
-      services: [],
-      dsc_details: [],
-      assigned_to: 'unassigned',
-      notes: '',
-      status: 'active'
+      email: '', phone: '', birthday: '', services: [], dsc_details: [],
+      assigned_to: 'unassigned', notes: '', status: 'active'
     });
-    setOtherService('');
-    setEditingClient(null);
-    setFormErrors({});
-    setContactErrors([]);
+    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
   };
-  // Clear errors when dialog closes
+
   useEffect(() => {
-    if (!dialogOpen) {
-      setFormErrors({});
-      setContactErrors([]);
-    }
+    if (!dialogOpen) { setFormErrors({}); setContactErrors([]); }
   }, [dialogOpen]);
-  // ==================== DYNAMIC FIELDS ====================
+
   const updateContact = (idx, field, val) => {
     setFormData(p => ({
       ...p,
-      contact_persons: p.contact_persons.map((c, i) =>
-        i === idx ? { ...c, [field]: val } : c
-      )
+      contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: val } : c)
     }));
-    // Live error clearing
     if (contactErrors[idx] && contactErrors[idx][field]) {
       const newCerr = [...contactErrors];
       if (newCerr[idx]) delete newCerr[idx][field];
@@ -454,165 +425,149 @@ export default function Clients() {
       setContactErrors(newCerr);
     }
   };
+
   const addContact = () => setFormData(p => ({
-    ...p,
-    contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }]
+    ...p, contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }]
   }));
   const removeContact = (idx) => setFormData(p => ({
-    ...p,
-    contact_persons: p.contact_persons.filter((_, i) => i !== idx)
+    ...p, contact_persons: p.contact_persons.filter((_, i) => i !== idx)
   }));
   const updateDSC = (idx, field, val) => setFormData(p => ({
-    ...p,
-    dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
+    ...p, dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d)
   }));
   const addDSC = () => setFormData(p => ({
-    ...p,
-    dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
+    ...p, dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }]
   }));
   const removeDSC = (idx) => setFormData(p => ({
-    ...p,
-    dsc_details: p.dsc_details.filter((_, i) => i !== idx)
+    ...p, dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
+
   const toggleService = (s) => {
     setFormData(p => {
-      const services = p.services.includes(s)
-        ? p.services.filter(x => x !== s)
-        : [...p.services, s];
+      const services = p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s];
       return { ...p, services };
     });
-    // Live clear services error
-    if (formErrors.services) {
-      setFormErrors(prev => ({ ...prev, services: undefined }));
-    }
+    if (formErrors.services) setFormErrors(prev => ({ ...prev, services: undefined }));
   };
+
   const addOtherService = () => {
     if (otherService.trim()) {
       setFormData(prev => ({
         ...prev,
-        services: [
-          ...prev.services.filter(s => !s.startsWith('Other:')),
-          `Other: ${otherService.trim()}`
-        ]
+        services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${otherService.trim()}`]
       }));
       setOtherService('');
     }
   };
+
   const detectClientTypeFromName = (name = '') => {
     const lower = name.toLowerCase().trim();
     const normalized = lower.replace(/\s+/g, ' ');
-    if (
-      normalized.includes('private limited') ||
-      normalized.includes('pvt ltd') ||
-      normalized.includes('pvt. ltd') ||
-      normalized.includes('pvt limited')
-    ) {
-      return 'pvt_ltd';
-    }
-    if (
-      normalized.includes('limited liability partnership') ||
-      normalized.includes('llp')
-    ) {
-      return 'llp';
-    }
-    if (
-      normalized.endsWith(' ltd') ||
-      normalized.endsWith(' limited') ||
-      normalized.includes(' ltd ') ||
-      normalized.includes(' limited ')
-    ) {
-      return 'pvt_ltd';
-    }
-    if (normalized.includes('partnership')) {
-      return 'partnership';
-    }
-    if (normalized.includes('huf')) {
-      return 'huf';
-    }
-    if (normalized.includes('trust')) {
-      return 'trust';
-    }
+    if (normalized.includes('private limited') || normalized.includes('pvt ltd') || normalized.includes('pvt. ltd') || normalized.includes('pvt limited')) return 'pvt_ltd';
+    if (normalized.includes('limited liability partnership') || normalized.includes('llp')) return 'llp';
+    if (normalized.endsWith(' ltd') || normalized.endsWith(' limited') || normalized.includes(' ltd ') || normalized.includes(' limited ')) return 'pvt_ltd';
+    if (normalized.includes('partnership')) return 'partnership';
+    if (normalized.includes('huf')) return 'huf';
+    if (normalized.includes('trust')) return 'trust';
     return 'proprietor';
   };
-  // ────────────────────────────────────────────────
-  // REFINED Virtualized Client Card Renderer – Premium SaaS look
-  // ────────────────────────────────────────────────
+
+  // ── Virtualized Client Card ─────────────────────────────────────────────
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
     if (index >= filteredClients.length || !client) return null;
+
+    const typeBadgeCls = TYPE_BADGE[client.client_type] || TYPE_BADGE.proprietor;
+    const avatarGrad = getAvatarGradient(client.company_name);
+    const serviceCount = client.services?.length || 0;
+    const contactCount = client.contact_persons?.length || 0;
+
     return (
-      <div style={style} className="p-4 box-border">
-        <Card className="h-full w-full rounded-3xl border border-slate-100 bg-white overflow-hidden hover:shadow-2xl hover:border-indigo-200 hover:-translate-y-1 transition-all duration-300 group relative">
-          {/* Status Indicator */}
+      <div style={style} className="p-3 box-border">
+        <div className="h-full w-full bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-xl hover:border-slate-200 hover:-translate-y-1 transition-all duration-300 group relative flex flex-col"
+          style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+
+          {/* Top accent bar — unique per type */}
+          <div className="h-1 w-full flex-shrink-0">
+            <div className="h-full w-full" style={{ background: avatarGrad }} />
+          </div>
+
+          {/* Archived badge */}
           {client.status === 'inactive' && (
-            <div className="absolute top-4 right-4 px-3 py-1 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full z-10 shadow-sm">
+            <div className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-600 border border-amber-200 rounded-full z-10">
               Archived
             </div>
           )}
-          <div className="p-6 flex flex-col h-full">
-            {/* Header with Avatar */}
-            <div className="flex items-start gap-4 mb-5">
-              <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-indigo-500 via-purple-500 to-violet-500 text-white rounded-2xl flex items-center justify-center text-2xl font-bold shadow-inner ring-1 ring-white/30">
+
+          <div className="p-5 flex flex-col flex-1">
+            {/* Header */}
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm"
+                style={{ background: avatarGrad }}>
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
-              <div className="flex-1 min-w-0 pt-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-slate-400 font-medium tracking-tight">
-                    {getClientNumber(index)}
+              <div className="flex-1 min-w-0 pt-0.5">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="font-mono text-[10px] text-slate-300 font-medium">
+                    #{getClientNumber(index)}
                   </span>
-                  <h3 className="font-semibold text-lg leading-tight text-slate-950 truncate pr-6">
-                    {client.company_name}
-                  </h3>
                 </div>
-                <p className="text-xs text-slate-500 mt-1 uppercase tracking-[0.5px]">
+                <h3 className="font-semibold text-sm leading-snug text-slate-900 truncate pr-8">
+                  {client.company_name}
+                </h3>
+                <span className={`inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-md border ${typeBadgeCls}`}>
                   {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
-                </p>
+                </span>
               </div>
             </div>
+
             {/* Contact Info */}
-            <div className="space-y-3 text-sm text-slate-600 flex-1">
-              <div className="flex items-center gap-3">
-                <Briefcase className="h-4 w-4 text-slate-400 flex-shrink-0" />
-                <span className="truncate font-medium">{client.phone || '—'}</span>
+            <div className="space-y-2 text-xs text-slate-500 flex-1">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Briefcase className="h-3 w-3 text-slate-400" />
+                </div>
+                <span className="truncate font-medium text-slate-700">{client.phone || '—'}</span>
               </div>
-              <div className="flex items-center gap-3">
-                <Mail className="h-4 w-4 text-slate-400 flex-shrink-0" />
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Mail className="h-3 w-3 text-slate-400" />
+                </div>
                 <span className="truncate">{client.email || '—'}</span>
               </div>
             </div>
+
             {/* Footer */}
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
-              <div>
-                {client.services?.length > 0 && (
-                  <Badge variant="secondary" className="text-xs font-medium px-3 py-1 bg-slate-100 text-slate-700">
-                    {client.services[0].replace('Other: ', '').length > 18
-                      ? client.services[0].replace('Other: ', '').substring(0, 15) + '...'
-                      : client.services[0].replace('Other: ', '')}
-                  </Badge>
+            <div className="mt-4 pt-3.5 border-t border-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                {client.services?.slice(0, 2).map((svc, i) => (
+                  <span key={i} className="text-[10px] font-medium px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-100 rounded-md">
+                    {svc.replace('Other: ', '').substring(0, 12)}
+                  </span>
+                ))}
+                {serviceCount > 2 && (
+                  <span className="text-[10px] font-medium px-2 py-0.5 bg-blue-50 text-blue-500 border border-blue-100 rounded-md">
+                    +{serviceCount - 2}
+                  </span>
                 )}
               </div>
-              {/* Action Buttons */}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+
+              {/* Action Buttons — shown on hover */}
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openWhatsApp(client.phone, client.company_name);
-                  }}
-                  className="p-2.5 hover:bg-emerald-50 text-emerald-600 rounded-2xl transition-colors"
-                  title="Message on WhatsApp"
+                  onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+                  className="w-7 h-7 flex items-center justify-center hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors"
+                  title="WhatsApp"
                 >
-                  <MessageCircle className="h-4 w-4" />
+                  <MessageCircle className="h-3.5 w-3.5" />
                 </button>
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEdit(client);
-                  }}
-                  className="p-2.5 hover:bg-indigo-50 text-indigo-600 rounded-2xl transition-colors"
-                  title="Edit Client"
+                  onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+                  className="w-7 h-7 flex items-center justify-center hover:bg-blue-50 text-blue-600 rounded-lg transition-colors"
+                  title="Edit"
                 >
-                  <Edit className="h-4 w-4" />
+                  <Edit className="h-3.5 w-3.5" />
                 </button>
                 {canDeleteData && (
                   <button
@@ -622,513 +577,472 @@ export default function Clients() {
                         api.delete(`/clients/${client.id}`).then(() => fetchClients());
                       }
                     }}
-                    className="p-2.5 hover:bg-red-50 text-red-500 rounded-2xl transition-colors"
-                    title="Delete Client"
+                    className="w-7 h-7 flex items-center justify-center hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                    title="Delete"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
             </div>
           </div>
-        </Card>
+        </div>
       </div>
     );
   };
+
+  // ── INPUT / FIELD HELPERS ────────────────────────────────────────────────
+  const fieldCls = (hasError) =>
+    `h-11 bg-white rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
+
+  const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
+
+  // ── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-50 p-6 md:p-8 space-y-8">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-indigo-600 text-white rounded-2xl flex items-center justify-center">
-              <Users className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-4xl font-bold tracking-[-0.03em] text-slate-950 font-outfit">Clients</h1>
-              <p className="text-slate-600 mt-1 text-lg">Central hub for all client relationships</p>
-            </div>
+    <div className="min-h-screen p-5 md:p-7 space-y-6" style={{ background: '#F4F6FA' }}>
+
+      {/* ── Page Header ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm text-white flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+            <Users className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Clients</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Central hub for all client relationships</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="outline" onClick={downloadTemplate} className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-2xl">
-            <FileText className="mr-2 h-4 w-4" />Download CSV Template
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={downloadTemplate}
+            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl gap-2"
+          >
+            <FileText className="h-4 w-4" /> CSV Template
           </Button>
           <Button
-            variant="secondary"
+            variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={importLoading}
-            className="rounded-2xl"
+            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl"
           >
-            {importLoading ? 'Importing...' : 'Import CSV'}
+            {importLoading ? 'Importing…' : 'Import CSV'}
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) resetForm();
-          }}>
+
+          {/* ── New Client Dialog ─── */}
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-7 shadow-lg transition-all font-medium">
-                <Plus className="mr-2 h-5 w-5" /> New Client
+              <Button
+                className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
+                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+              >
+                <Plus className="h-4 w-4" /> New Client
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-5xl max-h-[94vh] overflow-y-auto bg-white rounded-3xl border-none shadow-2xl p-0">
-              <div className="p-10 space-y-10">
-                <DialogHeader className="flex flex-row justify-between items-start">
-                  <div>
-                    <DialogTitle className="text-3xl font-bold font-outfit tracking-tight">Client Profile</DialogTitle>
-                    <DialogDescription className="text-base mt-2">Complete client information and preferences</DialogDescription>
-                  </div>
-                  <div className="flex items-center gap-4 bg-slate-50 px-5 py-2.5 rounded-2xl border">
-                    <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Status</Label>
-                    <Switch
-                      checked={formData.status === 'active'}
-                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
-                    />
-                    <span className="text-sm font-medium text-slate-700">{formData.status === 'active' ? 'Active' : 'Archived'}</span>
-                  </div>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-10">
-                  {/* Basic Information */}
-                  <div className="bg-white border border-slate-100 rounded-3xl p-8">
-                    <h3 className="text-xl font-semibold text-slate-900 mb-6 flex items-center gap-3">
-                      <div className="w-2 h-2 bg-indigo-600 rounded-full" />Basic Details
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Company Name *</Label>
-                        <Input
-                          className={`h-12 bg-white rounded-2xl text-base ${formErrors.company_name ? 'border-red-500 focus:border-red-500' : 'border-slate-200 focus:border-indigo-500'}`}
-                          value={formData.company_name}
-                          onChange={e => {
-                            setFormData({...formData, company_name: e.target.value});
-                            if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined}));
-                          }}
-                          required
-                        />
-                        {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Client Type *</Label>
-                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
-                          <SelectTrigger className="h-12 bg-white border-slate-200 rounded-2xl">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Email Address *</Label>
-                        <Input
-                          className={`h-12 bg-white rounded-2xl ${formErrors.email ? 'border-red-500 focus:border-red-500' : 'border-slate-200 focus:border-indigo-500'}`}
-                          type="email"
-                          value={formData.email}
-                          onChange={e => {
-                            setFormData({...formData, email: e.target.value});
-                            if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined}));
-                          }}
-                          required
-                        />
-                        {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Phone Number *</Label>
-                        <Input
-                          className={`h-12 bg-white rounded-2xl ${formErrors.phone ? 'border-red-500 focus:border-red-500' : 'border-slate-200 focus:border-indigo-500'}`}
-                          value={formData.phone}
-                          onChange={e => {
-                            setFormData({...formData, phone: e.target.value});
-                            if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined}));
-                          }}
-                          required
-                        />
-                        {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
-                      </div>
-                      <div className="md:col-span-2 space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Incorporation / Birthday</Label>
-                        <Input
-                          className="h-12 bg-white border-slate-200 focus:border-indigo-500 rounded-2xl"
-                          type="date"
-                          value={formData.birthday}
-                          onChange={e => setFormData({...formData, birthday: e.target.value})}
-                        />
-                      </div>
+
+            <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
+              {/* Dialog Header Bar */}
+              <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
+                    {editingClient ? 'Edit Client Profile' : 'New Client Profile'}
+                  </DialogTitle>
+                  <DialogDescription className="text-sm text-slate-400 mt-0.5">
+                    Complete client information and preferences
+                  </DialogDescription>
+                </div>
+                <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
+                  <Switch
+                    checked={formData.status === 'active'}
+                    onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
+                  />
+                  <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {formData.status === 'active' ? 'Active' : 'Archived'}
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmit} className="p-8 space-y-7">
+
+                {/* ── Basic Details ── */}
+                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Company Name <span className="text-red-400">*</span></label>
+                      <Input
+                        className={fieldCls(formErrors.company_name)}
+                        value={formData.company_name}
+                        onChange={e => {
+                          setFormData({...formData, company_name: e.target.value});
+                          if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined}));
+                        }}
+                        required
+                      />
+                      {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
                     </div>
-                  </div>
-                  {/* Contact Persons */}
-                  <div className="bg-white border border-slate-100 rounded-3xl p-8">
-                    <div className="flex justify-between items-end mb-6">
-                      <div>
-                        <h3 className="text-xl font-semibold text-slate-900">Contact Persons</h3>
-                        <p className="text-sm text-slate-500 mt-1">Key people you work with</p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={addContact}
-                        variant="outline"
-                        className="rounded-2xl h-10"
-                      >
-                        <Plus className="h-4 w-4 mr-2" /> Add Person
-                      </Button>
-                    </div>
-                    {formErrors.contacts && <p className="text-red-500 text-sm mb-4">{formErrors.contacts}</p>}
-                    <div className="space-y-6">
-                      {formData.contact_persons.map((cp, idx) => (
-                        <div
-                          key={idx}
-                          className="p-7 border border-slate-200 rounded-3xl bg-white relative shadow-sm"
-                        >
-                          <div className="flex justify-between items-center mb-6">
-                            <span className="font-semibold text-slate-800">Contact #{idx + 1}</span>
-                            {formData.contact_persons.length > 1 && (
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => removeContact(idx)}
-                                className="text-slate-400 hover:text-red-600 h-8 w-8"
-                              >
-                                <Trash className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Full Name</Label>
-                              <Input
-                                value={cp.name}
-                                onChange={e => updateContact(idx, 'name', e.target.value)}
-                                className={`h-11 rounded-2xl ${contactErrors[idx]?.name ? 'border-red-500' : ''}`}
-                              />
-                              {contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Designation</Label>
-                              <Input
-                                value={cp.designation}
-                                onChange={e => updateContact(idx, 'designation', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Email</Label>
-                              <Input
-                                type="email"
-                                value={cp.email}
-                                onChange={e => updateContact(idx, 'email', e.target.value)}
-                                className={`h-11 rounded-2xl ${contactErrors[idx]?.email ? 'border-red-500' : ''}`}
-                              />
-                              {contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Phone</Label>
-                              <Input
-                                value={cp.phone}
-                                onChange={e => updateContact(idx, 'phone', e.target.value)}
-                                className={`h-11 rounded-2xl ${contactErrors[idx]?.phone ? 'border-red-500' : ''}`}
-                              />
-                              {contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Birthday</Label>
-                              <Input
-                                type="date"
-                                value={cp.birthday || ''}
-                                onChange={e => updateContact(idx, 'birthday', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">DIN (Director ID)</Label>
-                              <Input
-                                value={cp.din || ''}
-                                onChange={e => updateContact(idx, 'din', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  {/* DSC DETAILS - ALIGNED WITH BACKEND ClientDSC */}
-                  <div className="bg-white border border-slate-100 rounded-3xl p-8">
-                    <div className="flex justify-between items-end mb-6">
-                      <div>
-                        <h3 className="text-xl font-semibold text-slate-900">DSC Details</h3>
-                        <p className="text-sm text-slate-500 mt-1">Digital Signature Certificates linked to this client</p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={addDSC}
-                        variant="outline"
-                        className="rounded-2xl h-10"
-                      >
-                        <Plus className="h-4 w-4 mr-2" /> Add DSC
-                      </Button>
-                    </div>
-                    <div className="space-y-6">
-                      {formData.dsc_details.map((dsc, idx) => (
-                        <div
-                          key={idx}
-                          className="p-7 border border-slate-200 rounded-3xl bg-white relative shadow-sm"
-                        >
-                          <div className="flex justify-between items-center mb-6">
-                            <span className="font-semibold text-slate-800">DSC #{idx + 1}</span>
-                            {formData.dsc_details.length > 1 && (
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => removeDSC(idx)}
-                                className="text-slate-400 hover:text-red-600 h-8 w-8"
-                              >
-                                <Trash className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Certificate Number</Label>
-                              <Input
-                                value={dsc.certificate_number}
-                                onChange={e => updateDSC(idx, 'certificate_number', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Holder Name</Label>
-                              <Input
-                                value={dsc.holder_name}
-                                onChange={e => updateDSC(idx, 'holder_name', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Issue Date</Label>
-                              <Input
-                                type="date"
-                                value={dsc.issue_date || ''}
-                                onChange={e => updateDSC(idx, 'issue_date', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Expiry Date</Label>
-                              <Input
-                                type="date"
-                                value={dsc.expiry_date || ''}
-                                onChange={e => updateDSC(idx, 'expiry_date', e.target.value)}
-                                className="h-11 rounded-2xl"
-                              />
-                            </div>
-                            <div className="md:col-span-2 space-y-2">
-                              <Label className="text-xs uppercase tracking-widest text-slate-500">Notes</Label>
-                              <Textarea
-                                value={dsc.notes || ''}
-                                onChange={e => updateDSC(idx, 'notes', e.target.value)}
-                                className="min-h-[80px] rounded-2xl"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Services */}
-                  <div className="space-y-4">
-                    <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Services Offered</Label>
-                    {formErrors.services && <p className="text-red-500 text-sm -mt-1">{formErrors.services}</p>}
-                    <div className="flex flex-wrap gap-2">
-                      {SERVICES.map(s => (
-                        <Badge
-                          key={s}
-                          variant={
-                            formData.services.includes(s) ||
-                            (s === 'Other' && formData.services.some(x => x.startsWith('Other:')))
-                            ? "default"
-                            : "outline"
-                          }
-                          className="cursor-pointer px-5 py-2 rounded-2xl text-sm hover:bg-indigo-50 transition-colors"
-                          onClick={() => toggleService(s)}
-                        >
-                          {s}
-                        </Badge>
-                      ))}
-                    </div>
-                    {formData.services.includes('Other') && (
-                      <div className="flex gap-3 items-end max-w-md">
-                        <div className="flex-1 space-y-2">
-                          <Label className="text-xs text-slate-500">Specify other service</Label>
-                          <Input
-                            placeholder="IEC Registration, FEMA..."
-                            value={otherService}
-                            onChange={e => setOtherService(e.target.value)}
-                            className="rounded-2xl"
-                          />
-                        </div>
-                        <Button type="button" size="sm" onClick={addOtherService} className="rounded-2xl h-11 px-6">Add</Button>
-                      </div>
-                    )}
-                  </div>
-                  {/* Notes */}
-                  <div className="space-y-3">
-                    <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Internal Notes</Label>
-                    <Textarea
-                      className="min-h-[140px] bg-white border-slate-200 rounded-3xl resize-y"
-                      placeholder="Any internal remarks, preferences, or special instructions..."
-                      value={formData.notes}
-                      onChange={e => setFormData({...formData, notes: e.target.value})}
-                    />
-                  </div>
-                  {canAssignClients && (
-                    <div className="space-y-3">
-                      <Label className="text-xs font-semibold uppercase tracking-widest text-slate-500">Assign To Staff</Label>
-                      <Select
-                        value={formData.assigned_to}
-                        onValueChange={v => setFormData({...formData, assigned_to: v})}
-                      >
-                        <SelectTrigger className="h-12 rounded-2xl">
-                          <SelectValue placeholder="Select team member" />
+                    <div>
+                      <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
+                      <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                        <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="unassigned">Unassigned</SelectItem>
-                          {users.map(u => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.name || u.email}
-                            </SelectItem>
-                          ))}
+                          {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
+                    <div>
+                      <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
+                      <Input
+                        className={fieldCls(formErrors.email)}
+                        type="email"
+                        value={formData.email}
+                        onChange={e => {
+                          setFormData({...formData, email: e.target.value});
+                          if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined}));
+                        }}
+                        required
+                      />
+                      {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
+                    </div>
+                    <div>
+                      <label className={labelCls}>Phone Number <span className="text-red-400">*</span></label>
+                      <Input
+                        className={fieldCls(formErrors.phone)}
+                        value={formData.phone}
+                        onChange={e => {
+                          setFormData({...formData, phone: e.target.value});
+                          if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined}));
+                        }}
+                        required
+                      />
+                      {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className={labelCls}>Incorporation / Birthday</label>
+                      <Input
+                        className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                        type="date"
+                        value={formData.birthday}
+                        onChange={e => setFormData({...formData, birthday: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Contact Persons ── */}
+                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with" />
+                    <Button type="button" size="sm" onClick={addContact} variant="outline"
+                      className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                      <Plus className="h-3 w-3 mr-1" /> Add Person
+                    </Button>
+                  </div>
+                  {formErrors.contacts && (
+                    <p className="text-red-500 text-xs mb-4 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.contacts}
+                    </p>
                   )}
-                  <DialogFooter className="pt-8 border-t flex flex-col sm:flex-row gap-4">
-                    <div className="flex gap-3 flex-1">
-                      <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-2xl">
-                        Cancel
-                      </Button>
-                      <Button type="button" variant="outline" onClick={downloadTemplate} className="rounded-2xl">
-                        CSV Template
+                  <div className="space-y-4">
+                    {formData.contact_persons.map((cp, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">
+                              {idx + 1}
+                            </div>
+                            <span className="text-sm font-semibold text-slate-700">Contact Person</span>
+                          </div>
+                          {formData.contact_persons.length > 1 && (
+                            <button type="button" onClick={() => removeContact(idx)}
+                              className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelCls}>Full Name</label>
+                            <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)}
+                              className={fieldCls(contactErrors[idx]?.name)} />
+                            {contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}
+                          </div>
+                          <div>
+                            <label className={labelCls}>Designation</label>
+                            <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)}
+                              className={fieldCls(false)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Email</label>
+                            <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)}
+                              className={fieldCls(contactErrors[idx]?.email)} />
+                            {contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}
+                          </div>
+                          <div>
+                            <label className={labelCls}>Phone</label>
+                            <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)}
+                              className={fieldCls(contactErrors[idx]?.phone)} />
+                            {contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}
+                          </div>
+                          <div>
+                            <label className={labelCls}>Birthday</label>
+                            <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)}
+                              className={fieldCls(false)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>DIN (Director ID)</label>
+                            <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)}
+                              className={fieldCls(false)} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── DSC Details ── */}
+                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" />
+                    <Button type="button" size="sm" onClick={addDSC} variant="outline"
+                      className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                      <Plus className="h-3 w-3 mr-1" /> Add DSC
+                    </Button>
+                  </div>
+                  <div className="space-y-4">
+                    {formData.dsc_details.map((dsc, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">
+                              {idx + 1}
+                            </div>
+                            <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
+                          </div>
+                          {formData.dsc_details.length > 1 && (
+                            <button type="button" onClick={() => removeDSC(idx)}
+                              className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelCls}>Certificate Number</label>
+                            <Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Holder Name</label>
+                            <Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Issue Date</label>
+                            <Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Expiry Date</label>
+                            <Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className={labelCls}>Notes</label>
+                            <Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)}
+                              className="min-h-[80px] bg-white border-slate-200 rounded-xl text-sm resize-y" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Services ── */}
+                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
+                  {formErrors.services && (
+                    <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.services}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {SERVICES.map(s => {
+                      const isSelected = formData.services.includes(s) ||
+                        (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => toggleService(s)}
+                          className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
+                            isSelected
+                              ? 'text-white border-transparent shadow-sm'
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                          style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}
+                        >
+                          {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {formData.services.includes('Other') && (
+                    <div className="flex gap-3 items-end max-w-sm mt-4">
+                      <div className="flex-1">
+                        <label className={labelCls}>Specify Other Service</label>
+                        <Input placeholder="e.g. IEC Registration" value={otherService}
+                          onChange={e => setOtherService(e.target.value)} className="h-10 rounded-xl text-sm border-slate-200" />
+                      </div>
+                      <Button type="button" size="sm" onClick={addOtherService}
+                        className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                        Add
                       </Button>
                     </div>
-                    <div className="flex gap-3 flex-1 sm:justify-end">
-                      <Button
-                        type="button"
-                        className="bg-indigo-600 text-white rounded-2xl"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        Import CSV
-                      </Button>
-                      <Button
-                        type="button"
-                        className="bg-indigo-600 text-white rounded-2xl"
-                        disabled={importLoading}
-                        onClick={() => excelInputRef.current?.click()}
-                      >
-                        Import Master Data
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-slate-900 hover:bg-black text-white px-10 rounded-2xl font-medium"
-                      >
-                        {loading ? 'Saving...' : editingClient ? 'Update Client' : 'Create Client'}
-                      </Button>
-                    </div>
-                  </DialogFooter>
-                </form>
-              </div>
+                  )}
+                </div>
+
+                {/* ── Notes ── */}
+                <div>
+                  <label className={labelCls}>Internal Notes</label>
+                  <Textarea
+                    className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
+                    placeholder="Internal remarks, preferences, or special instructions…"
+                    value={formData.notes}
+                    onChange={e => setFormData({...formData, notes: e.target.value})}
+                  />
+                </div>
+
+                {/* ── Assign To ── */}
+                {canAssignClients && (
+                  <div>
+                    <label className={labelCls}>Assign To Staff</label>
+                    <Select value={formData.assigned_to} onValueChange={v => setFormData({...formData, assigned_to: v})}>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 text-sm bg-white">
+                        <SelectValue placeholder="Select team member" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {users.map(u => (
+                          <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* ── Footer ── */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
+                  <div className="flex gap-2">
+                    <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}
+                      className="h-9 px-4 text-sm rounded-xl text-slate-500">
+                      Cancel
+                    </Button>
+                    <Button type="button" variant="outline" onClick={downloadTemplate}
+                      className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">
+                      CSV Template
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
+                      onClick={() => fileInputRef.current?.click()}>
+                      Import CSV
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
+                      disabled={importLoading} onClick={() => excelInputRef.current?.click()}>
+                      Import Excel
+                    </Button>
+                    <Button type="submit" disabled={loading}
+                      className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm"
+                      style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                      {loading ? 'Saving…' : editingClient ? 'Update Client' : 'Create Client'}
+                    </Button>
+                  </div>
+                </div>
+              </form>
             </DialogContent>
           </Dialog>
         </div>
       </div>
-      {/* Today's Celebrations */}
+
+      {/* ── Today's Celebrations ─────────────────────────────────────────── */}
       {canViewAllClients && todayReminders.length > 0 && (
-        <Card className="bg-gradient-to-r from-pink-50 to-rose-50 border-pink-100 shadow-sm">
-          <CardContent className="p-6 flex items-center gap-6">
-            <div className="p-4 bg-white rounded-2xl shadow text-pink-600">
-              <Cake className="h-7 w-7" />
+        <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
+          style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
+          <div className="w-11 h-11 bg-white rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0">
+            <Cake className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-pink-900 mb-2">🎉 Today's Celebrations</p>
+            <div className="flex flex-wrap gap-2">
+              {todayReminders.map(c => (
+                <span key={c.id} className="text-xs font-medium px-3 py-1 bg-white text-pink-700 border border-pink-200 rounded-full shadow-sm">
+                  {c.company_name}
+                </span>
+              ))}
             </div>
-            <div className="flex-1">
-              <h4 className="font-semibold text-pink-950 text-lg">Today's Celebrations</h4>
-              <div className="flex flex-wrap gap-2 mt-3">
-                {todayReminders.map(c => (
-                  <Badge key={c.id} className="bg-white text-pink-700 border-pink-200 px-4 py-1 shadow-sm">
-                    {c.company_name}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {/* Stats Dashboard */}
-      {canViewAllClients && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="p-6 border-slate-100 shadow-sm hover:shadow transition-all">
-            <div className="flex items-center gap-4">
-              <div className="p-4 bg-indigo-100 text-indigo-600 rounded-2xl">
-                <Users className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest font-medium text-slate-500">Total Clients</p>
-                <p className="text-4xl font-semibold text-slate-900 tracking-tighter mt-1">{stats.totalClients}</p>
-              </div>
-            </div>
-          </Card>
-          <Card className="p-6 border-slate-100 shadow-sm hover:shadow transition-all">
-            <div className="flex items-center gap-4">
-              <div className="p-4 bg-emerald-100 text-emerald-600 rounded-2xl">
-                <Briefcase className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest font-medium text-slate-500">Active</p>
-                <p className="text-4xl font-semibold text-slate-900 tracking-tighter mt-1">{stats.activeClients}</p>
-              </div>
-            </div>
-          </Card>
-          <Card className="p-6 border-slate-100 shadow-sm hover:shadow transition-all">
-            <div className="flex items-center gap-4">
-              <div className="p-4 bg-amber-100 text-amber-600 rounded-2xl">
-                <Archive className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest font-medium text-slate-500">Archived</p>
-                <p className="text-4xl font-semibold text-slate-900 tracking-tighter mt-1">{stats.totalClients - stats.activeClients}</p>
-              </div>
-            </div>
-          </Card>
-          <Card className="p-6 border-slate-100 shadow-sm hover:shadow transition-all overflow-hidden">
-            <div className="flex items-center gap-4">
-              <div className="p-4 bg-purple-100 text-purple-600 rounded-2xl">
-                <BarChart3 className="h-6 w-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs uppercase tracking-widest font-medium text-slate-500">Top Service</p>
-                <p className="text-xl font-semibold text-slate-900 tracking-tight truncate mt-1">
-                  {Object.entries(stats.serviceCounts).sort((a,b) => b[1] - a[1])[0]?.[0] || 'N/A'}
-                </p>
-              </div>
-            </div>
-          </Card>
+          </div>
         </div>
       )}
-      {/* Filters */}
-      <div className="flex flex-col lg:flex-row gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
+
+      {/* ── Stats Cards ──────────────────────────────────────────────────── */}
+      {canViewAllClients && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            {
+              label: 'Total Clients', value: stats.totalClients,
+              icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66',
+              accent: 'linear-gradient(135deg, #0D3B66, #1F6FB2)',
+            },
+            {
+              label: 'Active', value: stats.activeClients,
+              icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A',
+              accent: 'linear-gradient(135deg, #065f46, #059669)',
+            },
+            {
+              label: 'Archived', value: stats.totalClients - stats.activeClients,
+              icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706',
+              accent: 'linear-gradient(135deg, #92400e, #D97706)',
+            },
+            {
+              label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A',
+              icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed',
+              accent: 'linear-gradient(135deg, #4c1d95, #7c3aed)', isText: true,
+            },
+          ].map((s, i) => (
+            <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: s.iconBg, color: s.iconColor }}>
+                  {s.icon}
+                </div>
+                <div className="w-1 h-8 rounded-full opacity-30" style={{ background: s.accent }} />
+              </div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
+              <p className={`font-bold text-slate-900 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>
+                {s.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Filters ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
-            placeholder="Search by company, email or phone..."
-            className="pl-12 h-12 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-indigo-400 rounded-3xl text-base"
+            placeholder="Search by company, email or phone…"
+            className="pl-11 h-10 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2 flex-shrink-0">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-12 w-[130px] bg-slate-50 border-none rounded-3xl text-sm">
+            <SelectTrigger className="h-10 w-[120px] bg-slate-50 border-none rounded-xl text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1138,7 +1052,7 @@ export default function Clients() {
             </SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className="h-12 w-[170px] bg-slate-50 border-none rounded-3xl text-sm">
+            <SelectTrigger className="h-10 w-[150px] bg-slate-50 border-none rounded-xl text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1146,17 +1060,22 @@ export default function Clients() {
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          {/* Results count pill */}
+          <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
+            {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
+          </div>
         </div>
       </div>
-      {/* Virtualized Client Grid */}
-      <div className="h-[72vh] min-h-[520px] w-full border border-slate-100 rounded-3xl overflow-hidden bg-white shadow-sm">
+
+      {/* ── Virtualized Client Grid ───────────────────────────────────────── */}
+      <div className="h-[70vh] min-h-[480px] w-full border border-slate-100 rounded-2xl overflow-hidden bg-white shadow-sm">
         {filteredClients.length > 0 ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_SIZE = 305;
-              const columnCount = Math.max(1, Math.floor(width / CARD_SIZE));
-              const columnWidth = CARD_SIZE;
-              const rowHeight = CARD_SIZE;
+              const CARD_MIN = 280;
+              const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
+              const columnWidth = Math.floor(width / columnCount);
+              const rowHeight = 240;
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid
@@ -1183,49 +1102,40 @@ export default function Clients() {
           </AutoSizer>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
-            <div className="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
-              <Users className="h-9 w-9 opacity-40" />
+            <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center mb-4">
+              <Users className="h-7 w-7 opacity-30" />
             </div>
-            <p className="text-xl font-medium">No clients match your filters</p>
-            <p className="mt-2 text-sm">Try changing search term or filters</p>
+            <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
+            <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
           </div>
         )}
       </div>
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept=".csv"
-        onChange={handleImportCSV}
-        className="hidden"
-      />
-      <input
-        type="file"
-        ref={excelInputRef}
-        accept=".xlsx"
-        onChange={handleImportExcel}
-        className="hidden"
-      />
-      {/* Excel Preview Dialog */}
+
+      {/* Hidden file inputs */}
+      <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
+      <input type="file" ref={excelInputRef} accept=".xlsx" onChange={handleImportExcel} className="hidden" />
+
+      {/* ── Excel Preview Dialog ──────────────────────────────────────────── */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Review Excel Import</DialogTitle>
-            <DialogDescription>Preview and confirm data before bulk import</DialogDescription>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
+          <DialogHeader className="pb-4 border-b border-slate-100">
+            <DialogTitle className="text-lg font-bold text-slate-900">Review Excel Import</DialogTitle>
+            <DialogDescription className="text-sm text-slate-400">Preview and confirm data before bulk import</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-auto border rounded-2xl mt-4">
-            <table className="min-w-full text-xs divide-y divide-slate-100">
-              <thead className="bg-slate-50 sticky top-0">
+          <div className="flex-1 overflow-auto mt-4 rounded-xl border border-slate-100">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-50 sticky top-0 border-b border-slate-100">
                 <tr>
                   {previewHeaders.map(h => (
-                    <th key={h} className="px-4 py-3 text-left font-medium uppercase tracking-wider text-slate-500 border-b">
+                    <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-50">
                 {previewData.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
+                  <tr key={rowIndex} className="hover:bg-slate-50 transition-colors">
                     {previewHeaders.map(header => (
                       <td key={header} className="p-2">
                         <Input
@@ -1235,7 +1145,7 @@ export default function Clients() {
                             updated[rowIndex][header] = e.target.value;
                             setPreviewData(updated);
                           }}
-                          className="h-9 text-xs rounded-xl"
+                          className="h-8 text-xs rounded-lg border-slate-200"
                         />
                       </td>
                     ))}
@@ -1244,53 +1154,46 @@ export default function Clients() {
               </tbody>
             </table>
           </div>
-          <DialogFooter className="mt-6">
-            <Button variant="outline" onClick={() => setPreviewOpen(false)} className="rounded-2xl">
-              Cancel
-            </Button>
-            <Button
-              className="bg-indigo-600 text-white rounded-2xl"
-              onClick={async () => {
-                setImportLoading(true);
-                let success = 0;
-                for (let row of previewData) {
-                  const exists = clients.find(c =>
-                    c.company_name?.toLowerCase().trim() ===
-                    row.company_name?.toLowerCase().trim()
-                  );
-                  if (exists) {
-                    console.log("Skipping duplicate:", row.company_name);
-                    continue;
+          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+            <span className="text-xs text-slate-400">{previewData.length} rows ready to import</span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">
+                Cancel
+              </Button>
+              <Button
+                className="h-9 px-5 text-sm rounded-xl text-white font-semibold"
+                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                onClick={async () => {
+                  setImportLoading(true);
+                  let success = 0;
+                  for (let row of previewData) {
+                    const exists = clients.find(c =>
+                      c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim()
+                    );
+                    if (exists) { console.log("Skipping duplicate:", row.company_name); continue; }
+                    try {
+                      await api.post('/clients', {
+                        company_name: row.company_name?.trim(),
+                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type)
+                          ? row.client_type : 'proprietor',
+                        email: row.email?.trim(),
+                        phone: row.phone?.replace(/\D/g, ""),
+                        birthday: row.birthday || null,
+                        services: row.services ? row.services.split(',').map(s => s.trim()) : [],
+                        notes: row.notes?.trim() || null,
+                        assigned_to: null, contact_persons: [], dsc_details: []
+                      });
+                      success++;
+                    } catch (err) { console.error(err); }
                   }
-                  try {
-                    await api.post('/clients', {
-                      company_name: row.company_name?.trim(),
-                      client_type: [
-                        'proprietor','pvt_ltd','llp','partnership','huf','trust','other'
-                      ].includes(row.client_type) ? row.client_type : 'proprietor',
-                      email: row.email?.trim(),
-                      phone: row.phone?.replace(/\D/g, ""),
-                      birthday: row.birthday || null,
-                      services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-                      notes: row.notes?.trim() || null,
-                      assigned_to: null,
-                      contact_persons: [],
-                      dsc_details: []
-                    });
-                    success++;
-                  } catch (err) {
-                    console.error(err);
-                  }
-                }
-                toast.success(`${success} clients imported successfully`);
-                fetchClients();
-                setPreviewOpen(false);
-                setImportLoading(false);
-              }}
-            >
-              Confirm & Import All
-            </Button>
-          </DialogFooter>
+                  toast.success(`${success} clients imported successfully`);
+                  fetchClients(); setPreviewOpen(false); setImportLoading(false);
+                }}
+              >
+                Confirm & Import All
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
