@@ -210,30 +210,6 @@ export default function TodoDashboard() {
   const [todoLog, setTodoLog] = useState([]);
   const logSectionRef = useRef(null);
 
-  // Seed log from already-completed todos whenever the data loads/changes
-  useEffect(() => {
-    const completedTodos = todosRaw.filter(t => t.is_completed === true || t.status === "completed");
-    if (completedTodos.length === 0) return;
-    setTodoLog(prev => {
-      // Only add todos not already in the log (avoid duplicates on re-fetch)
-      const existingIds = new Set(prev.map(e => e.id));
-      const newEntries = completedTodos
-        .filter(t => !existingIds.has(t.id || t._id))
-        .map(t => ({
-          id: t.id || t._id,
-          title: t.title || 'Untitled Todo',
-          action: 'Completed',
-          timestamp: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
-          due_date: t.due_date || null,
-        }));
-      if (newEntries.length === 0) return prev;
-      // Merge and sort by timestamp descending
-      return [...newEntries, ...prev]
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 100);
-    });
-  }, [todosRaw]);
-
   // ── DATA FETCHING ─────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ["todos", selectedUser],
@@ -255,6 +231,30 @@ export default function TodoDashboard() {
   });
 
   const todos = useMemo(() => todosRaw, [todosRaw]);
+
+  // Seed log from already-completed todos whenever the data loads/changes
+  useEffect(() => {
+    const completedTodos = todos.filter(t => t.is_completed === true || t.status === "completed");
+    if (completedTodos.length === 0) return;
+    setTodoLog(prev => {
+      // Only add todos not already in the log (avoid duplicates on re-fetch)
+      const existingIds = new Set(prev.map(e => e.id));
+      const newEntries = completedTodos
+        .filter(t => !existingIds.has(t.id || t._id))
+        .map(t => ({
+          id: t.id || t._id,
+          title: t.title || 'Untitled Todo',
+          action: 'Completed',
+          timestamp: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
+          due_date: t.due_date || null,
+        }));
+      if (newEntries.length === 0) return prev;
+      // Merge and sort by timestamp descending
+      return [...newEntries, ...prev]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 100);
+    });
+  }, [todos]);
 
   // ── STATS (same calculation style as main Dashboard) ──────────────────────
   const stats = useMemo(() => {
