@@ -352,15 +352,25 @@ export default function Clients() {
       const data = response.data;
       
       // Extract city and state from address if not provided
-      let city = data.city || '';
-      let state = data.state || '';
-      let address = data.address || '';
+      let address = (data.address || data.registered_address || '').trim();
+      let city = (data.city || '').trim();
+      let state = (data.state || '').trim();
       
-      if (address && !city && !state) {
-        const addressParts = address.split(',').map(p => p.trim());
-        if (addressParts.length >= 2) {
-          state = addressParts[addressParts.length - 2] || '';
-          city = addressParts[addressParts.length - 3] || '';
+      // If we have address but no city/state, parse them
+      if (address && (!city || !state)) {
+        const addressParts = address.split(',').map(p => p.trim()).filter(p => p);
+        
+        if (addressParts.length > 0) {
+          // If no state, try to find it (usually second to last before country)
+          if (!state && addressParts.length >= 2) {
+            // Look for common state patterns or take second from end
+            state = addressParts[addressParts.length - 2] || '';
+          }
+          
+          // If no city, try to find it (usually before state)
+          if (!city && addressParts.length >= 3) {
+            city = addressParts[addressParts.length - 3] || '';
+          }
         }
       }
       
@@ -379,16 +389,16 @@ export default function Clients() {
       }
 
       setMdsForm({
-        company_name: data.company_name || '',
+        company_name: (data.company_name || '').trim(),
         client_type: data.client_type || 'proprietor',
-        email: data.email || '',
-        phone: data.phone || '',
+        email: (data.email || '').trim(),
+        phone: (data.phone || '').trim(),
         birthday: data.birthday || '',
         address: address,
         city: city,
         state: state,
         services: data.services || [],
-        notes: data.notes || '',
+        notes: (data.notes || '').trim(),
         status: data.status_value || 'active',
         contact_persons: contacts,
       });
