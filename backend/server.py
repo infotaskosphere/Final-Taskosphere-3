@@ -2691,6 +2691,15 @@ async def parse_mds_excel_for_client_form(
     status_raw = company_info.get("Company Status", "Active").lower()
     status = "active" if "active" in status_raw else "inactive"
 
+    # Extract city and state from address
+    city = ""
+    state = ""
+    if address and address not in ("-", "nan"):
+        address_parts = [p.strip() for p in address.split(",") if p.strip()]
+        if len(address_parts) >= 2:
+            state = address_parts[-2] if len(address_parts) >= 2 else ""
+            city = address_parts[-3] if len(address_parts) >= 3 else ""
+
     # ── Return the editable preview payload ───────────────────────────────
     return {
         "status": "ok",
@@ -2699,6 +2708,9 @@ async def parse_mds_excel_for_client_form(
         "email": email,
         "phone": phone,
         "birthday": birthday,
+        "address": address if address not in ("-", "nan") else "",
+        "city": city,
+        "state": state,
         "services": [],
         "notes": notes,
         "status_value": status,
