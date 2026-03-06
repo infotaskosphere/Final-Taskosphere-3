@@ -94,6 +94,10 @@ async def health():
 # ====================== SECURITY & DB (your original) ======================
 rankings_cache = {}
 rankings_cache_time = {}
+
+# ── IN-MEMORY CACHE for daily reminder (avoids DB query on every request) ──
+_last_reminder_date_cache: Optional[str] = None
+
 # ===================== HELPER FUNCTIONS =====================
 def safe_dt(value):
     if not value:
@@ -1214,6 +1218,76 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
  return tasks
+
+# =========================================================
+# GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
+# =========================================================
+@api_router.get("/tasks/{task_id}/detail")
+async def get_task_detail(task_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Returns the complete task document including notes, comments, sub_assignees,
+    and enriched user names. Used by the task detail popup/modal on the frontend.
+    """
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # OWNERSHIP RULE (Layer 4): user always accesses their own task records
+    if current_user.role != "admin":
+        if not is_own_record(current_user, task):
+            permissions = get_user_permissions(current_user)
+            allowed_users = permissions.get("view_other_tasks", [])
+            if task.get("assigned_to") not in allowed_users:
+                raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Enrich with user names
+    assigned_user = None
+    created_user = None
+    sub_assignee_names = []
+
+    if task.get("assigned_to"):
+        assigned_user = await db.users.find_one(
+            {"id": task["assigned_to"]},
+            {"_id": 0, "full_name": 1, "profile_picture": 1, "email": 1}
+        )
+    if task.get("created_by"):
+        created_user = await db.users.find_one(
+            {"id": task["created_by"]},
+            {"_id": 0, "full_name": 1}
+        )
+    if task.get("sub_assignees"):
+        sub_users = await db.users.find(
+            {"id": {"$in": task["sub_assignees"]}},
+            {"_id": 0, "full_name": 1, "id": 1}
+        ).to_list(50)
+        sub_assignee_names = [u["full_name"] for u in sub_users]
+
+    # Enrich client name if client_id is present
+    client_name = None
+    if task.get("client_id"):
+        client_doc = await db.clients.find_one(
+            {"id": task["client_id"]},
+            {"_id": 0, "company_name": 1}
+        )
+        if client_doc:
+            client_name = client_doc.get("company_name")
+
+    # Build enriched response — all original fields preserved + extra enriched fields
+    task["assigned_to_name"] = assigned_user.get("full_name", "Unknown") if assigned_user else "Unknown"
+    task["assigned_to_email"] = assigned_user.get("email") if assigned_user else None
+    task["assigned_to_picture"] = assigned_user.get("profile_picture") if assigned_user else None
+    task["created_by_name"] = created_user.get("full_name", "Unknown") if created_user else "Unknown"
+    task["sub_assignee_names"] = sub_assignee_names
+    task["client_name"] = client_name
+
+    # Normalize datetime fields
+    task["created_at"] = safe_dt(task.get("created_at"))
+    task["updated_at"] = safe_dt(task.get("updated_at"))
+    task["due_date"] = safe_dt(task.get("due_date"))
+    if task.get("completed_at"):
+        task["completed_at"] = safe_dt(task.get("completed_at"))
+
+    return task
 
 # =========================================================
 # GET SINGLE TASK (SECURE)
@@ -3409,33 +3483,49 @@ async def send_pending_task_reminders_internal():
   except Exception as e:
    logger.error(f"Auto reminder failed for {email}: {str(e)}")
 
-# AUTO DAILY REMINDER (ONLY ONE)
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTO DAILY REMINDER MIDDLEWARE
+# FIX: Uses in-memory cache (_last_reminder_date_cache) to avoid a MongoDB
+# query on EVERY request, which was the root cause of the 20000ms timeout.
+# The DB is only queried once when the in-memory cache is empty (cold start).
+# ─────────────────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def auto_daily_reminder(request, call_next):
- try:
-  india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
-  today_str = india_time.date().isoformat()
-  setting = await db.system_settings.find_one({"key": "last_reminder_date"})
-  last_date = setting["value"] if setting else None
-  if india_time.hour >= 10 and last_date != today_str:
-   logger.info("Auto daily reminder triggered at 10:00 AM IST")
-   await send_pending_task_reminders_internal()
-   await db.system_settings.update_one(
-    {"key": "last_reminder_date"},
-    {"$set": {"value": today_str}},
-    upsert=True
-   )
-   # Add automatic cleanup for staff_activity (90 days retention)
-   await db.staff_activity.delete_many({
-    "timestamp": {
-     "$lt": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    }
-   })
- except Exception as e:
-  logger.error(f"Auto job failed: {e}")
- # VERY IMPORTANT: continue request processing
- response = await call_next(request)
- return response
+    global _last_reminder_date_cache
+    try:
+        india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
+        today_str = india_time.date().isoformat()
+
+        # Only attempt reminder logic at or after 10:00 AM IST
+        if india_time.hour >= 10:
+            # Fast path: in-memory cache already has today's date — skip all DB work
+            if _last_reminder_date_cache != today_str:
+                # Slow path: check DB only once per server cold-start
+                setting = await db.system_settings.find_one({"key": "last_reminder_date"})
+                db_last_date = setting["value"] if setting else None
+
+                if db_last_date != today_str:
+                    logger.info("Auto daily reminder triggered at 10:00 AM IST")
+                    await send_pending_task_reminders_internal()
+                    await db.system_settings.update_one(
+                        {"key": "last_reminder_date"},
+                        {"$set": {"value": today_str}},
+                        upsert=True
+                    )
+                    # Add automatic cleanup for staff_activity (90 days retention)
+                    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                    await db.staff_activity.delete_many({"timestamp": {"$lt": cutoff}})
+
+                # Update in-memory cache regardless so we never hit DB again today
+                _last_reminder_date_cache = today_str
+
+    except Exception as e:
+        logger.error(f"Auto job failed: {e}")
+
+    # VERY IMPORTANT: continue request processing
+    response = await call_next(request)
+    return response
+
   
  
 # ==================== HOLIDAY ROUTES (STEP 3 & 4 - added here) ====================
