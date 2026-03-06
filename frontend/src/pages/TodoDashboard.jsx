@@ -37,6 +37,7 @@ import {
   TrendingUp,
   AlertCircle,
   Calendar as CalendarIcon,
+  History,
 } from 'lucide-react';
 
 // ── BRAND COLORS (exact match with main Dashboard) ───────────────────────────
@@ -204,6 +205,9 @@ export default function TodoDashboard() {
   const [dueDate, setDueDate] = useState('');
   const [selectedUser, setSelectedUser] = useState("all");
 
+  // ── TODO LOG — records every completion/undo action in-session ────────────
+  const [todoLog, setTodoLog] = useState([]);
+
   // ── DATA FETCHING ─────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ["todos", selectedUser],
@@ -256,7 +260,21 @@ export default function TodoDashboard() {
       const newCompleted = !(todo.is_completed === true || todo.status === "completed");
       return api.patch(`/todos/${id}`, { is_completed: newCompleted });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      // Append a log entry whenever a todo is toggled
+      const todo = todos.find(t => (t.id || t._id) === variables.id);
+      if (todo) {
+        const wasCompleted = todo.is_completed === true || todo.status === "completed";
+        setTodoLog(prev => [{
+          id: todo.id || todo._id,
+          title: todo.title || 'Untitled Todo',
+          action: wasCompleted ? 'Marked Pending' : 'Completed',
+          timestamp: new Date(),
+          due_date: todo.due_date || null,
+        }, ...prev].slice(0, 100)); // keep last 100 log entries
+      }
+    },
   });
 
   const promoteMutation = useMutation({
@@ -572,6 +590,76 @@ export default function TodoDashboard() {
           </div>
         </div>
       </motion.div>
+
+      {/* ── Todo Log ─────────────────────────────────────────────────────────── */}
+      <motion.div variants={itemVariants}>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.deepBlue})` }} />
+          <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <History className="h-4 w-4 text-slate-500" />
+              <span className="text-sm font-bold text-slate-800 tracking-tight">Todo Log</span>
+              <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                {todoLog.length}
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400">Activity this session</span>
+          </div>
+
+          {todoLog.length === 0 ? (
+            <div className="py-10 text-center">
+              <History className="h-8 w-8 mx-auto text-slate-200 mb-2" />
+              <p className="text-sm text-slate-400 font-medium">No activity yet</p>
+              <p className="text-xs text-slate-300 mt-1">Actions like completing or undoing todos will appear here</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50 max-h-[320px] overflow-y-auto">
+              <AnimatePresence>
+                {todoLog.map((entry, idx) => (
+                  <motion.div
+                    key={`${entry.id}-${entry.timestamp.getTime()}`}
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50/60 transition-colors"
+                  >
+                    {/* Status dot */}
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      entry.action === 'Completed' ? 'bg-emerald-500' : 'bg-amber-400'
+                    }`} />
+
+                    {/* Title + due date */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-700 truncate">{entry.title}</p>
+                      {entry.due_date && (
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Due: {format(parseISO(entry.due_date), 'MMM d, yyyy')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action badge */}
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap ${
+                      entry.action === 'Completed'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {entry.action}
+                    </span>
+
+                    {/* Timestamp */}
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap flex-shrink-0">
+                      {format(entry.timestamp, 'hh:mm a')}
+                    </span>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
     </motion.div>
   );
 }
