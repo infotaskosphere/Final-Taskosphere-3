@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -204,9 +204,35 @@ export default function TodoDashboard() {
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [selectedUser, setSelectedUser] = useState("all");
+  const [activeTab, setActiveTab] = useState("todos"); // "todos" | "log"
 
   // ── TODO LOG — records every completion/undo action in-session ────────────
   const [todoLog, setTodoLog] = useState([]);
+  const logSectionRef = useRef(null);
+
+  // Seed log from already-completed todos whenever the data loads/changes
+  useEffect(() => {
+    const completedTodos = todosRaw.filter(t => t.is_completed === true || t.status === "completed");
+    if (completedTodos.length === 0) return;
+    setTodoLog(prev => {
+      // Only add todos not already in the log (avoid duplicates on re-fetch)
+      const existingIds = new Set(prev.map(e => e.id));
+      const newEntries = completedTodos
+        .filter(t => !existingIds.has(t.id || t._id))
+        .map(t => ({
+          id: t.id || t._id,
+          title: t.title || 'Untitled Todo',
+          action: 'Completed',
+          timestamp: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
+          due_date: t.due_date || null,
+        }));
+      if (newEntries.length === 0) return prev;
+      // Merge and sort by timestamp descending
+      return [...newEntries, ...prev]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 100);
+    });
+  }, [todosRaw]);
 
   // ── DATA FETCHING ─────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
@@ -330,7 +356,43 @@ export default function TodoDashboard() {
               {format(new Date(), 'EEEE, MMMM d, yyyy')} · {stats.total} items
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* ── Tab buttons ── */}
+            <div className="flex items-center rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
+              <button
+                onClick={() => setActiveTab("todos")}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors ${
+                  activeTab === "todos"
+                    ? "text-white"
+                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                }`}
+                style={activeTab === "todos" ? { backgroundColor: COLORS.deepBlue } : {}}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Todos
+              </button>
+              <button
+                onClick={() => setActiveTab("log")}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors border-l border-slate-200 ${
+                  activeTab === "log"
+                    ? "text-white"
+                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                }`}
+                style={activeTab === "log" ? { backgroundColor: COLORS.deepBlue } : {}}
+              >
+                <History className="h-3.5 w-3.5" />
+                Todo Log
+                {todoLog.length > 0 && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    activeTab === "log" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {todoLog.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Status pills */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-white border border-slate-200 text-xs font-medium text-slate-600">
               <div className="w-2 h-2 rounded-full bg-emerald-500" />
               {stats.completed} completed
@@ -344,6 +406,9 @@ export default function TodoDashboard() {
           </div>
         </div>
       </motion.div>
+
+      {/* ── KPI Strip + Main Content (Todos tab) ─────────────────────────── */}
+      {activeTab === "todos" && <>
 
       {/* ── KPI Strip ────────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
@@ -591,7 +656,10 @@ export default function TodoDashboard() {
         </div>
       </motion.div>
 
-      {/* ── Todo Log ─────────────────────────────────────────────────────────── */}
+      </> /* end activeTab === "todos" */}
+
+      {/* ── Todo Log Tab ─────────────────────────────────────────────────────── */}
+      {activeTab === "log" && (
       <motion.div variants={itemVariants}>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.deepBlue})` }} />
@@ -603,26 +671,26 @@ export default function TodoDashboard() {
                 {todoLog.length}
               </span>
             </div>
-            <span className="text-[11px] text-slate-400">Activity this session</span>
+            <span className="text-[11px] text-slate-400">Completed &amp; activity history</span>
           </div>
 
           {todoLog.length === 0 ? (
-            <div className="py-10 text-center">
-              <History className="h-8 w-8 mx-auto text-slate-200 mb-2" />
+            <div className="py-16 text-center">
+              <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
               <p className="text-sm text-slate-400 font-medium">No activity yet</p>
-              <p className="text-xs text-slate-300 mt-1">Actions like completing or undoing todos will appear here</p>
+              <p className="text-xs text-slate-300 mt-1">Complete a todo and it will appear here</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-50 max-h-[320px] overflow-y-auto">
+            <div className="divide-y divide-slate-50">
               <AnimatePresence>
-                {todoLog.map((entry, idx) => (
+                {todoLog.map((entry) => (
                   <motion.div
                     key={`${entry.id}-${entry.timestamp.getTime()}`}
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.2 }}
-                    className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50/60 transition-colors"
+                    className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/60 transition-colors"
                   >
                     {/* Status dot */}
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -640,7 +708,7 @@ export default function TodoDashboard() {
                     </div>
 
                     {/* Action badge */}
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap ${
+                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded whitespace-nowrap ${
                       entry.action === 'Completed'
                         ? 'bg-emerald-100 text-emerald-700'
                         : 'bg-amber-100 text-amber-700'
@@ -650,7 +718,7 @@ export default function TodoDashboard() {
 
                     {/* Timestamp */}
                     <span className="text-[11px] text-slate-400 whitespace-nowrap flex-shrink-0">
-                      {format(entry.timestamp, 'hh:mm a')}
+                      {format(entry.timestamp, 'MMM d · hh:mm a')}
                     </span>
                   </motion.div>
                 ))}
@@ -659,6 +727,7 @@ export default function TodoDashboard() {
           )}
         </div>
       </motion.div>
+      )} {/* end activeTab === "log" */}
 
     </motion.div>
   );
