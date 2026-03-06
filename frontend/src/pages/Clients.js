@@ -403,9 +403,9 @@ export default function Clients() {
             din: cp.din?.trim() || null,
           }));
 
-        await api.post('/clients', {
-          company_name: mdsForm.company_name.trim(),
-          client_type: mdsForm.client_type,
+        const payload = {
+          company_name: mdsForm.company_name?.trim() || '',
+          client_type: mdsForm.client_type || 'proprietor',
           email: mdsForm.email?.trim() || '',
           phone: mdsForm.phone?.replace(/\D/g, '') || '',
           birthday: mdsForm.birthday || null,
@@ -414,14 +414,18 @@ export default function Clients() {
           state: mdsForm.state?.trim() || null,
           services: mdsForm.services || [],
           notes: mdsForm.notes?.trim() || null,
-          status: mdsForm.status,
+          status: mdsForm.status || 'active',
           contact_persons: contacts,
           dsc_details: [],
           assigned_to: null,
-        });
+        };
+
+        const response = await api.post('/clients', payload);
         toast.success(`Client "${mdsForm.company_name}" saved successfully!`);
         fetchClients();
         setMdsPreviewOpen(false);
+        setMdsData(null);
+        setMdsForm(null);
       } catch (err) {
         toast.error(err.response?.data?.detail || 'Failed to save client');
       } finally {
@@ -610,9 +614,10 @@ export default function Clients() {
     const serviceCount = client.services?.length || 0;
     const isArchived = client.status === 'inactive';
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
+    const assignedUser = users.find(u => u.id === client.assigned_to);
 
     return (
-      <div style={style} className="p-2.5 box-border">
+      <div style={style} className="p-3 box-border">
         <div
           className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${isArchived ? 'opacity-60' : ''}`}
           style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
@@ -620,9 +625,9 @@ export default function Clients() {
           {/* Colored top strip by type */}
           <div className="h-1 w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
 
-          <div className="flex flex-col flex-1 p-4">
+          <div className="flex flex-col flex-1 p-4 overflow-hidden">
             {/* Header row */}
-            <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex items-start justify-between gap-2 mb-2">
               {/* Avatar */}
               <div
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-sm"
@@ -643,62 +648,74 @@ export default function Clients() {
             </div>
 
             {/* Name + number */}
-            <div className="mb-3">
+            <div className="mb-2">
               <span className="text-[10px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
               <h3 className="font-bold text-sm leading-snug text-slate-900 mt-0.5 line-clamp-2">{client.company_name}</h3>
               {primaryContact?.name && (
-                <p className="text-[11px] text-slate-400 mt-1 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
               )}
             </div>
 
             {/* Contact details */}
-            <div className="space-y-1.5 flex-1">
+            <div className="space-y-1 flex-1 min-h-0">
               {client.phone && (
-                <div className="flex items-center gap-2 text-xs text-slate-500">
+                <div className="flex items-center gap-2 text-xs text-slate-500 overflow-hidden">
                   <Phone className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="font-medium text-slate-700">{client.phone}</span>
+                  <span className="font-medium text-slate-700 truncate">{client.phone}</span>
                 </div>
               )}
               {client.email && (
-                <div className="flex items-center gap-2 text-xs text-slate-500">
+                <div className="flex items-center gap-2 text-xs text-slate-500 overflow-hidden">
                   <Mail className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="truncate">{client.email}</span>
+                  <span className="truncate text-slate-600">{client.email}</span>
                 </div>
               )}
             </div>
 
-            {/* Services + actions */}
-            <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: `${cfg.border}` }}>
-              {/* Service tags */}
-              <div className="flex items-center gap-1 flex-wrap min-w-0">
-                {client.services?.slice(0, 2).map((svc, i) => (
-                  <span
-                    key={i}
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-md border"
-                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-                  >
-                    {svc.replace('Other: ', '').substring(0, 10)}
-                  </span>
-                ))}
-                {serviceCount > 2 && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                    +{serviceCount - 2}
-                  </span>
-                )}
+            {/* Assigned to */}
+            {assignedUser && (
+              <div className="mt-1 pt-1 flex items-center gap-2 text-xs border-t" style={{ borderColor: `${cfg.border}` }}>
+                <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[10px] font-bold flex-shrink-0">
+                  {assignedUser.full_name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <span className="text-slate-600 font-medium truncate">{assignedUser.full_name || assignedUser.name}</span>
               </div>
+            )}
+
+            {/* Services + actions */}
+            <div className="mt-2 pt-2 border-t flex flex-col gap-2" style={{ borderColor: `${cfg.border}` }}>
+              {/* Service tags */}
+              {serviceCount > 0 && (
+                <div className="flex items-center gap-1 flex-wrap min-w-0">
+                  {client.services?.slice(0, 2).map((svc, i) => (
+                    <span
+                      key={i}
+                      className="text-[9px] font-semibold px-2 py-0.5 rounded-md border whitespace-nowrap"
+                      style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+                    >
+                      {svc.replace('Other: ', '').substring(0, 12)}
+                    </span>
+                  ))}
+                  {serviceCount > 2 && (
+                    <span className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                      +{serviceCount - 2}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Action buttons */}
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex-shrink-0">
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                 <button
                   onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors flex-shrink-0"
                   title="WhatsApp"
                 >
                   <MessageCircle className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
                   title="Edit"
                 >
                   <Edit className="h-3.5 w-3.5" />
@@ -711,7 +728,7 @@ export default function Clients() {
                         api.delete(`/clients/${client.id}`).then(() => fetchClients());
                       }
                     }}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
                     title="Delete"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -1240,11 +1257,10 @@ export default function Clients() {
               const CARD_MIN = 280;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
-              const rowHeight = 250;
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
-                  rowCount={rowCount} rowHeight={rowHeight} width={width}
+                  rowCount={rowCount} rowHeight={320} width={width}
                   overscanColumnCount={2} overscanRowCount={4}>
                   {({ columnIndex, rowIndex, style }) => (
                     <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
