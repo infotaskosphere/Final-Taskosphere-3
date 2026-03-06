@@ -1,3 +1,4 @@
+// Professional font: Inter (loaded via index.html or global CSS — fallback stack here)
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
@@ -63,6 +64,7 @@ function DigitalClock() {
   return (
     <motion.div
       className="flex flex-col items-center px-6 py-4 rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 text-white"
+      style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif" }}
       animate={{
         boxShadow: [
           "0 0 6px rgba(59,130,246,0.4)",
@@ -91,6 +93,13 @@ function DigitalClock() {
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
   const canViewRankings = hasPermission("can_view_staff_rankings");
+  // Permission: can this user see other staff attendance?
+  const isAdmin = user && user.role === 'admin';
+  const canViewAllAttendance = isAdmin || hasPermission("can_view_attendance");
+  // List of specific user IDs this non-admin is permitted to view (from permission settings)
+  const permittedUserIds = (!isAdmin && user && user.permissions && Array.isArray(user.permissions.view_other_attendance))
+    ? user.permissions.view_other_attendance
+    : [];
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [mySummary, setMySummary] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState(null);
@@ -165,13 +174,25 @@ export default function Attendance() {
       ] = await Promise.all(requests);
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
-      if (user && user.role === 'admin') {
+      if (isAdmin) {
         setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
-        // Fetch all users for admin filter
+        // Admin: fetch full user list for the filter dropdown
         try {
           const usersRes = await api.get('/users');
           setAllUsers(usersRes.data || []);
         } catch (e) { /* ignore */ }
+      } else if (permittedUserIds.length > 0) {
+        // Permitted staff: build a minimal user list from only their allowed user IDs
+        // Backend /attendance/history already enforces the permission check server-side
+        // We fetch each permitted user's profile to show their name in the dropdown
+        try {
+          const usersRes = await api.get('/users');
+          const filtered = (usersRes.data || []).filter(u => permittedUserIds.includes(u.id));
+          setAllUsers(filtered);
+        } catch (e) {
+          // If /users is admin-only and fails, leave allUsers empty — dropdown won't show
+          setAllUsers([]);
+        }
       }
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
@@ -404,9 +425,34 @@ export default function Attendance() {
     setShowLeaveForm(true);
   };
   // Attendance Analytics Computations
-  const totalMinutesYTD = attendanceHistory.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) + (todayAttendance?.duration_minutes || 0);
-  const averageDailyMinutes = attendanceHistory.length > 0 ? totalMinutesYTD / (attendanceHistory.length + (todayAttendance ? 1 : 0)) : 0;
-  const attendancePercentage = ((attendanceHistory.length + (todayAttendance?.punch_in ? 1 : 0)) / (new Date().getDate())) * 100; // Simplified for current month
+  // YTD: sum ALL history records (todayAttendance.date is already in attendanceHistory after fetchData)
+  // To avoid double-count, check if today's record is already in history
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayAlreadyInHistory = attendanceHistory.some(a => a.date === todayStr);
+  const totalMinutesYTD = attendanceHistory.reduce((sum, a) => sum + (a.duration_minutes || 0), 0)
+    + (!todayAlreadyInHistory && todayAttendance ? (todayAttendance.duration_minutes || 0) : 0);
+  // Total working days with data (deduplicated)
+  const totalWorkingDaysYTD = attendanceHistory.length + (!todayAlreadyInHistory && todayAttendance ? 1 : 0);
+  // Average daily hours in decimal (e.g. 8.45 hrs)
+  const averageDailyHoursDecimal = totalWorkingDaysYTD > 0
+    ? parseFloat((totalMinutesYTD / totalWorkingDaysYTD / 60).toFixed(2))
+    : 0;
+  // Total hours YTD in decimal
+  const totalHoursYTDDecimal = parseFloat((totalMinutesYTD / 60).toFixed(2));
+  // Attendance % — only current month records vs working days elapsed this month (Mon-Fri, no holidays)
+  const currentMonthStart = startOfMonth(new Date());
+  const today = new Date();
+  let workingDaysElapsed = 0;
+  for (let d = new Date(currentMonthStart); d <= today; d.setDate(d.getDate() + 1)) {
+    const dayOfWeek = d.getDay();
+    const dStr = format(d, 'yyyy-MM-dd');
+    const isHol = holidays.some(h => h.date === dStr);
+    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !isHol) workingDaysElapsed++;
+  }
+  const currentMonthPresentDays = monthAttendance.filter(a => a.punch_in || a.duration_minutes > 0).length;
+  const attendancePercentage = workingDaysElapsed > 0
+    ? parseFloat(((currentMonthPresentDays / workingDaysElapsed) * 100).toFixed(2))
+    : 0;
   // Fix: find current month's hours from monthly_summary array
   const currentMonthKey = format(new Date(), 'yyyy-MM');
   const currentMonthSummary = mySummary && mySummary.monthly_summary
@@ -416,50 +462,93 @@ export default function Attendance() {
   // Export Attendance Summary to PDF
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    const brandColor = "#0D3B66";
-   
-    // Header
-    doc.setFillColor(13, 59, 102); // COLORS.deepBlue
-    doc.rect(0, 0, 210, 20, 'F');
+    // Determine the employee name to display
+    const employeeName = selectedUserId
+      ? (allUsers.find(u => u.id === selectedUserId)?.full_name || 'Employee')
+      : (user?.full_name || user?.name || 'Staff Member');
+
+    // Header banner
+    doc.setFillColor(13, 59, 102);
+    doc.rect(0, 0, 210, 24, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.text('TASKOSPHERE ATTENDANCE REPORT', 10, 13);
-   
-    // Body Text
+    doc.setFontSize(15);
+    doc.setFont(undefined, 'bold');
+    doc.text('TASKOSPHERE — ATTENDANCE REPORT', 10, 10);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}  |  IST`, 10, 19);
+
+    // Employee info block
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
-    doc.text(`Employee: ${user?.name || 'Staff Member'}`, 10, 30);
-    doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 40);
-   
-    // Stats Box
-    doc.setDrawColor(200, 200, 200);
-    doc.line(10, 45, 200, 45);
-    doc.text(`Total Monthly Hours: ${mySummary?.current_month?.total_hours || '0h 0m'}`, 10, 55);
-    doc.text(`Days Present: ${monthDaysPresent}`, 10, 65);
-    doc.text(`Late Arrivals: ${totalDaysLateThisMonth}`, 10, 75);
-    doc.line(10, 80, 200, 80);
-   
     doc.setFont(undefined, 'bold');
-    doc.text('Detailed Logs (Last 15 Records):', 10, 95);
+    doc.text(`Employee: ${employeeName}`, 10, 34);
     doc.setFont(undefined, 'normal');
-   
-    let y = 105;
+    doc.setFontSize(11);
+    doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 42);
+
+    // Divider
+    doc.setDrawColor(200, 200, 200);
+    doc.line(10, 47, 200, 47);
+
+    // Summary stats
+    doc.setFontSize(11);
+    doc.text(`Total Monthly Hours : ${currentMonthHours}`, 10, 56);
+    doc.text(`Days Present        : ${monthDaysPresent}`, 10, 64);
+    doc.text(`Late Arrivals       : ${totalDaysLateThisMonth}`, 10, 72);
+    doc.text(`Avg Daily Hours     : ${averageDailyHoursDecimal.toFixed(2)} hrs`, 10, 80);
+    doc.text(`Attendance %        : ${attendancePercentage.toFixed(2)}%`, 10, 88);
+    doc.line(10, 93, 200, 93);
+
+    // Detailed log header
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(11);
+    doc.text('Detailed Attendance Log (Last 15 Records):', 10, 102);
+    doc.setFont(undefined, 'normal');
+
+    // Column headers
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text('DATE', 10, 111);
+    doc.text('PUNCH IN', 65, 111);
+    doc.text('PUNCH OUT', 105, 111);
+    doc.text('DURATION', 155, 111);
+    doc.setDrawColor(180, 180, 180);
+    doc.line(10, 113, 200, 113);
+
+    doc.setTextColor(0, 0, 0);
+    let y = 121;
     attendanceHistory.slice(0, 15).forEach((record, index) => {
-      const dateStr = format(parseISO(record.date), 'MMM d, yyyy');
-      const timeStr = `${record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '--'} to ${record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}`;
-      doc.text(`${index + 1}. ${dateStr}`, 10, y);
-      doc.text(timeStr, 60, y);
-      doc.text(formatDuration(record.duration_minutes), 160, y);
+      if (y > 270) { doc.addPage(); y = 20; }
+      const dateStr = format(parseISO(record.date), 'dd MMM yyyy');
+      const inTime = record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—';
+      const outTime = record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing';
+      const dur = formatDuration(record.duration_minutes);
+      if (index % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(10, y - 5, 190, 9, 'F');
+      }
+      doc.setFontSize(9);
+      doc.text(dateStr, 10, y);
+      doc.text(inTime, 65, y);
+      doc.text(outTime, 105, y);
+      doc.text(dur, 155, y);
       y += 10;
     });
-   
-    doc.save(`Attendance_${format(selectedDate, 'MMM_yyyy')}.pdf`);
+
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Taskosphere HR Management System  |  Confidential', 10, 288);
+
+    doc.save(`Attendance_${employeeName.replace(/\s+/g, '_')}_${format(selectedDate, 'MMM_yyyy')}.pdf`);
   };
   // ─── JSX Render ──────────────────────────────────────────────
   return (
     <TooltipProvider>
       <motion.div
         className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
+        style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif" }}
         variants={containerVariants}
         initial="hidden"
         animate="visible"
@@ -467,16 +556,16 @@ export default function Attendance() {
         {/* Header */}
         <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>
+            <h1 className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue, fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif", letterSpacing: '-0.02em' }}>
               {user && user.role === 'admin' ? 'Attendance Management' : 'My Attendance'}
             </h1>
-            <p className="text-slate-600 mt-1">
+            <p className="text-slate-500 mt-1 text-sm font-medium tracking-wide">
               {user && user.role === 'admin' ? 'View and manage attendance for all staff' : 'Track your working hours and attendance history'}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap items-center">
-            {/* Admin: User Filter Dropdown */}
-            {user && user.role === 'admin' && allUsers.length > 0 && (
+            {/* User Filter Dropdown — Admin sees all staff; permitted staff sees only their allowed users */}
+            {(isAdmin || canViewAllAttendance || permittedUserIds.length > 0) && allUsers.length > 0 && (
               <select
                 className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 value={selectedUserId || ''}
@@ -486,7 +575,8 @@ export default function Attendance() {
                   fetchData(val);
                 }}
               >
-                <option value="">All Staff</option>
+                {/* "All Staff" option only available to admin or full can_view_attendance users */}
+                {(isAdmin || canViewAllAttendance) && <option value="">All Staff</option>}
                 {allUsers.map(u => (
                   <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
                 ))}
@@ -510,15 +600,17 @@ export default function Attendance() {
             </Button>
           </div>
         </motion.div>
-        {/* Admin: Viewing As Banner */}
-        {user && user.role === 'admin' && selectedUserId && (
+        {/* Viewing As Banner — shown for admin and permitted staff when a specific user is selected */}
+        {selectedUserId && (
           <motion.div variants={itemVariants}>
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
               <span className="font-semibold">Viewing attendance for:</span>
               <span className="font-bold">{allUsers.find(u => u.id === selectedUserId)?.full_name || selectedUserId}</span>
-              <button className="ml-auto text-blue-500 hover:text-blue-700 underline text-xs" onClick={() => { setSelectedUserId(null); fetchData(null); }}>
-                Clear (Show All)
-              </button>
+              {(isAdmin || canViewAllAttendance) && (
+                <button className="ml-auto text-blue-500 hover:text-blue-700 underline text-xs" onClick={() => { setSelectedUserId(null); fetchData(null); }}>
+                  Clear (Show All)
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -655,11 +747,11 @@ export default function Attendance() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase">This Month</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">This Month</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
                     {currentMonthHours}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">{monthDaysPresent} days present</p>
+                  <p className="text-xs text-slate-400 mt-1 font-medium">{monthDaysPresent} days present</p>
                 </div>
                 <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
                   <Timer className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
@@ -671,11 +763,11 @@ export default function Attendance() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase">Tasks Done</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Tasks Done</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
                     {tasksCompleted}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">this month</p>
+                  <p className="text-xs text-slate-400 mt-1 font-medium">this month</p>
                 </div>
                 <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
                   <CheckCircle2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
@@ -687,11 +779,11 @@ export default function Attendance() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase">Days Late</p>
-                  <p className="text-2xl font-bold mt-1 text-red-500">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Late</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
                     {totalDaysLateThisMonth}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">this month</p>
+                  <p className="text-xs text-slate-400 mt-1 font-medium">this month</p>
                 </div>
                 <div className="p-3 rounded-xl" style={{ backgroundColor: '#fee2e220' }}>
                   <CalendarX className="h-5 w-5" style={{ color: '#ef4444' }} />
@@ -724,12 +816,12 @@ export default function Attendance() {
             <CardContent className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 items-center gap-6">
                 <div className="text-center md:text-left">
-                  <p className="text-sm font-medium text-slate-500 uppercase mb-2">Total Hours Today</p>
-                  <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2">Total Hours Today</p>
+                  <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen, fontVariantNumeric: 'tabular-nums' }}>
                     {liveDuration}
                   </p>
                   {todayAttendance && todayAttendance.punch_in && !todayAttendance.punch_out && (
-                    <p className="text-xs text-emerald-600 mt-2 font-medium">LIVE • updates every minute</p>
+                    <p className="text-xs text-emerald-600 mt-2 font-semibold tracking-widest uppercase">● Live · updates every minute</p>
                   )}
                 </div>
                 <div className="flex justify-center md:justify-end">
@@ -751,20 +843,20 @@ export default function Attendance() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Total Hours</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Total Hours</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
                     {formatDuration(monthTotalMinutes)}
                   </p>
                 </div>
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Days Present</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Present</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
                     {monthDaysPresent}
                   </p>
                 </div>
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Days Late</p>
-                  <p className="text-2xl font-bold mt-1 text-red-500">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Late</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
                     {totalDaysLateThisMonth}
                   </p>
                 </div>
@@ -784,22 +876,25 @@ export default function Attendance() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Total Hours YTD</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
-                    {formatDuration(totalMinutesYTD)}
+                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Total Hours YTD</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
+                    {totalHoursYTDDecimal.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-1">hrs</span>
                   </p>
+                  <p className="text-xs text-slate-400 mt-1">{totalWorkingDaysYTD} working days recorded</p>
                 </div>
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Average Daily Hours</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>
-                    {formatDuration(averageDailyMinutes)}
+                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Avg Daily Hours</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                    {averageDailyHoursDecimal.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-1">hrs</span>
                   </p>
+                  <p className="text-xs text-slate-400 mt-1">per working day</p>
                 </div>
                 <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase">Attendance % (This Month)</p>
-                  <p className="text-2xl font-bold mt-1 text-blue-500">
-                    {attendancePercentage.toFixed(1)}%
+                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Attendance % (This Month)</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight text-blue-600">
+                    {attendancePercentage.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-0.5">%</span>
                   </p>
+                  <p className="text-xs text-slate-400 mt-1">{currentMonthPresentDays} of {workingDaysElapsed} working days</p>
                 </div>
               </div>
               <div className="mt-6 p-4 bg-slate-50 rounded-xl border text-center text-slate-500 text-sm italic">
@@ -879,25 +974,48 @@ export default function Attendance() {
           </div>
           {/* Recent History Table */}
           <Card className="border border-slate-200 shadow-sm xl:col-span-2 h-fit">
-            <CardHeader><CardTitle className="text-lg" style={{ color: COLORS.deepBlue }}>Recent Attendance</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold tracking-tight" style={{ color: COLORS.deepBlue }}>
+                {user && user.role === 'admin' && !selectedUserId ? 'All Staff — Recent Attendance' : 'Recent Attendance'}
+              </CardTitle>
+              {user && user.role === 'admin' && !selectedUserId && (
+                <p className="text-xs text-slate-400 mt-0.5">Showing latest records across all employees. Use the filter above to view a specific person.</p>
+              )}
+            </CardHeader>
             <CardContent>
               {attendanceHistory.length === 0 ? (
-                <p className="text-center py-10 text-slate-500">No records yet</p>
+                <p className="text-center py-10 text-slate-500 font-medium">No records yet</p>
               ) : (
-                <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2">
-                  {attendanceHistory.slice(0, 15).map(record => (
-                    <div key={record.date} className="flex justify-between items-center p-4 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all shadow-sm">
-                      <div>
-                        <p className="font-bold text-slate-800">{format(parseISO(record.date), 'MMM d, yyyy')}</p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'} → {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}
-                        </p>
+                <div className="space-y-3 max-h-[700px] overflow-y-auto pr-2">
+                  {attendanceHistory.slice(0, 15).map((record, idx) => {
+                    // For admin all-staff view, try to find the user's name
+                    const recordUserName = (user && user.role === 'admin' && !selectedUserId && record.user_id)
+                      ? (allUsers.find(u => u.id === record.user_id)?.full_name || record.user_id)
+                      : null;
+                    return (
+                      <div key={`${record.date}-${record.user_id || idx}`} className="flex justify-between items-center p-4 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all shadow-sm">
+                        <div>
+                          {recordUserName && (
+                            <p className="text-xs font-semibold text-blue-700 mb-0.5 uppercase tracking-wide">{recordUserName}</p>
+                          )}
+                          <p className="font-semibold text-slate-800 text-sm">{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
+                          <p className="text-xs text-slate-400 mt-0.5 font-mono">
+                            {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'}
+                            {' → '}
+                            {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant={record.duration_minutes > 0 ? "outline" : "secondary"} className={record.duration_minutes > 0 ? "border-emerald-200 text-emerald-700 bg-emerald-50 px-3 py-0.5 font-mono text-xs" : "text-xs"}>
+                            {formatDuration(record.duration_minutes)}
+                          </Badge>
+                          {record.is_late && (
+                            <span className="text-[10px] font-semibold text-red-500 uppercase tracking-wide">Late</span>
+                          )}
+                        </div>
                       </div>
-                      <Badge variant={record.duration_minutes > 0 ? "outline" : "secondary"} className={record.duration_minutes > 0 ? "border-emerald-200 text-emerald-700 bg-emerald-50 px-4 py-1" : ""}>
-                        {formatDuration(record.duration_minutes)}
-                      </Badge>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
