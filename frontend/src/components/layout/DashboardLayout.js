@@ -237,15 +237,12 @@ const DashboardLayout = ({ children }) => {
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className={`${contentMargin} transition-all duration-300 ease-in-out min-h-screen flex flex-col`}>
 
-        {/* Header */}
+        {/* Header — always white background for full logo visibility & branding */}
         <header
-          className="sticky top-0 z-40 flex-shrink-0"
+          className="sticky top-0 z-40 flex-shrink-0 bg-white"
           style={{
-            background: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.92)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.06)',
-            boxShadow: '0 1px 0 rgba(0,0,0,0.04)',
+            borderBottom: '1px solid rgba(0,0,0,0.07)',
+            boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
           }}
         >
           <div className="flex items-center justify-between px-5 md:px-7 h-14">
@@ -264,7 +261,7 @@ const DashboardLayout = ({ children }) => {
 
             {/* Page Title (desktop) */}
             <div className="hidden lg:block">
-              <span className={`text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className="text-sm font-semibold text-slate-500 uppercase tracking-widest">
                 {visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard'}
               </span>
             </div>
@@ -277,8 +274,8 @@ const DashboardLayout = ({ children }) => {
                 onClick={() => setIsDark(prev => !prev)}
                 className={`h-9 w-9 rounded-xl flex items-center justify-center border transition-all ${
                   isDark
-                    ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700'
-                    : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-slate-800 border-slate-600 text-amber-400 hover:bg-slate-700'
+                    : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
                 }`}
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.92 }}
@@ -292,11 +289,7 @@ const DashboardLayout = ({ children }) => {
               <div className="relative">
                 <motion.button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className={`flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl border transition-all ${
-                    isDark
-                      ? 'border-slate-700 hover:bg-slate-800 text-slate-200'
-                      : 'border-slate-200/80 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
+                  className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all"
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
                 >
@@ -312,7 +305,7 @@ const DashboardLayout = ({ children }) => {
                       </div>
                     )}
                   </div>
-                  <span className={`hidden md:block text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  <span className="hidden md:block text-sm font-semibold text-slate-700">
                     {user?.full_name?.split(' ')[0]}
                   </span>
                   <motion.div
@@ -325,12 +318,12 @@ const DashboardLayout = ({ children }) => {
 
                 {userMenuOpen && (
                   <div
-                    className={`absolute right-0 mt-2 w-56 rounded-2xl py-1.5 z-50 ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white'}`}
+                    className="absolute right-0 mt-2 w-56 bg-white rounded-2xl py-1.5 z-50"
                     style={{
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
                     }}
                   >
-                    <div className="px-4 py-3" style={{ borderBottom: isDark ? '1px solid #1e293b' : '1px solid #f1f5f9' }}>
+                    <div className="px-4 py-3" style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <div className="flex items-center gap-3 mb-2">
                         <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 ring-2 ring-slate-100">
                           {user?.profile_picture ? (
@@ -345,14 +338,14 @@ const DashboardLayout = ({ children }) => {
                           )}
                         </div>
                         <div>
-                          <p className={`font-semibold text-sm ${isDark ? 'text-white' : 'text-slate-800'}`}>{user?.full_name}</p>
-                          <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{user?.email}</p>
+                          <p className="font-semibold text-sm text-slate-800">{user?.full_name}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{user?.email}</p>
                         </div>
                       </div>
                     </div>
                     <button
                       onClick={handleLogout}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors mt-1"
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors mt-1"
                     >
                       <LogOut className="h-4 w-4" />
                       <span className="font-medium">Sign out</span>
