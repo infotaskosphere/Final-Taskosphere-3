@@ -2507,6 +2507,209 @@ async def sync_master_sheets(
   logger.error(f"Sync Failure: {str(e)}")
   raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
 
+# ==============================================================
+# MDS (MCA) EXCEL SMART PARSER — returns pre-filled client form data
+# Handles the MCA "AllMDSData" format:
+#   • MasterData sheet  → key/value rows  (Company Name, Email, CIN, etc.)
+#   • Director Details  → table rows      (DIN, Name, Designation, etc.)
+#   • Any other sheet   → raw table rows  (stored in notes)
+# ==============================================================
+@api_router.post("/clients/parse-mds-excel")
+async def parse_mds_excel_for_client_form(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Parse an MCA / MDS-format Excel file and return a pre-filled client
+    form payload that the frontend can display as an editable preview.
+    Does NOT write anything to the database.
+    """
+    filename = file.filename.lower()
+    if not filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx / .xls) are supported.")
+    try:
+        content = await file.read()
+        excel = pd.ExcelFile(BytesIO(content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not open Excel file: {str(e)}")
+
+    # ── helpers ────────────────────────────────────────────────────────────
+    def clean_email(raw: str) -> str:
+        """Convert MCA-obfuscated emails like info[at]x[dot]com → info@x.com"""
+        if not raw:
+            return ""
+        cleaned = raw.replace("[at]", "@").replace("[dot]", ".").strip()
+        return cleaned if "@" in cleaned else ""
+
+    def clean_phone(raw: str) -> str:
+        """Strip non-digits and return 10-digit phone if possible"""
+        digits = re.sub(r"\D", "", str(raw or ""))
+        # Indian numbers may arrive with country code 91
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        return digits[:10] if len(digits) >= 10 else digits
+
+    def detect_type(name: str) -> str:
+        n = name.lower()
+        if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt limited"]):
+            return "pvt_ltd"
+        if any(x in n for x in ["limited liability partnership", "llp"]):
+            return "llp"
+        if any(x in n for x in [" ltd", " limited"]):
+            return "pvt_ltd"
+        if "partnership" in n:
+            return "partnership"
+        if "huf" in n:
+            return "huf"
+        if "trust" in n:
+            return "trust"
+        return "proprietor"
+
+    def parse_date(raw: str) -> str:
+        """Parse various date formats and return yyyy-MM-dd or ''"""
+        if not raw or str(raw).strip() in ("", "-", "N/A"):
+            return ""
+        try:
+            return parser.parse(str(raw).strip()).strftime("%Y-%m-%d")
+        except Exception:
+            return ""
+
+    # ── sheet parsing ───────────────────────────────────────────────────────
+    company_info: dict = {}      # from key-value master sheet
+    directors: list = []         # from Director Details sheet
+    extra_notes_parts: list = [] # raw data from other sheets
+
+    for sheet_name in excel.sheet_names:
+        df = pd.read_excel(excel, sheet_name=sheet_name, header=None).fillna("")
+
+        sheet_lower = sheet_name.lower().strip()
+
+        # ── MasterData (or any sheet whose first cell is a section heading,
+        #    not a column header) — treat as key/value pairs ──────────────
+        if "master" in sheet_lower or "company" in sheet_lower or sheet_lower == "masterdata":
+            for _, row in df.iterrows():
+                key   = str(row.iloc[0]).strip()
+                value = str(row.iloc[1]).strip() if len(row) > 1 else ""
+                if key and key not in ("", "nan") and value not in ("", "nan"):
+                    company_info[key] = value
+
+        # ── Director / Signatory Details ───────────────────────────────────
+        elif "director" in sheet_lower or "signatory" in sheet_lower:
+            # First row is title, second row is column headers
+            rows_list = df.values.tolist()
+            if len(rows_list) < 2:
+                continue
+            headers = [str(h).strip() for h in rows_list[1]]
+            for row in rows_list[2:]:
+                row_dict = {headers[i]: str(row[i]).strip() for i in range(len(headers))}
+                name = row_dict.get("Name", "").strip()
+                if not name or name in ("nan", ""):
+                    continue
+                din = row_dict.get("DIN/PAN", "") or row_dict.get("DIN", "")
+                designation = row_dict.get("Designation", "")
+                appointment = parse_date(row_dict.get("Date of Appointment", ""))
+                directors.append({
+                    "name": name,
+                    "designation": designation or "Director",
+                    "email": None,
+                    "phone": None,
+                    "birthday": None,
+                    "din": din if din not in ("nan", "-", "") else None,
+                })
+
+        # ── Any other sheet — capture as plain notes ───────────────────────
+        else:
+            rows_list = df.values.tolist()
+            if len(rows_list) >= 2:
+                cols = [str(c).strip() for c in rows_list[0]]
+                data_rows = []
+                for row in rows_list[1:]:
+                    vals = [str(v).strip() for v in row]
+                    if any(v not in ("", "nan", "-") for v in vals):
+                        data_rows.append(dict(zip(cols, vals)))
+                if data_rows:
+                    extra_notes_parts.append(f"[{sheet_name}]")
+                    for r in data_rows[:10]:  # cap at 10 rows for notes
+                        extra_notes_parts.append(
+                            " | ".join(f"{k}: {v}" for k, v in r.items() if v not in ("", "nan", "-"))
+                        )
+
+    # ── Build structured client payload ────────────────────────────────────
+    company_name = (
+        company_info.get("Company Name")
+        or company_info.get("company_name")
+        or ""
+    ).strip()
+
+    raw_email = (
+        company_info.get("Email Id")
+        or company_info.get("Email")
+        or company_info.get("email")
+        or ""
+    )
+    email = clean_email(raw_email)
+
+    raw_phone = (
+        company_info.get("Phone")
+        or company_info.get("Mobile")
+        or company_info.get("Contact")
+        or ""
+    )
+    phone = clean_phone(raw_phone)
+
+    raw_doi = (
+        company_info.get("Date of Incorporation")
+        or company_info.get("Incorporation Date")
+        or ""
+    )
+    birthday = parse_date(raw_doi)
+
+    client_type = detect_type(company_name)
+
+    # Build notes from CIN, address, authorised capital, etc.
+    notes_lines = []
+    cin = company_info.get("CIN", "")
+    if cin and cin not in ("-", "nan"):
+        notes_lines.append(f"CIN: {cin}")
+    reg_no = company_info.get("Registration Number", "")
+    if reg_no and reg_no not in ("-", "nan"):
+        notes_lines.append(f"Reg No: {reg_no}")
+    address = company_info.get("Registered Address", "")
+    if address and address not in ("-", "nan"):
+        notes_lines.append(f"Address: {address}")
+    auth_cap = company_info.get("Authorised Capital (Rs)", "")
+    if auth_cap and auth_cap not in ("-", "nan"):
+        notes_lines.append(f"Authorised Capital: ₹{auth_cap}")
+    paid_cap = company_info.get("Paid up Capital (Rs)", "")
+    if paid_cap and paid_cap not in ("-", "nan"):
+        notes_lines.append(f"Paid-up Capital: ₹{paid_cap}")
+    if extra_notes_parts:
+        notes_lines.append("\n".join(extra_notes_parts))
+
+    notes = "\n".join(notes_lines)
+
+    status_raw = company_info.get("Company Status", "Active").lower()
+    status = "active" if "active" in status_raw else "inactive"
+
+    # ── Return the editable preview payload ───────────────────────────────
+    return {
+        "status": "ok",
+        "company_name": company_name,
+        "client_type": client_type,
+        "email": email,
+        "phone": phone,
+        "birthday": birthday,
+        "services": [],
+        "notes": notes,
+        "status_value": status,
+        "contact_persons": directors,
+        "dsc_details": [],
+        "assigned_to": "unassigned",
+        # raw info for the preview table
+        "raw_company_info": company_info,
+        "sheets_parsed": excel.sheet_names,
+    }
+
 @api_router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
  client = Client(**client_data.model_dump(), created_by=current_user.id)
