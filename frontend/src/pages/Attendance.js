@@ -1,8 +1,3 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// TASKOSPHERE ATTENDANCE MANAGEMENT SYSTEM
-// Complete rewrite with timezone fix + enhanced design + production-grade code
-// ═══════════════════════════════════════════════════════════════════════════════
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
