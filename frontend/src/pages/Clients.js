@@ -15,7 +15,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Edit, Trash2, Mail, Cake, X, UserPlus,
   FileText, Calendar, Search, Users,
-  Briefcase, BarChart3, Archive, MessageCircle, Trash
+  Briefcase, BarChart3, Archive, MessageCircle, Trash,
+  CheckCircle2, AlertCircle, Building2, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
@@ -86,9 +87,18 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
+  // Generic Excel preview (unchanged)
   const [previewData, setPreviewData] = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // ── NEW: MDS-specific editable preview states ──────────────────────────
+  const [mdsPreviewOpen, setMdsPreviewOpen] = useState(false);
+  const [mdsPreviewLoading, setMdsPreviewLoading] = useState(false);
+  const [mdsData, setMdsData] = useState(null);           // raw server response
+  const [mdsForm, setMdsForm] = useState(null);           // editable copy
+  const [mdsRawInfoOpen, setMdsRawInfoOpen] = useState(false); // accordion
+  // ──────────────────────────────────────────────────────────────────────
+  // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -291,45 +301,123 @@ export default function Clients() {
     }
   };
 
-  const handleImportExcel = (event) => {
+  // ── UPDATED: handleImportExcel — now calls backend parse-mds-excel ─────
+  const handleImportExcel = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    setImportLoading(true);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const workbook = XLSX.read(e.target.result, { type: 'binary' });
-      const normalizeHeader = (header) => {
-        if (!header) return '';
-        return header.toString().toLowerCase().replace(/\s+/g, '*');
-      };
-      let combinedRows = [];
-      workbook.SheetNames.forEach(sheetName => {
-        const sheet = workbook.Sheets[sheetName];
-        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-        if (rawRows.length < 2) return;
-        const headers = rawRows[0].map(normalizeHeader);
-        for (let i = 1; i < rawRows.length; i++) {
-          const rowArray = rawRows[i];
-          if (rowArray.every(cell => cell === '')) continue;
-          let row = {};
-          headers.forEach((h, idx) => { row[h] = rowArray[idx]; });
-          const companyName = row.company_name || row.companyname || row['company name'] || '';
-          if (!companyName) continue;
-          const detectedType = detectClientTypeFromName(companyName);
-          combinedRows.push({
-            sheet: sheetName, company_name: companyName,
-            client_type: row.client_type || detectedType,
-            email: row.email || '', phone: row.phone || '',
-            birthday: row.birthday || '', services: row.services || '', notes: row.notes || ''
-          });
-        }
+    if (excelInputRef.current) excelInputRef.current.value = '';
+
+    setMdsPreviewLoading(true);
+    setMdsPreviewOpen(true);
+    setMdsData(null);
+    setMdsForm(null);
+
+    const formPayload = new FormData();
+    formPayload.append('file', file);
+
+    try {
+      const response = await api.post('/clients/parse-mds-excel', formPayload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setPreviewHeaders(['sheet','company_name','client_type','email','phone','birthday','services','notes']);
-      setPreviewData(combinedRows);
-      setPreviewOpen(true);
-      setImportLoading(false);
-    };
-    reader.readAsBinaryString(file);
+      const data = response.data;
+      setMdsData(data);
+
+      // Build editable form state from server response
+      const contacts = (data.contact_persons || []).map(cp => ({
+        name: cp.name || '',
+        designation: cp.designation || '',
+        email: cp.email || '',
+        phone: cp.phone || '',
+        birthday: cp.birthday || '',
+        din: cp.din || '',
+      }));
+      if (contacts.length === 0) {
+        contacts.push({ name: '', designation: '', email: '', phone: '', birthday: '', din: '' });
+      }
+
+      setMdsForm({
+        company_name: data.company_name || '',
+        client_type: data.client_type || 'proprietor',
+        email: data.email || '',
+        phone: data.phone || '',
+        birthday: data.birthday || '',
+        services: data.services || [],
+        notes: data.notes || '',
+        status: data.status_value || 'active',
+        contact_persons: contacts,
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to parse Excel file');
+      setMdsPreviewOpen(false);
+    } finally {
+      setMdsPreviewLoading(false);
+    }
+  };
+
+  // ── Confirm MDS preview → populate main form and open client dialog ────
+  const handleMdsConfirm = async (saveDirectly = false) => {
+    if (!mdsForm) return;
+
+    if (saveDirectly) {
+      // Save directly via API
+      setImportLoading(true);
+      try {
+        const contacts = mdsForm.contact_persons
+          .filter(cp => cp.name?.trim())
+          .map(cp => ({
+            name: cp.name.trim(),
+            designation: cp.designation?.trim() || null,
+            email: cp.email?.trim() || null,
+            phone: cp.phone?.replace(/\D/g, '') || null,
+            birthday: cp.birthday ? cp.birthday : null,
+            din: cp.din?.trim() || null,
+          }));
+
+        await api.post('/clients', {
+          company_name: mdsForm.company_name.trim(),
+          client_type: mdsForm.client_type,
+          email: mdsForm.email?.trim() || '',
+          phone: mdsForm.phone?.replace(/\D/g, '') || '',
+          birthday: mdsForm.birthday || null,
+          services: mdsForm.services || [],
+          notes: mdsForm.notes?.trim() || null,
+          status: mdsForm.status,
+          contact_persons: contacts,
+          dsc_details: [],
+          assigned_to: null,
+        });
+        toast.success(`Client "${mdsForm.company_name}" saved successfully!`);
+        fetchClients();
+        setMdsPreviewOpen(false);
+      } catch (err) {
+        toast.error(err.response?.data?.detail || 'Failed to save client');
+      } finally {
+        setImportLoading(false);
+      }
+    } else {
+      // Populate the main Add Client form and open it for full editing
+      setFormData({
+        company_name: mdsForm.company_name || '',
+        client_type: mdsForm.client_type || 'proprietor',
+        email: mdsForm.email || '',
+        phone: mdsForm.phone || '',
+        birthday: mdsForm.birthday || '',
+        services: mdsForm.services || [],
+        notes: mdsForm.notes || '',
+        status: mdsForm.status || 'active',
+        contact_persons: mdsForm.contact_persons.length > 0
+          ? mdsForm.contact_persons
+          : [{ name: '', designation: '', email: '', phone: '', birthday: '', din: '' }],
+        dsc_details: [],
+        assigned_to: 'unassigned',
+      });
+      setEditingClient(null);
+      setFormErrors({});
+      setContactErrors([]);
+      setMdsPreviewOpen(false);
+      setDialogOpen(true);
+      toast.info('Form pre-filled from Excel — review and save when ready.');
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -481,27 +569,20 @@ export default function Clients() {
     const typeBadgeCls = TYPE_BADGE[client.client_type] || TYPE_BADGE.proprietor;
     const avatarGrad = getAvatarGradient(client.company_name);
     const serviceCount = client.services?.length || 0;
-    const contactCount = client.contact_persons?.length || 0;
 
     return (
       <div style={style} className="p-3 box-border">
         <div className="h-full w-full bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-xl hover:border-slate-200 hover:-translate-y-1 transition-all duration-300 group relative flex flex-col"
           style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-
-          {/* Top accent bar — unique per type */}
           <div className="h-1 w-full flex-shrink-0">
             <div className="h-full w-full" style={{ background: avatarGrad }} />
           </div>
-
-          {/* Archived badge */}
           {client.status === 'inactive' && (
             <div className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-600 border border-amber-200 rounded-full z-10">
               Archived
             </div>
           )}
-
           <div className="p-5 flex flex-col flex-1">
-            {/* Header */}
             <div className="flex items-start gap-3 mb-4">
               <div className="flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm"
                 style={{ background: avatarGrad }}>
@@ -509,20 +590,14 @@ export default function Clients() {
               </div>
               <div className="flex-1 min-w-0 pt-0.5">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <span className="font-mono text-[10px] text-slate-300 font-medium">
-                    #{getClientNumber(index)}
-                  </span>
+                  <span className="font-mono text-[10px] text-slate-300 font-medium">#{getClientNumber(index)}</span>
                 </div>
-                <h3 className="font-semibold text-sm leading-snug text-slate-900 truncate pr-8">
-                  {client.company_name}
-                </h3>
+                <h3 className="font-semibold text-sm leading-snug text-slate-900 truncate pr-8">{client.company_name}</h3>
                 <span className={`inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-md border ${typeBadgeCls}`}>
                   {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
                 </span>
               </div>
             </div>
-
-            {/* Contact Info */}
             <div className="space-y-2 text-xs text-slate-500 flex-1">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -537,8 +612,6 @@ export default function Clients() {
                 <span className="truncate">{client.email || '—'}</span>
               </div>
             </div>
-
-            {/* Footer */}
             <div className="mt-4 pt-3.5 border-t border-slate-50 flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 {client.services?.slice(0, 2).map((svc, i) => (
@@ -552,8 +625,6 @@ export default function Clients() {
                   </span>
                 )}
               </div>
-
-              {/* Action Buttons — shown on hover */}
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
                 <button
                   onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
@@ -591,11 +662,10 @@ export default function Clients() {
     );
   };
 
-  // ── INPUT / FIELD HELPERS ────────────────────────────────────────────────
   const fieldCls = (hasError) =>
     `h-11 bg-white rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
-
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
+  const mdsFieldCls = "h-10 bg-white rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3";
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
@@ -615,35 +685,24 @@ export default function Clients() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={downloadTemplate}
-            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl gap-2"
-          >
+          <Button variant="outline" onClick={downloadTemplate}
+            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl gap-2">
             <FileText className="h-4 w-4" /> CSV Template
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importLoading}
-            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl"
-          >
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading}
+            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl">
             {importLoading ? 'Importing…' : 'Import CSV'}
           </Button>
 
           {/* ── New Client Dialog ─── */}
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
-              <Button
-                className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
-                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-              >
+              <Button className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
+                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
                 <Plus className="h-4 w-4" /> New Client
               </Button>
             </DialogTrigger>
-
             <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
-              {/* Dialog Header Bar */}
               <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
                 <div>
                   <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
@@ -664,82 +723,48 @@ export default function Clients() {
                   </span>
                 </div>
               </div>
-
               <form onSubmit={handleSubmit} className="p-8 space-y-7">
-
-                {/* ── Basic Details ── */}
+                {/* Basic Details */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Company Name <span className="text-red-400">*</span></label>
-                      <Input
-                        className={fieldCls(formErrors.company_name)}
-                        value={formData.company_name}
-                        onChange={e => {
-                          setFormData({...formData, company_name: e.target.value});
-                          if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined}));
-                        }}
-                        required
-                      />
+                      <Input className={fieldCls(formErrors.company_name)} value={formData.company_name}
+                        onChange={e => { setFormData({...formData, company_name: e.target.value}); if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined})); }} required />
                       {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
                     </div>
                     <div>
                       <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
                       <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
-                        <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                        </SelectContent>
+                        <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div>
                       <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
-                      <Input
-                        className={fieldCls(formErrors.email)}
-                        type="email"
-                        value={formData.email}
-                        onChange={e => {
-                          setFormData({...formData, email: e.target.value});
-                          if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined}));
-                        }}
-                        required
-                      />
+                      <Input className={fieldCls(formErrors.email)} type="email" value={formData.email}
+                        onChange={e => { setFormData({...formData, email: e.target.value}); if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined})); }} required />
                       {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
                     </div>
                     <div>
                       <label className={labelCls}>Phone Number <span className="text-red-400">*</span></label>
-                      <Input
-                        className={fieldCls(formErrors.phone)}
-                        value={formData.phone}
-                        onChange={e => {
-                          setFormData({...formData, phone: e.target.value});
-                          if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined}));
-                        }}
-                        required
-                      />
+                      <Input className={fieldCls(formErrors.phone)} value={formData.phone}
+                        onChange={e => { setFormData({...formData, phone: e.target.value}); if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined})); }} required />
                       {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
                     </div>
                     <div className="md:col-span-2">
                       <label className={labelCls}>Incorporation / Birthday</label>
-                      <Input
-                        className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                        type="date"
-                        value={formData.birthday}
-                        onChange={e => setFormData({...formData, birthday: e.target.value})}
-                      />
+                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
+                        value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                     </div>
                   </div>
                 </div>
-
-                {/* ── Contact Persons ── */}
+                {/* Contact Persons */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-5">
                     <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with" />
-                    <Button type="button" size="sm" onClick={addContact} variant="outline"
-                      className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                    <Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
                       <Plus className="h-3 w-3 mr-1" /> Add Person
                     </Button>
                   </div>
@@ -753,9 +778,7 @@ export default function Clients() {
                       <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">
-                              {idx + 1}
-                            </div>
+                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
                             <span className="text-sm font-semibold text-slate-700">Contact Person</span>
                           </div>
                           {formData.contact_persons.length > 1 && (
@@ -768,49 +791,41 @@ export default function Clients() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className={labelCls}>Full Name</label>
-                            <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)}
-                              className={fieldCls(contactErrors[idx]?.name)} />
+                            <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)} className={fieldCls(contactErrors[idx]?.name)} />
                             {contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}
                           </div>
                           <div>
                             <label className={labelCls}>Designation</label>
-                            <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)}
-                              className={fieldCls(false)} />
+                            <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)} className={fieldCls(false)} />
                           </div>
                           <div>
                             <label className={labelCls}>Email</label>
-                            <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)}
-                              className={fieldCls(contactErrors[idx]?.email)} />
+                            <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)} className={fieldCls(contactErrors[idx]?.email)} />
                             {contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}
                           </div>
                           <div>
                             <label className={labelCls}>Phone</label>
-                            <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)}
-                              className={fieldCls(contactErrors[idx]?.phone)} />
+                            <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} className={fieldCls(contactErrors[idx]?.phone)} />
                             {contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}
                           </div>
                           <div>
                             <label className={labelCls}>Birthday</label>
-                            <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)}
-                              className={fieldCls(false)} />
+                            <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={fieldCls(false)} />
                           </div>
                           <div>
                             <label className={labelCls}>DIN (Director ID)</label>
-                            <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)}
-                              className={fieldCls(false)} />
+                            <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)} className={fieldCls(false)} />
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-
-                {/* ── DSC Details ── */}
+                {/* DSC Details */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-5">
                     <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" />
-                    <Button type="button" size="sm" onClick={addDSC} variant="outline"
-                      className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                    <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
                       <Plus className="h-3 w-3 mr-1" /> Add DSC
                     </Button>
                   </div>
@@ -819,9 +834,7 @@ export default function Clients() {
                       <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">
-                              {idx + 1}
-                            </div>
+                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
                             <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
                           </div>
                           {formData.dsc_details.length > 1 && (
@@ -858,8 +871,7 @@ export default function Clients() {
                     ))}
                   </div>
                 </div>
-
-                {/* ── Services ── */}
+                {/* Services */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
                   {formErrors.services && (
@@ -869,20 +881,11 @@ export default function Clients() {
                   )}
                   <div className="flex flex-wrap gap-2">
                     {SERVICES.map(s => {
-                      const isSelected = formData.services.includes(s) ||
-                        (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
+                      const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
                       return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => toggleService(s)}
-                          className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
-                            isSelected
-                              ? 'text-white border-transparent shadow-sm'
-                              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                          style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}
-                        >
+                        <button key={s} type="button" onClick={() => toggleService(s)}
+                          className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
+                          style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
                           {s}
                         </button>
                       );
@@ -902,57 +905,37 @@ export default function Clients() {
                     </div>
                   )}
                 </div>
-
-                {/* ── Notes ── */}
+                {/* Notes */}
                 <div>
                   <label className={labelCls}>Internal Notes</label>
-                  <Textarea
-                    className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
+                  <Textarea className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
                     placeholder="Internal remarks, preferences, or special instructions…"
-                    value={formData.notes}
-                    onChange={e => setFormData({...formData, notes: e.target.value})}
-                  />
+                    value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                 </div>
-
-                {/* ── Assign To ── */}
+                {/* Assign To */}
                 {canAssignClients && (
                   <div>
                     <label className={labelCls}>Assign To Staff</label>
                     <Select value={formData.assigned_to} onValueChange={v => setFormData({...formData, assigned_to: v})}>
-                      <SelectTrigger className="h-11 rounded-xl border-slate-200 text-sm bg-white">
-                        <SelectValue placeholder="Select team member" />
-                      </SelectTrigger>
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 text-sm bg-white"><SelectValue placeholder="Select team member" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
-                        {users.map(u => (
-                          <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
-                        ))}
+                        {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
-
-                {/* ── Footer ── */}
+                {/* Footer */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
                   <div className="flex gap-2">
-                    <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}
-                      className="h-9 px-4 text-sm rounded-xl text-slate-500">
-                      Cancel
-                    </Button>
-                    <Button type="button" variant="outline" onClick={downloadTemplate}
-                      className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">
-                      CSV Template
-                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="h-9 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
+                    <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
-                      onClick={() => fileInputRef.current?.click()}>
-                      Import CSV
-                    </Button>
+                      onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
                     <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
-                      disabled={importLoading} onClick={() => excelInputRef.current?.click()}>
-                      Import Excel
-                    </Button>
+                      disabled={importLoading} onClick={() => excelInputRef.current?.click()}>Import Master Data</Button>
                     <Button type="submit" disabled={loading}
                       className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm"
                       style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
@@ -990,40 +973,20 @@ export default function Clients() {
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            {
-              label: 'Total Clients', value: stats.totalClients,
-              icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66',
-              accent: 'linear-gradient(135deg, #0D3B66, #1F6FB2)',
-            },
-            {
-              label: 'Active', value: stats.activeClients,
-              icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A',
-              accent: 'linear-gradient(135deg, #065f46, #059669)',
-            },
-            {
-              label: 'Archived', value: stats.totalClients - stats.activeClients,
-              icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706',
-              accent: 'linear-gradient(135deg, #92400e, #D97706)',
-            },
-            {
-              label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A',
-              icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed',
-              accent: 'linear-gradient(135deg, #4c1d95, #7c3aed)', isText: true,
-            },
+            { label: 'Total Clients', value: stats.totalClients, icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66', accent: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' },
+            { label: 'Active', value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A', accent: 'linear-gradient(135deg, #065f46, #059669)' },
+            { label: 'Archived', value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', accent: 'linear-gradient(135deg, #92400e, #D97706)' },
+            { label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', accent: 'linear-gradient(135deg, #4c1d95, #7c3aed)', isText: true },
           ].map((s, i) => (
             <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-shadow"
               style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
               <div className="flex items-start justify-between mb-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: s.iconBg, color: s.iconColor }}>
-                  {s.icon}
-                </div>
+                  style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div>
                 <div className="w-1 h-8 rounded-full opacity-30" style={{ background: s.accent }} />
               </div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
-              <p className={`font-bold text-slate-900 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>
-                {s.value}
-              </p>
+              <p className={`font-bold text-slate-900 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>{s.value}</p>
             </div>
           ))}
         </div>
@@ -1033,18 +996,13 @@ export default function Clients() {
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder="Search by company, email or phone…"
+          <Input placeholder="Search by company, email or phone…"
             className="pl-11 h-10 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-          />
+            value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-10 w-[120px] bg-slate-50 border-none rounded-xl text-sm">
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger className="h-10 w-[120px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Archived</SelectItem>
@@ -1052,15 +1010,12 @@ export default function Clients() {
             </SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className="h-10 w-[150px] bg-slate-50 border-none rounded-xl text-sm">
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger className="h-10 w-[150px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Services</SelectItem>
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
-          {/* Results count pill */}
           <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
             {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
           </div>
@@ -1078,23 +1033,11 @@ export default function Clients() {
               const rowHeight = 240;
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
-                <Grid
-                  columnCount={columnCount}
-                  columnWidth={columnWidth}
-                  height={height}
-                  rowCount={rowCount}
-                  rowHeight={rowHeight}
-                  width={width}
-                  overscanColumnCount={2}
-                  overscanRowCount={4}
-                >
+                <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
+                  rowCount={rowCount} rowHeight={rowHeight} width={width}
+                  overscanColumnCount={2} overscanRowCount={4}>
                   {({ columnIndex, rowIndex, style }) => (
-                    <ClientCard
-                      columnIndex={columnIndex}
-                      rowIndex={rowIndex}
-                      style={style}
-                      columnCount={columnCount}
-                    />
+                    <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
                   )}
                 </Grid>
               );
@@ -1113,9 +1056,9 @@ export default function Clients() {
 
       {/* Hidden file inputs */}
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
-      <input type="file" ref={excelInputRef} accept=".xlsx" onChange={handleImportExcel} className="hidden" />
+      <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
-      {/* ── Excel Preview Dialog ──────────────────────────────────────────── */}
+      {/* ── Generic Excel Preview Dialog (unchanged) ─────────────────────── */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
           <DialogHeader className="pb-4 border-b border-slate-100">
@@ -1127,9 +1070,7 @@ export default function Clients() {
               <thead className="bg-slate-50 sticky top-0 border-b border-slate-100">
                 <tr>
                   {previewHeaders.map(h => (
-                    <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
-                      {h}
-                    </th>
+                    <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1138,15 +1079,9 @@ export default function Clients() {
                   <tr key={rowIndex} className="hover:bg-slate-50 transition-colors">
                     {previewHeaders.map(header => (
                       <td key={header} className="p-2">
-                        <Input
-                          value={row[header] || ''}
-                          onChange={e => {
-                            const updated = [...previewData];
-                            updated[rowIndex][header] = e.target.value;
-                            setPreviewData(updated);
-                          }}
-                          className="h-8 text-xs rounded-lg border-slate-200"
-                        />
+                        <Input value={row[header] || ''} onChange={e => {
+                          const updated = [...previewData]; updated[rowIndex][header] = e.target.value; setPreviewData(updated);
+                        }} className="h-8 text-xs rounded-lg border-slate-200" />
                       </td>
                     ))}
                   </tr>
@@ -1157,45 +1092,291 @@ export default function Clients() {
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">
             <span className="text-xs text-slate-400">{previewData.length} rows ready to import</span>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">
-                Cancel
-              </Button>
-              <Button
-                className="h-9 px-5 text-sm rounded-xl text-white font-semibold"
+              <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">Cancel</Button>
+              <Button className="h-9 px-5 text-sm rounded-xl text-white font-semibold"
                 style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
                 onClick={async () => {
                   setImportLoading(true);
                   let success = 0;
                   for (let row of previewData) {
-                    const exists = clients.find(c =>
-                      c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim()
-                    );
+                    const exists = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
                     if (exists) { console.log("Skipping duplicate:", row.company_name); continue; }
                     try {
                       await api.post('/clients', {
                         company_name: row.company_name?.trim(),
-                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type)
-                          ? row.client_type : 'proprietor',
-                        email: row.email?.trim(),
-                        phone: row.phone?.replace(/\D/g, ""),
-                        birthday: row.birthday || null,
+                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
+                        email: row.email?.trim(), phone: row.phone?.replace(/\D/g, ""), birthday: row.birthday || null,
                         services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-                        notes: row.notes?.trim() || null,
-                        assigned_to: null, contact_persons: [], dsc_details: []
+                        notes: row.notes?.trim() || null, assigned_to: null, contact_persons: [], dsc_details: []
                       });
                       success++;
                     } catch (err) { console.error(err); }
                   }
                   toast.success(`${success} clients imported successfully`);
                   fetchClients(); setPreviewOpen(false); setImportLoading(false);
-                }}
-              >
+                }}>
                 Confirm & Import All
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          MDS EXCEL SMART PREVIEW DIALOG
+          Shows parsed company + directors in editable form fields.
+          Two actions: "Open in Form" (for full editing) or "Save Now"
+      ══════════════════════════════════════════════════════════════════ */}
+      <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+
+          {/* Header */}
+          <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-7 py-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-bold text-slate-900">MCA / MDS Data Preview</DialogTitle>
+                <DialogDescription className="text-xs text-slate-400 mt-0.5">
+                  Review and edit the parsed data before saving
+                  {mdsData?.sheets_parsed && (
+                    <span className="ml-2 text-blue-500 font-medium">
+                      · {mdsData.sheets_parsed.length} sheet{mdsData.sheets_parsed.length !== 1 ? 's' : ''} parsed
+                    </span>
+                  )}
+                </DialogDescription>
+              </div>
+            </div>
+          </div>
+
+          {/* Loading state */}
+          {mdsPreviewLoading && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
+              <p className="text-sm text-slate-500 font-medium">Parsing Excel sheets…</p>
+              <p className="text-xs text-slate-400">Reading company info, directors, and charges</p>
+            </div>
+          )}
+
+          {/* Editable form */}
+          {!mdsPreviewLoading && mdsForm && (
+            <div className="p-7 space-y-6">
+
+              {/* ── Company Info ── */}
+              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
+                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                    <Briefcase className="h-3.5 w-3.5" />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-800">Company Details</h4>
+                  <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                    style={mdsForm.status === 'active'
+                      ? { background: '#f0fdf4', color: '#166534', borderColor: '#bbf7d0' }
+                      : { background: '#fffbeb', color: '#92400e', borderColor: '#fde68a' }}>
+                    {mdsForm.status === 'active' ? '● Active' : '● Archived'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className={labelCls}>Company Name</label>
+                    <input className={mdsFieldCls} value={mdsForm.company_name}
+                      onChange={e => setMdsForm(f => ({ ...f, company_name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Client Type</label>
+                    <select className={`${mdsFieldCls} appearance-none`} value={mdsForm.client_type}
+                      onChange={e => setMdsForm(f => ({ ...f, client_type: e.target.value }))}>
+                      {CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Incorporation Date</label>
+                    <input type="date" className={mdsFieldCls} value={mdsForm.birthday}
+                      onChange={e => setMdsForm(f => ({ ...f, birthday: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Email</label>
+                    <input type="email" className={mdsFieldCls} value={mdsForm.email}
+                      onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))}
+                      placeholder="Enter email address" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Phone</label>
+                    <input className={mdsFieldCls} value={mdsForm.phone}
+                      onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))}
+                      placeholder="10-digit phone number" />
+                  </div>
+                </div>
+
+                {/* Services in preview */}
+                <div className="mt-4">
+                  <label className={labelCls}>Services (select applicable)</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {SERVICES.map(s => {
+                      const sel = mdsForm.services?.includes(s);
+                      return (
+                        <button key={s} type="button"
+                          onClick={() => setMdsForm(f => ({
+                            ...f,
+                            services: sel ? f.services.filter(x => x !== s) : [...(f.services || []), s]
+                          }))}
+                          className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                          style={sel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
+                          {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Directors / Contact Persons ── */}
+              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
+                      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                      <Users className="h-3.5 w-3.5" />
+                    </div>
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      Directors / Contact Persons
+                      <span className="ml-2 text-[10px] font-normal text-slate-400">
+                        ({mdsForm.contact_persons.filter(c => c.name?.trim()).length} parsed)
+                      </span>
+                    </h4>
+                  </div>
+                  <button type="button"
+                    onClick={() => setMdsForm(f => ({
+                      ...f,
+                      contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }]
+                    }))}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors">
+                    <Plus className="h-3 w-3" /> Add
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {mdsForm.contact_persons.map((cp, idx) => (
+                    <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                          <span className="text-xs font-semibold text-slate-600">{cp.name || `Contact ${idx + 1}`}</span>
+                        </div>
+                        <button type="button"
+                          onClick={() => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.filter((_, i) => i !== idx) }))}
+                          className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                          <Trash className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className={labelCls}>Name</label>
+                          <input className={mdsFieldCls} value={cp.name}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, name: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Designation</label>
+                          <input className={mdsFieldCls} value={cp.designation}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, designation: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>DIN / PAN</label>
+                          <input className={mdsFieldCls} value={cp.din || ''}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, din: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Email</label>
+                          <input type="email" className={mdsFieldCls} value={cp.email || ''}
+                            placeholder="Optional"
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, email: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Phone</label>
+                          <input className={mdsFieldCls} value={cp.phone || ''}
+                            placeholder="Optional"
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, phone: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Birthday</label>
+                          <input type="date" className={mdsFieldCls} value={cp.birthday || ''}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, birthday: e.target.value } : c) }))} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Notes (pre-filled from CIN / Address / Capitals) ── */}
+              <div>
+                <label className={labelCls}>Notes (pre-filled from Excel)</label>
+                <textarea
+                  className="w-full min-h-[90px] bg-white border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors"
+                  value={mdsForm.notes}
+                  onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))}
+                />
+              </div>
+
+              {/* ── Raw Company Info Accordion ── */}
+              {mdsData?.raw_company_info && Object.keys(mdsData.raw_company_info).length > 0 && (
+                <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                  <button type="button"
+                    onClick={() => setMdsRawInfoOpen(o => !o)}
+                    className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-600">Raw Excel Data</span>
+                      <span className="text-[10px] text-slate-400">({Object.keys(mdsData.raw_company_info).length} fields extracted)</span>
+                    </div>
+                    {mdsRawInfoOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </button>
+                  {mdsRawInfoOpen && (
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto bg-white">
+                      {Object.entries(mdsData.raw_company_info).map(([key, val]) => (
+                        <div key={key} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg hover:bg-slate-50">
+                          <span className="text-slate-400 font-medium min-w-[120px] flex-shrink-0">{key}</span>
+                          <span className="text-slate-700 font-medium break-all">{String(val)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Action Buttons ── */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                <Button type="button" variant="ghost"
+                  onClick={() => { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); }}
+                  className="h-10 px-4 text-sm rounded-xl text-slate-500">
+                  Cancel
+                </Button>
+                <div className="flex gap-2">
+                  {/* Open in full form for further editing */}
+                  <Button type="button" variant="outline"
+                    onClick={() => handleMdsConfirm(false)}
+                    className="h-10 px-5 text-sm rounded-xl border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 gap-2">
+                    <Edit className="h-4 w-4" />
+                    Open in Full Form
+                  </Button>
+                  {/* Save directly */}
+                  <Button type="button" disabled={importLoading}
+                    onClick={() => handleMdsConfirm(true)}
+                    className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2"
+                    style={{ background: importLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                    <CheckCircle2 className="h-4 w-4" />
+                    {importLoading ? 'Saving…' : 'Save Client'}
+                  </Button>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
