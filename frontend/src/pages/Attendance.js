@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
@@ -112,6 +111,12 @@ export default function Attendance() {
   const [holidays, setHolidays] = useState([]);
   const [liveDuration, setLiveDuration] = useState('0h 0m');
   const [pendingHolidays, setPendingHolidays] = useState([]);
+  // Admin: user list + selected user for filtering
+  const [allUsers, setAllUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [holidayName, setHolidayName] = useState('');
+  const [holidayDate, setHolidayDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   // ─── Effects ─────────────────────────────────────────────────
   useEffect(() => {
     fetchData();
@@ -140,11 +145,13 @@ export default function Attendance() {
     }
   }, [todayAttendance]);
   // ─── Data Fetching ───────────────────────────────────────────
-  const fetchData = async () => {
+  const fetchData = async (overrideUserId) => {
     setLoading(true);
+    const targetUserId = overrideUserId !== undefined ? overrideUserId : selectedUserId;
     try {
+      const historyUrl = targetUserId ? `/attendance/history?user_id=${targetUserId}` : '/attendance/history';
       const requests = [
-        api.get('/attendance/history'),
+        api.get(historyUrl),
         api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
         api.get('/tasks'),
@@ -160,6 +167,11 @@ export default function Attendance() {
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (user && user.role === 'admin') {
         setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
+        // Fetch all users for admin filter
+        try {
+          const usersRes = await api.get('/users');
+          setAllUsers(usersRes.data || []);
+        } catch (e) { /* ignore */ }
       }
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
@@ -244,15 +256,16 @@ export default function Attendance() {
   };
   // ─── Holiday & Leave Handlers ───────────────────────────────
   const handleAddHoliday = async () => {
-    const holidayName = prompt('Enter holiday name:');
-    if (!holidayName) return;
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    if (!holidayName.trim()) { toast.error('Enter a holiday name'); return; }
     try {
-      await api.post('/holidays', { date: dateStr, name: holidayName });
+      await api.post('/holidays', { date: holidayDate, name: holidayName.trim() });
       toast.success('Holiday added');
+      setShowHolidayModal(false);
+      setHolidayName('');
+      setHolidayDate(format(new Date(), 'yyyy-MM-dd'));
       fetchData();
     } catch (err) {
-      toast.error('Failed to add holiday');
+      toast.error(err?.response?.data?.detail || 'Failed to add holiday');
     }
   };
   const handleHolidayDecision = async (holidayDate, decision) => {
@@ -351,17 +364,27 @@ export default function Attendance() {
   const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
   const CustomDay = ({ date, displayMonth, ...props }) => {
     const status = getDateStatus(date);
-    // Extract the actual day number (1, 2, 3...) from the date object
     const dayNumber = date.getDate();
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const isPresent = attendanceDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
+    const isLate = lateDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
+    const isHoliday = holidayDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
+    const isTodayDate = dateFnsIsToday(date);
+    let dotColor = null;
+    if (isHoliday) dotColor = '#DAA520';
+    else if (isLate) dotColor = '#ef4444';
+    else if (isPresent) dotColor = COLORS.emeraldGreen;
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* MUST include {dayNumber} inside the button tags */}
           <button
             {...props}
-            className={`${props.className} relative w-full h-full flex items-center justify-center min-h-[40px] transition-all hover:bg-slate-100 rounded-lg`}
+            className={`${props.className} relative w-full h-full flex flex-col items-center justify-center min-h-[40px] transition-all hover:bg-slate-100 rounded-lg ${isTodayDate ? 'ring-2 ring-blue-500 ring-offset-1 font-bold' : ''}`}
           >
-            {dayNumber}
+            <span>{dayNumber}</span>
+            {dotColor && (
+              <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -384,6 +407,12 @@ export default function Attendance() {
   const totalMinutesYTD = attendanceHistory.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) + (todayAttendance?.duration_minutes || 0);
   const averageDailyMinutes = attendanceHistory.length > 0 ? totalMinutesYTD / (attendanceHistory.length + (todayAttendance ? 1 : 0)) : 0;
   const attendancePercentage = ((attendanceHistory.length + (todayAttendance?.punch_in ? 1 : 0)) / (new Date().getDate())) * 100; // Simplified for current month
+  // Fix: find current month's hours from monthly_summary array
+  const currentMonthKey = format(new Date(), 'yyyy-MM');
+  const currentMonthSummary = mySummary && mySummary.monthly_summary
+    ? mySummary.monthly_summary.find(s => s.month === currentMonthKey)
+    : null;
+  const currentMonthHours = currentMonthSummary ? currentMonthSummary.total_hours : formatDuration(monthTotalMinutes);
   // Export Attendance Summary to PDF
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -438,13 +467,61 @@ export default function Attendance() {
         {/* Header */}
         <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>My Attendance</h1>
-            <p className="text-slate-600 mt-1">Track your working hours and attendance history</p>
+            <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>
+              {user && user.role === 'admin' ? 'Attendance Management' : 'My Attendance'}
+            </h1>
+            <p className="text-slate-600 mt-1">
+              {user && user.role === 'admin' ? 'View and manage attendance for all staff' : 'Track your working hours and attendance history'}
+            </p>
           </div>
-          <Button onClick={handleExportPDF} variant="outline">
-            Export PDF
-          </Button>
+          <div className="flex gap-2 flex-wrap items-center">
+            {/* Admin: User Filter Dropdown */}
+            {user && user.role === 'admin' && allUsers.length > 0 && (
+              <select
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                value={selectedUserId || ''}
+                onChange={e => {
+                  const val = e.target.value || null;
+                  setSelectedUserId(val);
+                  fetchData(val);
+                }}
+              >
+                <option value="">All Staff</option>
+                {allUsers.map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
+                ))}
+              </select>
+            )}
+            {/* Admin: Add Holiday Button */}
+            {user && user.role === 'admin' && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setHolidayDate(format(selectedDate, 'yyyy-MM-dd'));
+                  setShowHolidayModal(true);
+                }}
+                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+              >
+                + Add Holiday
+              </Button>
+            )}
+            <Button onClick={handleExportPDF} variant="outline">
+              Export PDF
+            </Button>
+          </div>
         </motion.div>
+        {/* Admin: Viewing As Banner */}
+        {user && user.role === 'admin' && selectedUserId && (
+          <motion.div variants={itemVariants}>
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
+              <span className="font-semibold">Viewing attendance for:</span>
+              <span className="font-bold">{allUsers.find(u => u.id === selectedUserId)?.full_name || selectedUserId}</span>
+              <button className="ml-auto text-blue-500 hover:text-blue-700 underline text-xs" onClick={() => { setSelectedUserId(null); fetchData(null); }}>
+                Clear (Show All)
+              </button>
+            </div>
+          </motion.div>
+        )}
         {/* Today's / Selected Date Status Card */}
         <motion.div variants={itemVariants}>
           <Card className="border-0 shadow-lg overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
@@ -580,7 +657,7 @@ export default function Attendance() {
                 <div>
                   <p className="text-xs font-medium text-slate-500 uppercase">This Month</p>
                   <p className="text-2xl font-bold mt-1" style={{ color: COLORS.deepBlue }}>
-                    {(mySummary && mySummary.current_month && mySummary.current_month.total_hours) || '0h 0m'}
+                    {currentMonthHours}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">{monthDaysPresent} days present</p>
                 </div>
@@ -861,6 +938,64 @@ export default function Attendance() {
             </motion.div>
           </motion.div>
         )}
+        {/* Add Holiday Modal */}
+        <AnimatePresence>
+          {showHolidayModal && (
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-8"
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>Add Holiday</h2>
+                    <p className="text-slate-500 mt-1 text-sm">Mark a day as holiday for all staff</p>
+                  </div>
+                  <button onClick={() => setShowHolidayModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl">✕</button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 mb-1 block">Holiday Name</label>
+                    <input
+                      type="text"
+                      value={holidayName}
+                      onChange={e => setHolidayName(e.target.value)}
+                      placeholder="e.g. Diwali, Republic Day..."
+                      className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 mb-1 block">Date</label>
+                    <input
+                      type="date"
+                      value={holidayDate}
+                      onChange={e => setHolidayDate(e.target.value)}
+                      className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-8">
+                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)}>Cancel</Button>
+                  <Button
+                    disabled={!holidayName.trim() || !holidayDate}
+                    onClick={handleAddHoliday}
+                    style={{ backgroundColor: COLORS.deepBlue, color: 'white' }}
+                  >
+                    Add Holiday
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Leave Request Modal */}
         <AnimatePresence>
           {showLeaveForm && (
