@@ -2723,14 +2723,39 @@ async def parse_mds_excel_for_client_form(
     }
 
 @api_router.post("/clients", response_model=Client)
-async def create_client(client_data: ClientCreate, current_user: User = Depends(get_current_user)):
- client = Client(**client_data.model_dump(), created_by=current_user.id)
- doc = client.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- if doc.get("birthday"):
-  doc["birthday"] = doc["birthday"].isoformat()
- await db.clients.insert_one(doc)
- return client
+async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
+ """Create a client from form data (handles both standard and Excel import fields)"""
+ try:
+  # Create ClientCreate object from payload, filtering only known fields
+  client_data = ClientCreate(**{
+   k: v for k, v in payload.items() 
+   if k in ClientCreate.model_fields
+  })
+  
+  # Create client with standard fields
+  client = Client(**client_data.model_dump(), created_by=current_user.id)
+  doc = client.model_dump()
+  doc["created_at"] = doc["created_at"].isoformat()
+  if doc.get("birthday"):
+   doc["birthday"] = doc["birthday"].isoformat()
+  
+  # Add extra fields from Excel import (address, city, state)
+  extra_fields = {
+   "address": payload.get("address", ""),
+   "city": payload.get("city", ""),
+   "state": payload.get("state", "")
+  }
+  
+  # Only add non-empty extra fields
+  for key, value in extra_fields.items():
+   if value:
+    doc[key] = value
+  
+  await db.clients.insert_one(doc)
+  return client
+ 
+ except Exception as e:
+  raise HTTPException(status_code=400, detail=str(e))
 
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
