@@ -130,16 +130,16 @@ function DigitalClock() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// STAT CARD COMPONENT
+// STAT CARD COMPONENT — FIX: uniform height, consistent layout
 // ═════════════════════════════════════════════════════════════════════════════
 function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, trend = null }) {
   return (
-    <motion.div variants={itemVariants}>
-      <Card className="border-0 shadow-md hover:shadow-lg transition-shadow overflow-hidden">
-        <CardContent className="p-6">
+    <motion.div variants={itemVariants} className="h-full">
+      <Card className="border-0 shadow-md hover:shadow-lg transition-shadow overflow-hidden h-full">
+        <CardContent className="p-6 h-full flex flex-col justify-between">
           <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
                 {label}
               </p>
               <div className="flex items-baseline gap-2">
@@ -148,19 +148,18 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
                 </p>
                 {unit && <p className="text-sm font-medium text-slate-400">{unit}</p>}
               </div>
-              {trend && (
-                <p className="text-xs text-slate-500 mt-2 font-medium">
-                  {trend}
-                </p>
-              )}
             </div>
             <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center"
+              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ml-3"
               style={{ backgroundColor: `${color}15` }}
             >
               <Icon className="w-6 h-6" style={{ color }} />
             </div>
           </div>
+          {/* Always reserve space for trend so all cards are same height */}
+          <p className="text-xs text-slate-500 mt-3 font-medium h-4">
+            {trend || ''}
+          </p>
         </CardContent>
       </Card>
     </motion.div>
@@ -169,23 +168,24 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY COMPONENT
+// FIX: replace bottom dot with a colored ring/circle around the date number
 // ═════════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dateStr = format(date, 'yyyy-MM-dd');
   const dayRecord = attendance[dateStr];
   const holiday = holidays.find(h => h.date === dateStr);
 
-  let dotColor = null;
+  let ringColor = null;
   let isSpecial = false;
 
   if (holiday) {
-    dotColor = COLORS.amber;
+    ringColor = COLORS.amber;
     isSpecial = true;
   } else if (dayRecord?.is_late) {
-    dotColor = COLORS.red;
+    ringColor = COLORS.red;
     isSpecial = true;
   } else if (dayRecord?.punch_in) {
-    dotColor = COLORS.emeraldGreen;
+    ringColor = COLORS.emeraldGreen;
   }
 
   const isTodayDate = dateFnsIsToday(date);
@@ -194,25 +194,35 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className={`
-            relative w-full aspect-square flex flex-col items-center justify-center
-            rounded-lg font-medium transition-all duration-200
-            ${isTodayDate ? 'ring-2 ring-offset-1 font-bold' : ''}
-            hover:bg-slate-100 active:scale-95
-          `}
-          style={{
-            ringColor: COLORS.deepBlue,
-          }}
+          className="relative w-full aspect-square flex items-center justify-center rounded-lg font-medium transition-all duration-200 hover:bg-slate-100 active:scale-95"
         >
-          <span className="text-sm">{date.getDate()}</span>
-          {dotColor && (
+          {/* Colored ring around the date for attendance status */}
+          {ringColor ? (
             <motion.span
-              className="absolute bottom-1.5 w-2 h-2 rounded-full"
-              style={{ backgroundColor: dotColor }}
-              animate={{ scale: isSpecial ? [1, 1.3, 1] : 1 }}
+              className="absolute inset-0.5 rounded-full border-2"
+              style={{ borderColor: ringColor, backgroundColor: `${ringColor}12` }}
+              animate={isSpecial ? { scale: [1, 1.06, 1] } : { scale: 1 }}
               transition={{ duration: 2, repeat: isSpecial ? Infinity : 0 }}
             />
+          ) : null}
+
+          {/* Today ring: bold blue outline */}
+          {isTodayDate && !ringColor && (
+            <span
+              className="absolute inset-0.5 rounded-full border-2"
+              style={{ borderColor: COLORS.deepBlue }}
+            />
           )}
+          {isTodayDate && ringColor && (
+            <span
+              className="absolute inset-0 rounded-full border-2 border-dashed opacity-60"
+              style={{ borderColor: COLORS.deepBlue }}
+            />
+          )}
+
+          <span className={`relative z-10 text-sm ${isTodayDate ? 'font-black' : ''}`}>
+            {date.getDate()}
+          </span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">
@@ -243,6 +253,21 @@ const formatDuration = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${h}h ${m}m`;
+};
+
+/**
+ * FIX: The original code used parseISO which treats the string as UTC if it
+ * lacks a timezone offset, causing an ~5:30 shift when displayed in IST.
+ * We now use formatInTimeZone from date-fns-tz consistently so the displayed
+ * time is always correct regardless of the raw ISO string.
+ */
+const formatAttendanceTime = (isoString) => {
+  if (!isoString) return '—';
+  try {
+    return formatInTimeZone(parseISO(isoString), IST_TIMEZONE, 'hh:mm a');
+  } catch {
+    return '—';
+  }
 };
 
 const calculateTodayLiveDuration = (todayAttendance) => {
@@ -533,7 +558,7 @@ export default function Attendance() {
     doc.setDrawColor(180, 180, 180);
     doc.line(10, 100, 200, 100);
 
-    // Table rows
+    // Table rows — use formatAttendanceTime for correct IST display
     doc.setTextColor(0, 0, 0);
     let y = 108;
     attendanceHistory.slice(0, 15).forEach((record, index) => {
@@ -542,12 +567,8 @@ export default function Attendance() {
         y = 20;
       }
       const dateStr = format(parseISO(record.date), 'dd MMM yyyy');
-      const inTime = record.punch_in
-        ? formatInTimeZone(parseISO(record.punch_in), IST_TIMEZONE, 'hh:mm a')
-        : '—';
-      const outTime = record.punch_out
-        ? formatInTimeZone(parseISO(record.punch_out), IST_TIMEZONE, 'hh:mm a')
-        : 'Ongoing';
+      const inTime = formatAttendanceTime(record.punch_in);
+      const outTime = record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing';
       const dur = formatDuration(record.duration_minutes);
 
       if (index % 2 === 0) {
@@ -640,9 +661,9 @@ export default function Attendance() {
         initial="hidden"
         animate="visible"
       >
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* HEADER SECTION                                                    */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* HEADER SECTION                                                  */
+        /* ═══════════════════════════════════════════════════════════════ */}
         <motion.div
           variants={itemVariants}
           className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8"
@@ -728,9 +749,9 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* TODAY'S STATUS HERO CARD                                          */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* TODAY'S STATUS HERO CARD                                        */
+        /* ═══════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants} className="mb-8">
           <Card
             className="border-0 shadow-xl overflow-hidden"
@@ -761,12 +782,12 @@ export default function Attendance() {
                     <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
                       <p className="text-blue-100 text-sm">
                         <span className="font-semibold">In:</span>{' '}
-                        {formatInTimeZone(parseISO(selectedAttendance.punch_in), IST_TIMEZONE, 'hh:mm a')}
+                        {formatAttendanceTime(selectedAttendance.punch_in)}
                         {selectedAttendance.punch_out && (
                           <>
                             {' • '}
                             <span className="font-semibold">Out:</span>{' '}
-                            {formatInTimeZone(parseISO(selectedAttendance.punch_out), IST_TIMEZONE, 'hh:mm a')}
+                            {formatAttendanceTime(selectedAttendance.punch_out)}
                           </>
                         )}
                       </p>
@@ -830,9 +851,9 @@ export default function Attendance() {
           </Card>
         </motion.div>
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* ADMIN PENDING HOLIDAY REVIEW                                      */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* ADMIN PENDING HOLIDAY REVIEW                                    */
+        /* ═══════════════════════════════════════════════════════════════ */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
@@ -881,10 +902,10 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* STATS GRID                                                        */
-        /* ═════════════════════════════════════════════════════════════════ */}
-        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* STATS GRID — FIX: items-stretch so all cards are equal height   */
+        /* ═══════════════════════════════════════════════════════════════ */}
+        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 items-stretch">
           <StatCard
             icon={Timer}
             label="This Month"
@@ -899,6 +920,7 @@ export default function Attendance() {
             value={tasksCompleted}
             unit="this month"
             color={COLORS.emeraldGreen}
+            trend=" "
           />
           <StatCard
             icon={CalendarX}
@@ -906,6 +928,7 @@ export default function Attendance() {
             value={totalDaysLateThisMonth}
             unit="this month"
             color={COLORS.red}
+            trend=" "
           />
           {canViewRankings && (
             <StatCard
@@ -914,13 +937,14 @@ export default function Attendance() {
               value={myRank}
               unit="overall"
               color={COLORS.deepBlue}
+              trend=" "
             />
           )}
         </motion.div>
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* LIVE DURATION + PERFORMANCE                                       */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* LIVE DURATION + PERFORMANCE                                     */
+        /* ═══════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants} className="mb-8">
           <Card className="border-0 shadow-md overflow-hidden">
             <CardContent className="p-8">
@@ -958,9 +982,9 @@ export default function Attendance() {
           </Card>
         </motion.div>
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* CALENDAR + HISTORY SECTION                                        */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* CALENDAR + HISTORY SECTION                                      */
+        /* ═══════════════════════════════════════════════════════════════ */}
         <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           {/* Calendar Sidebar */}
           <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6">
@@ -997,7 +1021,7 @@ export default function Attendance() {
                     head_cell: "text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center",
                     row: "flex w-full mt-2 justify-between",
                     cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20",
-                    day: "h-10 w-10 p-0 font-semibold rounded-lg transition-all hover:bg-slate-100",
+                    day: "h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100",
                     day_today: "font-black",
                   }}
                   components={{
@@ -1010,24 +1034,34 @@ export default function Attendance() {
                     )
                   }}
                 />
+                {/* Legend */}
                 <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }} />
+                    <span
+                      className="w-5 h-5 rounded-full border-2 flex-shrink-0"
+                      style={{ borderColor: COLORS.emeraldGreen, backgroundColor: `${COLORS.emeraldGreen}12` }}
+                    />
                     <span className="text-slate-600">Present</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-red-500" />
+                    <span
+                      className="w-5 h-5 rounded-full border-2 flex-shrink-0"
+                      style={{ borderColor: COLORS.red, backgroundColor: `${COLORS.red}12` }}
+                    />
                     <span className="text-slate-600">Late</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.amber }} />
+                    <span
+                      className="w-5 h-5 rounded-full border-2 flex-shrink-0"
+                      style={{ borderColor: COLORS.amber, backgroundColor: `${COLORS.amber}12` }}
+                    />
                     <span className="text-slate-600">Holiday</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Selected Day Details */}
+            {/* Selected Day Details — FIX: use formatAttendanceTime */}
             <Card className="border-0 shadow-md overflow-hidden">
               <CardContent className="p-0">
                 {selectedAttendance?.punch_in ? (
@@ -1039,14 +1073,14 @@ export default function Attendance() {
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600 font-medium">Punch In</span>
                         <span className="font-mono font-bold text-slate-900">
-                          {formatInTimeZone(parseISO(selectedAttendance.punch_in), IST_TIMEZONE, 'hh:mm a')}
+                          {formatAttendanceTime(selectedAttendance.punch_in)}
                         </span>
                       </div>
                       {selectedAttendance.punch_out && (
                         <div className="flex justify-between items-center">
                           <span className="text-slate-600 font-medium">Punch Out</span>
                           <span className="font-mono font-bold text-slate-900">
-                            {formatInTimeZone(parseISO(selectedAttendance.punch_out), IST_TIMEZONE, 'hh:mm a')}
+                            {formatAttendanceTime(selectedAttendance.punch_out)}
                           </span>
                         </div>
                       )}
@@ -1075,7 +1109,7 @@ export default function Attendance() {
             </Card>
           </motion.div>
 
-          {/* Recent History Table */}
+          {/* Recent History Table — FIX: use formatAttendanceTime */}
           <motion.div variants={itemVariants} className="xl:col-span-2">
             <Card className="border-0 shadow-md h-fit">
               <CardHeader className="border-b border-slate-100">
@@ -1098,12 +1132,10 @@ export default function Attendance() {
                             {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
                           </p>
                           <p className="text-xs text-slate-500 mt-1 font-mono">
-                            {record.punch_in
-                              ? formatInTimeZone(parseISO(record.punch_in), IST_TIMEZONE, 'hh:mm a')
-                              : '—'}
+                            {formatAttendanceTime(record.punch_in)}
                             {' → '}
                             {record.punch_out
-                              ? formatInTimeZone(parseISO(record.punch_out), IST_TIMEZONE, 'hh:mm a')
+                              ? formatAttendanceTime(record.punch_out)
                               : 'Ongoing'}
                           </p>
                         </div>
@@ -1130,9 +1162,9 @@ export default function Attendance() {
           </motion.div>
         </motion.div>
 
-        {/* ═════════════════════════════════════════════════════════════════ */
-        /* MODALS                                                            */
-        /* ═════════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */
+        /* MODALS                                                          */
+        /* ═══════════════════════════════════════════════════════════════ */}
 
         {/* Auto Punch-in Modal */}
         <AnimatePresence>
