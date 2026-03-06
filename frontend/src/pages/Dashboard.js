@@ -340,7 +340,9 @@ export default function Dashboard() {
       const mins = todayAttendance.duration_minutes || 0;
       return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     }
-    const diffMs = Date.now() - new Date(todayAttendance.punch_in).getTime();
+    const punchInStr = todayAttendance.punch_in;
+    const punchInDate = new Date(punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z');
+    const diffMs = Date.now() - punchInDate.getTime();
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
@@ -402,56 +404,83 @@ export default function Dashboard() {
       if (isTop) return '🥇';
       if (isSecond) return '🥈';
       if (isThird) return '🥉';
-      return `#${rank}`;
+      return null;
     };
 
+    const medal = getMedal();
+
     const rowStyle = isTop
-      ? { background: 'linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)', border: '1px solid #fde047' }
+      ? { background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 100%)', border: '1px solid #1F6FB2' }
       : isSecond
-      ? { background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', border: '1px solid #e2e8f0' }
+      ? { background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)', border: '1px solid #475569' }
       : isThird
-      ? { background: 'linear-gradient(135deg, #fff7ed 0%, #fed7aa 40%)', border: '1px solid #fdba74' }
-      : { background: '#fafafa', border: '1px solid #e2e8f0' };
+      ? { background: 'linear-gradient(135deg, #1c1917 0%, #292524 100%)', border: '1px solid #78716c' }
+      : { background: '#f8fafc', border: '1px solid #e2e8f0' };
+
+    const isColored = isTop || isSecond || isThird;
 
     return (
       <motion.div
-        whileHover={{ y: -2, transition: springPhysics.lift }}
-        className="flex items-center justify-between p-4 rounded-xl transition-shadow hover:shadow-md cursor-default"
+        whileHover={{ y: -2, scale: 1.01, transition: springPhysics.lift }}
+        className="flex items-center justify-between p-3.5 rounded-xl transition-all hover:shadow-lg cursor-default"
         style={rowStyle}
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 text-xl font-bold text-center flex-shrink-0">{getMedal()}</div>
-          <div
-            className={`w-10 h-10 rounded-xl overflow-hidden ring-2 flex-shrink-0 ${isTop ? 'ring-yellow-400' : 'ring-slate-200'}`}
-          >
+          {/* Rank Badge */}
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold ${
+            isColored ? 'bg-white/15 text-white' : 'bg-slate-200 text-slate-600'
+          }`}>
+            {medal || `${rank}`}
+          </div>
+
+          {/* Avatar */}
+          <div className={`w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 ring-2 ${
+            isTop ? 'ring-white/40' : isSecond ? 'ring-white/20' : isThird ? 'ring-white/15' : 'ring-slate-200'
+          }`}>
             {member.profile_picture ? (
               <img src={member.profile_picture} alt={member.user_name} className="w-full h-full object-cover" />
             ) : (
               <div
-                className={`w-full h-full flex items-center justify-center text-white font-semibold text-lg`}
-                style={{ background: isTop ? 'linear-gradient(135deg, #f59e0b, #fbbf24)' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                className="w-full h-full flex items-center justify-center font-bold text-base"
+                style={{
+                  background: isColored
+                    ? 'rgba(255,255,255,0.2)'
+                    : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+                  color: isColored ? 'white' : 'white',
+                }}
               >
                 {member.user_name?.charAt(0)?.toUpperCase() || '?'}
               </div>
             )}
           </div>
+
+          {/* Info */}
           <div>
-            <p className={`font-semibold text-sm ${isTop ? 'text-yellow-800' : 'text-slate-800'}`}>
+            <p className={`font-semibold text-sm leading-tight ${isColored ? 'text-white' : 'text-slate-800'}`}>
               {member.user_name || 'Unknown'}
             </p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-xs text-slate-400">{member.badge || 'Good Performer'}</span>
-              <span className="text-emerald-600 font-bold text-xs">· {member.overall_score}%</span>
+            <div className="flex items-center gap-1.5 mt-1">
+              {/* Score pill */}
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+                isColored ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {member.overall_score}%
+              </span>
+              <span className={`text-xs truncate max-w-[80px] ${isColored ? 'text-white/60' : 'text-slate-400'}`}>
+                {member.badge || 'Good Performer'}
+              </span>
             </div>
           </div>
         </div>
-        <div className="text-right">
-          <p className={`text-lg font-bold tracking-tight ${isTop ? 'text-yellow-700' : 'text-slate-700'}`}>
+
+        {/* Hours */}
+        <div className="text-right flex-shrink-0">
+          <p className={`text-base font-bold tracking-tight ${isColored ? 'text-white' : 'text-slate-700'}`}>
             {member.total_hours
               ? `${Math.floor(member.total_hours)}h ${Math.round((member.total_hours % 1) * 60)}m`
               : '0h 00m'}
           </p>
-          <p className="text-xs text-slate-400">
+          <p className={`text-xs ${isColored ? 'text-white/50' : 'text-slate-400'}`}>
             this {period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'period'}
           </p>
         </div>
