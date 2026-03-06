@@ -105,7 +105,7 @@ const buttonMotion = {
   whileTap: { scale: 0.92, transition: springPhysics.button }
 };
 
-// ── TODO ITEM (exact same visual & motion language as TaskStrip) ─────────────
+// ── TODO ITEM ─────────────────────────────────────────────────────────────────
 function TodoItem({ todo, onToggle, onPromote, onDelete }) {
   const isCompleted = todo.is_completed === true || todo.status === "completed";
   const isOverdue = todo.due_date && isPast(parseISO(todo.due_date)) && !isCompleted;
@@ -117,84 +117,82 @@ function TodoItem({ todo, onToggle, onPromote, onDelete }) {
       initial="hidden"
       animate="visible"
       exit="exit"
-      whileHover={{ y: -6, scale: 1.01, transition: springPhysics.lift }}
-      whileTap={{ scale: 0.985, transition: springPhysics.tap }}
-      className={`relative flex items-center justify-between p-6 rounded-3xl border bg-white transition-all group
-        ${isOverdue ? 'border-l-8 border-l-red-600 bg-red-50/40' : ''}
-        ${isCompleted 
-          ? 'opacity-80 bg-emerald-50/40 border-emerald-200' 
-          : 'hover:shadow-2xl hover:border-emerald-400 hover:ring-1 hover:ring-emerald-200/60'
-        }`}
+      className={`group relative flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-b-0 transition-colors
+        ${isOverdue ? 'bg-red-50/60 border-l-4 border-l-red-500' : ''}
+        ${isCompleted ? 'bg-slate-50/70' : 'hover:bg-blue-50/30'}
+      `}
     >
-      {/* Left: Checkbox + Content */}
-      <div className="flex items-center gap-5 flex-1 min-w-0">
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9, transition: springPhysics.button }}
-          onClick={() => onToggle(todo.id || todo._id)}
-          className={`w-11 h-11 rounded-2xl border-2 flex items-center justify-center transition-all flex-shrink-0
-            ${isCompleted 
-              ? 'bg-[#1FAF5A] border-[#1FAF5A] text-white shadow' 
-              : 'border-slate-300 hover:border-emerald-400 hover:bg-emerald-50'
-            }`}
-        >
-          {isCompleted && <CheckCircle2 className="h-6 w-6" />}
-        </motion.button>
+      {/* Checkbox */}
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9, transition: springPhysics.button }}
+        onClick={() => onToggle(todo.id || todo._id)}
+        className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
+          ${isCompleted
+            ? 'bg-emerald-500 border-emerald-500 text-white'
+            : 'border-slate-300 hover:border-emerald-400'
+          }`}
+      >
+        {isCompleted && <CheckCircle2 className="h-3.5 w-3.5" />}
+      </motion.button>
 
-        <div className="flex-1 min-w-0">
-          <p className={`font-medium text-lg leading-tight transition truncate ${isCompleted ? 'line-through text-slate-500' : 'text-slate-900'}`}>
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className={`font-medium text-sm leading-snug truncate max-w-xs transition
+            ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
             {todo.title || 'Untitled Todo'}
           </p>
-          
-          {todo.description && (
-            <p className="text-sm text-slate-500 mt-1 line-clamp-2">
-              {todo.description}
-            </p>
-          )}
-
-          <div className="flex items-center gap-x-4 gap-y-1 mt-3 text-xs text-slate-500 flex-wrap">
-            {todo.due_date && (
-              <span className={`flex items-center gap-1 font-medium ${isOverdue ? 'text-red-600' : 'text-amber-600'}`}>
-                <CalendarIcon className="h-3.5 w-3.5" />
-                Due: {format(parseISO(todo.due_date), 'MMM d, yyyy')}
-                {isOverdue && <span className="text-red-500 font-bold">(overdue)</span>}
-              </span>
-            )}
-            <span className="text-emerald-600 font-medium">
-              {isCompleted ? '✓ Completed' : 'Pending'}
+          {isOverdue && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-100 px-2 py-0.5 rounded uppercase tracking-wide">
+              <AlertCircle className="h-3 w-3" /> Overdue
             </span>
-          </div>
+          )}
+          {isCompleted && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded uppercase tracking-wide">
+              Done
+            </span>
+          )}
         </div>
+        {todo.description && (
+          <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{todo.description}</p>
+        )}
+        {todo.due_date && (
+          <span className={`inline-flex items-center gap-1 text-[11px] mt-1 font-medium
+            ${isOverdue ? 'text-red-500' : 'text-slate-400'}`}>
+            <CalendarIcon className="h-3 w-3" />
+            {format(parseISO(todo.due_date), 'MMM d, yyyy')}
+          </span>
+        )}
       </div>
 
-      {/* Right: Hover Actions */}
-      <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+      {/* Actions — appear on hover */}
+      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
         <motion.button
           {...buttonMotion}
           onClick={(e) => { e.stopPropagation(); onPromote(todo.id || todo._id); }}
           disabled={isCompleted}
-          className={`flex items-center gap-2 px-7 py-2 text-xs font-medium rounded-full transition border
-            ${isCompleted 
-              ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-              : 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200 hover:border-amber-300'
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded border transition
+            ${isCompleted
+              ? 'bg-slate-100 text-slate-300 cursor-not-allowed border-slate-200'
+              : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
             }`}
         >
-          <Zap className="h-4 w-4" /> Promote to Task
+          <Zap className="h-3.5 w-3.5" /> Promote
         </motion.button>
-
         <motion.button
           {...buttonMotion}
           onClick={(e) => { e.stopPropagation(); onDelete(todo.id || todo._id); }}
-          className="w-11 h-11 flex items-center justify-center rounded-2xl bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 transition"
+          className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 text-slate-400 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition"
         >
-          <Trash2 className="h-5 w-5" />
+          <Trash2 className="h-3.5 w-3.5" />
         </motion.button>
       </div>
     </motion.div>
   );
 }
 
-// ── MAIN TODO DASHBOARD COMPONENT (single file – fully redesigned) ───────────
+// ── MAIN TODO DASHBOARD COMPONENT ────────────────────────────────────────────
 export default function TodoDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -232,7 +230,7 @@ export default function TodoDashboard() {
   const stats = useMemo(() => {
     const total = todos.length;
     const completed = todos.filter(t => t.is_completed === true || t.status === "completed").length;
-    const overdue = todos.filter(t => 
+    const overdue = todos.filter(t =>
       t.due_date && isPast(parseISO(t.due_date)) && !(t.is_completed === true || t.status === "completed")
     ).length;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -297,282 +295,281 @@ export default function TodoDashboard() {
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
     <motion.div
-      className="space-y-8 pb-12"
+      className="space-y-5 pb-10 p-5 md:p-6 bg-slate-50/60 min-h-screen"
+      style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif" }}
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
-      {/* Welcome Banner – exact same as Dashboard */}
+      {/* ── Page Header ──────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-        <Card 
-          className="border-0 shadow-xl overflow-hidden relative rounded-3xl"
-          style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)' }}
-        >
-          <div
-            className="absolute top-0 right-0 w-80 h-80 rounded-full opacity-10 -mr-20 -mt-20"
-            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
-          />
-          <CardContent className="p-10 relative">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8">
-              <div>
-                <h1 className="text-4xl font-bold tracking-tighter" style={{ color: COLORS.deepBlue }}>
-                  Todo Management
-                </h1>
-                <p className="text-slate-600 mt-3 text-lg">
-                  Personal &amp; team tasks • {format(new Date(), 'MMMM d, yyyy')}
-                </p>
-              </div>
-
-              <motion.div
-                {...cardMotion}
-                className="flex items-center gap-4 px-8 py-5 rounded-3xl border-2 cursor-pointer hover:shadow-2xl transition-all bg-white"
-                style={{ borderColor: COLORS.emeraldGreen }}
-                onClick={() => window.scrollTo({ top: 800, behavior: 'smooth' })}
-              >
-                <Target className="h-8 w-8" style={{ color: COLORS.emeraldGreen }} />
-                <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-widest">Today</p>
-                  <p className="font-bold text-2xl" style={{ color: COLORS.deepBlue }}>
-                    {stats.total} active todos
-                  </p>
-                </div>
-              </motion.div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>
+              Todo Management
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {format(new Date(), 'EEEE, MMMM d, yyyy')} · {stats.total} items
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-white border border-slate-200 text-xs font-medium text-slate-600">
+              <div className="w-2 h-2 rounded-full bg-emerald-500" />
+              {stats.completed} completed
             </div>
-          </CardContent>
-        </Card>
+            {stats.overdue > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-50 border border-red-200 text-xs font-semibold text-red-600">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {stats.overdue} overdue
+              </div>
+            )}
+          </div>
+        </div>
       </motion.div>
 
-      {/* Key Metrics – exact same grid & hover as Dashboard */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-5" variants={itemVariants}>
+      {/* ── KPI Strip ────────────────────────────────────────────────────── */}
+      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
         {/* Total */}
-        <motion.div {...cardMotion} className="border border-slate-100 shadow-sm hover:shadow-2xl hover:border-slate-200 transition-all cursor-pointer group rounded-3xl">
-          <CardContent className="p-7 flex flex-col h-full">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Todos</p>
-                <p className="text-4xl font-bold mt-3" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
-              </div>
-              <div className="p-4 rounded-2xl group-hover:scale-125 transition-transform" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                <Target className="h-7 w-7" style={{ color: COLORS.deepBlue }} />
-              </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Total</p>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.deepBlue}12` }}>
+              <Target className="h-3.5 w-3.5" style={{ color: COLORS.deepBlue }} />
             </div>
-            <div className="mt-6 text-xs text-slate-500 group-hover:text-slate-700 flex items-center gap-1">View all <ArrowUpRight className="h-3 w-3" /></div>
-          </CardContent>
-        </motion.div>
+          </div>
+          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
+          <p className="text-[11px] text-slate-400 mt-1">todos tracked</p>
+        </div>
 
         {/* Overdue */}
-        <motion.div {...cardMotion} className={`border shadow-sm hover:shadow-2xl transition-all cursor-pointer group rounded-3xl ${stats.overdue > 0 ? 'border-red-200 bg-red-50/50' : 'border-slate-100'}`}>
-          <CardContent className="p-7 flex flex-col h-full">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue</p>
-                <p className="text-4xl font-bold mt-3" style={{ color: COLORS.coral }}>{stats.overdue}</p>
-              </div>
-              <div className="p-4 rounded-2xl group-hover:scale-125 transition-transform" style={{ backgroundColor: `${COLORS.coral}15` }}>
-                <AlertCircle className="h-7 w-7" style={{ color: COLORS.coral }} />
-              </div>
+        <div className={`bg-white rounded-xl border p-4 shadow-sm ${stats.overdue > 0 ? 'border-red-200' : 'border-slate-200'}`}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Overdue</p>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.coral}12` }}>
+              <AlertCircle className="h-3.5 w-3.5" style={{ color: COLORS.coral }} />
             </div>
-            <div className="mt-6 text-xs text-slate-500 group-hover:text-slate-700 flex items-center gap-1">Resolve now <ArrowUpRight className="h-3 w-3" /></div>
-          </CardContent>
-        </motion.div>
+          </div>
+          <p className="text-3xl font-bold tracking-tight" style={{ color: stats.overdue > 0 ? COLORS.coral : '#94a3b8' }}>{stats.overdue}</p>
+          <p className="text-[11px] text-slate-400 mt-1">need attention</p>
+        </div>
 
         {/* Completion */}
-        <motion.div {...cardMotion} className="border border-slate-100 shadow-sm hover:shadow-2xl hover:border-slate-200 transition-all cursor-pointer group rounded-3xl">
-          <CardContent className="p-7 flex flex-col h-full">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completion</p>
-                <p className="text-4xl font-bold mt-3" style={{ color: COLORS.emeraldGreen }}>{stats.completionRate}%</p>
-              </div>
-              <div className="p-4 rounded-2xl group-hover:scale-125 transition-transform" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                <TrendingUp className="h-7 w-7" style={{ color: COLORS.emeraldGreen }} />
-              </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Completion</p>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
+              <TrendingUp className="h-3.5 w-3.5" style={{ color: COLORS.emeraldGreen }} />
             </div>
-            <Progress value={stats.completionRate} className="mt-6 h-2" />
-          </CardContent>
-        </motion.div>
+          </div>
+          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>{stats.completionRate}%</p>
+          <Progress value={stats.completionRate} className="mt-2 h-1" />
+        </div>
 
         {/* Health */}
-        <motion.div {...cardMotion} className="border border-slate-100 shadow-sm hover:shadow-2xl hover:border-slate-200 transition-all cursor-pointer group rounded-3xl">
-          <CardContent className="p-7 flex flex-col h-full">
-            <div className="flex items-start justify-between flex-1">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Health Score</p>
-                <p className="text-4xl font-bold mt-3" style={{ color: COLORS.deepBlue }}>{stats.healthScore}%</p>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Health</p>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.mediumBlue}12` }}>
+              <Sparkles className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
+            </div>
+          </div>
+          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>{stats.healthScore}%</p>
+          <p className="text-[11px] text-emerald-600 mt-1 font-medium">Excellent</p>
+        </div>
+      </motion.div>
+
+      {/* ── Main Two-Column Layout ────────────────────────────────────────── */}
+      <motion.div className="grid grid-cols-1 xl:grid-cols-12 gap-5" variants={itemVariants}>
+
+        {/* ── Left: Add Form ──────────────────────────────────────────────── */}
+        <div className="xl:col-span-4 space-y-4">
+
+          {/* Create Todo Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Card header strip */}
+            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
+                <Plus className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
               </div>
-              <div className="p-4 rounded-2xl group-hover:scale-125 transition-transform" style={{ backgroundColor: `${COLORS.mediumBlue}15` }}>
-                <Sparkles className="h-7 w-7" style={{ color: COLORS.mediumBlue }} />
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 tracking-tight">New Todo</h2>
+                <p className="text-[11px] text-slate-400">Add to your personal or team list</p>
               </div>
             </div>
-            <div className="text-emerald-600 text-xs mt-6 font-medium">Excellent • Keep it up</div>
-          </CardContent>
-        </motion.div>
-      </motion.div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Title *</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="What needs to get done?"
+                  className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Notes</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Additional context (optional)"
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition placeholder:text-slate-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Due Date</label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
+                />
+              </div>
+              <Button
+                onClick={handleAddTodo}
+                disabled={!title.trim() || addTodoMutation.isPending}
+                className="w-full h-10 text-sm font-semibold rounded-lg"
+                style={{ backgroundColor: COLORS.deepBlue }}
+              >
+                {addTodoMutation.isPending
+                  ? <><RefreshCw className="animate-spin h-4 w-4 mr-2" /> Creating…</>
+                  : <><Plus className="h-4 w-4 mr-2" /> Create Todo</>
+                }
+              </Button>
+            </div>
+          </div>
 
-      {/* Main Grid */}
-      <motion.div className="grid grid-cols-1 xl:grid-cols-12 gap-8" variants={itemVariants}>
-        {/* Add Form */}
-        <div className="xl:col-span-5">
-          <Card className="border-slate-100 shadow-sm rounded-3xl overflow-hidden h-full">
-            <CardHeader className="pb-6 border-b px-8">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-2xl" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                  <Plus className="h-6 w-6" style={{ color: COLORS.emeraldGreen }} />
-                </div>
-                <div>
-                  <CardTitle className="text-2xl font-semibold">Create New Todo</CardTitle>
-                  <p className="text-sm text-slate-500">Add to your personal or team list</p>
-                </div>
+          {/* AI Insight Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="h-4 w-4 text-violet-600" />
               </div>
-            </CardHeader>
-            <CardContent className="p-8 space-y-7">
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="What needs to get done today?"
-                className="w-full h-16 bg-slate-50 border border-transparent focus:border-emerald-300 rounded-3xl px-7 text-lg font-medium placeholder:text-slate-400 focus:outline-none transition"
-              />
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Additional notes or description (optional)"
-                className="w-full min-h-[110px] bg-slate-50 border border-transparent focus:border-emerald-300 rounded-3xl p-7 text-base resize-y focus:outline-none transition"
-              />
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="text-xs font-medium text-slate-500 block mb-2">Due Date</label>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full h-14 bg-slate-50 border border-transparent focus:border-emerald-300 rounded-3xl px-7 text-sm focus:outline-none transition"
-                  />
-                </div>
-                <Button 
-                  onClick={handleAddTodo}
-                  disabled={!title.trim() || addTodoMutation.isPending}
-                  className="h-14 px-12 rounded-3xl text-base font-semibold flex-1"
-                  style={{ backgroundColor: COLORS.deepBlue }}
-                >
-                  {addTodoMutation.isPending ? <RefreshCw className="animate-spin h-5 w-5" /> : "Create Todo"}
-                </Button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800">AI Audit</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {stats.overdue} todos are overdue · {stats.completionRate}% on track
+                </p>
               </div>
-            </CardContent>
-          </Card>
+              <Button variant="ghost" className="text-violet-700 text-xs font-medium h-auto py-1 px-2 shrink-0">
+                Review →
+              </Button>
+            </div>
+          </div>
+
+          {/* Footer Summary Strip */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="grid grid-cols-3 divide-x divide-slate-100">
+              <div className="px-3 py-4 text-center">
+                <div className="text-xl font-bold font-mono" style={{ color: COLORS.emeraldGreen }}>{stats.completionRate}%</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Avg Done</div>
+              </div>
+              <div className="px-3 py-4 text-center">
+                <div className="text-xl font-bold font-mono text-amber-500">{stats.overdue}</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Attention</div>
+              </div>
+              <div className="px-3 py-4 text-center">
+                <div className="text-xl font-bold font-mono" style={{ color: COLORS.deepBlue }}>
+                  {todos.filter(t => !(t.is_completed === true || t.status === "completed")).length}
+                </div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Remaining</div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* List Column */}
-        <div className="xl:col-span-7 space-y-8">
-          {/* Admin Filter */}
+        {/* ── Right: Todo List + Admin Filter ─────────────────────────────── */}
+        <div className="xl:col-span-8 space-y-4">
+
+          {/* Admin Filter — layout only, all logic identical */}
           {isAdmin && (
-            <Card className="rounded-3xl border-slate-100 shadow-sm">
-              <CardHeader className="pb-4 px-8">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                    <CardTitle className="text-lg">Filter by Team Member</CardTitle>
-                  </div>
-                  <Badge variant="outline" className="text-xs">Admin Only</Badge>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <span className="text-sm font-semibold text-slate-700">Filter by Team Member</span>
                 </div>
-              </CardHeader>
-              <CardContent className="px-8 pb-8">
-                <Select value={selectedUser} onValueChange={setSelectedUser}>
-                  <SelectTrigger className="h-14 rounded-3xl border-slate-200 text-base">
-                    <SelectValue placeholder="All team members" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Everyone</SelectItem>
-                    {users.map((u) => (
-                      <SelectItem key={u.id || u._id} value={u.id || u._id}>
-                        {u.full_name || u.user_name} ({u.role})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* AI Insight */}
-          <Card className="rounded-3xl bg-gradient-to-r from-indigo-50 to-violet-50 border-none shadow-sm">
-            <CardContent className="p-7 flex items-center justify-between">
-              <div className="flex items-center gap-5">
-                <div className="p-3 bg-white rounded-2xl">
-                  <Sparkles className="h-7 w-7 text-violet-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">AI Audit</p>
-                  <p className="text-sm text-slate-600">
-                    {stats.overdue} todos are overdue • {stats.completionRate}% on track
-                  </p>
-                </div>
-              </div>
-              <Button variant="ghost" className="text-violet-700 font-medium">Review Priorities →</Button>
-            </CardContent>
-          </Card>
-
-          {/* Todo List */}
-          <Card className="rounded-3xl border-slate-100 shadow-sm overflow-hidden">
-            <CardHeader className="px-8 pb-5 border-b">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-3 text-xl">
-                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                  Your Todos ({todos.length})
-                </CardTitle>
-                <Badge className="bg-emerald-100 text-emerald-700 font-medium px-4 py-1">
-                  {stats.completed} completed
+                <Badge variant="outline" className="text-[10px] font-semibold uppercase tracking-widest border-slate-300 text-slate-500">
+                  Admin Only
                 </Badge>
               </div>
-            </CardHeader>
+              <Select value={selectedUser} onValueChange={setSelectedUser}>
+                <SelectTrigger className="h-9 rounded-lg border-slate-200 text-sm">
+                  <SelectValue placeholder="All team members" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Everyone</SelectItem>
+                  {users.map((u) => (
+                    <SelectItem key={u.id || u._id} value={u.id || u._id}>
+                      {u.full_name || u.user_name} ({u.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-            <CardContent className="p-8">
-              {isLoading ? (
-                <div className="py-16 text-center">
-                  <RefreshCw className="animate-spin h-8 w-8 mx-auto text-slate-300" />
-                  <p className="text-sm text-slate-400 mt-4">Loading your todos...</p>
-                </div>
-              ) : todos.length === 0 ? (
-                <div className="py-20 text-center border border-dashed border-slate-200 rounded-3xl">
-                  <CheckCircle2 className="h-16 w-16 mx-auto text-slate-200" />
-                  <p className="mt-6 text-slate-400">No todos yet. Create one above!</p>
-                </div>
-              ) : (
-                <div className="space-y-4 max-h-[620px] overflow-y-auto pr-4">
-                  <AnimatePresence>
-                    {todos.map((todo) => (
-                      <TodoItem
-                        key={todo.id || todo._id}
-                        todo={todo}
-                        onToggle={handleToggle}
-                        onPromote={handlePromote}
-                        onDelete={handleDelete}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </motion.div>
+          {/* Todo List Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Table header */}
+            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                <span className="text-sm font-bold text-slate-800 tracking-tight">
+                  {isAdmin && selectedUser !== 'all'
+                    ? `${users.find(u => (u.id || u._id) === selectedUser)?.full_name || 'User'}'s Todos`
+                    : 'Your Todos'
+                  }
+                </span>
+                <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                  {todos.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400 font-medium">{stats.completed} completed</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                <span className="text-[11px] text-slate-400 font-medium">{stats.overdue} overdue</span>
+              </div>
+            </div>
 
-      {/* Footer Stats Bar */}
-      <motion.div 
-        variants={itemVariants}
-        className="grid grid-cols-3 gap-5 text-center text-xs border border-slate-100 rounded-3xl p-8 bg-white"
-      >
-        <div>
-          <div className="font-mono text-2xl font-bold text-emerald-600">{stats.completionRate}</div>
-          <div className="text-slate-500">AVG COMPLETION</div>
-        </div>
-        <div>
-          <div className="font-mono text-2xl font-bold text-amber-600">{stats.overdue}</div>
-          <div className="text-slate-500">NEEDS ATTENTION</div>
-        </div>
-        <div>
-          <div className="font-mono text-2xl font-bold text-[#0D3B66]">{todos.filter(t => !(t.is_completed === true || t.status === "completed")).length}</div>
-          <div className="text-slate-500">REMAINING</div>
+            {/* Column labels */}
+            <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[20px_1fr_auto] gap-4 items-center">
+              <div />
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Task</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Actions</span>
+            </div>
+
+            {/* List body */}
+            {isLoading ? (
+              <div className="py-16 text-center">
+                <RefreshCw className="animate-spin h-6 w-6 mx-auto text-slate-300" />
+                <p className="text-xs text-slate-400 mt-3">Loading todos…</p>
+              </div>
+            ) : todos.length === 0 ? (
+              <div className="py-16 text-center">
+                <CheckCircle2 className="h-10 w-10 mx-auto text-slate-200" />
+                <p className="text-sm text-slate-400 mt-3 font-medium">No todos yet</p>
+                <p className="text-xs text-slate-300 mt-1">Create one using the form on the left</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
+                <AnimatePresence>
+                  {todos.map((todo) => (
+                    <TodoItem
+                      key={todo.id || todo._id}
+                      todo={todo}
+                      onToggle={handleToggle}
+                      onPromote={handlePromote}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
         </div>
       </motion.div>
     </motion.div>
