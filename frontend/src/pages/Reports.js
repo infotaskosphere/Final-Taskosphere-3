@@ -135,18 +135,30 @@ export default function Reports() {
   const fetchAllData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      // FIX: Always fetch own report first (works for ALL authenticated users)
+      // Always fetch own report first (works for ALL authenticated users)
       const reportRequests = [api.get('/reports/efficiency')];
 
-      // Additional cross-user reports if granted
-      const allowedUsers = user?.permissions?.view_other_reports || [];
-      allowedUsers.forEach(id => {
-        reportRequests.push(api.get('/reports/efficiency', { params: { user_id: id } }));
-      });
+      if (isAdmin) {
+        // Admin: fetch full user list, then each user's report in parallel
+        try {
+          const usersRes = await api.get('/users');
+          const otherUsers = (usersRes.data || []).filter(u => u.id !== user?.id);
+          otherUsers.forEach(u => {
+            reportRequests.push(api.get('/reports/efficiency', { params: { user_id: u.id } }));
+          });
+        } catch { /* /users failed — only own report will be shown */ }
+      } else {
+        // Non-admin: fetch reports for explicitly permitted user IDs only
+        const allowedUsers = user?.permissions?.view_other_reports || [];
+        allowedUsers.forEach(id => {
+          reportRequests.push(api.get('/reports/efficiency', { params: { user_id: id } }));
+        });
+      }
 
-      const reportResponses = await Promise.all(reportRequests);
-      // FIX: backend now returns { user: { id, full_name }, ... } so r.data.user works
-      const combined = reportResponses.map(r => r.data).filter(Boolean);
+      const reportResponses = await Promise.allSettled(reportRequests);
+      const combined = reportResponses
+        .filter(r => r.status === 'fulfilled' && r.value?.data)
+        .map(r => r.value.data);
       setReportData(combined);
 
       const [statsRes, tasksRes] = await Promise.all([
@@ -296,7 +308,7 @@ export default function Reports() {
                 <p className="text-sm text-slate-500 mt-0.5">Performance insights and efficiency metrics</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {/* User filter — only shown when multiple report data available */}
+                {/* User filter dropdown — shown when multiple report data available */}
                 {uniqueUsers.length > 1 && (
                   <select
                     value={selectedUserId}
