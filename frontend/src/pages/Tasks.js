@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Search, Calendar, Building2, User, LayoutGrid, List, Filter, Circle, ArrowRight, Check, Repeat, MessageSquare, Bell, FileText, Calendar as CalendarIcon } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Calendar, Building2, User, LayoutGrid, List, Filter, Circle, ArrowRight, Check, Repeat, MessageSquare, Bell, FileText, Calendar as CalendarIcon, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -298,7 +298,6 @@ const DashboardStripCard = ({ stripeColor, children, isCompleted = false, classN
   );
 };
 
-// ── Empty form default ──────────────────────────────────────────────────────────
 const EMPTY_FORM = {
   title: '',
   description: '',
@@ -341,6 +340,10 @@ export default function Tasks() {
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState('list');
 
+  // NEW: Task detail dialog
+  const [taskDetailOpen, setTaskDetailOpen] = useState(false);
+  const [selectedDetailTask, setSelectedDetailTask] = useState(null);
+
   const [comments, setComments] = useState({});
   const [showCommentsDialog, setShowCommentsDialog] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -363,7 +366,6 @@ export default function Tasks() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterAssignee, setFilterAssignee] = useState('all');
 
-  // ── FIX: initialise formData from the constant so resetForm is stable ──────
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
   const fileInputRef = useRef(null);
@@ -391,7 +393,6 @@ export default function Tasks() {
     const today = new Date();
     const dueDate = new Date(today);
     dueDate.setDate(dueDate.getDate() + workflow.estimatedDays);
-    // ── FIX: set the full new object directly (no stale-closure risk here) ──
     setFormData({
       title: workflow.title,
       description: workflow.description,
@@ -533,7 +534,6 @@ export default function Tasks() {
 
   const handleEdit = (task) => {
     setEditingTask(task);
-    // Set the full new object directly — no stale closure risk
     setFormData({
       title: task.title,
       description: task.description || '',
@@ -597,7 +597,6 @@ export default function Tasks() {
     setEditingTask(null);
   };
 
-  // ── FIX: functional updater so sub-assignee toggling never loses current state ──
   const toggleSubAssignee = (userId) => {
     setFormData(prev => {
       const isSelected = prev.sub_assignees.includes(userId);
@@ -826,6 +825,12 @@ export default function Tasks() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // NEW: Function to open task detail dialog
+  const openTaskDetail = (task) => {
+    setSelectedDetailTask(task);
+    setTaskDetailOpen(true);
+  };
+
   return (
     <motion.div
       className="space-y-6 bg-slate-50 p-6 rounded-3xl"
@@ -939,12 +944,6 @@ export default function Tasks() {
               </PopoverContent>
             </Popover>
 
-            {/*
-              ── FIX 1: Dialog is ALWAYS rendered (not gated by canEditTasks).
-                 Only the DialogTrigger button is conditional.
-                 This ensures handleEdit() can open the dialog regardless of canEditTasks,
-                 and that the form is always available in the DOM for controlled state.
-            */}
             <Dialog
               open={dialogOpen}
               onOpenChange={(open) => {
@@ -983,7 +982,6 @@ export default function Tasks() {
                       id="title"
                       placeholder="Enter task title"
                       value={formData.title}
-                      // ── FIX 2: functional updater prevents stale-closure keystroke drops ──
                       onChange={(e) => {
                         const val = e.target.value;
                         setFormData(prev => ({ ...prev, title: val }));
@@ -1239,7 +1237,6 @@ export default function Tasks() {
                 </form>
               </DialogContent>
             </Dialog>
-            {/* ── END FIX 1 ── */}
           </div>
         </CardContent>
       </Card>
@@ -1388,7 +1385,11 @@ export default function Tasks() {
                       <div className={`flex flex-wrap items-center justify-between transition-all duration-300 ${task.status === "completed" ? "gap-1" : "gap-3"}`}>
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <span className="text-xs font-bold text-slate-400 w-6">#{index + 1}</span>
-                          <span className={`font-semibold truncate transition-all duration-300 ${task.status === "completed" ? "text-sm text-slate-400 line-through" : "text-lg text-slate-900"}`}>
+                          {/* Clickable task title to open detail dialog */}
+                          <span 
+                            className={`font-semibold truncate transition-all duration-300 cursor-pointer hover:underline ${task.status === "completed" ? "text-sm text-slate-400 line-through" : "text-lg text-slate-900"}`}
+                            onClick={() => openTaskDetail(task)}
+                          >
                             {task.title}
                           </span>
                           <Badge className={`px-3 py-1 text-xs font-medium ${priorityStyle.bg} ${priorityStyle.text}`}>
@@ -1582,7 +1583,11 @@ export default function Tasks() {
                               )}
                             </div>
                             <span className="text-xs font-bold text-slate-400">#{index + 1}</span>
-                            <h3 className={`font-semibold transition-all duration-300 ${task.status === "completed" ? "text-sm text-slate-400 line-through" : "text-lg text-slate-900"}`}>
+                            {/* Clickable title in board view */}
+                            <h3 
+                              className={`font-semibold transition-all duration-300 cursor-pointer hover:underline ${task.status === "completed" ? "text-sm text-slate-400 line-through" : "text-lg text-slate-900"}`}
+                              onClick={() => openTaskDetail(task)}
+                            >
                               {task.title}
                             </h3>
 
@@ -1703,13 +1708,191 @@ export default function Tasks() {
         )}
       </div>
 
+      {/* NEW: Task Detail Dialog */}
+      <Dialog open={taskDetailOpen} onOpenChange={setTaskDetailOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="flex items-center justify-between">
+            <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>
+              Task Details
+            </DialogTitle>
+            <button 
+              onClick={() => setTaskDetailOpen(false)}
+              className="text-slate-400 hover:text-slate-600 transition"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </DialogHeader>
+
+          {selectedDetailTask && (
+            <div className="space-y-6 mt-4">
+              {/* Task Title */}
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900 mb-2">{selectedDetailTask.title}</h2>
+                <div className="flex flex-wrap gap-2">
+                  {selectedDetailTask.is_recurring && (
+                    <Badge className="bg-purple-100 text-purple-700">Recurring</Badge>
+                  )}
+                  {selectedDetailTask.priority && (
+                    <Badge className={`${PRIORITY_STYLES[selectedDetailTask.priority]?.bg || 'bg-slate-100'} ${PRIORITY_STYLES[selectedDetailTask.priority]?.text || 'text-slate-700'}`}>
+                      {PRIORITY_STYLES[selectedDetailTask.priority]?.label || selectedDetailTask.priority.toUpperCase()}
+                    </Badge>
+                  )}
+                  {selectedDetailTask.status && (
+                    <Badge className={`${STATUS_STYLES[selectedDetailTask.status]?.bg || 'bg-slate-100'} ${STATUS_STYLES[selectedDetailTask.status]?.text || 'text-slate-700'}`}>
+                      {STATUS_STYLES[selectedDetailTask.status]?.label || selectedDetailTask.status}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Description / Notes Section */}
+              {selectedDetailTask.description && (
+                <div className="border rounded-2xl p-6 bg-slate-50">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-3">📋 Notes & Description</h3>
+                  <div className="text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {selectedDetailTask.description}
+                  </div>
+                </div>
+              )}
+
+              {/* Task Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Assigned To */}
+                <div className="border rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Assigned To</p>
+                  <p className="text-lg font-semibold text-slate-900">{getUserName(selectedDetailTask.assigned_to)}</p>
+                </div>
+
+                {/* Due Date */}
+                <div className="border rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Due Date</p>
+                  {selectedDetailTask.due_date ? (
+                    <>
+                      <p className="text-lg font-semibold text-slate-900">
+                        {format(new Date(selectedDetailTask.due_date), 'MMM dd, yyyy')}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {getRelativeDueDate(selectedDetailTask.due_date)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-slate-500">No due date</p>
+                  )}
+                </div>
+
+                {/* Client */}
+                {selectedDetailTask.client_id && (
+                  <div className="border rounded-2xl p-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Client</p>
+                    <p className="text-lg font-semibold text-slate-900">{getClientName(selectedDetailTask.client_id)}</p>
+                  </div>
+                )}
+
+                {/* Category */}
+                <div className="border rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Department</p>
+                  <p className="text-lg font-semibold text-slate-900">{getCategoryLabel(selectedDetailTask.category)}</p>
+                </div>
+
+                {/* Created By */}
+                {selectedDetailTask.created_by && (
+                  <div className="border rounded-2xl p-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Created By</p>
+                    <p className="text-lg font-semibold text-slate-900">{getUserName(selectedDetailTask.created_by)}</p>
+                  </div>
+                )}
+
+                {/* Co-assignees */}
+                {selectedDetailTask.sub_assignees && selectedDetailTask.sub_assignees.length > 0 && (
+                  <div className="border rounded-2xl p-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Co-assignees</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedDetailTask.sub_assignees.map(uid => (
+                        <Badge key={uid} className="bg-blue-100 text-blue-700">
+                          {getUserName(uid)}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Checklist if present */}
+              {parseChecklist(selectedDetailTask.description).length > 0 && (
+                <div className="border rounded-2xl p-6 bg-emerald-50">
+                  <h3 className="text-lg font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                    <Check className="h-5 w-5" /> Compliance Checklist
+                  </h3>
+                  <div className="space-y-2">
+                    {parseChecklist(selectedDetailTask.description).map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-2">
+                        <Checkbox
+                          checked={(taskChecklists[selectedDetailTask.id] || []).includes(idx)}
+                          onCheckedChange={() => toggleChecklistItem(selectedDetailTask.id, idx)}
+                          className="mt-1"
+                        />
+                        <span className={(taskChecklists[selectedDetailTask.id] || []).includes(idx) ? "line-through text-slate-400" : "text-slate-700"}>
+                          {item}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 border-t pt-4">
+                {canModifyTask(selectedDetailTask) && (
+                  <Button
+                    onClick={() => {
+                      handleEdit(selectedDetailTask);
+                      setTaskDetailOpen(false);
+                    }}
+                    className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-2xl"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Edit Task
+                  </Button>
+                )}
+                {canModifyTask(selectedDetailTask) && (
+                  <Button
+                    onClick={() => {
+                      handleDuplicateTask(selectedDetailTask);
+                      setTaskDetailOpen(false);
+                    }}
+                    variant="outline"
+                    className="flex items-center gap-2 rounded-2xl"
+                  >
+                    <Repeat className="h-4 w-4" />
+                    Duplicate
+                  </Button>
+                )}
+                {canDeleteTasks && (
+                  <Button
+                    onClick={() => {
+                      handleDelete(selectedDetailTask.id);
+                      setTaskDetailOpen(false);
+                    }}
+                    variant="outline"
+                    className="flex items-center gap-2 rounded-2xl text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Compliance Workflow Library Dialog */}
       <Dialog open={showWorkflowLibrary} onOpenChange={setShowWorkflowLibrary}>
         <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-3xl font-semibold" style={{ color: COLORS.deepBlue }}>CA/CS Compliance Workflow Library</DialogTitle>
             <DialogDescription className="text-base">
-              14 professionally curated statutory workflows for CA/CS practice. Click any template to auto-fill task with checklist, recurrence &amp; priority.
+              14 professionally curated statutory workflows for CA/CS practice. Click any template to auto-fill task with checklist, recurrence & priority.
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-4 sticky top-0 bg-white z-10 py-4 border-b">
