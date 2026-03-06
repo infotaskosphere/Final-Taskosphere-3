@@ -138,6 +138,9 @@ export default function Clients() {
     email: '',
     phone: '',
     birthday: '',
+    address: '',
+    city: '',
+    state: '',
     services: [],
     dsc_details: [],
     assigned_to: 'unassigned',
@@ -367,6 +370,9 @@ export default function Clients() {
         email: data.email || '',
         phone: data.phone || '',
         birthday: data.birthday || '',
+        address: data.address || '',
+        city: data.city || '',
+        state: data.state || '',
         services: data.services || [],
         notes: data.notes || '',
         status: data.status_value || 'active',
@@ -403,6 +409,9 @@ export default function Clients() {
           email: mdsForm.email?.trim() || '',
           phone: mdsForm.phone?.replace(/\D/g, '') || '',
           birthday: mdsForm.birthday || null,
+          address: mdsForm.address?.trim() || null,
+          city: mdsForm.city?.trim() || null,
+          state: mdsForm.state?.trim() || null,
           services: mdsForm.services || [],
           notes: mdsForm.notes?.trim() || null,
           status: mdsForm.status,
@@ -425,6 +434,9 @@ export default function Clients() {
         email: mdsForm.email || '',
         phone: mdsForm.phone || '',
         birthday: mdsForm.birthday || '',
+        address: mdsForm.address || '',
+        city: mdsForm.city || '',
+        state: mdsForm.state || '',
         services: mdsForm.services || [],
         notes: mdsForm.notes || '',
         status: mdsForm.status || 'active',
@@ -470,7 +482,11 @@ export default function Clients() {
       const payload = {
         company_name: formData.company_name.trim(), client_type: formData.client_type,
         email: formData.email?.trim(), phone: cleanPhone,
-        birthday: safeDate(formData.birthday), services: finalServices,
+        birthday: safeDate(formData.birthday),
+        address: formData.address?.trim() || null,
+        city: formData.city?.trim() || null,
+        state: formData.state?.trim() || null,
+        services: finalServices,
         notes: formData.notes?.trim() || null,
         assigned_to: formData.assigned_to === "unassigned" ? null : formData.assigned_to,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC
@@ -514,7 +530,7 @@ export default function Clients() {
     setFormData({
       company_name: '', client_type: 'proprietor',
       contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
-      email: '', phone: '', birthday: '', services: [], dsc_details: [],
+      email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [],
       assigned_to: 'unassigned', notes: '', status: 'active'
     });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
@@ -907,6 +923,24 @@ export default function Clients() {
                       <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
                         value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                     </div>
+                    <div className="md:col-span-2">
+                      <label className={labelCls}>Address</label>
+                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                        placeholder="Street address (optional)"
+                        value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>City</label>
+                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                        placeholder="City (optional)"
+                        value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>State</label>
+                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                        placeholder="State (optional)"
+                        value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
+                    </div>
                   </div>
                 </div>
                 {/* Contact Persons */}
@@ -1069,7 +1103,7 @@ export default function Clients() {
                       <SelectTrigger className="h-11 rounded-xl border-slate-200 text-sm bg-white"><SelectValue placeholder="Select team member" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
-                        {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>)}
+                        {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1395,6 +1429,24 @@ export default function Clients() {
                     <input className={mdsFieldCls} value={mdsForm.phone}
                       onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))}
                       placeholder="10-digit phone number" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={labelCls}>Address</label>
+                    <input className={mdsFieldCls} value={mdsForm.address || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))}
+                      placeholder="Street address (optional)" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>City</label>
+                    <input className={mdsFieldCls} value={mdsForm.city || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))}
+                      placeholder="City (optional)" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>State</label>
+                    <input className={mdsFieldCls} value={mdsForm.state || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))}
+                      placeholder="State (optional)" />
                   </div>
                 </div>
                 <div className="mt-4">
