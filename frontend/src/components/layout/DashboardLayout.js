@@ -139,45 +139,51 @@ const DashboardLayout = ({ children }) => {
           lg:translate-x-0
         `}
         style={{
-          background: `linear-gradient(180deg, ${COLORS.deepBlue} 0%, #0a2d50 60%, #071f38 100%)`,
-          borderRight: '1px solid rgba(255,255,255,0.06)',
-          boxShadow: '4px 0 24px rgba(0,0,0,0.18)',
+          background: '#ffffff',
+          borderRight: '1px solid #e2e8f0',
+          boxShadow: '4px 0 24px rgba(0,0,0,0.06)',
         }}
       >
         {/* Logo Area */}
         <div
           className="flex items-center justify-between px-4 py-4 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+          style={{ borderBottom: '1px solid #f1f5f9' }}
         >
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center bg-white/10">
-              <img
-                src="/logo.png"
-                alt="Taskosphere"
-                className="h-6 w-6 object-contain"
-              />
-            </div>
-            {!collapsed && (
-              <span
-                className="font-bold text-white text-base tracking-tight whitespace-nowrap transition-opacity duration-200"
-                style={{ fontFamily: "'Nunito', 'DM Sans', sans-serif", letterSpacing: '-0.01em' }}
-              >
-                Taskosphere
-              </span>
-            )}
+          {/* Logo only — no text, centred when collapsed, left-aligned when expanded */}
+          <div className={`flex items-center overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
+            <img
+              src="/logo.png"
+              alt="Taskosphere"
+              className={`object-contain transition-all duration-300 ${collapsed ? 'h-9 w-9' : 'h-12'}`}
+            />
           </div>
 
-          <motion.button
-            onClick={() => setCollapsed(prev => !prev)}
-            className="hidden lg:flex p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 400 }}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!collapsed}
-          >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </motion.button>
+          {!collapsed && (
+            <motion.button
+              onClick={() => setCollapsed(prev => !prev)}
+              className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all flex-shrink-0"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 400 }}
+              aria-label="Collapse sidebar"
+              aria-expanded={true}
+            >
+              <PanelLeftClose size={16} />
+            </motion.button>
+          )}
+          {collapsed && (
+            <motion.button
+              onClick={() => setCollapsed(prev => !prev)}
+              className="hidden lg:flex absolute right-1 top-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 400 }}
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+            >
+              <PanelLeftOpen size={16} />
+            </motion.button>
+          )}
         </div>
 
         {/* Navigation */}
@@ -189,7 +195,7 @@ const DashboardLayout = ({ children }) => {
             return (
               <React.Fragment key={item.path}>
                 {item.path === '/staff-activity' && (
-                  <div className="my-3 mx-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
+                  <div className="my-3 mx-1" style={{ borderTop: '1px solid #e2e8f0' }} />
                 )}
 
                 <motion.div
@@ -208,19 +214,19 @@ const DashboardLayout = ({ children }) => {
                       ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
                       rounded-xl transition-all duration-200
                       ${isActive
-                        ? 'bg-white/15 text-white'
-                        : 'text-white/55 hover:text-white/90 hover:bg-white/08'
+                        ? 'text-white'
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                       }
                     `}
                     style={isActive ? {
-                      background: 'rgba(255,255,255,0.12)',
-                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)',
+                      background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+                      boxShadow: `0 4px 12px rgba(13,59,102,0.25)`,
                     } : {}}
                   >
                     {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-white rounded-r-full" />
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full" style={{ background: COLORS.mediumBlue }} />
                     )}
-                    <Icon className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${isActive ? 'text-white' : ''}`} />
+                    <Icon className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${isActive ? 'text-white' : 'text-slate-400'}`} />
                     {!collapsed && (
                       <span className="font-medium text-sm whitespace-nowrap tracking-tight">
                         {item.label}
