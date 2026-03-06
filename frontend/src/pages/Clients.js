@@ -350,6 +350,20 @@ export default function Clients() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const data = response.data;
+      
+      // Extract city and state from address if not provided
+      let city = data.city || '';
+      let state = data.state || '';
+      let address = data.address || '';
+      
+      if (address && !city && !state) {
+        const addressParts = address.split(',').map(p => p.trim());
+        if (addressParts.length >= 2) {
+          state = addressParts[addressParts.length - 2] || '';
+          city = addressParts[addressParts.length - 3] || '';
+        }
+      }
+      
       setMdsData(data);
 
       const contacts = (data.contact_persons || []).map(cp => ({
@@ -370,9 +384,9 @@ export default function Clients() {
         email: data.email || '',
         phone: data.phone || '',
         birthday: data.birthday || '',
-        address: data.address || '',
-        city: data.city || '',
-        state: data.state || '',
+        address: address,
+        city: city,
+        state: state,
         services: data.services || [],
         notes: data.notes || '',
         status: data.status_value || 'active',
@@ -1260,7 +1274,7 @@ export default function Clients() {
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
-                  rowCount={rowCount} rowHeight={400} width={width}
+                  rowCount={rowCount} rowHeight={370} width={width}
                   overscanColumnCount={2} overscanRowCount={4}>
                   {({ columnIndex, rowIndex, style }) => (
                     <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
