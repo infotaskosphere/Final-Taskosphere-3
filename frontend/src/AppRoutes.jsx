@@ -102,13 +102,13 @@ function AppRoutes() {
           }
         />
 
-        {/* ✅ TODO DASHBOARD ADDED */}
+        {/* ✅ TODO DASHBOARD — accessible to ALL authenticated users (owns their own todos) */}
         <Route
           path="/todos"
           element={
-            <Permission permission="can_view_todo_dashboard">
+            <Protected>
               <TodoDashboard />
-            </Permission>
+            </Protected>
           }
         />
 
