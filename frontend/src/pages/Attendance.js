@@ -124,8 +124,7 @@ export default function Attendance() {
   const [allUsers, setAllUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
-  const [holidayName, setHolidayName] = useState('');
-  const [holidayDate, setHolidayDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [holidayRows, setHolidayRows] = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
   // ─── Effects ─────────────────────────────────────────────────
   useEffect(() => {
     fetchData();
@@ -277,17 +276,23 @@ export default function Attendance() {
   };
   // ─── Holiday & Leave Handlers ───────────────────────────────
   const handleAddHoliday = async () => {
-    if (!holidayName.trim()) { toast.error('Enter a holiday name'); return; }
-    try {
-      await api.post('/holidays', { date: holidayDate, name: holidayName.trim() });
-      toast.success('Holiday added');
-      setShowHolidayModal(false);
-      setHolidayName('');
-      setHolidayDate(format(new Date(), 'yyyy-MM-dd'));
-      fetchData();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to add holiday');
+    const validRows = holidayRows.filter(r => r.name.trim() && r.date);
+    if (validRows.length === 0) { toast.error('Add at least one holiday with a name and date'); return; }
+    let added = 0;
+    let failed = 0;
+    for (const row of validRows) {
+      try {
+        await api.post('/holidays', { date: row.date, name: row.name.trim() });
+        added++;
+      } catch (err) {
+        failed++;
+      }
     }
+    if (added > 0) toast.success(`${added} holiday${added > 1 ? 's' : ''} added successfully`);
+    if (failed > 0) toast.error(`${failed} holiday${failed > 1 ? 's' : ''} failed (may already exist)`);
+    setShowHolidayModal(false);
+    setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+    fetchData();
   };
   const handleHolidayDecision = async (holidayDate, decision) => {
     try {
@@ -352,8 +357,9 @@ export default function Attendance() {
   // ─── Computed Values ─────────────────────────────────────────
   const monthAttendance = getMonthAttendance();
   const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
-  const monthDaysPresent = monthAttendance.length;
-  const totalDaysLateThisMonth = monthAttendance.filter(a => a.is_late).length;
+  // Only count days with an actual punch_in — leave days / no-punch days are absent
+  const monthDaysPresent = monthAttendance.filter(a => a.punch_in).length;
+  const totalDaysLateThisMonth = monthAttendance.filter(a => a.punch_in && a.is_late).length;
   const attendanceDates = [
     ...attendanceHistory.map(a => parseISO(a.date)),
     ...((todayAttendance && todayAttendance.punch_in) ? [parseISO(todayAttendance.date)] : [])
@@ -425,40 +431,97 @@ export default function Attendance() {
     setShowLeaveForm(true);
   };
   // Attendance Analytics Computations
-  // YTD: sum ALL history records (todayAttendance.date is already in attendanceHistory after fetchData)
-  // To avoid double-count, check if today's record is already in history
+  // ─── Dedup today from history to avoid double-count ───────────
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayAlreadyInHistory = attendanceHistory.some(a => a.date === todayStr);
-  const totalMinutesYTD = attendanceHistory.reduce((sum, a) => sum + (a.duration_minutes || 0), 0)
-    + (!todayAlreadyInHistory && todayAttendance ? (todayAttendance.duration_minutes || 0) : 0);
-  // Total working days with data (deduplicated)
-  const totalWorkingDaysYTD = attendanceHistory.length + (!todayAlreadyInHistory && todayAttendance ? 1 : 0);
-  // Average daily hours in decimal (e.g. 8.45 hrs)
-  const averageDailyHoursDecimal = totalWorkingDaysYTD > 0
-    ? parseFloat((totalMinutesYTD / totalWorkingDaysYTD / 60).toFixed(2))
-    : 0;
-  // Total hours YTD in decimal
+
+  // ─── Grace period in minutes ──────────────────────────────────
+  const graceMinutes = (() => {
+    if (!user || !user.grace_time) return 15;
+    const [gh, gm] = user.grace_time.split(':').map(Number);
+    return gh * 60 + gm;
+  })();
+
+  // ─── Helper: is a given date-string a Sunday or confirmed holiday ──
+  const holidayDateSet = new Set(holidays.map(h => h.date));
+  const isSundayOrHoliday = (dateStr) => {
+    const d = parseISO(dateStr);
+    return d.getDay() === 0 || holidayDateSet.has(dateStr);
+  };
+
+  // ─── Build full deduplicated record list for YTD ──────────────
+  const allRecords = [
+    ...attendanceHistory,
+    ...(!todayAlreadyInHistory && todayAttendance ? [todayAttendance] : [])
+  ];
+
+  // ─── YTD total hours (actual punched time only) ───────────────
+  const totalMinutesYTD = allRecords.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
   const totalHoursYTDDecimal = parseFloat((totalMinutesYTD / 60).toFixed(2));
-  // Attendance % — only current month records vs working days elapsed this month (Mon-Fri, no holidays)
-  const currentMonthStart = startOfMonth(new Date());
-  const today = new Date();
-  let workingDaysElapsed = 0;
-  for (let d = new Date(currentMonthStart); d <= today; d.setDate(d.getDate() + 1)) {
-    const dayOfWeek = d.getDay();
-    const dStr = format(d, 'yyyy-MM-dd');
-    const isHol = holidays.some(h => h.date === dStr);
-    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !isHol) workingDaysElapsed++;
-  }
-  const currentMonthPresentDays = monthAttendance.filter(a => a.punch_in || a.duration_minutes > 0).length;
-  const attendancePercentage = workingDaysElapsed > 0
-    ? parseFloat(((currentMonthPresentDays / workingDaysElapsed) * 100).toFixed(2))
+
+  // ─── YTD average: only over days with a punch record, excluding Sundays/holidays ──
+  const punchedWorkingDays = allRecords.filter(a =>
+    (a.duration_minutes || 0) > 0 && !isSundayOrHoliday(a.date)
+  ).length;
+  const averageDailyHoursDecimal = punchedWorkingDays > 0
+    ? parseFloat((totalMinutesYTD / punchedWorkingDays / 60).toFixed(2))
     : 0;
-  // Fix: find current month's hours from monthly_summary array
+
+  // ─── Attendance % for current month ──────────────────────────
+  // Formula: effective present days / total days in month × 100
+  // Rules:
+  //   • Sundays → count as present (1.0), don't count against you
+  //   • Confirmed Holidays → count as present (1.0)
+  //   • Punched on time (within grace) → 1.0
+  //   • Late after grace → 0.5 (half day)
+  //   • Absent on a working day → 0.0
+  // Denominator = total calendar days in current month (simple)
+
   const currentMonthKey = format(new Date(), 'yyyy-MM');
+  const today = new Date();
+  const currentMonthStart = startOfMonth(today);
+  const totalDaysInMonth = endOfMonth(today).getDate();
+
+  // Days elapsed so far this month (1 → today's date number)
+  const daysElapsed = today.getDate();
+
+  let effectivePresentDays = 0;
+  for (let dayNum = 1; dayNum <= daysElapsed; dayNum++) {
+    const d = new Date(today.getFullYear(), today.getMonth(), dayNum);
+    const dStr = format(d, 'yyyy-MM-dd');
+
+    // Sunday or holiday → full present day
+    if (d.getDay() === 0 || holidayDateSet.has(dStr)) {
+      effectivePresentDays += 1;
+      continue;
+    }
+
+    // Find punch record for this day
+    const record = allRecords.find(a => a.date === dStr);
+    if (!record || !record.punch_in) {
+      // Absent working day → 0
+      continue;
+    }
+
+    // Check if late beyond grace period
+    if (record.is_late) {
+      effectivePresentDays += 0.5; // half day for late after grace
+    } else {
+      effectivePresentDays += 1.0;
+    }
+  }
+
+  const attendancePercentage = daysElapsed > 0
+    ? parseFloat(((effectivePresentDays / daysElapsed) * 100).toFixed(2))
+    : 0;
+
+  // ─── Current month display hours ─────────────────────────────
   const currentMonthSummary = mySummary && mySummary.monthly_summary
     ? mySummary.monthly_summary.find(s => s.month === currentMonthKey)
     : null;
-  const currentMonthHours = currentMonthSummary ? currentMonthSummary.total_hours : formatDuration(monthTotalMinutes);
+  const currentMonthHours = currentMonthSummary
+    ? currentMonthSummary.total_hours
+    : formatDuration(monthTotalMinutes);
   // Export Attendance Summary to PDF
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -547,7 +610,7 @@ export default function Attendance() {
   return (
     <TooltipProvider>
       <motion.div
-        className="space-y-6 min-h-screen overflow-y-auto p-4 md:p-6 lg:p-8"
+        className="space-y-5 min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9 bg-slate-50/60"
         style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif" }}
         variants={containerVariants}
         initial="hidden"
@@ -587,7 +650,7 @@ export default function Attendance() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setHolidayDate(format(selectedDate, 'yyyy-MM-dd'));
+                  setHolidayRows([{ name: '', date: format(selectedDate, 'yyyy-MM-dd') }]);
                   setShowHolidayModal(true);
                 }}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
@@ -833,12 +896,19 @@ export default function Attendance() {
         </motion.div>
         {/* Monthly Summary */}
         <motion.div variants={itemVariants}>
-          <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                <TrendingUp className="h-5 w-5" /> Monthly Performance
-              </CardTitle>
-              <CardDescription>{format(selectedDate, 'MMMM yyyy')}</CardDescription>
+          <Card className="border border-slate-200 shadow-sm bg-white">
+            <CardHeader className="pb-3 border-b border-slate-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
+                    <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Monthly Performance</CardTitle>
+                    <CardDescription className="text-[11px]">{format(selectedDate, 'MMMM yyyy')}</CardDescription>
+                  </div>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -866,39 +936,44 @@ export default function Attendance() {
         </motion.div>
         {/* Attendance Analytics Dashboard */}
         <motion.div variants={itemVariants}>
-          <Card className="border border-blue-200 shadow-sm bg-blue-50/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                <TrendingUp className="h-5 w-5" /> Attendance Analytics Dashboard
-              </CardTitle>
-              <CardDescription>Year-to-Date Insights and Trends</CardDescription>
+          <Card className="border border-slate-200 shadow-sm bg-white">
+            <CardHeader className="pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
+                  <TrendingUp className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Attendance Analytics</CardTitle>
+                  <CardDescription className="text-[11px]">Year-to-Date Insights · Late after grace = ½ day · Sundays & holidays counted as present</CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Total Hours YTD</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    {totalHoursYTDDecimal.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-1">hrs</span>
+                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Total Hours YTD</p>
+                  <p className="text-2xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>
+                    {totalHoursYTDDecimal.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-1">hrs</span>
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">{totalWorkingDaysYTD} working days recorded</p>
+                  <p className="text-[11px] text-slate-400 mt-1">{punchedWorkingDays} working days recorded</p>
                 </div>
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Avg Daily Hours</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                    {averageDailyHoursDecimal.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-1">hrs</span>
+                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Avg Daily Hours</p>
+                  <p className="text-2xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                    {averageDailyHoursDecimal.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-1">hrs</span>
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">per working day</p>
+                  <p className="text-[11px] text-slate-400 mt-1">per working day (excl. Sun & holidays)</p>
                 </div>
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">Attendance % (This Month)</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-blue-600">
-                    {attendancePercentage.toFixed(2)}<span className="text-base font-medium text-slate-400 ml-0.5">%</span>
+                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Attendance % (This Month)</p>
+                  <p className="text-2xl font-bold tracking-tight text-blue-600">
+                    {attendancePercentage.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-0.5">%</span>
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">{currentMonthPresentDays} of {workingDaysElapsed} working days</p>
+                  <p className="text-[11px] text-slate-400 mt-1">{effectivePresentDays.toFixed(1)} of {daysElapsed} days · late = ½ day</p>
                 </div>
               </div>
-              <div className="mt-6 p-4 bg-slate-50 rounded-xl border text-center text-slate-500 text-sm italic">
-                Analytics are calculated based on your historical punch records.
+              <div className="mt-5 px-4 py-3 bg-slate-50 rounded-xl border border-slate-100 text-[11px] text-slate-400 leading-relaxed">
+                <strong className="text-slate-500">Calculation rules:</strong> Sundays & confirmed holidays are counted as present (1 day). Days with late punch-in beyond grace period count as half-day (0.5). Attendance % = effective present days ÷ total days elapsed this month × 100.
               </div>
             </CardContent>
           </Card>
@@ -1056,7 +1131,7 @@ export default function Attendance() {
             </motion.div>
           </motion.div>
         )}
-        {/* Add Holiday Modal */}
+        {/* Add Holidays Modal — Bulk Add */}
         <AnimatePresence>
           {showHolidayModal && (
             <motion.div
@@ -1066,49 +1141,79 @@ export default function Attendance() {
               exit={{ opacity: 0 }}
             >
               <motion.div
-                className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-8"
+                className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden"
                 initial={{ scale: 0.95, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 20 }}
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex justify-between items-start mb-6">
+                {/* Modal Header */}
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
                   <div>
-                    <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>Add Holiday</h2>
-                    <p className="text-slate-500 mt-1 text-sm">Mark a day as holiday for all staff</p>
+                    <h2 className="text-lg font-bold text-white tracking-tight">Add Holidays</h2>
+                    <p className="text-blue-200 text-xs mt-0.5">Add one or multiple holidays at once</p>
                   </div>
-                  <button onClick={() => setShowHolidayModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl">✕</button>
+                  <button onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }} className="text-white/70 hover:text-white text-xl font-light">✕</button>
                 </div>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-slate-700 mb-1 block">Holiday Name</label>
-                    <input
-                      type="text"
-                      value={holidayName}
-                      onChange={e => setHolidayName(e.target.value)}
-                      placeholder="e.g. Diwali, Republic Day..."
-                      className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                {/* Rows */}
+                <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
+                  <div className="grid grid-cols-[1fr_160px_36px] gap-2 mb-1">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Holiday Name</span>
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Date</span>
+                    <span />
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700 mb-1 block">Date</label>
-                    <input
-                      type="date"
-                      value={holidayDate}
-                      onChange={e => setHolidayDate(e.target.value)}
-                      className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 mt-8">
-                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)}>Cancel</Button>
-                  <Button
-                    disabled={!holidayName.trim() || !holidayDate}
-                    onClick={handleAddHoliday}
-                    style={{ backgroundColor: COLORS.deepBlue, color: 'white' }}
+                  {holidayRows.map((row, idx) => (
+                    <div key={idx} className="grid grid-cols-[1fr_160px_36px] gap-2 items-center">
+                      <input
+                        type="text"
+                        value={row.name}
+                        onChange={e => {
+                          const updated = [...holidayRows];
+                          updated[idx] = { ...updated[idx], name: e.target.value };
+                          setHolidayRows(updated);
+                        }}
+                        placeholder="e.g. Diwali, Holi..."
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                      <input
+                        type="date"
+                        value={row.date}
+                        onChange={e => {
+                          const updated = [...holidayRows];
+                          updated[idx] = { ...updated[idx], date: e.target.value };
+                          setHolidayRows(updated);
+                        }}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                      <button
+                        onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))}
+                        disabled={holidayRows.length === 1}
+                        className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors text-lg font-bold"
+                      >×</button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
+                    className="mt-2 flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors"
                   >
-                    Add Holiday
-                  </Button>
+                    <span className="w-6 h-6 rounded-full border-2 border-blue-500 flex items-center justify-center text-blue-600 font-bold text-base leading-none">+</span>
+                    Add Another Holiday
+                  </button>
+                </div>
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+                  <span className="text-xs text-slate-400">{holidayRows.filter(r => r.name.trim() && r.date).length} of {holidayRows.length} row{holidayRows.length !== 1 ? 's' : ''} ready</span>
+                  <div className="flex gap-3">
+                    <Button variant="ghost" size="sm" onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }}>Cancel</Button>
+                    <Button
+                      size="sm"
+                      disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0}
+                      onClick={handleAddHoliday}
+                      style={{ backgroundColor: COLORS.deepBlue, color: 'white' }}
+                    >
+                      Save {holidayRows.filter(r => r.name.trim() && r.date).length > 1 ? `${holidayRows.filter(r => r.name.trim() && r.date).length} Holidays` : 'Holiday'}
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
             </motion.div>
