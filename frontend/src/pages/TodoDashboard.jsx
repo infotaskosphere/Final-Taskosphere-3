@@ -211,18 +211,15 @@ export default function TodoDashboard() {
   const logSectionRef = useRef(null);
 
   // ── DATA FETCHING ─────────────────────────────────────────────────────────
-  // For admin: fetch own todos only (not all users' todos)
-  // For non-admin: fetch own todos
-  const todoQuery = isAdmin ? {} : {};
-  
+  // FIX: Admin fetches ALL todos by default (no user_id filter unless explicitly chosen)
   const { data: todosRaw = [], isLoading } = useQuery({
     queryKey: ["todos", selectedUser],
     queryFn: async () => {
       let endpoint = "/todos";
-      // Admin only filters by selectedUser if explicitly chosen
       if (isAdmin && selectedUser !== "all") {
         endpoint += `?user_id=${selectedUser}`;
       }
+      // Admin with "all" selected → no user_id param → backend returns all todos
       const res = await api.get(endpoint);
       return res.data;
     },
@@ -239,27 +236,53 @@ export default function TodoDashboard() {
 
   const todos = useMemo(() => todosRaw, [todosRaw]);
 
-  // Seed log from already-completed todos whenever the data loads/changes
+  // ── USER ID → NAME MAP (for log display) ──────────────────────────────────
+  const userMap = useMemo(() => {
+    const map = {};
+    users.forEach(u => {
+      if (u.id || u._id) map[u.id || u._id] = u.full_name || u.user_name || 'Unknown';
+    });
+    // Always include the current user themselves
+    if (user?.id) map[user.id] = user.full_name || user.email || 'Me';
+    return map;
+  }, [users, user]);
+
+  // Helper: resolve a user_id to a display name
+  const resolveUserName = (userId) => {
+    if (!userId) return 'Unknown';
+    if (userId === user?.id) return user?.full_name || 'Me';
+    return userMap[userId] || userId;
+  };
+
+  // ── SEED LOG from already-completed todos whenever data loads/changes ─────
   useEffect(() => {
     const completedTodos = todos.filter(t => t.is_completed === true || t.status === "completed");
     if (completedTodos.length === 0) return;
     setTodoLog(prev => {
-      // Only add todos not already in the log (avoid duplicates on re-fetch)
       const existingIds = new Set(prev.map(e => e.id));
       const newEntries = completedTodos
         .filter(t => !existingIds.has(t.id || t._id))
         .map(t => ({
           id: t.id || t._id,
           title: t.title || 'Untitled Todo',
-          created_by: t.created_by || 'Unknown',
-          created_at: t.created_at || new Date().toISOString(),
-          completed_at: t.completed_at ? new Date(t.completed_at) : new Date(t.updated_at || t.created_at || Date.now()),
+          // FIX: store user_id so we can resolve name at render time
+          created_by_id: t.user_id || t.created_by || null,
+          created_at: t.created_at || null,
+          completed_at: t.completed_at
+            ? new Date(t.completed_at)
+            : t.updated_at
+              ? new Date(t.updated_at)
+              : new Date(),
           deleted_at: null,
+          event: 'completed',
         }));
       if (newEntries.length === 0) return prev;
-      // Merge and sort by timestamp descending
       return [...newEntries, ...prev]
-        .sort((a, b) => b.completed_at - a.completed_at)
+        .sort((a, b) => {
+          const aTime = a.completed_at || a.deleted_at || new Date(a.created_at || 0);
+          const bTime = b.completed_at || b.deleted_at || new Date(b.created_at || 0);
+          return bTime - aTime;
+        })
         .slice(0, 100);
     });
   }, [todos]);
@@ -296,17 +319,18 @@ export default function TodoDashboard() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
-      // Append a log entry whenever a todo is toggled
       const todo = todos.find(t => (t.id || t._id) === variables.id);
       if (todo) {
         const wasCompleted = todo.is_completed === true || todo.status === "completed";
+        // FIX: store user_id not resolved name — resolve at render time
         setTodoLog(prev => [{
           id: todo.id || todo._id,
           title: todo.title || 'Untitled Todo',
-          created_by: todo.created_by || 'Unknown',
-          created_at: todo.created_at || new Date().toISOString(),
+          created_by_id: todo.user_id || todo.created_by || null,
+          created_at: todo.created_at || null,
           completed_at: wasCompleted ? null : new Date(),
           deleted_at: null,
+          event: wasCompleted ? 'uncompleted' : 'completed',
         }, ...prev].slice(0, 100));
       }
     },
@@ -326,13 +350,15 @@ export default function TodoDashboard() {
     onSuccess: (_, variables) => {
       const deletedTodo = todos.find(t => (t.id || t._id) === variables);
       if (deletedTodo) {
+        // FIX: store user_id not resolved name — resolve at render time
         setTodoLog(prev => [{
           id: deletedTodo.id || deletedTodo._id,
           title: deletedTodo.title || 'Untitled Todo',
-          created_by: deletedTodo.created_by || 'Unknown',
-          created_at: deletedTodo.created_at || new Date().toISOString(),
+          created_by_id: deletedTodo.user_id || deletedTodo.created_by || null,
+          created_at: deletedTodo.created_at || null,
           completed_at: null,
           deleted_at: new Date(),
+          event: 'deleted',
         }, ...prev].slice(0, 100));
       }
       queryClient.invalidateQueries({ queryKey: ["todos"] });
@@ -694,6 +720,14 @@ export default function TodoDashboard() {
             <span className="text-[11px] text-slate-400">Completed, deleted &amp; activity history</span>
           </div>
 
+          {/* ── Column headers ── */}
+          <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Todo Title</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created By</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created On</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Event</span>
+          </div>
+
           {todoLog.length === 0 ? (
             <div className="py-16 text-center">
               <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
@@ -704,11 +738,34 @@ export default function TodoDashboard() {
             <div className="divide-y divide-slate-50">
               <AnimatePresence>
                 {todoLog.map((entry, idx) => {
-                  // Format: "Title" by Creator on Created · [Completed on Date] [Deleted on Date]
-                  const createdDate = entry.created_at ? format(new Date(entry.created_at), 'MMM d, yyyy · hh:mm a') : 'Unknown date';
-                  const completedText = entry.completed_at ? `Completed on ${format(entry.completed_at, 'MMM d, yyyy · hh:mm a')}` : null;
-                  const deletedText = entry.deleted_at ? `Deleted on ${format(entry.deleted_at, 'MMM d, yyyy · hh:mm a')}` : null;
-                  
+                  // FIX: resolve user_id → name at render time using userMap
+                  const creatorName = resolveUserName(entry.created_by_id);
+                  const createdDate = entry.created_at
+                    ? format(new Date(entry.created_at), 'MMM d, yyyy h:mm a')
+                    : '—';
+
+                  // Build a single event pill
+                  let eventPill = null;
+                  if (entry.deleted_at) {
+                    eventPill = (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
+                        ✕ Deleted · {format(entry.deleted_at, 'MMM d, h:mm a')}
+                      </span>
+                    );
+                  } else if (entry.completed_at) {
+                    eventPill = (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">
+                        ✓ Completed · {format(entry.completed_at, 'MMM d, h:mm a')}
+                      </span>
+                    );
+                  } else if (entry.event === 'uncompleted') {
+                    eventPill = (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-700 whitespace-nowrap">
+                        ↩ Reopened
+                      </span>
+                    );
+                  }
+
                   return (
                     <motion.div
                       key={`${entry.id}-${idx}`}
@@ -716,24 +773,23 @@ export default function TodoDashboard() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.2 }}
-                      className="flex items-center px-5 py-3.5 hover:bg-slate-50/60 transition-colors"
+                      className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-medium text-slate-800">"{entry.title}"</p>
-                          <span className="text-xs text-slate-500">by {entry.created_by}</span>
-                          <span className="text-xs text-slate-400">on {createdDate}</span>
-                          {completedText && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
-                              ✓ {completedText}
-                            </span>
-                          )}
-                          {deletedText && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-red-100 text-red-700">
-                              ✕ {deletedText}
-                            </span>
-                          )}
-                        </div>
+                      {/* Title */}
+                      <p className="text-sm font-medium text-slate-800 truncate" title={entry.title}>
+                        {entry.title}
+                      </p>
+                      {/* Created by */}
+                      <span className="text-xs text-slate-500 whitespace-nowrap">
+                        {creatorName}
+                      </span>
+                      {/* Created on */}
+                      <span className="text-xs text-slate-400 whitespace-nowrap">
+                        {createdDate}
+                      </span>
+                      {/* Event pill */}
+                      <div className="flex justify-end">
+                        {eventPill}
                       </div>
                     </motion.div>
                   );
