@@ -1,5 +1,9 @@
-// Professional font: Inter (loaded via index.html or global CSS — fallback stack here)
-import React, { useState, useEffect } from 'react';
+// ═══════════════════════════════════════════════════════════════════════════════
+// TASKOSPHERE ATTENDANCE MANAGEMENT SYSTEM
+// Complete rewrite with timezone fix + enhanced design + production-grade code
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
 import { useAuth } from '@/contexts/AuthContext';
@@ -30,186 +34,359 @@ import {
   CheckCircle2,
   CalendarX,
   TrendingUp,
-  Timer
+  Timer,
+  ChevronRight,
+  Zap,
+  Users,
+  BarChart3
 } from 'lucide-react';
-// ────────────────────────────────────────────────
-// Brand Colors
-// ────────────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════════
+// BRAND COLORS & CONSTANTS
+// ═════════════════════════════════════════════════════════════════════════════
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
   lightGreen: '#5CCB5F',
+  amber: '#F59E0B',
+  red: '#EF4444',
+  slate50: '#F8FAFC',
+  slate200: '#E2E8F0',
 };
-// ────────────────────────────────────────────────
-// Framer Motion Variants
-// ────────────────────────────────────────────────
+
+const IST_TIMEZONE = 'Asia/Kolkata';
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ANIMATION VARIANTS
+// ═════════════════════════════════════════════════════════════════════════════
 const containerVariants = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.08 } }
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08, delayChildren: 0.1 }
+  }
 };
+
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.4, ease: "easeOut" }
+  }
 };
-// ────────────────────────────────────────────────
-// Live Digital Clock
-// ────────────────────────────────────────────────
+
+const pulseVariants = {
+  initial: { scale: 1 },
+  animate: {
+    scale: [1, 1.05, 1],
+    transition: { duration: 2, repeat: Infinity, ease: "easeInOut" }
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LIVE DIGITAL CLOCK COMPONENT
+// ═════════════════════════════════════════════════════════════════════════════
 function DigitalClock() {
   const [time, setTime] = useState(new Date());
+
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const timeString = time.toLocaleTimeString('en-IN', {
+    hour12: true,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
   return (
     <motion.div
-      className="flex flex-col items-center px-6 py-4 rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 text-white"
-      style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif" }}
+      className="flex flex-col items-center justify-center px-8 py-5 rounded-2xl text-white font-mono"
+      style={{
+        background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+        boxShadow: '0 20px 40px rgba(13, 59, 102, 0.3)'
+      }}
       animate={{
         boxShadow: [
-          "0 0 6px rgba(59,130,246,0.4)",
-          "0 0 18px rgba(59,130,246,0.9)",
-          "0 0 6px rgba(59,130,246,0.4)"
+          `0 20px 40px rgba(13, 59, 102, 0.3)`,
+          `0 20px 60px rgba(13, 59, 102, 0.5)`,
+          `0 20px 40px rgba(13, 59, 102, 0.3)`
         ]
       }}
       transition={{ duration: 2, repeat: Infinity }}
     >
       <motion.span
-        className="text-3xl font-mono font-bold tracking-wider"
-        animate={{ scale: [1, 1.05, 1] }}
-        transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+        className="text-5xl font-black tracking-widest"
+        variants={pulseVariants}
+        initial="initial"
+        animate="animate"
       >
-        {time.toLocaleTimeString('en-IN', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        {timeString}
       </motion.span>
-      <span className="text-[11px] uppercase tracking-widest text-blue-200 mt-1">
-        Indian Standard Time
+      <span className="text-xs uppercase tracking-widest text-blue-200 mt-2 font-bold">
+        {format(time, 'EEEE, MMMM d, yyyy')} • IST
       </span>
     </motion.div>
   );
 }
-// ────────────────────────────────────────────────
-// Main Attendance Component
-// ────────────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════════
+// STAT CARD COMPONENT
+// ═════════════════════════════════════════════════════════════════════════════
+function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, trend = null }) {
+  return (
+    <motion.div variants={itemVariants}>
+      <Card className="border-0 shadow-md hover:shadow-lg transition-shadow overflow-hidden">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">
+                {label}
+              </p>
+              <div className="flex items-baseline gap-2">
+                <p className="text-3xl font-black tracking-tight" style={{ color }}>
+                  {value}
+                </p>
+                {unit && <p className="text-sm font-medium text-slate-400">{unit}</p>}
+              </div>
+              {trend && (
+                <p className="text-xs text-slate-500 mt-2 font-medium">
+                  {trend}
+                </p>
+              )}
+            </div>
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center"
+              style={{ backgroundColor: `${color}15` }}
+            >
+              <Icon className="w-6 h-6" style={{ color }} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CUSTOM CALENDAR DAY COMPONENT
+// ═════════════════════════════════════════════════════════════════════════════
+function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
+  const dateStr = format(date, 'yyyy-MM-dd');
+  const dayRecord = attendance[dateStr];
+  const holiday = holidays.find(h => h.date === dateStr);
+
+  let dotColor = null;
+  let isSpecial = false;
+
+  if (holiday) {
+    dotColor = COLORS.amber;
+    isSpecial = true;
+  } else if (dayRecord?.is_late) {
+    dotColor = COLORS.red;
+    isSpecial = true;
+  } else if (dayRecord?.punch_in) {
+    dotColor = COLORS.emeraldGreen;
+  }
+
+  const isTodayDate = dateFnsIsToday(date);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={`
+            relative w-full aspect-square flex flex-col items-center justify-center
+            rounded-lg font-medium transition-all duration-200
+            ${isTodayDate ? 'ring-2 ring-offset-1 font-bold' : ''}
+            hover:bg-slate-100 active:scale-95
+          `}
+          style={{
+            ringColor: COLORS.deepBlue,
+          }}
+        >
+          <span className="text-sm">{date.getDate()}</span>
+          {dotColor && (
+            <motion.span
+              className="absolute bottom-1.5 w-2 h-2 rounded-full"
+              style={{ backgroundColor: dotColor }}
+              animate={{ scale: isSpecial ? [1, 1.3, 1] : 1 }}
+              transition={{ duration: 2, repeat: isSpecial ? Infinity : 0 }}
+            />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        <p className="font-bold mb-1">{format(date, 'MMM d, yyyy')}</p>
+        {holiday ? (
+          <p className="text-amber-600 font-medium">🎉 {holiday.name}</p>
+        ) : dayRecord?.punch_in ? (
+          <>
+            <p>In: {formatInTimeZone(parseISO(dayRecord.punch_in), IST_TIMEZONE, 'hh:mm a')}</p>
+            {dayRecord.punch_out && (
+              <p>Out: {formatInTimeZone(parseISO(dayRecord.punch_out), IST_TIMEZONE, 'hh:mm a')}</p>
+            )}
+            <p className="font-semibold text-green-600">{formatDuration(dayRecord.duration_minutes)}</p>
+          </>
+        ) : (
+          <p className="text-red-600">No record</p>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═════════════════════════════════════════════════════════════════════════════
+const formatDuration = (minutes) => {
+  if (!minutes) return '0h 0m';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
+};
+
+const calculateTodayLiveDuration = (todayAttendance) => {
+  if (!todayAttendance?.punch_in) return "0h 0m";
+  if (todayAttendance.punch_out) return formatDuration(todayAttendance.duration_minutes);
+
+  const start = parseISO(todayAttendance.punch_in);
+  const diffMs = Date.now() - start.getTime();
+  if (diffMs < 0) return "0h 0m";
+
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  return `${h}h ${m}m`;
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MAIN ATTENDANCE COMPONENT
+// ═════════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
-  const canViewRankings = hasPermission("can_view_staff_rankings");
-  // Permission: can this user see other staff attendance?
-  const isAdmin = user && user.role === 'admin';
+
+  // ─── PERMISSION CHECKS ───────────────────────────────────────────────────
+  const isAdmin = user?.role === 'admin';
   const canViewAllAttendance = isAdmin || hasPermission("can_view_attendance");
-  // List of specific user IDs this non-admin is permitted to view (from permission settings)
-  const permittedUserIds = (!isAdmin && user && user.permissions && Array.isArray(user.permissions.view_other_attendance))
-    ? user.permissions.view_other_attendance
-    : [];
-  const [attendanceHistory, setAttendanceHistory] = useState([]);
-  const [mySummary, setMySummary] = useState(null);
-  const [todayAttendance, setTodayAttendance] = useState(null);
-  const [isLateToday, setIsLateToday] = useState(false);
-  const [lateByMinutesToday, setLateByMinutesToday] = useState(0);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const canViewRankings = hasPermission("can_view_staff_rankings");
+
+  // ─── STATE MANAGEMENT ────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
-  const [showPunchInModal, setShowPunchInModal] = useState(false);
-  // Additional states
-  const [myRank, setMyRank] = useState('—');
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedUserId, setSelectedUserId] = useState(null);
+
+  // Data states
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [mySummary, setMySummary] = useState(null);
+  const [holidays, setHolidays] = useState([]);
+  const [pendingHolidays, setPendingHolidays] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [tasksCompleted, setTasksCompleted] = useState(0);
-  const [isEarlyLeaveToday, setIsEarlyLeaveToday] = useState(false);
-  const [earlyByMinutesToday, setEarlyByMinutesToday] = useState(0);
+  const [myRank, setMyRank] = useState('—');
+
+  // Modal states
+  const [showPunchInModal, setShowPunchInModal] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+
+  // Leave form state
   const [leaveFrom, setLeaveFrom] = useState(null);
   const [leaveTo, setLeaveTo] = useState(null);
   const [leaveReason, setLeaveReason] = useState("");
-  const [holidays, setHolidays] = useState([]);
+
+  // Holiday form state
+  const [holidayRows, setHolidayRows] = useState([
+    { name: '', date: format(new Date(), 'yyyy-MM-dd') }
+  ]);
+
+  // UI state
   const [liveDuration, setLiveDuration] = useState('0h 0m');
-  const [pendingHolidays, setPendingHolidays] = useState([]);
-  // Admin: user list + selected user for filtering
-  const [allUsers, setAllUsers] = useState([]);
-  const [selectedUserId, setSelectedUserId] = useState(null);
-  const [showHolidayModal, setShowHolidayModal] = useState(false);
-  const [holidayRows, setHolidayRows] = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-  // ─── Effects ─────────────────────────────────────────────────
+
+  // ─── EFFECTS ─────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchData();
   }, []);
+
   useEffect(() => {
     if (todayAttendance && !todayAttendance.punch_in) {
-      setShowPunchInModal(true);
+      const timer = setTimeout(() => setShowPunchInModal(true), 800);
+      return () => clearTimeout(timer);
     }
   }, [todayAttendance]);
+
   useEffect(() => {
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    if (todayAttendance && todayAttendance.date !== todayStr) {
-      setIsLateToday(false);
-      setLateByMinutesToday(0);
-      setIsEarlyLeaveToday(false);
-      setEarlyByMinutesToday(0);
-    }
-  }, [todayAttendance]);
-  useEffect(() => {
-    setLiveDuration(getTodayLiveDuration());
-    if (todayAttendance && todayAttendance.punch_in && !todayAttendance.punch_out) {
+    setLiveDuration(calculateTodayLiveDuration(todayAttendance));
+    if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
       const interval = setInterval(() => {
-        setLiveDuration(getTodayLiveDuration());
+        setLiveDuration(calculateTodayLiveDuration(todayAttendance));
       }, 60000);
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
-  // ─── Data Fetching ───────────────────────────────────────────
-  const fetchData = async (overrideUserId) => {
+
+  // ─── DATA FETCHING ──────────────────────────────────────────────────────
+  const fetchData = useCallback(async (overrideUserId = null) => {
     setLoading(true);
     const targetUserId = overrideUserId !== undefined ? overrideUserId : selectedUserId;
+
     try {
-      const historyUrl = targetUserId ? `/attendance/history?user_id=${targetUserId}` : '/attendance/history';
+      const historyUrl = targetUserId
+        ? `/attendance/history?user_id=${targetUserId}`
+        : '/attendance/history';
+
       const requests = [
         api.get(historyUrl),
         api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
         api.get('/tasks'),
         api.get('/holidays'),
-        canViewRankings
-          ? api.get('/reports/performance-rankings?period=monthly')
-          : Promise.resolve({ data: { rankings: [] } })
+        canViewRankings ? api.get('/reports/performance-rankings?period=monthly') : Promise.resolve({ data: { rankings: [] } })
       ];
-      const [
-        historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes
-      ] = await Promise.all(requests);
+
+      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
+
+      // Process holidays
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
+
       if (isAdmin) {
         setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
-        // Admin: fetch full user list for the filter dropdown
         try {
           const usersRes = await api.get('/users');
           setAllUsers(usersRes.data || []);
-        } catch (e) { /* ignore */ }
-      } else if (permittedUserIds.length > 0) {
-        // Permitted staff: build a minimal user list from only their allowed user IDs
-        // Backend /attendance/history already enforces the permission check server-side
-        // We fetch each permitted user's profile to show their name in the dropdown
-        try {
-          const usersRes = await api.get('/users');
-          const filtered = (usersRes.data || []).filter(u => permittedUserIds.includes(u.id));
-          setAllUsers(filtered);
         } catch (e) {
-          // If /users is admin-only and fails, leave allUsers empty — dropdown won't show
-          setAllUsers([]);
+          console.error('Failed to fetch users:', e);
         }
       }
+
+      // Set attendance data
       setAttendanceHistory(historyRes.data || []);
       setMySummary(summaryRes.data);
       setTodayAttendance(todayRes.data);
-      const rankingList = rankingRes.data.rankings || [];
-      const myEntry = rankingList.find(r => r.user_id === (user && user.id));
+
+      // Set rankings
+      const rankingList = rankingRes.data?.rankings || [];
+      const myEntry = rankingList.find(r => r.user_id === user?.id);
       if (myEntry) setMyRank(`#${myEntry.rank}`);
-      const completedCount = tasksRes.data.filter(t => t.status === 'completed').length;
+
+      // Count tasks
+      const completedCount = (tasksRes.data || []).filter(t => t.status === 'completed').length;
       setTasksCompleted(completedCount);
     } catch (error) {
       toast.error('Failed to fetch attendance data');
-      console.error(error);
+      console.error('Attendance fetch error:', error);
     } finally {
       setLoading(false);
     }
-  };
-  // ─── Punch In / Out Handler ─────────────────────────────────
-  const handlePunchAction = async (action) => {
+  }, [selectedUserId, isAdmin, canViewRankings, user?.id]);
+
+  // ─── HANDLERS ────────────────────────────────────────────────────────────
+  const handlePunchAction = useCallback(async (action) => {
     setLoading(true);
     try {
       let locationData = null;
@@ -223,63 +400,60 @@ export default function Attendance() {
             longitude: position.coords.longitude
           };
         } catch (locErr) {
-          console.warn("Location not available");
+          console.warn("Location unavailable");
         }
       }
-      await api.post('/attendance', { action, location: locationData });
-      let isLate = false;
-      let lateByMinutes = 0;
-      let isEarlyLeave = false;
-      let earlyByMinutes = 0;
-      if (action === 'punch_in' && user && user.punch_in_time) {
-        const [expH, expM] = user.punch_in_time.split(':').map(Number);
-        const expected = new Date();
-        expected.setHours(expH, expM, 0, 0);
-        const actual = new Date();
-        if (actual > expected) {
-          const diffMs = actual.getTime() - expected.getTime();
-          lateByMinutes = Math.floor(diffMs / 60000);
-          const [graceH, graceM] = user.grace_time ? user.grace_time.split(':').map(Number) : [0, 15];
-          const grace = graceH * 60 + graceM;
-          if (lateByMinutes > grace) {
-            isLate = true;
-            setIsLateToday(true);
-            setLateByMinutesToday(lateByMinutes);
-            toast.warning(`Late by ${lateByMinutes} minutes (grace: ${grace} min)`, { duration: 6000 });
-          }
-        }
-      } else if (action === 'punch_out' && user && user.punch_out_time && todayAttendance && todayAttendance.punch_in) {
-        const [expH, expM] = user.punch_out_time.split(':').map(Number);
-        const expectedOut = new Date();
-        expectedOut.setHours(expH, expM, 0, 0);
-        const actualOut = new Date();
-        if (actualOut < expectedOut) {
-          const diffMs = expectedOut.getTime() - actualOut.getTime();
-          earlyByMinutes = Math.floor(diffMs / 60000);
-          isEarlyLeave = true;
-          setIsEarlyLeaveToday(true);
-          setEarlyByMinutesToday(earlyByMinutes);
-          toast.warning(`Early leave by ${earlyByMinutes} min`, { duration: 6000 });
-        }
+
+      const response = await api.post('/attendance', { action, location: locationData });
+
+      if (action === 'punch_in') {
+        toast.success('✓ Punched in successfully!', { duration: 3000 });
+      } else if (action === 'punch_out') {
+        const duration = response.data?.duration || 0;
+        toast.success(`✓ Punched out successfully! (${formatDuration(duration)})`, { duration: 3000 });
       }
-      toast.success(
-        action === 'punch_in'
-          ? (isLate ? 'Punched in (late)' : 'Punched in successfully!')
-          : (isEarlyLeave ? 'Punched out (early)' : 'Punched out successfully!')
-      );
-      fetchData();
+
+      await fetchData();
     } catch (error) {
-      toast.error((error.response && error.response.data && error.response.data.detail) || 'Failed to record attendance');
+      const errorMsg = error.response?.data?.detail || 'Failed to record attendance';
+      toast.error(errorMsg, { duration: 4000 });
     } finally {
       setLoading(false);
     }
-  };
-  // ─── Holiday & Leave Handlers ───────────────────────────────
-  const handleAddHoliday = async () => {
+  }, [fetchData]);
+
+  const handleApplyLeave = useCallback(async () => {
+    if (!leaveFrom) {
+      toast.error('Select a leave start date');
+      return;
+    }
+
+    try {
+      await api.post("/attendance/apply-leave", {
+        from_date: format(leaveFrom, 'yyyy-MM-dd'),
+        to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
+        reason: leaveReason || "Personal Leave"
+      });
+
+      toast.success('✓ Leave request submitted successfully');
+      setShowLeaveForm(false);
+      setLeaveFrom(null);
+      setLeaveTo(null);
+      setLeaveReason("");
+      await fetchData();
+    } catch (error) {
+      toast.error('Failed to submit leave request');
+    }
+  }, [leaveFrom, leaveTo, leaveReason, fetchData]);
+
+  const handleAddHolidays = useCallback(async () => {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
-    if (validRows.length === 0) { toast.error('Add at least one holiday with a name and date'); return; }
-    let added = 0;
-    let failed = 0;
+    if (validRows.length === 0) {
+      toast.error('Add at least one holiday');
+      return;
+    }
+
+    let added = 0, failed = 0;
     for (const row of validRows) {
       try {
         await api.post('/holidays', { date: row.date, name: row.name.trim() });
@@ -288,249 +462,33 @@ export default function Attendance() {
         failed++;
       }
     }
-    if (added > 0) toast.success(`${added} holiday${added > 1 ? 's' : ''} added successfully`);
-    if (failed > 0) toast.error(`${failed} holiday${failed > 1 ? 's' : ''} failed (may already exist)`);
+
+    if (added > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} added`);
+    if (failed > 0) toast.error(`${failed} failed (may already exist)`);
+
     setShowHolidayModal(false);
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-    fetchData();
-  };
-  const handleHolidayDecision = async (holidayDate, decision) => {
+    await fetchData();
+  }, [holidayRows, fetchData]);
+
+  const handleHolidayDecision = useCallback(async (holidayDate, decision) => {
     try {
       await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
       toast.success(decision === 'confirmed' ? "Holiday confirmed" : "Holiday rejected");
-      fetchData();
+      await fetchData();
     } catch (err) {
-      toast.error("Failed to update holiday status");
+      toast.error("Failed to update holiday");
     }
-  };
-  // ─── Utility Functions ───────────────────────────────────────
-  const formatDuration = (minutes) => {
-    if (!minutes) return '0h 0m';
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return `${h}h ${m}m`;
-  };
-  const getTodayLiveDuration = () => {
-    if (!(todayAttendance && todayAttendance.punch_in)) return "0h 0m";
-    if (todayAttendance.punch_out) return formatDuration(todayAttendance.duration_minutes);
-    const start = new Date(todayAttendance.punch_in);
-    let diffMs = Date.now() - start.getTime();
-    if (diffMs < 0) diffMs = 0;
-    const h = Math.floor(diffMs / 3600000);
-    const m = Math.floor((diffMs % 3600000) / 60000);
-    return `${h}h ${m}m`;
-  };
-  const getDateStatus = (date) => {
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const isTodayDate = dateFnsIsToday(date);
-    const att = isTodayDate ? todayAttendance : attendanceHistory.find(a => a.date === dateStr);
-    const hol = holidays.find(h => h.date === dateStr);
-    if (hol) return `Holiday: ${hol.name}`;
-    if (att) {
-      let str = att.is_late ? 'Late' : 'Present';
-      str += ` - ${formatDuration(att.duration_minutes || 0)}`;
-      if (!att.punch_out && isTodayDate) str += ' (Ongoing)';
-      return str;
-    }
-    if (isBefore(startOfDay(date), startOfDay(new Date()))) return 'Absent';
-    if (isAfter(date, new Date())) return 'Future';
-    return 'Today - No record';
-  };
-  const getMonthAttendance = () => {
-    const start = startOfMonth(selectedDate);
-    const end = endOfMonth(selectedDate);
-    let atts = attendanceHistory.filter(a => {
-      const d = parseISO(a.date);
-      return d >= start && d <= end;
-    });
-    if (todayAttendance) {
-      const todayStr = todayAttendance.date;
-      if (!atts.some(a => a.date === todayStr)) {
-        const todayD = parseISO(todayStr);
-        if (todayD >= start && todayD <= end) {
-          atts = [...atts, todayAttendance];
-        }
-      }
-    }
-    return atts;
-  };
-  // ─── Computed Values ─────────────────────────────────────────
-  const monthAttendance = getMonthAttendance();
-  const monthTotalMinutes = monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
-  // Only count days with an actual punch_in — leave days / no-punch days are absent
-  const monthDaysPresent = monthAttendance.filter(a => a.punch_in).length;
-  const totalDaysLateThisMonth = monthAttendance.filter(a => a.punch_in && a.is_late).length;
-  const attendanceDates = [
-    ...attendanceHistory.map(a => parseISO(a.date)),
-    ...((todayAttendance && todayAttendance.punch_in) ? [parseISO(todayAttendance.date)] : [])
-  ];
-  const lateDates = [
-    ...attendanceHistory.filter(a => a.is_late).map(a => parseISO(a.date)),
-    ...((isLateToday || (todayAttendance && todayAttendance.is_late)) && todayAttendance && todayAttendance.date ? [parseISO(todayAttendance.date)] : [])
-  ];
-  const holidayDates = holidays.map(h => parseISO(h.date));
-  const modifiers = {
-    present: attendanceDates,
-    late: lateDates,
-    holidays: holidayDates,
-    today: [new Date()]
-  };
-  const modifiersStyles = {
-    present: { backgroundColor: `${COLORS.emeraldGreen}20`, borderRadius: '50%' },
-    late: { backgroundColor: '#fee2e2', color: '#ef4444', fontWeight: 'bold', borderRadius: '50%' },
-    holidays: { backgroundColor: '#FFD70020', color: '#DAA520', fontWeight: 'bold', borderRadius: '50%' },
-    today: { fontWeight: 'bold', color: COLORS.deepBlue }
-  };
-  const isTodaySelected = dateFnsIsToday(selectedDate);
-  const isSelectedFuture = isAfter(selectedDate, new Date());
-  const isSelectedPast = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
-  // Selected day data (computed, no extra state or lag)
-  const selectedAttendance = isTodaySelected
-    ? todayAttendance
-    : attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
-  const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
-  const CustomDay = ({ date, displayMonth, ...props }) => {
-    const status = getDateStatus(date);
-    const dayNumber = date.getDate();
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const isPresent = attendanceDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
-    const isLate = lateDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
-    const isHoliday = holidayDates.some(d => format(d, 'yyyy-MM-dd') === dateStr);
-    const isTodayDate = dateFnsIsToday(date);
-    let dotColor = null;
-    if (isHoliday) dotColor = '#DAA520';
-    else if (isLate) dotColor = '#ef4444';
-    else if (isPresent) dotColor = COLORS.emeraldGreen;
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            {...props}
-            className={`${props.className} relative w-full h-full flex flex-col items-center justify-center min-h-[40px] transition-all hover:bg-slate-100 rounded-lg ${isTodayDate ? 'ring-2 ring-blue-500 ring-offset-1 font-bold' : ''}`}
-          >
-            <span>{dayNumber}</span>
-            {dotColor && (
-              <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <div className="text-xs">
-             <p className="font-bold border-b border-slate-200 pb-1 mb-1">
-               {format(date, 'MMMM d, yyyy')}
-             </p>
-             <p className="font-medium text-blue-600">{status}</p>
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    );
-  };
-  const handleApplyLeaveClick = () => {
-    setLeaveFrom(selectedDate);
-    setLeaveTo(selectedDate);
-    setShowLeaveForm(true);
-  };
-  // Attendance Analytics Computations
-  // ─── Dedup today from history to avoid double-count ───────────
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
-  const todayAlreadyInHistory = attendanceHistory.some(a => a.date === todayStr);
+  }, [fetchData]);
 
-  // ─── Grace period in minutes ──────────────────────────────────
-  const graceMinutes = (() => {
-    if (!user || !user.grace_time) return 15;
-    const [gh, gm] = user.grace_time.split(':').map(Number);
-    return gh * 60 + gm;
-  })();
-
-  // ─── Helper: is a given date-string a Sunday or confirmed holiday ──
-  const holidayDateSet = new Set(holidays.map(h => h.date));
-  const isSundayOrHoliday = (dateStr) => {
-    const d = parseISO(dateStr);
-    return d.getDay() === 0 || holidayDateSet.has(dateStr);
-  };
-
-  // ─── Build full deduplicated record list for YTD ──────────────
-  const allRecords = [
-    ...attendanceHistory,
-    ...(!todayAlreadyInHistory && todayAttendance ? [todayAttendance] : [])
-  ];
-
-  // ─── YTD total hours (actual punched time only) ───────────────
-  const totalMinutesYTD = allRecords.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
-  const totalHoursYTDDecimal = parseFloat((totalMinutesYTD / 60).toFixed(2));
-
-  // ─── YTD average: only over days with a punch record, excluding Sundays/holidays ──
-  const punchedWorkingDays = allRecords.filter(a =>
-    (a.duration_minutes || 0) > 0 && !isSundayOrHoliday(a.date)
-  ).length;
-  const averageDailyHoursDecimal = punchedWorkingDays > 0
-    ? parseFloat((totalMinutesYTD / punchedWorkingDays / 60).toFixed(2))
-    : 0;
-
-  // ─── Attendance % for current month ──────────────────────────
-  // Formula: effective present days / total days in month × 100
-  // Rules:
-  //   • Sundays → count as present (1.0), don't count against you
-  //   • Confirmed Holidays → count as present (1.0)
-  //   • Punched on time (within grace) → 1.0
-  //   • Late after grace → 0.5 (half day)
-  //   • Absent on a working day → 0.0
-  // Denominator = total calendar days in current month (simple)
-
-  const currentMonthKey = format(new Date(), 'yyyy-MM');
-  const today = new Date();
-  const currentMonthStart = startOfMonth(today);
-  const totalDaysInMonth = endOfMonth(today).getDate();
-
-  // Days elapsed so far this month (1 → today's date number)
-  const daysElapsed = today.getDate();
-
-  let effectivePresentDays = 0;
-  for (let dayNum = 1; dayNum <= daysElapsed; dayNum++) {
-    const d = new Date(today.getFullYear(), today.getMonth(), dayNum);
-    const dStr = format(d, 'yyyy-MM-dd');
-
-    // Sunday or holiday → full present day
-    if (d.getDay() === 0 || holidayDateSet.has(dStr)) {
-      effectivePresentDays += 1;
-      continue;
-    }
-
-    // Find punch record for this day
-    const record = allRecords.find(a => a.date === dStr);
-    if (!record || !record.punch_in) {
-      // Absent working day → 0
-      continue;
-    }
-
-    // Check if late beyond grace period
-    if (record.is_late) {
-      effectivePresentDays += 0.5; // half day for late after grace
-    } else {
-      effectivePresentDays += 1.0;
-    }
-  }
-
-  const attendancePercentage = daysElapsed > 0
-    ? parseFloat(((effectivePresentDays / daysElapsed) * 100).toFixed(2))
-    : 0;
-
-  // ─── Current month display hours ─────────────────────────────
-  const currentMonthSummary = mySummary && mySummary.monthly_summary
-    ? mySummary.monthly_summary.find(s => s.month === currentMonthKey)
-    : null;
-  const currentMonthHours = currentMonthSummary
-    ? currentMonthSummary.total_hours
-    : formatDuration(monthTotalMinutes);
-  // Export Attendance Summary to PDF
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    // Determine the employee name to display
+  const handleExportPDF = useCallback(() => {
     const employeeName = selectedUserId
       ? (allUsers.find(u => u.id === selectedUserId)?.full_name || 'Employee')
-      : (user?.full_name || user?.name || 'Staff Member');
+      : (user?.full_name || 'Staff Member');
 
-    // Header banner
+    const doc = new jsPDF();
+
+    // Header
     doc.setFillColor(13, 59, 102);
     doc.rect(0, 0, 210, 24, 'F');
     doc.setTextColor(255, 255, 255);
@@ -539,9 +497,9 @@ export default function Attendance() {
     doc.text('TASKOSPHERE — ATTENDANCE REPORT', 10, 10);
     doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
-    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}  |  IST`, 10, 19);
+    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy, hh:mm a')} IST`, 10, 19);
 
-    // Employee info block
+    // Employee info
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
@@ -554,39 +512,49 @@ export default function Attendance() {
     doc.setDrawColor(200, 200, 200);
     doc.line(10, 47, 200, 47);
 
-    // Summary stats
+    // Summary
     doc.setFontSize(11);
-    doc.text(`Total Monthly Hours : ${currentMonthHours}`, 10, 56);
-    doc.text(`Days Present        : ${monthDaysPresent}`, 10, 64);
-    doc.text(`Late Arrivals       : ${totalDaysLateThisMonth}`, 10, 72);
-    doc.text(`Avg Daily Hours     : ${averageDailyHoursDecimal.toFixed(2)} hrs`, 10, 80);
-    doc.text(`Attendance %        : ${attendancePercentage.toFixed(2)}%`, 10, 88);
-    doc.line(10, 93, 200, 93);
+    const monthlyHours = mySummary?.monthly_summary
+      ?.find(s => s.month === format(selectedDate, 'yyyy-MM'))?.total_hours || '0h 0m';
+    doc.text(`Total Monthly Hours : ${monthlyHours}`, 10, 56);
+    doc.text(`Days Present        : ${attendanceHistory.filter(a => a.punch_in).length}`, 10, 64);
+    doc.text(`Late Arrivals       : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 72);
+
+    doc.line(10, 80, 200, 80);
 
     // Detailed log header
     doc.setFont(undefined, 'bold');
     doc.setFontSize(11);
-    doc.text('Detailed Attendance Log (Last 15 Records):', 10, 102);
+    doc.text('Attendance Log (Last 15 Records):', 10, 89);
     doc.setFont(undefined, 'normal');
 
-    // Column headers
+    // Table headers
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
-    doc.text('DATE', 10, 111);
-    doc.text('PUNCH IN', 65, 111);
-    doc.text('PUNCH OUT', 105, 111);
-    doc.text('DURATION', 155, 111);
+    doc.text('DATE', 10, 98);
+    doc.text('PUNCH IN', 65, 98);
+    doc.text('PUNCH OUT', 105, 98);
+    doc.text('DURATION', 155, 98);
     doc.setDrawColor(180, 180, 180);
-    doc.line(10, 113, 200, 113);
+    doc.line(10, 100, 200, 100);
 
+    // Table rows
     doc.setTextColor(0, 0, 0);
-    let y = 121;
+    let y = 108;
     attendanceHistory.slice(0, 15).forEach((record, index) => {
-      if (y > 270) { doc.addPage(); y = 20; }
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
       const dateStr = format(parseISO(record.date), 'dd MMM yyyy');
-      const inTime = record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—';
-      const outTime = record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing';
+      const inTime = record.punch_in
+        ? formatInTimeZone(parseISO(record.punch_in), IST_TIMEZONE, 'hh:mm a')
+        : '—';
+      const outTime = record.punch_out
+        ? formatInTimeZone(parseISO(record.punch_out), IST_TIMEZONE, 'hh:mm a')
+        : 'Ongoing';
       const dur = formatDuration(record.duration_minutes);
+
       if (index % 2 === 0) {
         doc.setFillColor(248, 250, 252);
         doc.rect(10, y - 5, 190, 9, 'F');
@@ -605,32 +573,102 @@ export default function Attendance() {
     doc.text('Taskosphere HR Management System  |  Confidential', 10, 288);
 
     doc.save(`Attendance_${employeeName.replace(/\s+/g, '_')}_${format(selectedDate, 'MMM_yyyy')}.pdf`);
-  };
-  // ─── JSX Render ──────────────────────────────────────────────
+  }, [selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
+
+  // ─── COMPUTED VALUES ────────────────────────────────────────────────────
+  const monthAttendance = useMemo(() => {
+    const start = startOfMonth(selectedDate);
+    const end = endOfMonth(selectedDate);
+    let atts = attendanceHistory.filter(a => {
+      const d = parseISO(a.date);
+      return d >= start && d <= end;
+    });
+
+    if (todayAttendance) {
+      const todayStr = todayAttendance.date;
+      if (!atts.some(a => a.date === todayStr)) {
+        const todayD = parseISO(todayStr);
+        if (todayD >= start && todayD <= end) {
+          atts = [...atts, todayAttendance];
+        }
+      }
+    }
+
+    return atts;
+  }, [attendanceHistory, todayAttendance, selectedDate]);
+
+  const monthTotalMinutes = useMemo(
+    () => monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0),
+    [monthAttendance]
+  );
+
+  const monthDaysPresent = useMemo(
+    () => monthAttendance.filter(a => a.punch_in).length,
+    [monthAttendance]
+  );
+
+  const totalDaysLateThisMonth = useMemo(
+    () => monthAttendance.filter(a => a.punch_in && a.is_late).length,
+    [monthAttendance]
+  );
+
+  const isTodaySelected = dateFnsIsToday(selectedDate);
+  const selectedAttendance = isTodaySelected
+    ? todayAttendance
+    : attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
+
+  const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
+
+  const attendanceMap = useMemo(() => {
+    const map = {};
+    attendanceHistory.forEach(a => {
+      map[a.date] = a;
+    });
+    if (todayAttendance) {
+      map[todayAttendance.date] = todayAttendance;
+    }
+    return map;
+  }, [attendanceHistory, todayAttendance]);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // JSX RENDERING
+  // ═════════════════════════════════════════════════════════════════════════
   return (
     <TooltipProvider>
       <motion.div
-        className="space-y-5 min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9 bg-slate-50/60"
-        style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif" }}
+        className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
+        style={{
+          background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)`,
+          fontFamily: "'DM Sans', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif"
+        }}
         variants={containerVariants}
         initial="hidden"
         animate="visible"
       >
-        {/* Header */}
-        <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* HEADER SECTION                                                    */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        <motion.div
+          variants={itemVariants}
+          className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8"
+        >
           <div>
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue, fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif", letterSpacing: '-0.02em' }}>
-              {user && user.role === 'admin' ? 'Attendance Management' : 'My Attendance'}
+            <h1
+              className="text-4xl font-black tracking-tight"
+              style={{ color: COLORS.deepBlue, letterSpacing: '-0.02em' }}
+            >
+              {isAdmin ? 'Attendance Management' : 'My Attendance'}
             </h1>
-            <p className="text-slate-500 mt-1 text-sm font-medium tracking-wide">
-              {user && user.role === 'admin' ? 'View and manage attendance for all staff' : 'Track your working hours and attendance history'}
+            <p className="text-slate-500 mt-2 text-sm font-medium">
+              {isAdmin ? 'Manage team attendance across all departments' : 'Track your daily hours and attendance'}
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap items-center">
-            {/* User Filter Dropdown — Admin sees all staff; permitted staff sees only their allowed users */}
-            {(isAdmin || canViewAllAttendance || permittedUserIds.length > 0) && allUsers.length > 0 && (
-              <select
-                className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+
+          <div className="flex gap-3 flex-wrap items-center">
+            {(isAdmin || canViewAllAttendance) && allUsers.length > 0 && (
+              <motion.select
+                variants={itemVariants}
+                className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium"
                 value={selectedUserId || ''}
                 onChange={e => {
                   const val = e.target.value || null;
@@ -638,612 +676,560 @@ export default function Attendance() {
                   fetchData(val);
                 }}
               >
-                {/* "All Staff" option only available to admin or full can_view_attendance users */}
-                {(isAdmin || canViewAllAttendance) && <option value="">All Staff</option>}
+                <option value="">All Staff</option>
                 {allUsers.map(u => (
                   <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
                 ))}
-              </select>
+              </motion.select>
             )}
-            {/* Admin: Add Holiday Button */}
-            {user && user.role === 'admin' && (
+
+            {isAdmin && (
+              <motion.div variants={itemVariants}>
+                <Button
+                  onClick={() => {
+                    setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+                    setShowHolidayModal(true);
+                  }}
+                  className="bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl px-5 py-2.5"
+                >
+                  <Zap className="w-4 h-4 mr-2" />
+                  Add Holiday
+                </Button>
+              </motion.div>
+            )}
+
+            <motion.div variants={itemVariants}>
               <Button
+                onClick={handleExportPDF}
                 variant="outline"
-                onClick={() => {
-                  setHolidayRows([{ name: '', date: format(selectedDate, 'yyyy-MM-dd') }]);
-                  setShowHolidayModal(true);
-                }}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                className="border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50"
               >
-                + Add Holiday
+                ↓ Export PDF
               </Button>
-            )}
-            <Button onClick={handleExportPDF} variant="outline">
-              Export PDF
-            </Button>
+            </motion.div>
           </div>
         </motion.div>
-        {/* Viewing As Banner — shown for admin and permitted staff when a specific user is selected */}
+
+        {/* VIEWING AS BANNER */}
         {selectedUserId && (
-          <motion.div variants={itemVariants}>
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
-              <span className="font-semibold">Viewing attendance for:</span>
-              <span className="font-bold">{allUsers.find(u => u.id === selectedUserId)?.full_name || selectedUserId}</span>
-              {(isAdmin || canViewAllAttendance) && (
-                <button className="ml-auto text-blue-500 hover:text-blue-700 underline text-xs" onClick={() => { setSelectedUserId(null); fetchData(null); }}>
-                  Clear (Show All)
-                </button>
-              )}
-            </div>
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200"
+            style={{ backgroundColor: '#EFF6FF' }}
+          >
+            <Users className="w-4 h-4 text-blue-700" />
+            <span className="text-sm font-semibold text-blue-900">
+              Viewing: {allUsers.find(u => u.id === selectedUserId)?.full_name || selectedUserId}
+            </span>
+            <button
+              className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline"
+              onClick={() => {
+                setSelectedUserId(null);
+                fetchData(null);
+              }}
+            >
+              Clear
+            </button>
           </motion.div>
         )}
-        {/* Today's / Selected Date Status Card */}
-        <motion.div variants={itemVariants}>
-          <Card className="border-0 shadow-lg overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
-            <CardContent className="p-6">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center space-x-4">
-                  <div className="w-14 h-14 bg-white/20 backdrop-blur rounded-2xl flex items-center justify-center">
-                    <Clock className="h-7 w-7 text-white" />
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* TODAY'S STATUS HERO CARD                                          */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        <motion.div variants={itemVariants} className="mb-8">
+          <Card
+            className="border-0 shadow-xl overflow-hidden"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`
+            }}
+          >
+            <CardContent className="p-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                <div className="text-white space-y-4">
+                  <div className="flex items-center gap-3">
+                    <motion.div
+                      className="w-16 h-16 bg-white/15 backdrop-blur rounded-2xl flex items-center justify-center"
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    >
+                      <Clock className="w-8 h-8 text-white" />
+                    </motion.div>
+                    <div>
+                      <h3 className="text-2xl font-bold">
+                        {isTodaySelected ? "Today's Status" : format(selectedDate, 'EEEE, MMM d')}
+                      </h3>
+                      <p className="text-blue-100 text-sm mt-0.5">Real-time attendance tracking</p>
+                    </div>
                   </div>
-                  <div className="text-white">
-                    <h3 className="text-xl font-semibold">
-                      {isTodaySelected ? "Today's Status" : `Status for ${format(selectedDate, 'EEEE, MMMM d, yyyy')}`}
-                    </h3>
-                    {!isTodaySelected && (
-                      <p className="text-blue-100 text-sm">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
-                    )}
-                    {selectedAttendance && selectedAttendance.punch_in && (
-                      <p className="text-sm text-blue-100/80">
-                        In: {formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}
+
+                  {selectedAttendance?.punch_in && (
+                    <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
+                      <p className="text-blue-100 text-sm">
+                        <span className="font-semibold">In:</span>{' '}
+                        {formatInTimeZone(parseISO(selectedAttendance.punch_in), IST_TIMEZONE, 'hh:mm a')}
                         {selectedAttendance.punch_out && (
-                          <> • Out: {formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}</>
+                          <>
+                            {' • '}
+                            <span className="font-semibold">Out:</span>{' '}
+                            {formatInTimeZone(parseISO(selectedAttendance.punch_out), IST_TIMEZONE, 'hh:mm a')}
+                          </>
                         )}
                       </p>
-                    )}
-                    <p className="text-sm text-blue-100/80 mt-1">
-                      Expected: In {user && user.punch_in_time || 'N/A'} (Grace {user && user.grace_time || 'N/A'}) • Out {user && user.punch_out_time || 'N/A'}
-                    </p>
-                    {isLateToday && isTodaySelected && (
-                      <div className="mt-2 inline-flex items-center gap-2 bg-red-500/30 backdrop-blur px-3 py-1 rounded-full">
-                        <AlertTriangle className="h-4 w-4 text-red-300" />
-                        <span className="text-red-200 font-medium text-sm">Late by {lateByMinutesToday} min</span>
-                      </div>
-                    )}
-                    {isEarlyLeaveToday && isTodaySelected && (
-                      <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/30 backdrop-blur px-3 py-1 rounded-full">
-                        <AlertTriangle className="h-4 w-4 text-amber-300" />
-                        <span className="text-amber-200 font-medium text-sm">Early by {earlyByMinutesToday} min</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  {!(selectedAttendance && selectedAttendance.punch_in) ? (
-                    <div className="flex gap-3">
-                      {isTodaySelected && (
-                        <Button
-                          onClick={() => { handlePunchAction("punch_in"); setShowPunchInModal(false); }}
-                          className="bg-green-600 hover:bg-green-700"
-                        >
-                          Punch In
-                        </Button>
-                      )}
-                      {(!isSelectedPast || isTodaySelected) && (
-                        <Button variant="outline" onClick={handleApplyLeaveClick}>
-                          Apply For Leave
-                        </Button>
-                      )}
+                      <p className="text-blue-100 text-xs">
+                        Expected: {user?.punch_in_time || '10:30'} ({user?.grace_time || '15'} min grace) • {user?.punch_out_time || '19:00'}
+                      </p>
                     </div>
-                  ) : (
-                    !(selectedAttendance && selectedAttendance.punch_out) && isTodaySelected && (
-                      <Button
+                  )}
+
+                  <div className="flex gap-3 flex-wrap pt-2">
+                    {!selectedAttendance?.punch_in ? (
+                      <>
+                        {isTodaySelected && (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => {
+                              handlePunchAction('punch_in');
+                              setShowPunchInModal(false);
+                            }}
+                            disabled={loading}
+                            className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-colors"
+                          >
+                            <LogIn className="w-5 h-5 inline mr-2" />
+                            Punch In
+                          </motion.button>
+                        )}
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => setShowLeaveForm(true)}
+                          className="border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10 transition-colors"
+                        >
+                          Apply Leave
+                        </motion.button>
+                      </>
+                    ) : !selectedAttendance?.punch_out && isTodaySelected ? (
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => handlePunchAction('punch_out')}
                         disabled={loading}
-                        className="bg-white/20 backdrop-blur text-white hover:bg-white/30 rounded-xl px-8"
+                        className="bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl transition-colors"
                       >
-                        <LogOut className="mr-2 h-5 w-5" />
+                        <LogOut className="w-5 h-5 inline mr-2" />
                         Punch Out
-                      </Button>
-                    )
-                  )}
-                  {(selectedAttendance && selectedAttendance.punch_out) && (
-                    <Badge className="bg-white/20 text-white border-0">
-                      {formatDuration(selectedAttendance.duration_minutes)}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-        {/* Admin Pending Holiday Review */}
-        {user && user.role === 'admin' && pendingHolidays.length > 0 && (
-          <motion.div variants={itemVariants} className="mb-6">
-            <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
-              <div className="bg-amber-100/80 px-4 py-2 border-b border-amber-200 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-700" />
-                  <span className="text-xs font-bold uppercase text-amber-800">
-                    Holiday Review ({pendingHolidays.length})
-                  </span>
-                </div>
-                <Badge variant="outline" className="bg-amber-200 text-amber-800 border-amber-300">
-                  Admin
-                </Badge>
-              </div>
-              <CardContent className="p-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {pendingHolidays.map(holiday => (
-                    <div key={holiday.date} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex flex-col">
-                      <div className="mb-4">
-                        <h4 className="font-bold text-slate-800">{holiday.name}</h4>
-                        <p className="text-sm text-slate-500">{format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}</p>
-                      </div>
-                      <div className="flex gap-2 mt-auto">
-                        <Button
-                          size="sm"
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                          onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}
-                        >
-                          Yes (Closed)
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
-                          onClick={() => handleHolidayDecision(holiday.date, 'rejected')}
-                        >
-                          No (Working)
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-        {/* Stats Row */}
-        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4" variants={itemVariants}>
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">This Month</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    {currentMonthHours}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1 font-medium">{monthDaysPresent} days present</p>
-                </div>
-                <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                  <Timer className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Tasks Done</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                    {tasksCompleted}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1 font-medium">this month</p>
-                </div>
-                <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                  <CheckCircle2 className="h-5 w-5" style={{ color: COLORS.emeraldGreen }} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Late</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
-                    {totalDaysLateThisMonth}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1 font-medium">this month</p>
-                </div>
-                <div className="p-3 rounded-xl" style={{ backgroundColor: '#fee2e220' }}>
-                  <CalendarX className="h-5 w-5" style={{ color: '#ef4444' }} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          {canViewRankings && (
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-slate-500 uppercase">Your Rank</p>
-                    <p className="text-5xl font-extrabold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
-                      {myRank}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">overall</p>
-                  </div>
-                  <div className="p-3 rounded-xl" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                    <TrendingUp className="h-5 w-5" style={{ color: COLORS.deepBlue }} />
+                      </motion.button>
+                    ) : selectedAttendance?.punch_out ? (
+                      <Badge className="px-4 py-2 bg-white/20 text-white border-0 font-mono">
+                        {formatDuration(selectedAttendance.duration_minutes)}
+                      </Badge>
+                    ) : null}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </motion.div>
-        {/* Live Duration + Clock */}
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm">
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 items-center gap-6">
-                <div className="text-center md:text-left">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2">Total Hours Today</p>
-                  <p className="text-4xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen, fontVariantNumeric: 'tabular-nums' }}>
-                    {liveDuration}
-                  </p>
-                  {todayAttendance && todayAttendance.punch_in && !todayAttendance.punch_out && (
-                    <p className="text-xs text-emerald-600 mt-2 font-semibold tracking-widest uppercase">● Live · updates every minute</p>
-                  )}
-                </div>
-                <div className="flex justify-center md:justify-end">
+
+                <div>
                   <DigitalClock />
                 </div>
               </div>
             </CardContent>
           </Card>
         </motion.div>
-        {/* Monthly Summary */}
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm bg-white">
-            <CardHeader className="pb-3 border-b border-slate-100">
-              <div className="flex items-center justify-between">
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* ADMIN PENDING HOLIDAY REVIEW                                      */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        {isAdmin && pendingHolidays.length > 0 && (
+          <motion.div variants={itemVariants} className="mb-8">
+            <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
+              <div className="bg-amber-100 px-6 py-3 border-b border-amber-200 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                    <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Monthly Performance</CardTitle>
-                    <CardDescription className="text-[11px]">{format(selectedDate, 'MMMM yyyy')}</CardDescription>
-                  </div>
+                  <AlertTriangle className="w-5 h-5 text-amber-700" />
+                  <span className="text-sm font-black uppercase text-amber-900">
+                    Holiday Review ({pendingHolidays.length})
+                  </span>
                 </div>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Total Hours</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    {formatDuration(monthTotalMinutes)}
-                  </p>
+              <CardContent className="p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {pendingHolidays.map(holiday => (
+                    <motion.div
+                      key={holiday.date}
+                      variants={itemVariants}
+                      className="bg-white p-5 rounded-xl border-2 border-amber-200 shadow-sm"
+                    >
+                      <h4 className="font-bold text-slate-800 text-lg mb-2">{holiday.name}</h4>
+                      <p className="text-sm text-slate-500 mb-4">
+                        {format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg"
+                          onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 border-red-300 text-red-600 hover:bg-red-50 font-bold rounded-lg"
+                          onClick={() => handleHolidayDecision(holiday.date, 'rejected')}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Present</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                    {monthDaysPresent}
-                  </p>
-                </div>
-                <div className="bg-white rounded-xl p-5 border shadow-sm">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Days Late</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
-                    {totalDaysLateThisMonth}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* STATS GRID                                                        */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard
+            icon={Timer}
+            label="This Month"
+            value={formatDuration(monthTotalMinutes).split('h')[0]}
+            unit="hours"
+            color={COLORS.deepBlue}
+            trend={`${monthDaysPresent} days present`}
+          />
+          <StatCard
+            icon={CheckCircle2}
+            label="Tasks Done"
+            value={tasksCompleted}
+            unit="this month"
+            color={COLORS.emeraldGreen}
+          />
+          <StatCard
+            icon={CalendarX}
+            label="Days Late"
+            value={totalDaysLateThisMonth}
+            unit="this month"
+            color={COLORS.red}
+          />
+          {canViewRankings && (
+            <StatCard
+              icon={TrendingUp}
+              label="Your Rank"
+              value={myRank}
+              unit="overall"
+              color={COLORS.deepBlue}
+            />
+          )}
         </motion.div>
-        {/* Attendance Analytics Dashboard */}
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 shadow-sm bg-white">
-            <CardHeader className="pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.deepBlue}15` }}>
-                  <TrendingUp className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
-                </div>
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* LIVE DURATION + PERFORMANCE                                       */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        <motion.div variants={itemVariants} className="mb-8">
+          <Card className="border-0 shadow-md overflow-hidden">
+            <CardContent className="p-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
                 <div>
-                  <CardTitle className="text-base font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Attendance Analytics</CardTitle>
-                  <CardDescription className="text-[11px]">Year-to-Date Insights · Late after grace = ½ day · Sundays & holidays counted as present</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Total Hours YTD</p>
-                  <p className="text-2xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>
-                    {totalHoursYTDDecimal.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-1">hrs</span>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Daily Progress
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-1">{punchedWorkingDays} working days recorded</p>
-                </div>
-                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Avg Daily Hours</p>
-                  <p className="text-2xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                    {averageDailyHoursDecimal.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-1">hrs</span>
+                  <p
+                    className="text-5xl font-black tracking-tight mb-1"
+                    style={{ color: COLORS.emeraldGreen, fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {liveDuration}
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-1">per working day (excl. Sun & holidays)</p>
-                </div>
-                <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold mb-1">Attendance % (This Month)</p>
-                  <p className="text-2xl font-bold tracking-tight text-blue-600">
-                    {attendancePercentage.toFixed(2)}<span className="text-sm font-medium text-slate-400 ml-0.5">%</span>
+                  <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider">
+                    {todayAttendance?.punch_in && !todayAttendance?.punch_out
+                      ? '● Live • updating every minute'
+                      : 'Total for today'}
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-1">{effectivePresentDays.toFixed(1)} of {daysElapsed} days · late = ½ day</p>
                 </div>
-              </div>
-              <div className="mt-5 px-4 py-3 bg-slate-50 rounded-xl border border-slate-100 text-[11px] text-slate-400 leading-relaxed">
-                <strong className="text-slate-500">Calculation rules:</strong> Sundays & confirmed holidays are counted as present (1 day). Days with late punch-in beyond grace period count as half-day (0.5). Attendance % = effective present days ÷ total days elapsed this month × 100.
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-br from-blue-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-xs text-slate-500 font-bold uppercase mb-1">Daily Goal</p>
+                    <p className="text-2xl font-bold text-slate-800">8.5h</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {((parseInt(liveDuration) / 8.5) * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
         </motion.div>
-        {/* Calendar + History Container */}
-        <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-6" variants={itemVariants}>
-         
-          {/* Calendar & Selection Sidebar */}
-          <div className="xl:col-span-1 space-y-6">
-            <Card className="border border-slate-200 shadow-sm h-fit">
-              <CardHeader className="pb-3">
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* CALENDAR + HISTORY SECTION                                        */
+        /* ═════════════════════════════════════════════════════════════════ */}
+        <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+          {/* Calendar Sidebar */}
+          <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6">
+            <Card className="border-0 shadow-md">
+              <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                    <CalendarIcon className="h-5 w-5" /> Attendance Calendar
+                  <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                    <CalendarIcon className="w-5 h-5" />
+                    Attendance Calendar
                   </CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedDate(new Date())}
+                    className="text-xs font-bold"
+                  >
                     Today
                   </Button>
                 </div>
-                <CardDescription>Click date for details • Hover for info</CardDescription>
+                <CardDescription className="text-xs">Click date for details</CardDescription>
               </CardHeader>
-             
               <CardContent className="p-4">
                 <Calendar
                   mode="single"
                   selected={selectedDate}
                   onSelect={(date) => date && setSelectedDate(date)}
-                  modifiers={modifiers}
-                  modifiersStyles={modifiersStyles}
-                  components={{ Day: CustomDay }}
-                  className="rounded-xl border w-full flex justify-center shadow-sm"
-                  showOutsideDays={true}
-                  fixedWeeks
+                  disabled={date => isAfter(date, new Date())}
+                  className="rounded-xl border-0 shadow-sm"
                   classNames={{
                     months: "w-full",
-                    month: "w-full space-y-4",
+                    month: "w-full space-y-3",
                     table: "w-full border-collapse",
                     head_row: "flex w-full justify-between mb-2",
-                    head_cell: "text-muted-foreground rounded-md w-9 font-medium text-[0.8rem] text-center",
+                    head_cell: "text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center",
                     row: "flex w-full mt-2 justify-between",
                     cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20",
-                    day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 hover:bg-slate-100 rounded-md transition-all flex items-center justify-center",
-                    day_today: "bg-slate-100 text-accent-foreground font-bold",
+                    day: "h-10 w-10 p-0 font-semibold rounded-lg transition-all hover:bg-slate-100",
+                    day_today: "font-black",
+                  }}
+                  components={{
+                    Day: (props) => (
+                      <CustomDay
+                        {...props}
+                        attendance={attendanceMap}
+                        holidays={holidays}
+                      />
+                    )
                   }}
                 />
-                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-[11px] justify-center border-t pt-4">
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }} /><span>Present</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span>Late</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#DAA520' }} /><span>Holiday</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full ring-2 ring-blue-500 ring-offset-1" style={{ backgroundColor: COLORS.deepBlue }} /><span>Today</span></div>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.emeraldGreen }} />
+                    <span className="text-slate-600">Present</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-red-500" />
+                    <span className="text-slate-600">Late</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.amber }} />
+                    <span className="text-slate-600">Holiday</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
-            {/* Selected Day Info Card */}
-            <Card className="border border-slate-200 shadow-sm overflow-hidden">
-                <CardContent className="p-0">
-                  {selectedAttendance ? (
-                    <div className="p-5 bg-slate-50 border-l-4 border-blue-500">
-                      <p className="font-bold text-slate-700 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d')}</p>
-                      <div className="space-y-3 text-sm">
-                        <div className="flex justify-between"><span className="text-slate-500">Punch In</span><span className="font-mono font-bold">{formatInTimeZone(new Date(selectedAttendance.punch_in), 'Asia/Kolkata', 'hh:mm a')}</span></div>
-                        {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-500">Punch Out</span><span className="font-mono font-bold">{formatInTimeZone(new Date(selectedAttendance.punch_out), 'Asia/Kolkata', 'hh:mm a')}</span></div>}
-                        <div className="pt-3 border-t flex justify-between items-center"><span className="font-bold">Total Duration</span><Badge className="px-3 py-1 font-mono">{formatDuration(selectedAttendance.duration_minutes)}</Badge></div>
+
+            {/* Selected Day Details */}
+            <Card className="border-0 shadow-md overflow-hidden">
+              <CardContent className="p-0">
+                {selectedAttendance?.punch_in ? (
+                  <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4" style={{ borderColor: COLORS.emeraldGreen }}>
+                    <p className="font-bold text-slate-800 text-lg mb-4">
+                      {format(selectedDate, 'EEEE, MMM d, yyyy')}
+                    </p>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600 font-medium">Punch In</span>
+                        <span className="font-mono font-bold text-slate-900">
+                          {formatInTimeZone(parseISO(selectedAttendance.punch_in), IST_TIMEZONE, 'hh:mm a')}
+                        </span>
+                      </div>
+                      {selectedAttendance.punch_out && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-600 font-medium">Punch Out</span>
+                          <span className="font-mono font-bold text-slate-900">
+                            {formatInTimeZone(parseISO(selectedAttendance.punch_out), IST_TIMEZONE, 'hh:mm a')}
+                          </span>
+                        </div>
+                      )}
+                      <div className="pt-3 border-t flex justify-between items-center">
+                        <span className="font-bold text-slate-800">Duration</span>
+                        <Badge className="px-3 py-1 font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>
+                          {formatDuration(selectedAttendance.duration_minutes)}
+                        </Badge>
                       </div>
                     </div>
-                  ) : selectedHoliday ? (
-                    <div className="p-5 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 text-sm font-medium">Holiday: {selectedHoliday.name}</div>
-                  ) : (
-                    <div className="p-5 bg-red-50 border-l-4 border-red-400 text-red-600 text-sm font-medium">No record / Absent for {format(selectedDate, 'MMM d')}</div>
-                  )}
-                </CardContent>
+                  </div>
+                ) : selectedHoliday ? (
+                  <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400">
+                    <p className="text-sm font-bold text-amber-900">
+                      🎉 Holiday: {selectedHoliday.name}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400">
+                    <p className="text-sm font-bold text-red-900">
+                      No record for {format(selectedDate, 'MMM d')}
+                    </p>
+                  </div>
+                )}
+              </CardContent>
             </Card>
-          </div>
+          </motion.div>
+
           {/* Recent History Table */}
-          <Card className="border border-slate-200 shadow-sm xl:col-span-2 h-fit">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold tracking-tight" style={{ color: COLORS.deepBlue }}>
-                {user && user.role === 'admin' && !selectedUserId ? 'All Staff — Recent Attendance' : 'Recent Attendance'}
-              </CardTitle>
-              {user && user.role === 'admin' && !selectedUserId && (
-                <p className="text-xs text-slate-400 mt-0.5">Showing latest records across all employees. Use the filter above to view a specific person.</p>
-              )}
-            </CardHeader>
-            <CardContent>
-              {attendanceHistory.length === 0 ? (
-                <p className="text-center py-10 text-slate-500 font-medium">No records yet</p>
-              ) : (
-                <div className="space-y-3 max-h-[700px] overflow-y-auto pr-2">
-                  {attendanceHistory.slice(0, 15).map((record, idx) => {
-                    // For admin all-staff view, try to find the user's name
-                    const recordUserName = (user && user.role === 'admin' && !selectedUserId && record.user_id)
-                      ? (allUsers.find(u => u.id === record.user_id)?.full_name || record.user_id)
-                      : null;
-                    return (
-                      <div key={`${record.date}-${record.user_id || idx}`} className="flex justify-between items-center p-4 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all shadow-sm">
-                        <div>
-                          {recordUserName && (
-                            <p className="text-xs font-semibold text-blue-700 mb-0.5 uppercase tracking-wide">{recordUserName}</p>
-                          )}
-                          <p className="font-semibold text-slate-800 text-sm">{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
-                          <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                            {record.punch_in ? formatInTimeZone(new Date(record.punch_in), 'Asia/Kolkata', 'hh:mm a') : '—'}
+          <motion.div variants={itemVariants} className="xl:col-span-2">
+            <Card className="border-0 shadow-md h-fit">
+              <CardHeader className="border-b border-slate-100">
+                <CardTitle style={{ color: COLORS.deepBlue }}>Recent Attendance</CardTitle>
+                <CardDescription>Last 15 records</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6">
+                {attendanceHistory.length === 0 ? (
+                  <p className="text-center py-12 text-slate-500 font-medium">No records yet</p>
+                ) : (
+                  <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                    {attendanceHistory.slice(0, 15).map((record, idx) => (
+                      <motion.div
+                        key={`${record.date}-${idx}`}
+                        variants={itemVariants}
+                        className="flex justify-between items-center p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors border border-slate-200"
+                      >
+                        <div className="flex-1">
+                          <p className="font-bold text-slate-800 text-sm">
+                            {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1 font-mono">
+                            {record.punch_in
+                              ? formatInTimeZone(parseISO(record.punch_in), IST_TIMEZONE, 'hh:mm a')
+                              : '—'}
                             {' → '}
-                            {record.punch_out ? formatInTimeZone(new Date(record.punch_out), 'Asia/Kolkata', 'hh:mm a') : 'Ongoing'}
+                            {record.punch_out
+                              ? formatInTimeZone(parseISO(record.punch_out), IST_TIMEZONE, 'hh:mm a')
+                              : 'Ongoing'}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <Badge variant={record.duration_minutes > 0 ? "outline" : "secondary"} className={record.duration_minutes > 0 ? "border-emerald-200 text-emerald-700 bg-emerald-50 px-3 py-0.5 font-mono text-xs" : "text-xs"}>
+                        <div className="flex items-center gap-3">
+                          <Badge className="font-mono text-xs font-bold px-2 py-1" style={{
+                            backgroundColor: record.duration_minutes > 0 ? `${COLORS.emeraldGreen}20` : `${COLORS.slate200}`,
+                            color: record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue,
+                            border: `1px solid ${record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.slate200}`
+                          }}>
                             {formatDuration(record.duration_minutes)}
                           </Badge>
                           {record.is_late && (
-                            <span className="text-[10px] font-semibold text-red-500 uppercase tracking-wide">Late</span>
+                            <span className="text-[10px] font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">
+                              Late
+                            </span>
                           )}
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-        {/* Auto Punch-in Modal */}
-        {showPunchInModal && (
-          <motion.div
-            className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            onClick={() => setShowPunchInModal(false)}
-          >
-            <motion.div
-              className="bg-white rounded-3xl p-10 max-w-sm w-[92%] text-center shadow-2xl"
-              onClick={e => e.stopPropagation()}
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-            >
-              <div className="mb-6">
-                <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                  <LogIn className="h-9 w-9 text-emerald-600" />
-                </div>
-              </div>
-              <h2 className="text-3xl font-bold mb-3" style={{ color: COLORS.deepBlue }}>Good Morning!</h2>
-              <p className="text-slate-600 text-lg mb-8">Ready to start your day?<br />Let's punch in.</p>
-              <Button
-                onClick={() => { handlePunchAction('punch_in'); setShowPunchInModal(false); }}
-                disabled={loading}
-                className="w-full mb-4 py-7 text-lg rounded-2xl"
-                style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`, color: 'white' }}
-              >
-                Punch In Now
-              </Button>
-              <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline">
-                I'll do it later
-              </button>
-            </motion.div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </motion.div>
-        )}
-        {/* Add Holidays Modal — Bulk Add */}
+        </motion.div>
+
+        {/* ═════════════════════════════════════════════════════════════════ */
+        /* MODALS                                                            */
+        /* ═════════════════════════════════════════════════════════════════ */}
+
+        {/* Auto Punch-in Modal */}
         <AnimatePresence>
-          {showHolidayModal && (
+          {showPunchInModal && (
             <motion.div
-              className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              onClick={() => setShowPunchInModal(false)}
             >
               <motion.div
-                className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden"
-                initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl"
                 onClick={e => e.stopPropagation()}
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
               >
-                {/* Modal Header */}
-                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
-                  <div>
-                    <h2 className="text-lg font-bold text-white tracking-tight">Add Holidays</h2>
-                    <p className="text-blue-200 text-xs mt-0.5">Add one or multiple holidays at once</p>
-                  </div>
-                  <button onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }} className="text-white/70 hover:text-white text-xl font-light">✕</button>
-                </div>
-                {/* Rows */}
-                <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
-                  <div className="grid grid-cols-[1fr_160px_36px] gap-2 mb-1">
-                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Holiday Name</span>
-                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Date</span>
-                    <span />
-                  </div>
-                  {holidayRows.map((row, idx) => (
-                    <div key={idx} className="grid grid-cols-[1fr_160px_36px] gap-2 items-center">
-                      <input
-                        type="text"
-                        value={row.name}
-                        onChange={e => {
-                          const updated = [...holidayRows];
-                          updated[idx] = { ...updated[idx], name: e.target.value };
-                          setHolidayRows(updated);
-                        }}
-                        placeholder="e.g. Diwali, Holi..."
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      />
-                      <input
-                        type="date"
-                        value={row.date}
-                        onChange={e => {
-                          const updated = [...holidayRows];
-                          updated[idx] = { ...updated[idx], date: e.target.value };
-                          setHolidayRows(updated);
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      />
-                      <button
-                        onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))}
-                        disabled={holidayRows.length === 1}
-                        className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors text-lg font-bold"
-                      >×</button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
-                    className="mt-2 flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors"
+                <div className="mb-6">
+                  <motion.div
+                    className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center"
+                    animate={{ scale: [1, 1.1, 1] }}
+                    transition={{ duration: 1, repeat: Infinity }}
                   >
-                    <span className="w-6 h-6 rounded-full border-2 border-blue-500 flex items-center justify-center text-blue-600 font-bold text-base leading-none">+</span>
-                    Add Another Holiday
-                  </button>
+                    <LogIn className="w-10 h-10 text-emerald-600" />
+                  </motion.div>
                 </div>
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
-                  <span className="text-xs text-slate-400">{holidayRows.filter(r => r.name.trim() && r.date).length} of {holidayRows.length} row{holidayRows.length !== 1 ? 's' : ''} ready</span>
-                  <div className="flex gap-3">
-                    <Button variant="ghost" size="sm" onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }}>Cancel</Button>
-                    <Button
-                      size="sm"
-                      disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0}
-                      onClick={handleAddHoliday}
-                      style={{ backgroundColor: COLORS.deepBlue, color: 'white' }}
-                    >
-                      Save {holidayRows.filter(r => r.name.trim() && r.date).length > 1 ? `${holidayRows.filter(r => r.name.trim() && r.date).length} Holidays` : 'Holiday'}
-                    </Button>
-                  </div>
-                </div>
+                <h2 className="text-3xl font-black mb-3" style={{ color: COLORS.deepBlue }}>
+                  Good Morning! 👋
+                </h2>
+                <p className="text-slate-600 text-lg mb-8">
+                  Let's punch in and start your day
+                </p>
+                <Button
+                  onClick={() => {
+                    handlePunchAction('punch_in');
+                    setShowPunchInModal(false);
+                  }}
+                  disabled={loading}
+                  className="w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white"
+                  style={{ backgroundColor: COLORS.emeraldGreen }}
+                >
+                  Punch In Now
+                </Button>
+                <button
+                  onClick={() => setShowPunchInModal(false)}
+                  className="text-slate-500 hover:text-slate-700 text-sm underline"
+                >
+                  I'll do it later
+                </button>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
+
         {/* Leave Request Modal */}
         <AnimatePresence>
           {showLeaveForm && (
             <motion.div
-              className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
               <motion.div
-                className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8"
+                className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
                 initial={{ scale: 0.95, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 20 }}
               >
                 <div className="flex justify-between items-start mb-8">
                   <div>
-                    <h2 className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>Request Leave</h2>
-                    <p className="text-slate-500 mt-1">Select leave period</p>
+                    <h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>
+                      Request Leave
+                    </h2>
+                    <p className="text-slate-500 mt-1 text-sm font-medium">
+                      Select your leave period
+                    </p>
                   </div>
-                  <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl">✕</button>
+                  <button
+                    onClick={() => setShowLeaveForm(false)}
+                    className="text-slate-400 hover:text-slate-600 text-2xl font-light"
+                  >
+                    ✕
+                  </button>
                 </div>
+
                 {/* Quick Presets */}
                 <div className="mb-8">
-                  <p className="text-xs font-medium text-slate-500 mb-3">QUICK SELECT</p>
+                  <p className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-widest">
+                    Quick Select
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {[1, 3, 7, 15, 30].map(days => (
                       <Button
@@ -1257,87 +1243,203 @@ export default function Attendance() {
                           setLeaveFrom(from);
                           setLeaveTo(to);
                         }}
+                        className="rounded-lg font-semibold"
                       >
                         {days === 1 ? "1 Day" : `${days} Days`}
                       </Button>
                     ))}
                   </div>
                 </div>
+
                 {/* Calendars */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div>
-                    <label className="text-sm font-medium text-slate-700 mb-2 block">From</label>
+                    <label className="text-sm font-bold text-slate-700 mb-3 block">
+                      From Date
+                    </label>
                     <Calendar
                       mode="single"
                       selected={leaveFrom}
                       onSelect={setLeaveFrom}
-                      modifiers={modifiers}
-                      modifiersStyles={modifiersStyles}
-                      components={{ Day: CustomDay }}
-                      className="rounded-xl border"
-                      showOutsideDays={false}
+                      disabled={date => isBefore(date, startOfDay(new Date()))}
+                      className="rounded-xl border border-slate-200"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-700 mb-2 block">To</label>
+                    <label className="text-sm font-bold text-slate-700 mb-3 block">
+                      To Date
+                    </label>
                     <Calendar
                       mode="single"
                       selected={leaveTo}
                       onSelect={setLeaveTo}
-                      disabled={{ before: leaveFrom || new Date() }}
-                      className="rounded-2xl border shadow-sm"
+                      disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
+                      className="rounded-xl border border-slate-200"
                     />
                   </div>
                 </div>
+
+                {/* Duration Summary */}
                 {leaveFrom && (
-                  <div className="mt-6 p-4 bg-blue-50 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-600">Total Duration</p>
-                      <p className="text-3xl font-bold text-blue-700">
-                        {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)}
-                        <span className="text-xl font-normal"> days</span>
-                      </p>
-                    </div>
-                    <div className="text-right text-xs text-slate-500">
+                  <motion.div
+                    className="p-5 rounded-2xl mb-8"
+                    style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
+                    <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>
+                      {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days
+                    </p>
+                    <p className="text-xs text-slate-500 mt-2 font-medium">
                       {format(leaveFrom, 'dd MMM')} — {leaveTo ? format(leaveTo, 'dd MMM yyyy') : format(leaveFrom, 'dd MMM yyyy')}
-                    </div>
-                  </div>
+                    </p>
+                  </motion.div>
                 )}
-                <div className="mt-8">
-                  <label className="text-sm font-medium text-slate-700 mb-2 block">Reason</label>
+
+                {/* Reason */}
+                <div className="mb-8">
+                  <label className="text-sm font-bold text-slate-700 mb-2 block">
+                    Reason (Optional)
+                  </label>
                   <textarea
                     value={leaveReason}
                     onChange={e => setLeaveReason(e.target.value)}
-                    placeholder="Reason for leave..."
-                    className="w-full min-h-[110px] p-4 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    placeholder="Tell us why you need leave..."
+                    className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none"
                   />
                 </div>
-                <div className="flex justify-end gap-4 mt-8">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setShowLeaveForm(false)}
+                    className="font-semibold rounded-lg"
+                  >
+                    Cancel
+                  </Button>
                   <Button
                     disabled={!leaveFrom}
-                    onClick={async () => {
-                      if (!leaveFrom) return;
-                      try {
-                        await api.post("/attendance/apply-leave", {
-                          from_date: format(leaveFrom, 'yyyy-MM-dd'),
-                          to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
-                          reason: leaveReason || "Personal Leave"
-                        });
-                        toast.success("Leave request submitted");
-                        setShowLeaveForm(false);
-                        setLeaveFrom(null);
-                        setLeaveTo(null);
-                        setLeaveReason("");
-                        fetchData();
-                      } catch (err) {
-                        toast.error("Failed to submit leave request");
-                      }
-                    }}
-                    style={{ backgroundColor: COLORS.deepBlue, color: 'white' }}
+                    onClick={handleApplyLeave}
+                    className="font-bold rounded-lg text-white"
+                    style={{ backgroundColor: COLORS.deepBlue }}
                   >
                     Submit Request
                   </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Add Holidays Modal */}
+        <AnimatePresence>
+          {showHolidayModal && (
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden"
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+              >
+                {/* Header */}
+                <div
+                  className="px-8 py-6 text-white"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}
+                >
+                  <h2 className="text-2xl font-black">Add Holidays</h2>
+                  <p className="text-blue-200 text-sm mt-1">Batch add holidays to the calendar</p>
+                </div>
+
+                {/* Content */}
+                <div className="p-8">
+                  <div className="grid grid-cols-[1fr_160px_40px] gap-3 mb-4">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Date</p>
+                  </div>
+
+                  <div className="space-y-3 max-h-[50vh] overflow-y-auto mb-6">
+                    {holidayRows.map((row, idx) => (
+                      <motion.div
+                        key={idx}
+                        className="grid grid-cols-[1fr_160px_40px] gap-3 items-center"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                      >
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => {
+                            const updated = [...holidayRows];
+                            updated[idx] = { ...updated[idx], name: e.target.value };
+                            setHolidayRows(updated);
+                          }}
+                          placeholder="e.g., Diwali"
+                          className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
+                        />
+                        <input
+                          type="date"
+                          value={row.date}
+                          onChange={e => {
+                            const updated = [...holidayRows];
+                            updated[idx] = { ...updated[idx], date: e.target.value };
+                            setHolidayRows(updated);
+                          }}
+                          className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
+                        />
+                        <button
+                          onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))}
+                          disabled={holidayRows.length === 1}
+                          className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 font-bold text-lg transition-colors"
+                        >
+                          ×
+                        </button>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
+                    className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-800 mb-6"
+                  >
+                    <span className="w-6 h-6 rounded-full border-2 border-blue-500 flex items-center justify-center text-blue-600 font-bold">
+                      +
+                    </span>
+                    Add Another
+                  </button>
+                </div>
+
+                {/* Footer */}
+                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-between items-center">
+                  <p className="text-xs text-slate-500 font-medium">
+                    {holidayRows.filter(r => r.name.trim() && r.date).length} of {holidayRows.length} ready
+                  </p>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setShowHolidayModal(false);
+                        setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+                      }}
+                      className="font-bold rounded-lg"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0}
+                      onClick={handleAddHolidays}
+                      className="font-bold text-white rounded-lg"
+                      style={{ backgroundColor: COLORS.deepBlue }}
+                    >
+                      Save
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
             </motion.div>
