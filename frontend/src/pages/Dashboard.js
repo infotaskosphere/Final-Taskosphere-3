@@ -246,6 +246,13 @@ export default function Dashboard() {
     [todosRaw]
   );
 
+  // Pending todos only — completed ones are removed from the dashboard card
+  // but remain visible on the Todo page and in the Todo Log
+  const pendingTodos = useMemo(() =>
+    todos.filter(todo => !todo.completed),
+    [todos]
+  );
+
   const tasksAssignedToMe = useMemo(() =>
     tasks
       .filter(t => t.assigned_to === user?.id && t.status !== "completed")
@@ -1065,12 +1072,10 @@ export default function Dashboard() {
             title="My To-Do List"
             subtitle="Personal tasks"
             action={
-              isAdmin ? (
-                <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
-                  onClick={() => navigate('/todo-list')}>
-                  View All
-                </Button>
-              ) : null
+              <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
+                onClick={() => navigate('/todo-list')}>
+                View All
+              </Button>
             }
           />
           <div className="p-3">
@@ -1116,12 +1121,12 @@ export default function Dashboard() {
               </p>
             )}
 
-            {todos.length === 0 ? (
+            {pendingTodos.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
             ) : (
               <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
                 <AnimatePresence>
-                  {todos.map(todo => (
+                  {pendingTodos.map(todo => (
                     <motion.div
                       key={todo._id || todo.id}
                       variants={itemVariants}
