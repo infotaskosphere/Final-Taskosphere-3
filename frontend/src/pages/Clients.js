@@ -617,7 +617,7 @@ export default function Clients() {
     const assignedUser = users.find(u => u.id === client.assigned_to);
 
     return (
-      <div style={style} className="p-3 box-border">
+      <div style={style} className="p-2 box-border">
         <div
           className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${isArchived ? 'opacity-60' : ''}`}
           style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
@@ -625,22 +625,22 @@ export default function Clients() {
           {/* Colored top strip by type */}
           <div className="h-1 w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
 
-          <div className="flex flex-col flex-1 p-4 overflow-hidden">
+          <div className="flex flex-col flex-1 p-3 overflow-hidden">
             {/* Header row */}
-            <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-start justify-between gap-2 mb-1.5">
               {/* Avatar */}
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-sm"
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
                 style={{ background: avatarGrad }}
               >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
 
               {/* Type pill + archived */}
-              <div className="flex flex-col items-end gap-1">
+              <div className="flex flex-col items-end gap-0.5">
                 <TypePill type={client.client_type} />
                 {isArchived && (
-                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                  <span className="text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
                     Archived
                   </span>
                 )}
@@ -648,34 +648,34 @@ export default function Clients() {
             </div>
 
             {/* Name + number */}
-            <div className="mb-2">
-              <span className="text-[10px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
-              <h3 className="font-bold text-sm leading-snug text-slate-900 mt-0.5 line-clamp-2">{client.company_name}</h3>
+            <div className="mb-1.5">
+              <span className="text-[9px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
+              <h3 className="font-bold text-xs leading-tight text-slate-900 mt-0.5 line-clamp-2">{client.company_name}</h3>
               {primaryContact?.name && (
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
               )}
             </div>
 
             {/* Contact details */}
-            <div className="space-y-1 flex-1 min-h-0">
+            <div className="space-y-0.5 flex-1 min-h-0 text-xs">
               {client.phone && (
-                <div className="flex items-center gap-2 text-xs text-slate-500 overflow-hidden">
-                  <Phone className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="font-medium text-slate-700 truncate">{client.phone}</span>
+                <div className="flex items-center gap-1.5 text-slate-500 overflow-hidden">
+                  <Phone className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
+                  <span className="font-medium text-slate-700 truncate text-[10px]">{client.phone}</span>
                 </div>
               )}
               {client.email && (
-                <div className="flex items-center gap-2 text-xs text-slate-500 overflow-hidden">
-                  <Mail className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="truncate text-slate-600">{client.email}</span>
+                <div className="flex items-center gap-1.5 text-slate-500 overflow-hidden">
+                  <Mail className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600 text-[10px]">{client.email}</span>
                 </div>
               )}
             </div>
 
             {/* Assigned to */}
             {assignedUser && (
-              <div className="mt-1 pt-1 flex items-center gap-2 text-xs border-t" style={{ borderColor: `${cfg.border}` }}>
-                <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[10px] font-bold flex-shrink-0">
+              <div className="mt-0.5 pt-0.5 flex items-center gap-1.5 text-[10px] border-t" style={{ borderColor: `${cfg.border}` }}>
+                <div className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[8px] font-bold flex-shrink-0">
                   {assignedUser.full_name?.charAt(0).toUpperCase() || 'U'}
                 </div>
                 <span className="text-slate-600 font-medium truncate">{assignedUser.full_name || assignedUser.name}</span>
@@ -683,21 +683,21 @@ export default function Clients() {
             )}
 
             {/* Services + actions */}
-            <div className="mt-2 pt-2 border-t flex flex-col gap-2" style={{ borderColor: `${cfg.border}` }}>
+            <div className="mt-1 pt-1 border-t flex flex-col gap-1" style={{ borderColor: `${cfg.border}` }}>
               {/* Service tags */}
               {serviceCount > 0 && (
-                <div className="flex items-center gap-1 flex-wrap min-w-0">
+                <div className="flex items-center gap-0.5 flex-wrap min-w-0">
                   {client.services?.slice(0, 2).map((svc, i) => (
                     <span
                       key={i}
-                      className="text-[9px] font-semibold px-2 py-0.5 rounded-md border whitespace-nowrap"
+                      className="text-[8px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
                       style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
                     >
-                      {svc.replace('Other: ', '').substring(0, 12)}
+                      {svc.replace('Other: ', '').substring(0, 14)}
                     </span>
                   ))}
                   {serviceCount > 2 && (
-                    <span className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                    <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
                       +{serviceCount - 2}
                     </span>
                   )}
@@ -708,17 +708,17 @@ export default function Clients() {
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                 <button
                   onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors flex-shrink-0"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors flex-shrink-0"
                   title="WhatsApp"
                 >
-                  <MessageCircle className="h-3.5 w-3.5" />
+                  <MessageCircle className="h-3 w-3" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
+                  className="w-6 h-6 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
                   title="Edit"
                 >
-                  <Edit className="h-3.5 w-3.5" />
+                  <Edit className="h-3 w-3" />
                 </button>
                 {canDeleteData && (
                   <button
@@ -728,10 +728,10 @@ export default function Clients() {
                         api.delete(`/clients/${client.id}`).then(() => fetchClients());
                       }
                     }}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
+                    className="w-6 h-6 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
                     title="Delete"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-3 w-3" />
                   </button>
                 )}
               </div>
@@ -1260,7 +1260,7 @@ export default function Clients() {
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
-                  rowCount={rowCount} rowHeight={320} width={width}
+                  rowCount={rowCount} rowHeight={400} width={width}
                   overscanColumnCount={2} overscanRowCount={4}>
                   {({ columnIndex, rowIndex, style }) => (
                     <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
