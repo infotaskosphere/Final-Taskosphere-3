@@ -17,13 +17,15 @@ import {
   FileText, Calendar, Search, Users,
   Briefcase, BarChart3, Archive, MessageCircle, Trash,
   CheckCircle2, AlertCircle, Building2, ChevronDown, ChevronUp,
+  LayoutGrid, List, Phone,
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
-import { FixedSizeGrid as Grid } from 'react-window';
+import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
 
+// ── All original constants preserved exactly ──────────────────────────────────
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -38,7 +40,27 @@ const SERVICES = [
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
 
-// ── Avatar gradient palette by first letter
+// ── Enhanced type system with richer color language ───────────────────────────
+const TYPE_CONFIG = {
+  pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', accent: 'from-blue-600 to-blue-800',     strip: '#2563EB' },
+  llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', accent: 'from-violet-600 to-violet-800',  strip: '#7C3AED' },
+  partnership: { label: 'Partnership', bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: '#D97706', accent: 'from-amber-500 to-amber-700',    strip: '#D97706' },
+  huf:         { label: 'HUF',         bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', accent: 'from-teal-600 to-teal-800',      strip: '#0D9488' },
+  trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', accent: 'from-rose-600 to-rose-800',      strip: '#E11D48' },
+  proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', accent: 'from-slate-500 to-slate-700',    strip: '#64748B' },
+};
+
+// Keep original TYPE_BADGE for backward compat with dialogs
+const TYPE_BADGE = {
+  pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
+  llp:         'bg-violet-50 text-violet-700 border-violet-200',
+  partnership: 'bg-amber-50 text-amber-700 border-amber-200',
+  huf:         'bg-teal-50 text-teal-700 border-teal-200',
+  trust:       'bg-rose-50 text-rose-700 border-rose-200',
+  proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
+};
+
+// ── Avatar gradient palette by first letter (unchanged) ──────────────────────
 const AVATAR_GRADIENTS = [
   ['#0D3B66', '#1F6FB2'], ['#065f46', '#059669'], ['#7c2d12', '#ea580c'],
   ['#4c1d95', '#7c3aed'], ['#1e3a5f', '#2563eb'], ['#831843', '#db2777'],
@@ -49,17 +71,7 @@ const getAvatarGradient = (name = '') => {
   return `linear-gradient(135deg, ${AVATAR_GRADIENTS[idx][0]}, ${AVATAR_GRADIENTS[idx][1]})`;
 };
 
-// ── Client type badge colors
-const TYPE_BADGE = {
-  pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
-  llp:         'bg-violet-50 text-violet-700 border-violet-200',
-  partnership: 'bg-amber-50 text-amber-700 border-amber-200',
-  huf:         'bg-teal-50 text-teal-700 border-teal-200',
-  trust:       'bg-rose-50 text-rose-700 border-rose-200',
-  proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
-};
-
-// ── Section heading used in dialog
+// ── Section heading used in dialog (unchanged) ────────────────────────────────
 const SectionHeading = ({ icon, title, subtitle }) => (
   <div className="flex items-center gap-3 mb-6">
     <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
@@ -73,7 +85,22 @@ const SectionHeading = ({ icon, title, subtitle }) => (
   </div>
 );
 
+// ── Type Badge pill ───────────────────────────────────────────────────────────
+const TypePill = ({ type }) => {
+  const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.proprietor;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border tracking-wide"
+      style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
+      {cfg.label}
+    </span>
+  );
+};
+
 export default function Clients() {
+  // ── All original state & logic — zero changes ─────────────────────────────
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
   const canDeleteData = hasPermission("can_delete_data");
@@ -87,23 +114,23 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  // Generic Excel preview (unchanged)
   const [previewData, setPreviewData] = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen] = useState(false);
-  // ── NEW: MDS-specific editable preview states ──────────────────────────
   const [mdsPreviewOpen, setMdsPreviewOpen] = useState(false);
   const [mdsPreviewLoading, setMdsPreviewLoading] = useState(false);
-  const [mdsData, setMdsData] = useState(null);           // raw server response
-  const [mdsForm, setMdsForm] = useState(null);           // editable copy
-  const [mdsRawInfoOpen, setMdsRawInfoOpen] = useState(false); // accordion
-  // ──────────────────────────────────────────────────────────────────────
-  // Filter States
+  const [mdsData, setMdsData] = useState(null);
+  const [mdsForm, setMdsForm] = useState(null);
+  const [mdsRawInfoOpen, setMdsRawInfoOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
+
+  // ── NEW: view mode toggle ─────────────────────────────────────────────────
+  const [viewMode, setViewMode] = useState('board'); // 'board' | 'list'
+
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
@@ -120,6 +147,7 @@ export default function Clients() {
   const [formErrors, setFormErrors] = useState({});
   const [contactErrors, setContactErrors] = useState([]);
 
+  // ── All original handlers — zero changes ──────────────────────────────────
   const safeDate = (dateStr) => {
     if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return null;
     const date = new Date(dateStr.trim());
@@ -301,7 +329,6 @@ export default function Clients() {
     }
   };
 
-  // ── UPDATED: handleImportExcel — now calls backend parse-mds-excel ─────
   const handleImportExcel = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -322,7 +349,6 @@ export default function Clients() {
       const data = response.data;
       setMdsData(data);
 
-      // Build editable form state from server response
       const contacts = (data.contact_persons || []).map(cp => ({
         name: cp.name || '',
         designation: cp.designation || '',
@@ -354,12 +380,10 @@ export default function Clients() {
     }
   };
 
-  // ── Confirm MDS preview → populate main form and open client dialog ────
   const handleMdsConfirm = async (saveDirectly = false) => {
     if (!mdsForm) return;
 
     if (saveDirectly) {
-      // Save directly via API
       setImportLoading(true);
       try {
         const contacts = mdsForm.contact_persons
@@ -395,7 +419,6 @@ export default function Clients() {
         setImportLoading(false);
       }
     } else {
-      // Populate the main Add Client form and open it for full editing
       setFormData({
         company_name: mdsForm.company_name || '',
         client_type: mdsForm.client_type || 'proprietor',
@@ -560,82 +583,106 @@ export default function Clients() {
     return 'proprietor';
   };
 
-  // ── Virtualized Client Card ─────────────────────────────────────────────
+  // ── REDESIGNED: Board Card (virtualized grid) ─────────────────────────────
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
     if (index >= filteredClients.length || !client) return null;
 
-    const typeBadgeCls = TYPE_BADGE[client.client_type] || TYPE_BADGE.proprietor;
+    const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
     const avatarGrad = getAvatarGradient(client.company_name);
     const serviceCount = client.services?.length || 0;
+    const isArchived = client.status === 'inactive';
+    const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
 
     return (
-      <div style={style} className="p-3 box-border">
-        <div className="h-full w-full bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-xl hover:border-slate-200 hover:-translate-y-1 transition-all duration-300 group relative flex flex-col"
-          style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-          <div className="h-1 w-full flex-shrink-0">
-            <div className="h-full w-full" style={{ background: avatarGrad }} />
-          </div>
-          {client.status === 'inactive' && (
-            <div className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-600 border border-amber-200 rounded-full z-10">
-              Archived
-            </div>
-          )}
-          <div className="p-5 flex flex-col flex-1">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm"
-                style={{ background: avatarGrad }}>
+      <div style={style} className="p-2.5 box-border">
+        <div
+          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${isArchived ? 'opacity-60' : ''}`}
+          style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+        >
+          {/* Colored top strip by type */}
+          <div className="h-1 w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
+
+          <div className="flex flex-col flex-1 p-4">
+            {/* Header row */}
+            <div className="flex items-start justify-between gap-2 mb-3">
+              {/* Avatar */}
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-sm"
+                style={{ background: avatarGrad }}
+              >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
-              <div className="flex-1 min-w-0 pt-0.5">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="font-mono text-[10px] text-slate-300 font-medium">#{getClientNumber(index)}</span>
-                </div>
-                <h3 className="font-semibold text-sm leading-snug text-slate-900 truncate pr-8">{client.company_name}</h3>
-                <span className={`inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-md border ${typeBadgeCls}`}>
-                  {CLIENT_TYPES.find(t => t.value === client.client_type)?.label || client.client_type}
-                </span>
+
+              {/* Type pill + archived */}
+              <div className="flex flex-col items-end gap-1">
+                <TypePill type={client.client_type} />
+                {isArchived && (
+                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                    Archived
+                  </span>
+                )}
               </div>
             </div>
-            <div className="space-y-2 text-xs text-slate-500 flex-1">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Briefcase className="h-3 w-3 text-slate-400" />
-                </div>
-                <span className="truncate font-medium text-slate-700">{client.phone || '—'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Mail className="h-3 w-3 text-slate-400" />
-                </div>
-                <span className="truncate">{client.email || '—'}</span>
-              </div>
+
+            {/* Name + number */}
+            <div className="mb-3">
+              <span className="text-[10px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
+              <h3 className="font-bold text-sm leading-snug text-slate-900 mt-0.5 line-clamp-2">{client.company_name}</h3>
+              {primaryContact?.name && (
+                <p className="text-[11px] text-slate-400 mt-1 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
+              )}
             </div>
-            <div className="mt-4 pt-3.5 border-t border-slate-50 flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
+
+            {/* Contact details */}
+            <div className="space-y-1.5 flex-1">
+              {client.phone && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Phone className="h-3 w-3 text-slate-300 flex-shrink-0" />
+                  <span className="font-medium text-slate-700">{client.phone}</span>
+                </div>
+              )}
+              {client.email && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Mail className="h-3 w-3 text-slate-300 flex-shrink-0" />
+                  <span className="truncate">{client.email}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Services + actions */}
+            <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: `${cfg.border}` }}>
+              {/* Service tags */}
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
                 {client.services?.slice(0, 2).map((svc, i) => (
-                  <span key={i} className="text-[10px] font-medium px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-100 rounded-md">
-                    {svc.replace('Other: ', '').substring(0, 12)}
+                  <span
+                    key={i}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-md border"
+                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+                  >
+                    {svc.replace('Other: ', '').substring(0, 10)}
                   </span>
                 ))}
                 {serviceCount > 2 && (
-                  <span className="text-[10px] font-medium px-2 py-0.5 bg-blue-50 text-blue-500 border border-blue-100 rounded-md">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
                     +{serviceCount - 2}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex-shrink-0">
                 <button
                   onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                  className="w-7 h-7 flex items-center justify-center hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
                   title="WhatsApp"
                 >
                   <MessageCircle className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                  className="w-7 h-7 flex items-center justify-center hover:bg-blue-50 text-blue-600 rounded-lg transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
                   title="Edit"
                 >
                   <Edit className="h-3.5 w-3.5" />
@@ -648,7 +695,7 @@ export default function Clients() {
                         api.delete(`/clients/${client.id}`).then(() => fetchClients());
                       }
                     }}
-                    className="w-7 h-7 flex items-center justify-center hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"
                     title="Delete"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -662,6 +709,108 @@ export default function Clients() {
     );
   };
 
+  // ── NEW: List Row (for list view) ─────────────────────────────────────────
+  const ListRow = ({ index, style }) => {
+    const client = filteredClients[index];
+    if (!client) return null;
+    const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
+    const isArchived = client.status === 'inactive';
+    const serviceCount = client.services?.length || 0;
+
+    return (
+      <div style={style} className="px-1">
+        <div
+          className={`flex items-center gap-4 px-5 py-3.5 bg-white border-b transition-colors hover:bg-slate-50/60 group ${isArchived ? 'opacity-60' : ''}`}
+          style={{ borderColor: '#F1F5F9' }}
+        >
+          {/* Left accent */}
+          <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
+
+          {/* Avatar */}
+          <div
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+            style={{ background: getAvatarGradient(client.company_name) }}
+          >
+            {client.company_name?.charAt(0).toUpperCase() || '?'}
+          </div>
+
+          {/* Name + number */}
+          <div className="w-56 flex-shrink-0 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+              {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
+            </div>
+            <p className="text-sm font-semibold text-slate-900 truncate">{client.company_name}</p>
+          </div>
+
+          {/* Type pill */}
+          <div className="w-28 flex-shrink-0">
+            <TypePill type={client.client_type} />
+          </div>
+
+          {/* Phone */}
+          <div className="w-36 flex-shrink-0">
+            <p className="text-xs text-slate-600 font-medium">{client.phone || '—'}</p>
+          </div>
+
+          {/* Email */}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-slate-500 truncate">{client.email || '—'}</p>
+          </div>
+
+          {/* Services */}
+          <div className="flex items-center gap-1 w-44 flex-shrink-0">
+            {client.services?.slice(0, 2).map((svc, i) => (
+              <span
+                key={i}
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-md border"
+                style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+              >
+                {svc.replace('Other: ', '').substring(0, 10)}
+              </span>
+            ))}
+            {serviceCount > 2 && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                +{serviceCount - 2}
+              </span>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            <button
+              onClick={() => openWhatsApp(client.phone, client.company_name)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
+              title="WhatsApp"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => handleEdit(client)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Edit"
+            >
+              <Edit className="h-3.5 w-3.5" />
+            </button>
+            {canDeleteData && (
+              <button
+                onClick={() => {
+                  if (confirm("Delete this client permanently?")) {
+                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                  }
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                title="Delete"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const fieldCls = (hasError) =>
     `h-11 bg-white rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
@@ -669,7 +818,7 @@ export default function Clients() {
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen p-5 md:p-7 space-y-6" style={{ background: '#F4F6FA' }}>
+    <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: '#F4F6FA' }}>
 
       {/* ── Page Header ─────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
@@ -694,7 +843,7 @@ export default function Clients() {
             {importLoading ? 'Importing…' : 'Import CSV'}
           </Button>
 
-          {/* ── New Client Dialog ─── */}
+          {/* ── New Client Dialog (all inner JSX unchanged) ─── */}
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
@@ -949,7 +1098,7 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* ── Today's Celebrations ─────────────────────────────────────────── */}
+      {/* ── Today's Celebrations (unchanged logic) ──────────────────────── */}
       {canViewAllClients && todayReminders.length > 0 && (
         <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
@@ -969,7 +1118,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Stats Cards ──────────────────────────────────────────────────── */}
+      {/* ── Stats Cards (unchanged logic, refined visuals) ───────────────── */}
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -992,7 +1141,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Filters ──────────────────────────────────────────────────────── */}
+      {/* ── Filters + View Toggle ────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1000,7 +1149,7 @@ export default function Clients() {
             className="pl-11 h-10 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm"
             value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex gap-2 flex-shrink-0 flex-wrap">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-10 w-[120px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -1019,18 +1168,45 @@ export default function Clients() {
           <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
             {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
           </div>
+
+          {/* ── View Mode Toggle ── */}
+          <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl p-1 gap-0.5">
+            <button
+              onClick={() => setViewMode('board')}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
+              title="Board view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
+              title="List view"
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Virtualized Client Grid ───────────────────────────────────────── */}
-      <div className="h-[70vh] min-h-[480px] w-full border border-slate-100 rounded-2xl overflow-hidden bg-white shadow-sm">
-        {filteredClients.length > 0 ? (
+      {/* ── Client Grid / List ───────────────────────────────────────────── */}
+      <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: 'white' }}>
+        {filteredClients.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400">
+            <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center mb-4">
+              <Users className="h-7 w-7 opacity-30" />
+            </div>
+            <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
+            <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
+          </div>
+        ) : viewMode === 'board' ? (
+          /* ── Board view (virtualized grid) ── */
           <AutoSizer>
             {({ height, width }) => {
               const CARD_MIN = 280;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
-              const rowHeight = 240;
+              const rowHeight = 250;
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
@@ -1044,17 +1220,38 @@ export default function Clients() {
             }}
           </AutoSizer>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400">
-            <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center mb-4">
-              <Users className="h-7 w-7 opacity-30" />
+          /* ── List view (virtualized list) ── */
+          <div className="h-full flex flex-col">
+            {/* List header */}
+            <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
+              <div className="w-1 flex-shrink-0" />
+              <div className="w-8 flex-shrink-0" />
+              <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
+              <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
+              <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
+              <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+              <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
+              <div className="w-24 flex-shrink-0" />
             </div>
-            <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
-            <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
+            <div className="flex-1">
+              <AutoSizer>
+                {({ height, width }) => (
+                  <FixedSizeList
+                    height={height}
+                    width={width}
+                    itemCount={filteredClients.length}
+                    itemSize={56}
+                  >
+                    {({ index, style }) => <ListRow index={index} style={style} />}
+                  </FixedSizeList>
+                )}
+              </AutoSizer>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Hidden file inputs */}
+      {/* Hidden file inputs (unchanged) */}
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
@@ -1122,15 +1319,9 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          MDS EXCEL SMART PREVIEW DIALOG
-          Shows parsed company + directors in editable form fields.
-          Two actions: "Open in Form" (for full editing) or "Save Now"
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── MDS Excel Smart Preview Dialog (unchanged) ───────────────────── */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
-
-          {/* Header */}
           <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-7 py-5">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0"
@@ -1151,7 +1342,6 @@ export default function Clients() {
             </div>
           </div>
 
-          {/* Loading state */}
           {mdsPreviewLoading && (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
@@ -1160,11 +1350,8 @@ export default function Clients() {
             </div>
           )}
 
-          {/* Editable form */}
           {!mdsPreviewLoading && mdsForm && (
             <div className="p-7 space-y-6">
-
-              {/* ── Company Info ── */}
               <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                 <div className="flex items-center gap-2 mb-5">
                   <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
@@ -1210,8 +1397,6 @@ export default function Clients() {
                       placeholder="10-digit phone number" />
                   </div>
                 </div>
-
-                {/* Services in preview */}
                 <div className="mt-4">
                   <label className={labelCls}>Services (select applicable)</label>
                   <div className="flex flex-wrap gap-2 mt-1">
@@ -1233,7 +1418,6 @@ export default function Clients() {
                 </div>
               </div>
 
-              {/* ── Directors / Contact Persons ── */}
               <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                 <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-2">
@@ -1310,7 +1494,6 @@ export default function Clients() {
                 </div>
               </div>
 
-              {/* ── Notes (pre-filled from CIN / Address / Capitals) ── */}
               <div>
                 <label className={labelCls}>Notes (pre-filled from Excel)</label>
                 <textarea
@@ -1320,7 +1503,6 @@ export default function Clients() {
                 />
               </div>
 
-              {/* ── Raw Company Info Accordion ── */}
               {mdsData?.raw_company_info && Object.keys(mdsData.raw_company_info).length > 0 && (
                 <div className="border border-slate-100 rounded-2xl overflow-hidden">
                   <button type="button"
@@ -1346,7 +1528,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* ── Action Buttons ── */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
                 <Button type="button" variant="ghost"
                   onClick={() => { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); }}
@@ -1354,14 +1535,12 @@ export default function Clients() {
                   Cancel
                 </Button>
                 <div className="flex gap-2">
-                  {/* Open in full form for further editing */}
                   <Button type="button" variant="outline"
                     onClick={() => handleMdsConfirm(false)}
                     className="h-10 px-5 text-sm rounded-xl border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 gap-2">
                     <Edit className="h-4 w-4" />
                     Open in Full Form
                   </Button>
-                  {/* Save directly */}
                   <Button type="button" disabled={importLoading}
                     onClick={() => handleMdsConfirm(true)}
                     className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2"
@@ -1371,7 +1550,6 @@ export default function Clients() {
                   </Button>
                 </div>
               </div>
-
             </div>
           )}
         </DialogContent>
