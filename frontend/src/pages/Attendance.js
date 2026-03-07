@@ -168,7 +168,6 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY COMPONENT
-// Circle is sized to snugly wrap the date number (w-8 h-8 = 32px)
 // ═════════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dateStr = format(date, 'yyyy-MM-dd');
@@ -197,10 +196,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* Outer button: full cell, no bg — just a click target */}
         <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95">
-
-          {/* Circle snugly around the number */}
           {ringColor ? (
             <motion.span
               className="absolute flex items-center justify-center rounded-full border-2"
@@ -214,7 +210,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
               transition={{ duration: 2.2, repeat: isSpecial ? Infinity : 0, ease: 'easeInOut' }}
             />
           ) : isTodayDate ? (
-            /* Today gets a solid deep-blue filled circle */
             <span
               className="absolute rounded-full"
               style={{ width: 30, height: 30, backgroundColor: COLORS.deepBlue }}
@@ -239,9 +234,9 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           <p className="text-amber-600 font-medium">🎉 {holiday.name}</p>
         ) : dayRecord?.punch_in ? (
           <>
-            <p>In: {formatInTimeZone(parseISO(dayRecord.punch_in), IST_TIMEZONE, 'hh:mm a')}</p>
+            <p>In: {formatAttendanceTime(dayRecord.punch_in)}</p>
             {dayRecord.punch_out && (
-              <p>Out: {formatInTimeZone(parseISO(dayRecord.punch_out), IST_TIMEZONE, 'hh:mm a')}</p>
+              <p>Out: {formatAttendanceTime(dayRecord.punch_out)}</p>
             )}
             <p className="font-semibold text-green-600">{formatDuration(dayRecord.duration_minutes)}</p>
           </>
@@ -264,15 +259,25 @@ const formatDuration = (minutes) => {
 };
 
 /**
- * FIX: The original code used parseISO which treats the string as UTC if it
- * lacks a timezone offset, causing an ~5:30 shift when displayed in IST.
- * We now use formatInTimeZone from date-fns-tz consistently so the displayed
- * time is always correct regardless of the raw ISO string.
+ * FIX: Correctly converts any ISO string or Date object to IST display time.
+ * Handles both UTC strings (e.g. "2026-03-07T05:10:00Z") and naive strings
+ * (e.g. "2026-03-07T10:40:00") by always treating naive strings as UTC
+ * (matching MongoDB storage behavior) then converting to IST (+5:30).
  */
-const formatAttendanceTime = (isoString) => {
-  if (!isoString) return '—';
+const formatAttendanceTime = (isoStringOrDate) => {
+  if (!isoStringOrDate) return '—';
   try {
-    return formatInTimeZone(parseISO(isoString), IST_TIMEZONE, 'hh:mm a');
+    let date;
+    if (isoStringOrDate instanceof Date) {
+      date = isoStringOrDate;
+    } else {
+      const str = String(isoStringOrDate);
+      // If the string has no timezone info, treat it as UTC (MongoDB stores UTC)
+      const normalized = /[Z+\-]\d*$/.test(str.trim()) ? str : str + 'Z';
+      date = new Date(normalized);
+    }
+    if (isNaN(date.getTime())) return '—';
+    return formatInTimeZone(date, IST_TIMEZONE, 'hh:mm a');
   } catch {
     return '—';
   }
@@ -282,7 +287,15 @@ const calculateTodayLiveDuration = (todayAttendance) => {
   if (!todayAttendance?.punch_in) return "0h 0m";
   if (todayAttendance.punch_out) return formatDuration(todayAttendance.duration_minutes);
 
-  const start = parseISO(todayAttendance.punch_in);
+  let start;
+  if (todayAttendance.punch_in instanceof Date) {
+    start = todayAttendance.punch_in;
+  } else {
+    const str = String(todayAttendance.punch_in);
+    const normalized = /[Z+\-]\d*$/.test(str.trim()) ? str : str + 'Z';
+    start = new Date(normalized);
+  }
+
   const diffMs = Date.now() - start.getTime();
   if (diffMs < 0) return "0h 0m";
 
@@ -566,7 +579,6 @@ export default function Attendance() {
     doc.setDrawColor(180, 180, 180);
     doc.line(10, 100, 200, 100);
 
-    // Table rows — use formatAttendanceTime for correct IST display
     doc.setTextColor(0, 0, 0);
     let y = 108;
     attendanceHistory.slice(0, 15).forEach((record, index) => {
@@ -669,9 +681,9 @@ export default function Attendance() {
         initial="hidden"
         animate="visible"
       >
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* HEADER SECTION                                                  */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* HEADER SECTION                                                  */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div
           variants={itemVariants}
           className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8"
@@ -757,9 +769,9 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* TODAY'S STATUS HERO CARD                                        */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* TODAY'S STATUS HERO CARD                                        */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants} className="mb-8">
           <Card
             className="border-0 shadow-xl overflow-hidden"
@@ -788,6 +800,7 @@ export default function Attendance() {
 
                   {selectedAttendance?.punch_in && (
                     <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
+                      {/* FIX: use formatAttendanceTime for correct IST display */}
                       <p className="text-blue-100 text-sm">
                         <span className="font-semibold">In:</span>{' '}
                         {formatAttendanceTime(selectedAttendance.punch_in)}
@@ -859,9 +872,9 @@ export default function Attendance() {
           </Card>
         </motion.div>
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* ADMIN PENDING HOLIDAY REVIEW                                    */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* ADMIN PENDING HOLIDAY REVIEW                                    */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
@@ -910,10 +923,10 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* STATS GRID — FIX: items-stretch so all cards are equal height   */
-        /* ═══════════════════════════════════════════════════════════════ */}
-        <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 items-stretch">
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* STATS GRID — FIX: items-stretch + equal columns for symmetry   */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'}`}>
           <StatCard
             icon={Timer}
             label="This Month"
@@ -950,9 +963,9 @@ export default function Attendance() {
           )}
         </motion.div>
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* LIVE DURATION + PERFORMANCE                                     */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* LIVE DURATION + PERFORMANCE                                     */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants} className="mb-8">
           <Card className="border-0 shadow-md overflow-hidden">
             <CardContent className="p-8">
@@ -990,9 +1003,9 @@ export default function Attendance() {
           </Card>
         </motion.div>
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* CALENDAR + HISTORY SECTION                                      */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* CALENDAR + HISTORY SECTION                                      */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           {/* Calendar Sidebar */}
           <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6">
@@ -1069,7 +1082,7 @@ export default function Attendance() {
               </CardContent>
             </Card>
 
-            {/* Selected Day Details — FIX: use formatAttendanceTime */}
+            {/* Selected Day Details — FIX: use formatAttendanceTime for correct IST */}
             <Card className="border-0 shadow-md overflow-hidden">
               <CardContent className="p-0">
                 {selectedAttendance?.punch_in ? (
@@ -1080,6 +1093,7 @@ export default function Attendance() {
                     <div className="space-y-3 text-sm">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600 font-medium">Punch In</span>
+                        {/* FIX: formatAttendanceTime correctly converts UTC → IST */}
                         <span className="font-mono font-bold text-slate-900">
                           {formatAttendanceTime(selectedAttendance.punch_in)}
                         </span>
@@ -1087,6 +1101,7 @@ export default function Attendance() {
                       {selectedAttendance.punch_out && (
                         <div className="flex justify-between items-center">
                           <span className="text-slate-600 font-medium">Punch Out</span>
+                          {/* FIX: formatAttendanceTime correctly converts UTC → IST */}
                           <span className="font-mono font-bold text-slate-900">
                             {formatAttendanceTime(selectedAttendance.punch_out)}
                           </span>
@@ -1143,7 +1158,6 @@ export default function Attendance() {
                             className="flex items-center gap-3 p-3 rounded-xl"
                             style={{ backgroundColor: `${COLORS.amber}15`, border: `1.5px solid ${COLORS.amber}40` }}
                           >
-                            {/* Amber circle with day number */}
                             <div
                               className="w-10 h-10 rounded-full flex flex-col items-center justify-center flex-shrink-0 text-white font-black"
                               style={{ backgroundColor: COLORS.amber }}
@@ -1220,9 +1234,9 @@ export default function Attendance() {
           </motion.div>
         </motion.div>
 
-        {/* ═══════════════════════════════════════════════════════════════ */
-        /* MODALS                                                          */
-        /* ═══════════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* MODALS                                                          */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
 
         {/* Auto Punch-in Modal */}
         <AnimatePresence>
