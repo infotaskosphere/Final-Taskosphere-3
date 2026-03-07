@@ -1868,34 +1868,67 @@ async def get_attendance_history(
  current_user: User = Depends(get_current_user)
 ):
  """
- OWNERSHIP RULE: every user always sees their own attendance.
- Admin sees all. Manager sees own + team.
- Staff can only see their own attendance unless explicitly granted.
+ Attendance visibility rules:
+ - Admin: sees all users; can filter by user_id.
+ - Manager: sees own attendance always.
+   Can see another user's attendance ONLY IF both conditions are met:
+     1. Manager has can_view_attendance = True
+     2. That user is listed in manager's view_other_attendance (cross-visibility scope)
+ - Staff: sees only own attendance.
+   Can see another user's attendance ONLY IF that user is listed in
+   their view_other_attendance permission list (admin-granted cross-visibility).
  """
  query = {}
+
  if current_user.role == "admin":
-    # Admin: optionally filter by user_id
+    # ── ADMIN: full access, optional user_id filter ──────────────────────
     if user_id:
         query["user_id"] = user_id
+
  elif current_user.role == "manager":
-    team_ids = await get_team_user_ids(current_user.id)
+    # ── MANAGER: own always + cross-visibility scoped users ──────────────
+    permissions_mgr = get_user_permissions(current_user)
+    allowed_users = permissions_mgr.get("view_other_attendance", [])
+
     if user_id:
-        # Manager can see their own or a team member's attendance
-        if user_id not in team_ids and user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized")
-        query["user_id"] = user_id
+        if user_id == current_user.id:
+            # Own attendance — always allowed (ownership rule)
+            query["user_id"] = user_id
+        else:
+            # Cross-user access requires BOTH:
+            # 1. can_view_attendance flag is True
+            # 2. target user is in the cross-visibility scope list
+            if not permissions_mgr.get("can_view_attendance", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have permission to view other users' attendance"
+                )
+            if user_id not in allowed_users:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This user is outside your cross-visibility scope"
+                )
+            query["user_id"] = user_id
     else:
-        # Default: own + team attendance
-        query["user_id"] = {"$in": team_ids + [current_user.id]}
+        # No filter — return own + all users in cross-visibility scope
+        if permissions_mgr.get("can_view_attendance", False) and allowed_users:
+            query["user_id"] = {"$in": allowed_users + [current_user.id]}
+        else:
+            # No cross-visibility granted — own attendance only
+            query["user_id"] = current_user.id
+
  else:
-    # OWNERSHIP RULE: staff always see their own attendance
+    # ── STAFF: own attendance always; cross-visibility via view_other_attendance ──
     if user_id and user_id != current_user.id:
-        # Allow if admin has granted cross-user attendance access
         permissions = get_user_permissions(current_user)
         allowed_users = permissions.get("view_other_attendance", [])
         if user_id not in allowed_users:
-            raise HTTPException(status_code=403, detail="Not authorized to view other users' attendance")
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to view other users' attendance"
+            )
     query["user_id"] = user_id if user_id else current_user.id
+
  attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
  for attendance in attendance_list:
   attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
