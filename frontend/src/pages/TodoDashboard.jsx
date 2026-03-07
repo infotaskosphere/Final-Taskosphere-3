@@ -300,13 +300,29 @@ export default function TodoDashboard() {
     return { total, completed, overdue, completionRate, healthScore };
   }, [todos]);
 
+  // ── NOTIFICATION HELPER ───────────────────────────────────────────────────
+  const sendTodoNotification = async ({ title: notifTitle, message, userId }) => {
+    try {
+      const payload = { title: notifTitle, message, type: 'todo' };
+      if (userId) payload.user_id = userId;
+      await api.post('/notifications/send', payload);
+    } catch (_) {}
+  };
+
   // ── MUTATIONS ─────────────────────────────────────────────────────────────
   const addTodoMutation = useMutation({
     mutationFn: (payload) => api.post("/todos", payload),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo created successfully");
       setTitle(""); setDescription(""); setDueDate("");
+      // ── NOTIFICATION ──────────────────────────────────────────────────────
+      if (!isAdmin) {
+        sendTodoNotification({
+          title: '📝 New Todo Created',
+          message: `${user?.full_name || user?.email || 'A team member'} created a new todo: "${variables.title}".`,
+        });
+      }
     },
     onError: () => toast.error("Failed to create todo"),
   });
@@ -332,15 +348,28 @@ export default function TodoDashboard() {
           deleted_at: null,
           event: wasCompleted ? 'uncompleted' : 'completed',
         }, ...prev].slice(0, 100));
+        // ── NOTIFICATION ────────────────────────────────────────────────────
+        if (!wasCompleted) {
+          sendTodoNotification({
+            title: '✅ Todo Completed',
+            message: `"${todo.title || 'Untitled Todo'}" was marked as completed by ${user?.full_name || user?.email || 'a team member'}.`,
+          });
+        }
       }
     },
   });
 
   const promoteMutation = useMutation({
     mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       toast.success("Todo promoted to Master Task!");
       queryClient.invalidateQueries({ queryKey: ["todos"] });
+      // ── NOTIFICATION ──────────────────────────────────────────────────────
+      const todo = todos.find(t => (t.id || t._id) === id);
+      sendTodoNotification({
+        title: '⚡ Todo Promoted to Task',
+        message: `"${todo?.title || 'A todo'}" was promoted to a task by ${user?.full_name || user?.email || 'a team member'}.`,
+      });
     },
     onError: () => toast.error("Failed to promote todo"),
   });
