@@ -311,13 +311,19 @@ export default function Attendance() {
   const { user, hasPermission } = useAuth();
 
   // ─── PERMISSION CHECKS ───────────────────────────────────────────────────
+  // Role detection
   const isAdmin = user?.role === 'admin';
-  const canViewAllAttendance = isAdmin || hasPermission("can_view_attendance");
+  const isManager = user?.role === 'manager';
+  const isStaff = user?.role === 'staff';
+
+  // Rankings permission (unchanged)
   const canViewRankings = hasPermission("can_view_staff_rankings");
 
   // ─── STATE MANAGEMENT ────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+
+  // Admin-only: selected user filter. Managers and staff never use this.
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   // Data states
@@ -326,6 +332,7 @@ export default function Attendance() {
   const [mySummary, setMySummary] = useState(null);
   const [holidays, setHolidays] = useState([]);
   const [pendingHolidays, setPendingHolidays] = useState([]);
+  // allUsers is only populated for admin (for the user filter dropdown)
   const [allUsers, setAllUsers] = useState([]);
   const [tasksCompleted, setTasksCompleted] = useState(0);
   const [myRank, setMyRank] = useState('—');
@@ -371,22 +378,26 @@ export default function Attendance() {
   }, [todayAttendance]);
 
   // ─── DATA FETCHING ──────────────────────────────────────────────────────
-  const fetchData = useCallback(async (overrideUserId = null) => {
+  const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
-    // overrideUserId = null  → clear filter, show own data
-    // overrideUserId = string → show this user's data
-    // undefined              → keep current selectedUserId
-    const targetUserId = overrideUserId !== undefined ? overrideUserId : selectedUserId;
-    const isViewingOther = !!targetUserId;
+
+    // Only admins can pass a targetUserId to filter by another user.
+    // Managers and staff always see their own attendance (backend enforces this too).
+    const targetUserId = isAdmin
+      ? (overrideUserId !== undefined ? overrideUserId : selectedUserId)
+      : null;
+
+    // isViewingOther is true ONLY when admin has selected a different user
+    const isViewingOther = isAdmin && !!targetUserId;
 
     try {
-      // History scoped to targetUserId when set
+      // History: admin can filter by targetUserId; all others get own history
       const historyUrl = isViewingOther
         ? `/attendance/history?user_id=${targetUserId}`
         : '/attendance/history';
 
-      // /attendance/my-summary always uses the token's own user on the backend,
-      // so skip it when viewing another user — we derive the summary from history.
+      // /attendance/my-summary always uses the token's own user on the backend.
+      // Skip it when admin is viewing another user — we derive summary from history.
       // /attendance/today always reflects the logged-in user (for punch-in/out).
       const requests = [
         api.get(historyUrl),
@@ -406,9 +417,9 @@ export default function Attendance() {
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
 
-      // ── Load user list for dropdown (admin OR can_view_attendance) ───────
-      // Fetch only once to avoid redundant requests on every filter change
-      if (canViewAllAttendance && allUsers.length === 0) {
+      // ── Load user list ONLY for admin (for the user filter dropdown) ─────
+      // Managers and staff never need this list — they have no user filter UI.
+      if (isAdmin && allUsers.length === 0) {
         try {
           const usersRes = await api.get('/users');
           setAllUsers(usersRes.data || []);
@@ -421,7 +432,7 @@ export default function Attendance() {
       const history = historyRes.data || [];
       setAttendanceHistory(history);
 
-      // ── Summary: derive from history when viewing another user ───────────
+      // ── Summary: derive from history when admin is viewing another user ──
       if (isViewingOther) {
         const monthlySummary = {};
         history.forEach(a => {
@@ -465,7 +476,7 @@ export default function Attendance() {
     } finally {
       setLoading(false);
     }
-  }, [selectedUserId, isAdmin, canViewAllAttendance, canViewRankings, user?.id, allUsers.length]);
+  }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
 
   // ─── HANDLERS ────────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action) => {
@@ -564,7 +575,8 @@ export default function Attendance() {
   }, [fetchData]);
 
   const handleExportPDF = useCallback(() => {
-    const employeeName = selectedUserId
+    // For admin viewing another user, show that user's name; otherwise own name
+    const employeeName = (isAdmin && selectedUserId)
       ? (allUsers.find(u => u.id === selectedUserId)?.full_name || 'Employee')
       : (user?.full_name || 'Staff Member');
 
@@ -650,7 +662,7 @@ export default function Attendance() {
     doc.text('Taskosphere HR Management System  |  Confidential', 10, 288);
 
     doc.save(`Attendance_${employeeName.replace(/\s+/g, '_')}_${format(selectedDate, 'MMM_yyyy')}.pdf`);
-  }, [selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
+  }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
 
   // ─── COMPUTED VALUES ────────────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
@@ -737,12 +749,24 @@ export default function Attendance() {
               {isAdmin ? 'Attendance Management' : 'My Attendance'}
             </h1>
             <p className="text-slate-500 mt-2 text-sm font-medium">
-              {isAdmin ? 'Manage team attendance across all departments' : 'Track your daily hours and attendance'}
+              {isAdmin
+                ? 'Manage team attendance across all departments'
+                : 'Track your daily hours and attendance'}
             </p>
           </div>
 
           <div className="flex gap-3 flex-wrap items-center">
-            {canViewAllAttendance && (
+            {/*
+              ── USER FILTER DROPDOWN ──────────────────────────────────────
+              Visibility rule (spec table):
+                Admin   → ✅ show user filter (full access)
+                Manager → ❌ hidden (no user selector)
+                Staff   → ❌ hidden (no user selector)
+              Backend also enforces this — managers/staff cannot query
+              other users via the history endpoint without explicit
+              cross-visibility permission + scope match.
+            */}
+            {isAdmin && (
               <motion.select
                 variants={itemVariants}
                 className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium"
@@ -788,8 +812,12 @@ export default function Attendance() {
           </div>
         </motion.div>
 
-        {/* VIEWING AS BANNER */}
-        {selectedUserId && (
+        {/*
+          VIEWING AS BANNER — only shown when admin has selected another user.
+          Managers and staff never see this banner (selectedUserId is always null
+          for them since the dropdown is hidden).
+        */}
+        {isAdmin && selectedUserId && (
           <motion.div
             variants={itemVariants}
             className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200"
