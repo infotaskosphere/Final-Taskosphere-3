@@ -1138,11 +1138,11 @@ export default function Attendance() {
                 } catch { return false; }
               });
               return (
-                <Card className="border-0 shadow-md overflow-hidden">
+                <Card className="border-0 shadow-md overflow-hidden w-full">
                   <CardHeader className="pb-3 border-b border-slate-100">
-                    <CardTitle className="text-sm flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-                      <span className="text-base">🎉</span>
-                      Holidays — {format(selectedDate, 'MMMM yyyy')}
+                    <CardTitle className="text-sm flex items-center gap-2 min-w-0" style={{ color: COLORS.deepBlue }}>
+                      <span className="text-base flex-shrink-0">🎉</span>
+                      <span className="truncate">Holidays — {format(selectedDate, 'MMMM yyyy')}</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-4">
@@ -1151,23 +1151,23 @@ export default function Attendance() {
                         No holidays this month
                       </p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-2 w-full">
                         {monthHolidays.map(h => (
                           <div
                             key={h.date}
-                            className="flex items-center gap-3 p-3 rounded-xl"
+                            className="flex items-center gap-2 p-2.5 rounded-xl w-full min-w-0"
                             style={{ backgroundColor: `${COLORS.amber}15`, border: `1.5px solid ${COLORS.amber}40` }}
                           >
                             <div
-                              className="w-10 h-10 rounded-full flex flex-col items-center justify-center flex-shrink-0 text-white font-black"
+                              className="w-9 h-9 rounded-full flex flex-col items-center justify-center flex-shrink-0 text-white font-black"
                               style={{ backgroundColor: COLORS.amber }}
                             >
-                              <span className="text-xs leading-none">{format(parseISO(h.date), 'MMM')}</span>
-                              <span className="text-sm leading-none">{format(parseISO(h.date), 'd')}</span>
+                              <span className="text-[9px] leading-none">{format(parseISO(h.date), 'MMM')}</span>
+                              <span className="text-xs leading-none">{format(parseISO(h.date), 'd')}</span>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-800 truncate">{h.name}</p>
-                              <p className="text-xs text-slate-500 font-medium">
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <p className="text-xs font-bold text-slate-800 truncate leading-snug">{h.name}</p>
+                              <p className="text-[10px] text-slate-500 font-medium truncate">
                                 {format(parseISO(h.date), 'EEEE')}
                               </p>
                             </div>
