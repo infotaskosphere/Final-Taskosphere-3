@@ -654,81 +654,81 @@ export default function Clients() {
           {/* Colored top strip by type */}
           <div className="h-1 w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
 
-          <div className="flex flex-col flex-1 p-3 overflow-hidden">
-            {/* Header row */}
-            <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="flex flex-col flex-1 p-2.5 overflow-hidden">
+            {/* Header row - compact */}
+            <div className="flex items-start justify-between gap-1.5 mb-0.5">
               {/* Avatar */}
               <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
                 style={{ background: avatarGrad }}
               >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
 
               {/* Type pill + archived */}
-              <div className="flex flex-col items-end gap-0.5">
+              <div className="flex flex-col items-end gap-0">
                 <TypePill type={client.client_type} />
                 {isArchived && (
-                  <span className="text-[8px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded-full">
+                  <span className="text-[7px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1 py-0 rounded-full">
                     Archived
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Name + number */}
-            <div className="mb-1">
-              <span className="text-[9px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
-              <h3 className="font-bold text-xs leading-tight text-slate-900 mt-0.5 line-clamp-2">{client.company_name}</h3>
+            {/* Name + number - compact */}
+            <div className="mb-0.5">
+              <span className="text-[8px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
+              <h3 className="font-bold text-xs leading-tight text-slate-900 mt-0 line-clamp-2">{client.company_name}</h3>
               {primaryContact?.name && (
-                <p className="text-[9px] text-slate-400 mt-0.5 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
+                <p className="text-[8px] text-slate-400 mt-0 truncate">{primaryContact.name}{primaryContact.designation ? ` · ${primaryContact.designation}` : ''}</p>
               )}
             </div>
 
-            {/* Contact details + Address */}
-            <div className="space-y-0.5 flex-1 min-h-0 text-xs">
+            {/* Contact details - dense grid */}
+            <div className="space-y-0 flex-1 min-h-0 text-[8px]">
               {client.phone && (
-                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
-                  <Phone className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
-                  <span className="font-medium text-slate-700 truncate text-[9px]">{client.phone}</span>
+                <div className="flex items-center gap-0.5 text-slate-500 overflow-hidden">
+                  <Phone className="h-2 w-2 text-slate-300 flex-shrink-0" />
+                  <span className="font-medium text-slate-700 truncate">{client.phone}</span>
                 </div>
               )}
               {client.email && (
-                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
-                  <Mail className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
-                  <span className="truncate text-slate-600 text-[9px]">{client.email}</span>
+                <div className="flex items-center gap-0.5 text-slate-500 overflow-hidden">
+                  <Mail className="h-2 w-2 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600">{client.email}</span>
                 </div>
               )}
               {(client.city || client.state) && (
-                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
-                  <MapPin className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
-                  <span className="truncate text-slate-600 text-[9px]">{[client.city, client.state].filter(Boolean).join(', ')}</span>
+                <div className="flex items-center gap-0.5 text-slate-500 overflow-hidden">
+                  <MapPin className="h-2 w-2 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600">{[client.city, client.state].filter(Boolean).join(', ')}</span>
                 </div>
               )}
               {assignedUser && (
-                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
-                  <User className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
-                  <span className="truncate text-slate-600 text-[9px]">{assignedUser.full_name || assignedUser.name}</span>
+                <div className="flex items-center gap-0.5 text-slate-500 overflow-hidden">
+                  <User className="h-2 w-2 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600">{assignedUser.full_name || assignedUser.name}</span>
                 </div>
               )}
             </div>
 
-            {/* Services + actions */}
-            <div className="mt-1 pt-1 border-t flex flex-col gap-0.5" style={{ borderColor: `${cfg.border}` }}>
+            {/* Services + actions - compact */}
+            <div className="mt-0 pt-0.5 border-t flex flex-col gap-0" style={{ borderColor: `${cfg.border}` }}>
               {/* Service tags */}
               {serviceCount > 0 && (
-                <div className="flex items-center gap-0.5 flex-wrap min-w-0">
+                <div className="flex items-center gap-0.5 flex-wrap min-w-0 py-0.5">
                   {client.services?.slice(0, 2).map((svc, i) => (
                     <span
                       key={i}
-                      className="text-[7px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
+                      className="text-[6px] font-semibold px-1 py-0.5 rounded-sm border whitespace-nowrap"
                       style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
                     >
-                      {svc.replace('Other: ', '').substring(0, 12)}
+                      {svc.replace('Other: ', '').substring(0, 10)}
                     </span>
                   ))}
                   {serviceCount > 2 && (
-                    <span className="text-[7px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                    <span className="text-[6px] font-semibold px-1 py-0.5 rounded-sm bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
                       +{serviceCount - 2}
                     </span>
                   )}
@@ -736,20 +736,20 @@ export default function Clients() {
               )}
 
               {/* Action buttons */}
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 mt-0.5">
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                 <button
                   onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                  className="w-5 h-5 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors flex-shrink-0"
+                  className="w-5 h-5 flex items-center justify-center rounded text-emerald-600 hover:bg-emerald-50 transition-colors flex-shrink-0"
                   title="WhatsApp"
                 >
-                  <MessageCircle className="h-3 w-3" />
+                  <MessageCircle className="h-2.5 w-2.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                  className="w-5 h-5 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
+                  className="w-5 h-5 flex items-center justify-center rounded text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
                   title="Edit"
                 >
-                  <Edit className="h-3 w-3" />
+                  <Edit className="h-2.5 w-2.5" />
                 </button>
                 {canDeleteData && (
                   <button
@@ -759,10 +759,10 @@ export default function Clients() {
                         api.delete(`/clients/${client.id}`).then(() => fetchClients());
                       }
                     }}
-                    className="w-5 h-5 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
+                    className="w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
                     title="Delete"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-2.5 w-2.5" />
                   </button>
                 )}
               </div>
@@ -1481,7 +1481,7 @@ export default function Clients() {
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
                 <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
-                  rowCount={rowCount} rowHeight={330} width={width}
+                  rowCount={rowCount} rowHeight={300} width={width}
                   overscanColumnCount={2} overscanRowCount={4}>
                   {({ columnIndex, rowIndex, style }) => (
                     <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
