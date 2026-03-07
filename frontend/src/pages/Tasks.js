@@ -517,9 +517,56 @@ export default function Tasks() {
       if (editingTask) {
         await api.patch(`/tasks/${editingTask.id}`, taskData);
         toast.success('Task updated successfully!');
+        // ── NOTIFICATION: task updated ──────────────────────────────────────
+        const newAssignee = taskData.assigned_to;
+        const oldAssignee = editingTask.assigned_to;
+        if (newAssignee && newAssignee !== oldAssignee) {
+          api.post('/notifications/send', {
+            title: '📋 Task Reassigned',
+            message: `You have been assigned the task "${taskData.title}" by ${user?.full_name || user?.email || 'a team member'}.`,
+            type: 'task',
+            user_id: newAssignee,
+          }).catch(() => {});
+          if (!isAdmin) {
+            api.post('/notifications/send', {
+              title: '📋 Task Reassigned by Staff/Manager',
+              message: `${user?.full_name || user?.email || 'A team member'} reassigned the task "${taskData.title}".`,
+              type: 'task',
+            }).catch(() => {});
+          }
+        }
+        if (taskData.status === 'completed' && editingTask.status !== 'completed') {
+          api.post('/notifications/send', {
+            title: '✅ Task Completed',
+            message: `Task "${taskData.title}" was marked as completed by ${user?.full_name || user?.email || 'a team member'}.`,
+            type: 'task',
+          }).catch(() => {});
+        } else if (taskData.status !== editingTask.status) {
+          api.post('/notifications/send', {
+            title: '🔄 Task Status Updated',
+            message: `Task "${taskData.title}" status changed to "${STATUS_STYLES[taskData.status]?.label || taskData.status}" by ${user?.full_name || user?.email || 'a team member'}.`,
+            type: 'task',
+          }).catch(() => {});
+        }
       } else {
         await api.post('/tasks', taskData);
         toast.success('Task created successfully!');
+        // ── NOTIFICATION: new task assigned ────────────────────────────────
+        if (taskData.assigned_to) {
+          api.post('/notifications/send', {
+            title: '📋 New Task Assigned',
+            message: `You have been assigned a new task: "${taskData.title}" by ${user?.full_name || user?.email || 'a team member'}.`,
+            type: 'task',
+            user_id: taskData.assigned_to,
+          }).catch(() => {});
+          if (!isAdmin) {
+            api.post('/notifications/send', {
+              title: '📋 New Task Created',
+              message: `${user?.full_name || user?.email || 'A team member'} created a new task: "${taskData.title}".`,
+              type: 'task',
+            }).catch(() => {});
+          }
+        }
       }
       setDialogOpen(false);
       resetForm();
@@ -566,6 +613,20 @@ export default function Tasks() {
     try {
       await api.patch(`/tasks/${task.id}`, { status: newStatus });
       toast.success(`Task marked as ${STATUS_STYLES[newStatus]?.label || newStatus}!`);
+      // ── NOTIFICATION: status change ─────────────────────────────────────
+      if (newStatus === 'completed') {
+        api.post('/notifications/send', {
+          title: '✅ Task Completed',
+          message: `Task "${task.title}" was marked as completed by ${user?.full_name || user?.email || 'a team member'}.`,
+          type: 'task',
+        }).catch(() => {});
+      } else {
+        api.post('/notifications/send', {
+          title: '🔄 Task Status Updated',
+          message: `Task "${task.title}" was marked as "${STATUS_STYLES[newStatus]?.label || newStatus}" by ${user?.full_name || user?.email || 'a team member'}.`,
+          type: 'task',
+        }).catch(() => {});
+      }
       fetchTasks();
       fetchNotifications();
     } catch (error) {
@@ -586,6 +647,15 @@ export default function Tasks() {
       setNewComment('');
       fetchComments(selectedTask.id);
       toast.success('Comment added!');
+      // ── NOTIFICATION: comment added ─────────────────────────────────────
+      if (selectedTask.assigned_to && selectedTask.assigned_to !== user?.id) {
+        api.post('/notifications/send', {
+          title: '💬 New Comment on Task',
+          message: `${user?.full_name || user?.email || 'A team member'} commented on task "${selectedTask.title}".`,
+          type: 'task',
+          user_id: selectedTask.assigned_to,
+        }).catch(() => {});
+      }
       fetchNotifications();
     } catch (error) {
       toast.error('Failed to add comment');
