@@ -178,7 +178,10 @@ export default function Reports() {
   // ── Derived data ───────────────────────────────────────────────────────────
   const filteredReportData = selectedUserId === 'all'
     ? reportData
-    : reportData.filter(r => r.user?.id === selectedUserId || r.user_id === selectedUserId);
+    : reportData.filter(r => {
+        const userId = r.user?.id || r.user_id;
+        return userId === selectedUserId;
+      });
 
   const uniqueUsers = Array.from(
     new Map(reportData.map(r => [r.user?.id || r.user_id, r.user || { id: r.user_id, full_name: 'Me' }])).values()
@@ -518,8 +521,12 @@ export default function Reports() {
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredReportData.map((d, i) => {
-              const name = d.user?.full_name || (d.user_id === user?.id ? 'You' : 'User');
-              const pct  = d.days_logged > 0 ? Math.round((d.total_tasks_completed / Math.max(d.days_logged, 1)) * 100) / 100 : 0;
+              const userId = d.user?.id || d.user_id;
+              const name = d.user?.full_name || d.full_name || (userId === user?.id ? 'You' : 'User');
+              const completedTasks = d.total_tasks_completed || 0;
+              const screenTime = d.total_screen_time || 0;
+              const daysLogged = d.days_logged || 0;
+              const pct = daysLogged > 0 ? Math.round((completedTasks / Math.max(daysLogged, 1)) * 100) / 100 : 0;
               return (
                 <div key={i} className="border border-slate-200 rounded-xl p-4 hover:shadow-sm transition-all">
                   <div className="flex items-center gap-3 mb-3">
@@ -528,17 +535,17 @@ export default function Reports() {
                     </div>
                     <div>
                       <p className="font-semibold text-slate-800 text-sm">{name}</p>
-                      <p className="text-xs text-slate-400">{d.days_logged} days logged</p>
+                      <p className="text-xs text-slate-400">{daysLogged} days logged</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-slate-50 rounded-lg p-2.5">
                       <p className="text-[10px] font-semibold text-slate-400 uppercase">Completed</p>
-                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.emeraldGreen }}>{d.total_tasks_completed}</p>
+                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.emeraldGreen }}>{completedTasks}</p>
                     </div>
                     <div className="bg-slate-50 rounded-lg p-2.5">
                       <p className="text-[10px] font-semibold text-slate-400 uppercase">Screen Time</p>
-                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.mediumBlue }}>{formatTime(d.total_screen_time || 0)}</p>
+                      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.mediumBlue }}>{formatTime(screenTime)}</p>
                     </div>
                   </div>
                 </div>
