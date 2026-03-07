@@ -93,6 +93,9 @@ const TypePill = ({ type }) => {
   );
 };
 
+// ── NEW: Empty assignment row ─────────────────────────────────────────────────
+const EMPTY_ASSIGNMENT = { user_id: '', services: [] };
+
 export default function Clients() {
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
@@ -118,6 +121,8 @@ export default function Clients() {
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  // ── NEW: assigned-to filter ───────────────────────────────────────────────
+  const [assignedToFilter, setAssignedToFilter] = useState('all');
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
 
@@ -137,7 +142,8 @@ export default function Clients() {
     state: '',
     services: [],
     dsc_details: [],
-    assigned_to: 'unassigned',
+    // ── CHANGED: assignments replaces assigned_to ─────────────────────────
+    assignments: [{ ...EMPTY_ASSIGNMENT }],
     notes: '',
     status: 'active',
   });
@@ -214,6 +220,7 @@ export default function Clients() {
     });
   }, [clients]);
 
+  // ── UPDATED: filteredClients now respects assignedToFilter ────────────────
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -223,9 +230,23 @@ export default function Clients() {
       const matchesService = serviceFilter === 'all' ||
         (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
-      return matchesSearch && matchesService && matchesStatus;
+
+      // ── NEW: assigned-to filter logic ─────────────────────────────────────
+      let matchesAssigned = true;
+      if (assignedToFilter !== 'all') {
+        // Support both legacy assigned_to (string) and new assignments (array)
+        const assignments = c?.assignments || [];
+        const legacyAssignedTo = c?.assigned_to;
+        if (assignments.length > 0) {
+          matchesAssigned = assignments.some(a => a.user_id === assignedToFilter);
+        } else {
+          matchesAssigned = legacyAssignedTo === assignedToFilter;
+        }
+      }
+
+      return matchesSearch && matchesService && matchesStatus && matchesAssigned;
     });
-  }, [clients, searchTerm, serviceFilter, statusFilter]);
+  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter]);
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
@@ -427,6 +448,7 @@ export default function Clients() {
           status: mdsForm.status || 'active',
           contact_persons: contacts,
           dsc_details: [],
+          assignments: [],
           assigned_to: null,
         };
 
@@ -458,7 +480,7 @@ export default function Clients() {
           ? mdsForm.contact_persons
           : [{ name: '', designation: '', email: '', phone: '', birthday: '', din: '' }],
         dsc_details: [],
-        assigned_to: 'unassigned',
+        assignments: [{ ...EMPTY_ASSIGNMENT }],
       });
       setEditingClient(null);
       setFormErrors({});
@@ -493,6 +515,12 @@ export default function Clients() {
         issue_date: safeDate(dsc.issue_date), expiry_date: safeDate(dsc.expiry_date),
         notes: dsc.notes?.trim() || null
       }));
+
+      // ── NEW: build assignments payload ────────────────────────────────────
+      const cleanedAssignments = (formData.assignments || [])
+        .filter(a => a.user_id && a.user_id !== 'unassigned')
+        .map(a => ({ user_id: a.user_id, services: a.services || [] }));
+
       const payload = {
         company_name: formData.company_name.trim(), client_type: formData.client_type,
         email: formData.email?.trim(), phone: cleanPhone,
@@ -502,7 +530,9 @@ export default function Clients() {
         state: formData.state?.trim() || null,
         services: finalServices,
         notes: formData.notes?.trim() || null,
-        assigned_to: formData.assigned_to === "unassigned" ? null : formData.assigned_to,
+        // backward-compat: first assignment user_id as assigned_to
+        assigned_to: cleanedAssignments[0]?.user_id || null,
+        assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC
       };
       if (editingClient) {
@@ -519,8 +549,19 @@ export default function Clients() {
     }
   };
 
+  // ── UPDATED: handleEdit normalises legacy assigned_to → assignments ────────
   const handleEdit = (client) => {
     setEditingClient(client);
+
+    // Normalise assignments
+    let assignments = client?.assignments || [];
+    if (assignments.length === 0 && client?.assigned_to) {
+      assignments = [{ user_id: client.assigned_to, services: [] }];
+    }
+    if (assignments.length === 0) {
+      assignments = [{ ...EMPTY_ASSIGNMENT }];
+    }
+
     setFormData({
       ...client,
       contact_persons: client?.contact_persons?.map(cp => ({
@@ -532,7 +573,8 @@ export default function Clients() {
         issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '',
         expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '',
       })) || [],
-      status: client?.status || 'active', assigned_to: client?.assigned_to || 'unassigned',
+      status: client?.status || 'active',
+      assignments,
     });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
@@ -545,7 +587,7 @@ export default function Clients() {
       company_name: '', client_type: 'proprietor',
       contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [],
-      assigned_to: 'unassigned', notes: '', status: 'active'
+      assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active'
     });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
   };
@@ -583,6 +625,28 @@ export default function Clients() {
     ...p, dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
 
+  // ── NEW: assignment helpers ───────────────────────────────────────────────
+  const addAssignment = () => setFormData(p => ({
+    ...p, assignments: [...(p.assignments || []), { ...EMPTY_ASSIGNMENT }]
+  }));
+  const removeAssignment = (idx) => setFormData(p => ({
+    ...p, assignments: (p.assignments || []).filter((_, i) => i !== idx)
+  }));
+  const updateAssignmentUser = (idx, userId) => setFormData(p => ({
+    ...p,
+    assignments: (p.assignments || []).map((a, i) => i === idx ? { ...a, user_id: userId } : a)
+  }));
+  const toggleAssignmentService = (idx, svc) => setFormData(p => ({
+    ...p,
+    assignments: (p.assignments || []).map((a, i) => {
+      if (i !== idx) return a;
+      const services = a.services.includes(svc)
+        ? a.services.filter(s => s !== svc)
+        : [...a.services, svc];
+      return { ...a, services };
+    })
+  }));
+
   const toggleService = (s) => {
     setFormData(p => {
       const services = p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s];
@@ -613,6 +677,13 @@ export default function Clients() {
     return 'proprietor';
   };
 
+  // ── Helper: get all assigned users for a client (supports both schemas) ──
+  const getClientAssignments = (client) => {
+    if (client?.assignments && client.assignments.length > 0) return client.assignments;
+    if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }];
+    return [];
+  };
+
   // ── REDESIGNED: Compact Board Card — no blank space, all info visible ──
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
@@ -624,10 +695,9 @@ export default function Clients() {
     const serviceCount = client.services?.length || 0;
     const isArchived = client.status === 'inactive';
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
-    const assignedUser = users.find(u => u.id === client.assigned_to);
-    // Build a short location string
+    // ── UPDATED: use getClientAssignments ────────────────────────────────
+    const clientAssignments = getClientAssignments(client);
     const locationStr = [client.city, client.state].filter(Boolean).join(', ');
-    // Truncated address for display (first 40 chars)
     const addressShort = client.address
       ? (client.address.length > 42 ? client.address.substring(0, 42) + '…' : client.address)
       : '';
@@ -672,7 +742,7 @@ export default function Clients() {
             {/* Divider */}
             <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
 
-            {/* Row 2: Contact info block — phone, email, location, assignee */}
+            {/* Row 2: Contact info block — phone, email, location, assignees */}
             <div className="flex flex-col gap-1">
               {/* Primary contact person name + designation */}
               {primaryContact?.name && (
@@ -703,7 +773,7 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Address (city+state preferred, fall back to address snippet) */}
+              {/* Address */}
               {(locationStr || addressShort) && (
                 <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
                   <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
@@ -711,11 +781,28 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Assigned staff */}
-              {assignedUser && (
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                  <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate">{assignedUser.full_name || assignedUser.name}</span>
+              {/* ── UPDATED: Multi-user assignments display ─────────────────── */}
+              {clientAssignments.length > 0 && (
+                <div className="flex flex-col gap-0.5">
+                  {clientAssignments.map((a, i) => {
+                    const assignedUser = users.find(u => u.id === a.user_id);
+                    if (!assignedUser) return null;
+                    return (
+                      <div key={i} className="flex items-start gap-1.5 text-[10px] text-slate-500">
+                        <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate font-medium text-slate-600">
+                            {assignedUser.full_name || assignedUser.name}
+                          </span>
+                          {a.services && a.services.length > 0 && (
+                            <span className="text-[9px] text-slate-400 truncate">
+                              {a.services.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -740,7 +827,7 @@ export default function Clients() {
               </div>
             )}
 
-            {/* Row 4: Action buttons — tight, no mt-auto so no blank space */}
+            {/* Row 4: Action buttons */}
             <div
               className="flex items-center gap-1 pt-2 border-t"
               style={{ borderColor: cfg.border }}
@@ -790,6 +877,8 @@ export default function Clients() {
     const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
     const isArchived = client.status === 'inactive';
     const serviceCount = client.services?.length || 0;
+    // ── UPDATED: multi-user assignments in list row ───────────────────────
+    const clientAssignments = getClientAssignments(client);
 
     return (
       <div style={style} className="px-1">
@@ -835,6 +924,23 @@ export default function Clients() {
               </span>
             )}
           </div>
+          {/* ── UPDATED: show assignee names in list row ─────────────────── */}
+          <div className="w-32 flex-shrink-0 flex flex-col gap-0.5">
+            {clientAssignments.slice(0, 2).map((a, i) => {
+              const u = users.find(x => x.id === a.user_id);
+              return u ? (
+                <span key={i} className="text-[10px] text-slate-500 truncate">
+                  {u.full_name || u.name}
+                  {a.services?.length > 0 && (
+                    <span className="text-slate-400"> · {a.services[0]}{a.services.length > 1 ? `+${a.services.length - 1}` : ''}</span>
+                  )}
+                </span>
+              ) : null;
+            })}
+            {clientAssignments.length > 2 && (
+              <span className="text-[10px] text-slate-400">+{clientAssignments.length - 2} more</span>
+            )}
+          </div>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
               className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors" title="WhatsApp">
@@ -865,7 +971,8 @@ export default function Clients() {
     if (!selectedClient) return null;
     const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
     const avatarGrad = getAvatarGradient(selectedClient.company_name);
-    const assignedUser = users.find(u => u.id === selectedClient.assigned_to);
+    // ── UPDATED: use getClientAssignments ────────────────────────────────
+    const clientAssignments = getClientAssignments(selectedClient);
 
     return (
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
@@ -986,20 +1093,53 @@ export default function Clients() {
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4">
-                {assignedUser && (
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3">Assigned To</h3>
-                    <p className="text-sm font-semibold text-slate-900">{assignedUser.full_name || assignedUser.name}</p>
-                  </div>
-                )}
-                {selectedClient.notes && (
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3">Notes</h3>
-                    <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
-                  </div>
-                )}
-              </div>
+              {/* ── UPDATED: Multi-assignment section in detail popup ──────── */}
+              {(clientAssignments.length > 0 || selectedClient.notes) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {clientAssignments.length > 0 && (
+                    <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5 col-span-2">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3 flex items-center gap-2">
+                        <Briefcase className="h-3.5 w-3.5" /> Staff Assignments
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {clientAssignments.map((a, i) => {
+                          const u = users.find(x => x.id === a.user_id);
+                          if (!u) return null;
+                          return (
+                            <div key={i} className="flex items-start gap-3 bg-white border border-slate-100 rounded-xl px-4 py-2.5">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>
+                                {(u.full_name || u.name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-900">{u.full_name || u.name}</p>
+                                {a.services && a.services.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {a.services.map((svc, si) => (
+                                      <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                                        style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+                                        {svc}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 mt-0.5">All services</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {selectedClient.notes && (
+                    <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5 col-span-2">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3">Notes</h3>
+                      <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="sticky bottom-0 flex items-center justify-between gap-2 p-6 bg-white border-t border-slate-100">
@@ -1292,17 +1432,86 @@ export default function Clients() {
                     value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                 </div>
 
-                {/* Assign To */}
+                {/* ── NEW: Multi-user Staff Assignments section ─────────────────────── */}
                 {canAssignClients && (
-                  <div>
-                    <label className={labelCls}>Assign To Staff</label>
-                    <Select value={formData.assigned_to} onValueChange={v => setFormData({...formData, assigned_to: v})}>
-                      <SelectTrigger className="h-11 rounded-xl border-slate-200 text-sm bg-white"><SelectValue placeholder="Select team member" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">Unassigned</SelectItem>
-                        {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-5">
+                      <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" />
+                      <Button type="button" size="sm" onClick={addAssignment} variant="outline"
+                        className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                        <Plus className="h-3 w-3 mr-1" /> Add Staff
+                      </Button>
+                    </div>
+                    <div className="space-y-4">
+                      {(formData.assignments || []).map((assignment, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                              <span className="text-sm font-semibold text-slate-700">Assignment</span>
+                            </div>
+                            {(formData.assignments || []).length > 1 && (
+                              <button type="button" onClick={() => removeAssignment(idx)}
+                                className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                <Trash className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Staff member select */}
+                          <div className="mb-4">
+                            <label className={labelCls}>Staff Member</label>
+                            <Select value={assignment.user_id || 'unassigned'}
+                              onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
+                              <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
+                                <SelectValue placeholder="Select team member" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">— Unassigned —</SelectItem>
+                                {users
+                                  .filter(u => {
+                                    // Don't show already-selected users in other rows
+                                    const otherAssignedIds = (formData.assignments || [])
+                                      .filter((_, i) => i !== idx)
+                                      .map(a => a.user_id)
+                                      .filter(Boolean);
+                                    return !otherAssignedIds.includes(u.id);
+                                  })
+                                  .map(u => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name || u.name || u.email}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Per-assignment service selection */}
+                          <div>
+                            <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {formData.services
+                                .filter(s => !s.startsWith('Other:') || s)
+                                .map(svc => {
+                                  const displaySvc = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc;
+                                  const isSelected = assignment.services.includes(svc);
+                                  return (
+                                    <button key={svc} type="button"
+                                      onClick={() => toggleAssignmentService(idx, svc)}
+                                      className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                                      style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
+                                      {displaySvc}
+                                    </button>
+                                  );
+                                })}
+                              {formData.services.length === 0 && (
+                                <p className="text-xs text-slate-400 italic">Select services above first to assign specific ones here</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1397,6 +1606,20 @@ export default function Clients() {
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          {/* ── NEW: Assigned To filter ──────────────────────────────────── */}
+          {canAssignClients && users.length > 0 && (
+            <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
+              <SelectTrigger className="h-10 w-[160px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Staff" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Staff</SelectItem>
+                {users.map(u => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.full_name || u.name || u.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
             {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
           </div>
@@ -1422,7 +1645,6 @@ export default function Clients() {
             <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
           </div>
         ) : viewMode === 'board' ? (
-          /* ── Board view — rowHeight 285 (was 420) eliminates blank space ── */
           <AutoSizer>
             {({ height, width }) => {
               const CARD_MIN = 260;
@@ -1435,7 +1657,7 @@ export default function Clients() {
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={285}   // ← KEY FIX: was 420, reduced to 285
+                  rowHeight={285}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
@@ -1448,7 +1670,6 @@ export default function Clients() {
             }}
           </AutoSizer>
         ) : (
-          /* ── List view ── */
           <div className="h-full flex flex-col">
             <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
               <div className="w-1 flex-shrink-0" />
@@ -1458,6 +1679,8 @@ export default function Clients() {
               <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
               <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
               <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
+              {/* ── NEW: Assigned column header ─────────────────────────── */}
+              <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
               <div className="w-24 flex-shrink-0" />
             </div>
             <div className="flex-1">
@@ -1529,7 +1752,7 @@ export default function Clients() {
                         client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
                         email: row.email?.trim(), phone: row.phone?.replace(/\D/g, ""), birthday: row.birthday || null,
                         services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-                        notes: row.notes?.trim() || null, assigned_to: null, contact_persons: [], dsc_details: []
+                        notes: row.notes?.trim() || null, assigned_to: null, assignments: [], contact_persons: [], dsc_details: []
                       });
                       success++;
                     } catch (err) { console.error(err); }
