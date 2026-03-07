@@ -229,24 +229,27 @@ export default function Dashboard() {
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
 
-  // Todos (personal)
+  // ── FIXED: Todos query with staleTime 0 for real-time updates ──────────────
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos"],
     queryFn: async () => {
       const res = await api.get("/todos");
       return res.data;
     },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
+  // ── FIXED: Properly check both completed status fields ────────────────────
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
-      completed: todo.status === "completed",
+      completed: todo.status === "completed" || todo.is_completed === true,
     })),
     [todosRaw]
   );
 
-  // Pending todos only — completed ones are removed from the dashboard card
+  // ── Pending todos only — completed ones are removed from the dashboard card
   // but remain visible on the Todo page and in the Todo Log
   const pendingTodos = useMemo(() =>
     todos.filter(todo => !todo.completed),
@@ -294,9 +297,21 @@ export default function Dashboard() {
     onError: () => toast.error("Failed to add todo"),
   });
 
+  // ── FIXED: Update todo mutation with proper invalidation ───────────────────
   const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => api.patch(`/todos/${id}`, { is_completed: status === "completed" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
+    mutationFn: ({ id, status }) => {
+      const todoId = id;
+      const isCompleting = status === "completed";
+      return api.patch(`/todos/${todoId}`, { is_completed: isCompleting });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      toast.success("Todo updated");
+    },
+    onError: (error) => {
+      toast.error("Failed to update todo");
+      console.error("Update error:", error);
+    },
   });
 
   const deleteTodo = useMutation({
@@ -320,11 +335,18 @@ export default function Dashboard() {
     setSelectedDueDate(undefined);
   };
 
+  // ── FIXED: Proper toggle handler with correct status logic ─────────────────
   const handleToggleTodo = (id) => {
-    const todo = todosRaw.find(t => t.id === id || t._id === id);
+    const todo = todosRaw.find(t => (t.id === id || t._id === id));
     if (!todo) return;
-    const newStatus = todo.status === "completed" ? "pending" : "completed";
-    updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
+    
+    const currentCompleted = todo.is_completed === true || todo.status === "completed";
+    const newStatus = currentCompleted ? "pending" : "completed";
+    
+    updateTodo.mutate({ 
+      id: todo.id || todo._id, 
+      status: newStatus 
+    });
   };
 
   const handleDeleteTodo = (id) => {
@@ -1143,7 +1165,7 @@ export default function Dashboard() {
                           type="checkbox"
                           checked={todo.completed}
                           onChange={() => handleToggleTodo(todo._id || todo.id)}
-                          className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded"
+                          className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded cursor-pointer"
                         />
                         <div className="flex-1 min-w-0">
                           <span className={`block text-sm truncate ${
