@@ -685,7 +685,7 @@ export default function Clients() {
               )}
             </div>
 
-            {/* Contact details */}
+            {/* Contact details + Address */}
             <div className="space-y-0.5 flex-1 min-h-0 text-xs">
               {client.phone && (
                 <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
@@ -697,6 +697,18 @@ export default function Clients() {
                 <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
                   <Mail className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
                   <span className="truncate text-slate-600 text-[9px]">{client.email}</span>
+                </div>
+              )}
+              {(client.city || client.state) && (
+                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
+                  <MapPin className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600 text-[9px]">{[client.city, client.state].filter(Boolean).join(', ')}</span>
+                </div>
+              )}
+              {assignedUser && (
+                <div className="flex items-center gap-1 text-slate-500 overflow-hidden">
+                  <User className="h-2.5 w-2.5 text-slate-300 flex-shrink-0" />
+                  <span className="truncate text-slate-600 text-[9px]">{assignedUser.full_name || assignedUser.name}</span>
                 </div>
               )}
             </div>
