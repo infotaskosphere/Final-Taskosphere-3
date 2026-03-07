@@ -686,7 +686,7 @@ export default function Clients() {
             </div>
 
             {/* Contact details - dense grid */}
-            <div className="space-y-0 flex-1 min-h-0 text-[8px]">
+            <div className="space-y-0 text-[8px]">
               {client.phone && (
                 <div className="flex items-center gap-0.5 text-slate-500 overflow-hidden">
                   <Phone className="h-2 w-2 text-slate-300 flex-shrink-0" />
@@ -887,6 +887,9 @@ export default function Clients() {
     return (
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+          <DialogTitle className="sr-only">Client Details</DialogTitle>
+          <DialogDescription className="sr-only">View complete client information</DialogDescription>
+          
           {/* Sticky Header */}
           <div className="sticky top-0 z-10 bg-gradient-to-r pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
             <div className="flex items-start gap-4">
