@@ -828,11 +828,11 @@ export default function Tasks() {
   };
 
   const stats = {
-    total: tasks.length,
-    todo: tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
-    inProgress: tasks.filter(t => t.status === 'in_progress').length,
-    completed: tasks.filter(t => t.status === 'completed').length,
-    overdue: tasks.filter(t => isOverdue(t)).length,
+    total: displayTasks.length,
+    todo: displayTasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
+    inProgress: displayTasks.filter(t => t.status === 'in_progress').length,
+    completed: displayTasks.filter(t => t.status === 'completed').length,
+    overdue: displayTasks.filter(t => isOverdue(t)).length,
   };
 
   const handleCsvUploadClick = () => {
