@@ -961,14 +961,11 @@ export default function Dashboard() {
         </SectionCard>
       </motion.div>
 
-      {/* ── Assigned Tasks – Two Columns ────────────────────────────────── */}
-      {showTaskSection && (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      {/* ── Star Performers + To-Do List + Assigned Tasks ────────────────────────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-4 gap-3">
 
-          {/* Tasks Assigned to Me */}
-          <SectionCard className="cursor-pointer hover:shadow-md transition group"
-            onClick={() => navigate('/tasks?filter=assigned-to-me')}
-          >
+        {/* Star Performers — shows ALL users */}
+        <SectionCard>
             <CardHeaderRow
               iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
               icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
@@ -1041,11 +1038,11 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* ── Star Performers + To-Do List ────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* ── Star Performers + To-Do List + Assigned Tasks ────────────────────────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-4 gap-3 auto-rows-max">
 
         {/* Star Performers — shows ALL users */}
-        <SectionCard>
+        <SectionCard className="lg:row-span-2">
           <CardHeaderRow
             iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'}
             icon={<TrendingUp className="h-4 w-4 text-yellow-500" />}
@@ -1075,7 +1072,22 @@ export default function Dashboard() {
             {rankings.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No ranking data</div>
             ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
+              }}>
+                <style>{`
+                  div::-webkit-scrollbar {
+                    width: 6px;
+                  }
+                  div::-webkit-scrollbar-track {
+                    background: ${isDark ? '#1e293b' : '#f8fafc'};
+                  }
+                  div::-webkit-scrollbar-thumb {
+                    background: ${isDark ? '#475569' : '#cbd5e1'};
+                    border-radius: 3px;
+                  }
+                `}</style>
                 <AnimatePresence>
                   {rankings.map((member, i) => (
                     <RankingItem key={member.user_id || i} member={member} index={i} period={rankingPeriod} />
@@ -1146,7 +1158,22 @@ export default function Dashboard() {
             {pendingTodos.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
             ) : (
-              <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1" style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
+              }}>
+                <style>{`
+                  div::-webkit-scrollbar {
+                    width: 6px;
+                  }
+                  div::-webkit-scrollbar-track {
+                    background: ${isDark ? '#1e293b' : '#f8fafc'};
+                  }
+                  div::-webkit-scrollbar-thumb {
+                    background: ${isDark ? '#475569' : '#cbd5e1'};
+                    border-radius: 3px;
+                  }
+                `}</style>
                 <AnimatePresence>
                   {pendingTodos.map(todo => (
                     <motion.div
@@ -1200,9 +1227,115 @@ export default function Dashboard() {
             )}
           </div>
         </SectionCard>
-      </motion.div>
 
-      {/* ── Quick Access Tiles ───────────────────────────────────────────── */}
+        {/* Tasks Assigned to Me */}
+        {showTaskSection && (
+          <SectionCard className="cursor-pointer hover:shadow-md transition group"
+            onClick={() => navigate('/tasks?filter=assigned-to-me')}
+          >
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
+              icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
+              title="Tasks Assigned to Me"
+              subtitle="Tasks others gave you"
+              action={
+                <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
+                  onClick={e => { e.stopPropagation(); navigate('/tasks?filter=assigned-to-me'); }}>
+                  View All →
+                </Button>
+              }
+            />
+            <div className="p-3">
+              {tasksAssignedToMe.length === 0 ? (
+                <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
+                  No tasks assigned to you
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
+                }}>
+                  <style>{`
+                    div::-webkit-scrollbar {
+                      width: 6px;
+                    }
+                    div::-webkit-scrollbar-track {
+                      background: ${isDark ? '#1e293b' : '#f8fafc'};
+                    }
+                    div::-webkit-scrollbar-thumb {
+                      background: ${isDark ? '#475569' : '#cbd5e1'};
+                      border-radius: 3px;
+                    }
+                  `}</style>
+                  <AnimatePresence>
+                    {tasksAssignedToMe.map(task => (
+                      <TaskStrip
+                        key={task.id} task={task} isToMe={true}
+                        assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
+                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* Tasks Assigned by Me */}
+        {showTaskSection && (
+          <SectionCard className="cursor-pointer hover:shadow-md transition group"
+            onClick={() => navigate('/tasks?filter=assigned-by-me')}
+          >
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+              icon={<Briefcase className="h-4 w-4 text-blue-600" />}
+              title="Tasks Assigned by Me"
+              subtitle="Tasks you delegated"
+              action={
+                <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
+                  onClick={e => { e.stopPropagation(); navigate('/tasks?filter=assigned-by-me'); }}>
+                  View All →
+                </Button>
+              }
+            />
+            <div className="p-3">
+              {tasksAssignedByMe.length === 0 ? (
+                <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
+                  No tasks assigned yet
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
+                }}>
+                  <style>{`
+                    div::-webkit-scrollbar {
+                      width: 6px;
+                    }
+                    div::-webkit-scrollbar-track {
+                      background: ${isDark ? '#1e293b' : '#f8fafc'};
+                    }
+                    div::-webkit-scrollbar-thumb {
+                      background: ${isDark ? '#475569' : '#cbd5e1'};
+                      border-radius: 3px;
+                    }
+                  `}</style>
+                  <AnimatePresence>
+                    {tasksAssignedByMe.map(task => (
+                      <TaskStrip
+                        key={task.id} task={task} isToMe={false}
+                        assignedName={task.assigned_to_name || 'Unknown'}
+                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+        )}
+      </motion.div>
       <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
 
         {[
