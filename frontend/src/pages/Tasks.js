@@ -1785,6 +1785,9 @@ export default function Tasks() {
             <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>
               Task Details
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Full details for the selected task including description, assignee, due date, and checklist.
+            </DialogDescription>
             <button 
               onClick={() => setTaskDetailOpen(false)}
               className="text-slate-400 hover:text-slate-600 transition"
