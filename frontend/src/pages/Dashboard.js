@@ -961,11 +961,11 @@ export default function Dashboard() {
         </SectionCard>
       </motion.div>
 
-      {/* ── Star Performers + To-Do List + Assigned Tasks ────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      {/* ── Star Performers + To-Do List + Assigned Tasks (2-Column Layout) ──────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
 
-        {/* Star Performers — shows ALL users */}
-        <SectionCard>
+        {/* LEFT: Star Performers — shows ALL users */}
+        <SectionCard className="h-full">
             <CardHeaderRow
               iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
               icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
@@ -1038,11 +1038,11 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* ── Star Performers + To-Do List + Assigned Tasks ────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-4 gap-3 auto-rows-max">
+      {/* ── Star Performers + To-Do List + Assigned Tasks (2-Column Layout) ──────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
 
-        {/* Star Performers — shows ALL users */}
-        <SectionCard className="lg:row-span-2">
+        {/* LEFT: Star Performers — Full Height */}
+        <SectionCard className="flex flex-col">
           <CardHeaderRow
             iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'}
             icon={<TrendingUp className="h-4 w-4 text-yellow-500" />}
@@ -1068,11 +1068,11 @@ export default function Dashboard() {
               ) : null
             }
           />
-          <div className="p-3">
+          <div className="p-3 flex-1 flex flex-col">
             {rankings.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No ranking data</div>
             ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+              <div className="space-y-2 flex-1 overflow-y-auto pr-1" style={{
                 scrollbarWidth: 'thin',
                 scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
               }}>
@@ -1098,8 +1098,10 @@ export default function Dashboard() {
           </div>
         </SectionCard>
 
-        {/* My To-Do List */}
-        <SectionCard>
+        {/* RIGHT: Three vertical cards stacked */}
+        <div className="flex flex-col gap-3">
+          {/* Card 1: My To-Do List */}
+          <SectionCard className="flex-1 flex flex-col">
           <CardHeaderRow
             iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
             icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
@@ -1112,9 +1114,9 @@ export default function Dashboard() {
               </Button>
             }
           />
-          <div className="p-3">
+          <div className="p-3 flex-1 flex flex-col">
             {/* Input Row */}
-            <div className="flex gap-2 mb-3">
+            <div className="flex gap-2 mb-3 flex-shrink-0">
               <input
                 type="text"
                 value={newTodo}
@@ -1150,7 +1152,7 @@ export default function Dashboard() {
               </Button>
             </div>
             {selectedDueDate && (
-              <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1">
+              <p className="text-xs text-amber-500 font-medium mb-2 -mt-1 ml-1 flex-shrink-0">
                 📅 Due: {format(selectedDueDate, 'MMM d, yyyy')}
               </p>
             )}
@@ -1158,7 +1160,7 @@ export default function Dashboard() {
             {pendingTodos.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
             ) : (
-              <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1" style={{
+              <div className="space-y-1.5 flex-1 overflow-y-auto pr-1" style={{
                 scrollbarWidth: 'thin',
                 scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
               }}>
@@ -1228,9 +1230,9 @@ export default function Dashboard() {
           </div>
         </SectionCard>
 
-        {/* Tasks Assigned to Me */}
+        {/* Card 2: Tasks Assigned To Me */}
         {showTaskSection && (
-          <SectionCard className="cursor-pointer hover:shadow-md transition group"
+          <SectionCard className="flex-1 flex flex-col"  className="cursor-pointer hover:shadow-md transition group"
             onClick={() => navigate('/tasks?filter=assigned-to-me')}
           >
             <CardHeaderRow
@@ -1245,13 +1247,13 @@ export default function Dashboard() {
                 </Button>
               }
             />
-            <div className="p-3">
+            <div className="p-3 flex-1 flex flex-col">
               {tasksAssignedToMe.length === 0 ? (
                 <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
                   No tasks assigned to you
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+                <div className="space-y-2 flex-1 overflow-y-auto pr-1" style={{
                   scrollbarWidth: 'thin',
                   scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
                 }}>
@@ -1282,9 +1284,9 @@ export default function Dashboard() {
           </SectionCard>
         )}
 
-        {/* Tasks Assigned by Me */}
+        {/* Card 3: Tasks Assigned By Me */}
         {showTaskSection && (
-          <SectionCard className="cursor-pointer hover:shadow-md transition group"
+          <SectionCard className="flex-1 flex flex-col" className="cursor-pointer hover:shadow-md transition group"
             onClick={() => navigate('/tasks?filter=assigned-by-me')}
           >
             <CardHeaderRow
@@ -1299,13 +1301,13 @@ export default function Dashboard() {
                 </Button>
               }
             />
-            <div className="p-3">
+            <div className="p-3 flex-1 flex flex-col">
               {tasksAssignedByMe.length === 0 ? (
                 <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
                   No tasks assigned yet
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1" style={{
+                <div className="space-y-2 flex-1 overflow-y-auto pr-1" style={{
                   scrollbarWidth: 'thin',
                   scrollbarColor: isDark ? '#475569 #1e293b' : '#cbd5e1 #f8fafc'
                 }}>
@@ -1335,7 +1337,10 @@ export default function Dashboard() {
             </div>
           </SectionCard>
         )}
+        </div>
       </motion.div>
+
+      {/* ── Quick Access Tiles ───────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
 
         {[
