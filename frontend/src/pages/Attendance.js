@@ -373,30 +373,42 @@ export default function Attendance() {
   // ─── DATA FETCHING ──────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = null) => {
     setLoading(true);
+    // overrideUserId = null  → clear filter, show own data
+    // overrideUserId = string → show this user's data
+    // undefined              → keep current selectedUserId
     const targetUserId = overrideUserId !== undefined ? overrideUserId : selectedUserId;
+    const isViewingOther = !!targetUserId;
 
     try {
-      const historyUrl = targetUserId
+      // History scoped to targetUserId when set
+      const historyUrl = isViewingOther
         ? `/attendance/history?user_id=${targetUserId}`
         : '/attendance/history';
 
+      // /attendance/my-summary always uses the token's own user on the backend,
+      // so skip it when viewing another user — we derive the summary from history.
+      // /attendance/today always reflects the logged-in user (for punch-in/out).
       const requests = [
         api.get(historyUrl),
-        api.get('/attendance/my-summary'),
+        isViewingOther ? Promise.resolve(null) : api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
         api.get('/tasks'),
         api.get('/holidays'),
-        canViewRankings ? api.get('/reports/performance-rankings?period=monthly') : Promise.resolve({ data: { rankings: [] } })
+        canViewRankings
+          ? api.get('/reports/performance-rankings?period=monthly')
+          : Promise.resolve({ data: [] })
       ];
 
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
-      // Process holidays
+      // ── Holidays ────────────────────────────────────────────────────────
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
+      if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
 
-      if (isAdmin) {
-        setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
+      // ── Load user list for dropdown (admin OR can_view_attendance) ───────
+      // Fetch only once to avoid redundant requests on every filter change
+      if (canViewAllAttendance && allUsers.length === 0) {
         try {
           const usersRes = await api.get('/users');
           setAllUsers(usersRes.data || []);
@@ -405,26 +417,55 @@ export default function Attendance() {
         }
       }
 
-      // Set attendance data
-      setAttendanceHistory(historyRes.data || []);
-      setMySummary(summaryRes.data);
+      // ── Attendance history ───────────────────────────────────────────────
+      const history = historyRes.data || [];
+      setAttendanceHistory(history);
+
+      // ── Summary: derive from history when viewing another user ───────────
+      if (isViewingOther) {
+        const monthlySummary = {};
+        history.forEach(a => {
+          const m = a.date?.slice(0, 7);
+          if (!m) return;
+          if (!monthlySummary[m]) monthlySummary[m] = { total_minutes: 0, days_present: 0 };
+          if (a.punch_in) {
+            monthlySummary[m].total_minutes += (a.duration_minutes || 0);
+            monthlySummary[m].days_present += 1;
+          }
+        });
+        setMySummary({
+          total_minutes: history.reduce((s, a) => s + (a.duration_minutes || 0), 0),
+          total_days: history.filter(a => a.punch_in).length,
+          monthly_summary: Object.entries(monthlySummary).map(([month, d]) => {
+            const h = Math.floor(d.total_minutes / 60), m = d.total_minutes % 60;
+            return { month, ...d, total_hours: `${h}h ${m}m` };
+          })
+        });
+      } else {
+        setMySummary(summaryRes?.data ?? null);
+      }
+
+      // ── Today: always the logged-in user's own record ────────────────────
       setTodayAttendance(todayRes.data);
 
-      // Set rankings
-      const rankingList = rankingRes.data?.rankings || [];
+      // ── Rankings: backend returns array directly (not wrapped) ───────────
+      const rankingList = Array.isArray(rankingRes.data)
+        ? rankingRes.data
+        : (rankingRes.data?.rankings || rankingRes.data?.data || []);
       const myEntry = rankingList.find(r => r.user_id === user?.id);
-      if (myEntry) setMyRank(`#${myEntry.rank}`);
+      setMyRank(myEntry ? `#${myEntry.rank}` : '—');
 
-      // Count tasks
+      // ── Completed tasks count ────────────────────────────────────────────
       const completedCount = (tasksRes.data || []).filter(t => t.status === 'completed').length;
       setTasksCompleted(completedCount);
+
     } catch (error) {
       toast.error('Failed to fetch attendance data');
       console.error('Attendance fetch error:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedUserId, isAdmin, canViewRankings, user?.id]);
+  }, [selectedUserId, isAdmin, canViewAllAttendance, canViewRankings, user?.id, allUsers.length]);
 
   // ─── HANDLERS ────────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action) => {
@@ -701,7 +742,7 @@ export default function Attendance() {
           </div>
 
           <div className="flex gap-3 flex-wrap items-center">
-            {(isAdmin || canViewAllAttendance) && allUsers.length > 0 && (
+            {canViewAllAttendance && (
               <motion.select
                 variants={itemVariants}
                 className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium"
@@ -711,8 +752,9 @@ export default function Attendance() {
                   setSelectedUserId(val);
                   fetchData(val);
                 }}
+                disabled={allUsers.length === 0}
               >
-                <option value="">All Staff</option>
+                <option value="">{allUsers.length === 0 ? 'Loading...' : 'My Attendance'}</option>
                 {allUsers.map(u => (
                   <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
                 ))}
@@ -755,7 +797,7 @@ export default function Attendance() {
           >
             <Users className="w-4 h-4 text-blue-700" />
             <span className="text-sm font-semibold text-blue-900">
-              Viewing: {allUsers.find(u => u.id === selectedUserId)?.full_name || selectedUserId}
+              Viewing: {allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee'}
             </span>
             <button
               className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline"
