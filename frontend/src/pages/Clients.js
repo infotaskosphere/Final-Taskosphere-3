@@ -25,7 +25,6 @@ import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
 
-// ── All original constants preserved exactly ──────────────────────────────────
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -40,7 +39,6 @@ const SERVICES = [
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
 
-// ── Enhanced type system with richer color language ───────────────────────────
 const TYPE_CONFIG = {
   pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', accent: 'from-blue-600 to-blue-800',     strip: '#2563EB' },
   llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', accent: 'from-violet-600 to-violet-800',  strip: '#7C3AED' },
@@ -50,7 +48,6 @@ const TYPE_CONFIG = {
   proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', accent: 'from-slate-500 to-slate-700',    strip: '#64748B' },
 };
 
-// Keep original TYPE_BADGE for backward compat with dialogs
 const TYPE_BADGE = {
   pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
   llp:         'bg-violet-50 text-violet-700 border-violet-200',
@@ -60,7 +57,6 @@ const TYPE_BADGE = {
   proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
 };
 
-// ── Avatar gradient palette by first letter (unchanged) ──────────────────────
 const AVATAR_GRADIENTS = [
   ['#0D3B66', '#1F6FB2'], ['#065f46', '#059669'], ['#7c2d12', '#ea580c'],
   ['#4c1d95', '#7c3aed'], ['#1e3a5f', '#2563eb'], ['#831843', '#db2777'],
@@ -71,7 +67,6 @@ const getAvatarGradient = (name = '') => {
   return `linear-gradient(135deg, ${AVATAR_GRADIENTS[idx][0]}, ${AVATAR_GRADIENTS[idx][1]})`;
 };
 
-// ── Section heading used in dialog (unchanged) ────────────────────────────────
 const SectionHeading = ({ icon, title, subtitle }) => (
   <div className="flex items-center gap-3 mb-6">
     <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
@@ -85,7 +80,6 @@ const SectionHeading = ({ icon, title, subtitle }) => (
   </div>
 );
 
-// ── Type Badge pill ───────────────────────────────────────────────────────────
 const TypePill = ({ type }) => {
   const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.proprietor;
   return (
@@ -100,7 +94,6 @@ const TypePill = ({ type }) => {
 };
 
 export default function Clients() {
-  // ── All original state & logic — zero changes ─────────────────────────────
   const { user, hasPermission } = useAuth();
   const canViewAllClients = hasPermission("can_view_all_clients");
   const canDeleteData = hasPermission("can_delete_data");
@@ -128,10 +121,7 @@ export default function Clients() {
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
 
-  // ── NEW: view mode toggle ─────────────────────────────────────────────────
-  const [viewMode, setViewMode] = useState('board'); // 'board' | 'list'
-
-  // ── NEW: client detail popup ──────────────────────────────────────────────
+  const [viewMode, setViewMode] = useState('board');
   const [selectedClient, setSelectedClient] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
@@ -154,7 +144,6 @@ export default function Clients() {
   const [formErrors, setFormErrors] = useState({});
   const [contactErrors, setContactErrors] = useState([]);
 
-  // ── All original handlers — zero changes ──────────────────────────────────
   const safeDate = (dateStr) => {
     if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return null;
     const date = new Date(dateStr.trim());
@@ -355,23 +344,16 @@ export default function Clients() {
       });
       const data = response.data;
       
-      // Extract city and state from address if not provided
       let address = (data.address || data.registered_address || '').trim();
       let city = (data.city || '').trim();
       let state = (data.state || '').trim();
       
-      // If we have address but no city/state, parse them
       if (address && (!city || !state)) {
         const addressParts = address.split(',').map(p => p.trim()).filter(p => p);
-        
         if (addressParts.length > 0) {
-          // If no state, try to find it (usually second to last before country)
           if (!state && addressParts.length >= 2) {
-            // Look for common state patterns or take second from end
             state = addressParts[addressParts.length - 2] || '';
           }
-          
-          // If no city, try to find it (usually before state)
           if (!city && addressParts.length >= 3) {
             city = addressParts[addressParts.length - 3] || '';
           }
@@ -631,7 +613,7 @@ export default function Clients() {
     return 'proprietor';
   };
 
-  // ── REDESIGNED: Board Card (virtualized grid) with compact height ───────
+  // ── REDESIGNED: Compact Board Card — no blank space, all info visible ──
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
@@ -643,108 +625,129 @@ export default function Clients() {
     const isArchived = client.status === 'inactive';
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
     const assignedUser = users.find(u => u.id === client.assigned_to);
+    // Build a short location string
+    const locationStr = [client.city, client.state].filter(Boolean).join(', ');
+    // Truncated address for display (first 40 chars)
+    const addressShort = client.address
+      ? (client.address.length > 42 ? client.address.substring(0, 42) + '…' : client.address)
+      : '';
 
     return (
       <div style={style} className="p-2 box-border">
         <div
-          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${isArchived ? 'opacity-60' : ''}`}
+          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
           style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
-          {/* Colored top strip by type */}
-          <div className="h-1 w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
+          {/* Colored top strip */}
+          <div className="h-[5px] w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
 
-          <div className="flex flex-col flex-1 p-3 overflow-hidden">
-            {/* Header row - company name and type */}
-            <div className="flex items-start justify-between gap-2 mb-2">
-              {/* Avatar */}
+          {/* ── CARD BODY ── tight padding, dense layout */}
+          <div className="flex flex-col p-3 gap-2 overflow-hidden flex-1">
+
+            {/* Row 1: Avatar + Company name + Type pill */}
+            <div className="flex items-start gap-2">
               <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
                 style={{ background: avatarGrad }}
               >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
-
-              {/* Type pill + archived */}
-              <div className="flex flex-col items-end gap-0.5">
-                <TypePill type={client.client_type} />
-                {isArchived && (
-                  <span className="text-[8px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
-                    Archived
-                  </span>
-                )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 flex-wrap mb-0.5">
+                  <span className="text-[9px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                  {isArchived && (
+                    <span className="text-[8px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                      Archived
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-bold text-[13px] leading-tight text-slate-900 line-clamp-2 break-words">
+                  {client.company_name}
+                </h3>
               </div>
+              <TypePill type={client.client_type} />
             </div>
 
-            {/* Client number and company name */}
-            <div className="mb-1.5">
-              <span className="text-[9px] font-mono text-slate-300 font-medium">#{getClientNumber(index)}</span>
-              <h3 className="font-bold text-sm leading-tight text-slate-900 line-clamp-2">{client.company_name}</h3>
-            </div>
+            {/* Divider */}
+            <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
 
-            {/* Primary contact person */}
-            {primaryContact?.name && (
-              <p className="text-[9px] text-slate-500 mb-1.5 truncate">
-                {primaryContact.name}
-                {primaryContact.designation && <span className="text-slate-400"> · {primaryContact.designation}</span>}
-              </p>
-            )}
+            {/* Row 2: Contact info block — phone, email, location, assignee */}
+            <div className="flex flex-col gap-1">
+              {/* Primary contact person name + designation */}
+              {primaryContact?.name && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-700 font-semibold">
+                  <User className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">
+                    {primaryContact.name}
+                    {primaryContact.designation && (
+                      <span className="text-slate-400 font-normal"> · {primaryContact.designation}</span>
+                    )}
+                  </span>
+                </div>
+              )}
 
-            {/* Contact information - organized rows */}
-            <div className="space-y-1 mb-1.5 text-[9px]">
+              {/* Phone */}
               {client.phone && (
-                <div className="flex items-center gap-1.5 text-slate-600 overflow-hidden">
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
                   <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
                   <span className="truncate font-medium">{client.phone}</span>
                 </div>
               )}
+
+              {/* Email */}
               {client.email && (
-                <div className="flex items-center gap-1.5 text-slate-600 overflow-hidden">
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                   <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
                   <span className="truncate">{client.email}</span>
                 </div>
               )}
-              {(client.city || client.state) && (
-                <div className="flex items-center gap-1.5 text-slate-600 overflow-hidden">
-                  <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate">{[client.city, client.state].filter(Boolean).join(', ')}</span>
+
+              {/* Address (city+state preferred, fall back to address snippet) */}
+              {(locationStr || addressShort) && (
+                <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
+                  <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                  <span className="line-clamp-1">{locationStr || addressShort}</span>
                 </div>
               )}
+
+              {/* Assigned staff */}
               {assignedUser && (
-                <div className="flex items-center gap-1.5 text-slate-600 overflow-hidden">
-                  <User className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate font-medium">{assignedUser.full_name || assignedUser.name}</span>
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">{assignedUser.full_name || assignedUser.name}</span>
                 </div>
               )}
             </div>
 
-            {/* Services section */}
+            {/* Row 3: Services tags */}
             {serviceCount > 0 && (
-              <div className="mb-2 flex flex-col">
-                <div className="flex items-center gap-1 flex-wrap">
-                  {client.services?.slice(0, 3).map((svc, i) => (
-                    <span
-                      key={i}
-                      className="text-[8px] font-semibold px-2 py-1 rounded-full border whitespace-nowrap"
-                      style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-                    >
-                      {svc.replace('Other: ', '').substring(0, 12)}
-                    </span>
-                  ))}
-                  {serviceCount > 3 && (
-                    <span className="text-[8px] font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">
-                      +{serviceCount - 3}
-                    </span>
-                  )}
-                </div>
+              <div className="flex items-center gap-1 flex-wrap">
+                {client.services?.slice(0, 4).map((svc, i) => (
+                  <span
+                    key={i}
+                    className="text-[9px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
+                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+                  >
+                    {svc.replace('Other: ', '').substring(0, 14)}
+                  </span>
+                ))}
+                {serviceCount > 4 && (
+                  <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                    +{serviceCount - 4}
+                  </span>
+                )}
               </div>
             )}
 
-            {/* Action buttons - bottom */}
-            <div className="flex items-center gap-1 justify-start mt-auto pt-2 border-t" style={{ borderColor: cfg.border }}>
+            {/* Row 4: Action buttons — tight, no mt-auto so no blank space */}
+            <div
+              className="flex items-center gap-1 pt-2 border-t"
+              style={{ borderColor: cfg.border }}
+            >
               <button
                 onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-xs font-medium"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-semibold"
                 title="WhatsApp"
               >
                 <MessageCircle className="h-3.5 w-3.5" />
@@ -752,7 +755,7 @@ export default function Clients() {
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-xs font-medium"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-semibold"
                 title="Edit"
               >
                 <Edit className="h-3.5 w-3.5" />
@@ -766,7 +769,7 @@ export default function Clients() {
                       api.delete(`/clients/${client.id}`).then(() => fetchClients());
                     }
                   }}
-                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-xs font-medium"
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-[10px] font-semibold"
                   title="Delete"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -780,7 +783,7 @@ export default function Clients() {
     );
   };
 
-  // ── NEW: List Row (for list view) ─────────────────────────────────────────
+  // ── List Row (virtualized) ────────────────────────────────────────────────
   const ListRow = ({ index, style }) => {
     const client = filteredClients[index];
     if (!client) return null;
@@ -795,18 +798,13 @@ export default function Clients() {
           style={{ borderColor: '#F1F5F9' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
-          {/* Left accent */}
           <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
-
-          {/* Avatar */}
           <div
             className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
             style={{ background: getAvatarGradient(client.company_name) }}
           >
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
-
-          {/* Name + number */}
           <div className="w-56 flex-shrink-0 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
@@ -814,23 +812,13 @@ export default function Clients() {
             </div>
             <p className="text-sm font-semibold text-slate-900 truncate">{client.company_name}</p>
           </div>
-
-          {/* Type pill */}
-          <div className="w-28 flex-shrink-0">
-            <TypePill type={client.client_type} />
-          </div>
-
-          {/* Phone */}
+          <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} /></div>
           <div className="w-36 flex-shrink-0">
             <p className="text-xs text-slate-600 font-medium">{client.phone || '—'}</p>
           </div>
-
-          {/* Email */}
           <div className="flex-1 min-w-0">
             <p className="text-xs text-slate-500 truncate">{client.email || '—'}</p>
           </div>
-
-          {/* Services */}
           <div className="flex items-center gap-1 w-44 flex-shrink-0">
             {client.services?.slice(0, 2).map((svc, i) => (
               <span
@@ -847,34 +835,22 @@ export default function Clients() {
               </span>
             )}
           </div>
-
-          {/* Actions */}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
-              title="WhatsApp"
-            >
+            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors" title="WhatsApp">
               <MessageCircle className="h-3.5 w-3.5" />
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
-              title="Edit"
-            >
+            <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors" title="Edit">
               <Edit className="h-3.5 w-3.5" />
             </button>
             {canDeleteData && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm("Delete this client permanently?")) {
-                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                  }
-                }}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"
-                title="Delete"
-              >
+              <button onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Delete this client permanently?")) {
+                  api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                }
+              }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors" title="Delete">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
@@ -884,7 +860,7 @@ export default function Clients() {
     );
   };
 
-  // ── NEW: Client Detail Popup ──────────────────────────────────────────────
+  // ── Client Detail Popup ───────────────────────────────────────────────────
   const ClientDetailPopup = () => {
     if (!selectedClient) return null;
     const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
@@ -896,14 +872,9 @@ export default function Clients() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
           <DialogTitle className="sr-only">Client Details</DialogTitle>
           <DialogDescription className="sr-only">View complete client information</DialogDescription>
-          
-          {/* Sticky Header */}
           <div className="sticky top-0 z-10 bg-gradient-to-r pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
             <div className="flex items-start gap-4">
-              <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-md"
-                style={{ background: avatarGrad }}
-              >
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-md" style={{ background: avatarGrad }}>
                 {selectedClient.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
               <div className="flex-1">
@@ -911,9 +882,7 @@ export default function Clients() {
                   <h2 className="text-2xl font-bold text-slate-900">{selectedClient.company_name}</h2>
                   <TypePill type={selectedClient.client_type} />
                   {selectedClient.status === 'inactive' && (
-                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">
-                      Archived
-                    </span>
+                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>
                   )}
                 </div>
                 {selectedClient.birthday && (
@@ -925,11 +894,8 @@ export default function Clients() {
               </div>
             </div>
           </div>
-
-          {/* Scrollable Content */}
           <div className="flex-1 overflow-y-auto">
             <div className="p-8 space-y-6">
-              {/* Contact Information */}
               <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                 <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
                   <Mail className="h-4 w-4" /> Contact Information
@@ -953,17 +919,13 @@ export default function Clients() {
                       <div className="text-slate-700 text-sm">
                         <p>{selectedClient.address}</p>
                         {(selectedClient.city || selectedClient.state) && (
-                          <p className="text-slate-500 text-xs mt-1">
-                            {[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}
-                          </p>
+                          <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>
                         )}
                       </div>
                     </div>
                   )}
                 </div>
               </div>
-
-              {/* Services */}
               {selectedClient.services && selectedClient.services.length > 0 && (
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
@@ -971,19 +933,14 @@ export default function Clients() {
                   </h3>
                   <div className="flex flex-wrap gap-2">
                     {selectedClient.services.map((svc, i) => (
-                      <span
-                        key={i}
-                        className="text-xs font-semibold px-3 py-2 rounded-xl border"
-                        style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-                      >
+                      <span key={i} className="text-xs font-semibold px-3 py-2 rounded-xl border"
+                        style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
                         {svc.replace('Other: ', '')}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
-
-              {/* Contact Persons */}
               {selectedClient.contact_persons && selectedClient.contact_persons.length > 0 && (
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
@@ -1007,8 +964,6 @@ export default function Clients() {
                   </div>
                 </div>
               )}
-
-              {/* DSC Details */}
               {selectedClient.dsc_details && selectedClient.dsc_details.length > 0 && (
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
@@ -1031,8 +986,6 @@ export default function Clients() {
                   </div>
                 </div>
               )}
-
-              {/* Assignment & Notes */}
               <div className="grid grid-cols-2 gap-4">
                 {assignedUser && (
                   <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
@@ -1049,21 +1002,14 @@ export default function Clients() {
               </div>
             </div>
           </div>
-
-          {/* Sticky Footer */}
           <div className="sticky bottom-0 flex items-center justify-between gap-2 p-6 bg-white border-t border-slate-100">
-            <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">
-              Close
-            </Button>
+            <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
             <div className="flex gap-2">
-              <Button
-                onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }}
-                className="h-10 px-4 text-sm rounded-xl text-white gap-2"
-                style={{ background: '#25D366' }}>
+              <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }}
+                className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}>
                 <MessageCircle className="h-4 w-4" /> WhatsApp
               </Button>
-              <Button
-                onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }}
+              <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }}
                 className="h-10 px-4 text-sm rounded-xl text-white gap-2"
                 style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
                 <Edit className="h-4 w-4" /> Edit
@@ -1080,11 +1026,10 @@ export default function Clients() {
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
   const mdsFieldCls = "h-10 bg-white rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3";
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: '#F4F6FA' }}>
 
-      {/* ── Page Header ─────────────────────────────────────────────────── */}
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm text-white flex-shrink-0"
@@ -1107,7 +1052,6 @@ export default function Clients() {
             {importLoading ? 'Importing…' : 'Import CSV'}
           </Button>
 
-          {/* ── New Client Dialog (all inner JSX unchanged) ─── */}
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
@@ -1191,6 +1135,7 @@ export default function Clients() {
                     </div>
                   </div>
                 </div>
+
                 {/* Contact Persons */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-5">
@@ -1252,6 +1197,7 @@ export default function Clients() {
                     ))}
                   </div>
                 </div>
+
                 {/* DSC Details */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-5">
@@ -1302,6 +1248,7 @@ export default function Clients() {
                     ))}
                   </div>
                 </div>
+
                 {/* Services */}
                 <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                   <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
@@ -1336,6 +1283,7 @@ export default function Clients() {
                     </div>
                   )}
                 </div>
+
                 {/* Notes */}
                 <div>
                   <label className={labelCls}>Internal Notes</label>
@@ -1343,6 +1291,7 @@ export default function Clients() {
                     placeholder="Internal remarks, preferences, or special instructions…"
                     value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                 </div>
+
                 {/* Assign To */}
                 {canAssignClients && (
                   <div>
@@ -1356,6 +1305,7 @@ export default function Clients() {
                     </Select>
                   </div>
                 )}
+
                 {/* Footer */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
                   <div className="flex gap-2">
@@ -1380,7 +1330,7 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* ── Today's Celebrations (unchanged logic) ──────────────────────── */}
+      {/* Today's Celebrations */}
       {canViewAllClients && todayReminders.length > 0 && (
         <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
@@ -1400,7 +1350,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Stats Cards (unchanged logic, refined visuals) ───────────────── */}
+      {/* Stats Cards */}
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -1423,7 +1373,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Filters + View Toggle ────────────────────────────────────────── */}
+      {/* Filters + View Toggle */}
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1450,28 +1400,18 @@ export default function Clients() {
           <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
             {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
           </div>
-
-          {/* ── View Mode Toggle ── */}
           <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl p-1 gap-0.5">
-            <button
-              onClick={() => setViewMode('board')}
+            <button onClick={() => setViewMode('board')}
               className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Board view"
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
+              title="Board view"><LayoutGrid className="h-4 w-4" /></button>
+            <button onClick={() => setViewMode('list')}
               className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
-              title="List view"
-            >
-              <List className="h-4 w-4" />
-            </button>
+              title="List view"><List className="h-4 w-4" /></button>
           </div>
         </div>
       </div>
 
-      {/* ── Client Grid / List ───────────────────────────────────────────── */}
+      {/* ── Client Grid / List ── */}
       <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: 'white' }}>
         {filteredClients.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -1482,17 +1422,24 @@ export default function Clients() {
             <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
           </div>
         ) : viewMode === 'board' ? (
-          /* ── Board view (virtualized grid) ── */
+          /* ── Board view — rowHeight 285 (was 420) eliminates blank space ── */
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 280;
+              const CARD_MIN = 260;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
               return (
-                <Grid columnCount={columnCount} columnWidth={columnWidth} height={height}
-                  rowCount={rowCount} rowHeight={420} width={width}
-                  overscanColumnCount={2} overscanRowCount={4}>
+                <Grid
+                  columnCount={columnCount}
+                  columnWidth={columnWidth}
+                  height={height}
+                  rowCount={rowCount}
+                  rowHeight={285}   // ← KEY FIX: was 420, reduced to 285
+                  width={width}
+                  overscanColumnCount={2}
+                  overscanRowCount={4}
+                >
                   {({ columnIndex, rowIndex, style }) => (
                     <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
                   )}
@@ -1501,9 +1448,8 @@ export default function Clients() {
             }}
           </AutoSizer>
         ) : (
-          /* ── List view (virtualized list) ── */
+          /* ── List view ── */
           <div className="h-full flex flex-col">
-            {/* List header */}
             <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
               <div className="w-1 flex-shrink-0" />
               <div className="w-8 flex-shrink-0" />
@@ -1517,12 +1463,7 @@ export default function Clients() {
             <div className="flex-1">
               <AutoSizer>
                 {({ height, width }) => (
-                  <FixedSizeList
-                    height={height}
-                    width={width}
-                    itemCount={filteredClients.length}
-                    itemSize={56}
-                  >
+                  <FixedSizeList height={height} width={width} itemCount={filteredClients.length} itemSize={56}>
                     {({ index, style }) => <ListRow index={index} style={style} />}
                   </FixedSizeList>
                 )}
@@ -1532,14 +1473,14 @@ export default function Clients() {
         )}
       </div>
 
-      {/* ── Client Detail Popup ──────────────────────────────────────────── */}
+      {/* Client Detail Popup */}
       <ClientDetailPopup />
 
-      {/* Hidden file inputs (unchanged) */}
+      {/* Hidden file inputs */}
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
-      {/* ── Generic Excel Preview Dialog (unchanged) ─────────────────────── */}
+      {/* Generic Excel Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
           <DialogHeader className="pb-4 border-b border-slate-100">
@@ -1603,7 +1544,7 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
-      {/* ── MDS Excel Smart Preview Dialog (unchanged) ───────────────────── */}
+      {/* MDS Excel Smart Preview Dialog */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
           <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-7 py-5">
@@ -1671,32 +1612,27 @@ export default function Clients() {
                   <div>
                     <label className={labelCls}>Email</label>
                     <input type="email" className={mdsFieldCls} value={mdsForm.email}
-                      onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))}
-                      placeholder="Enter email address" />
+                      onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))} placeholder="Enter email address" />
                   </div>
                   <div>
                     <label className={labelCls}>Phone</label>
                     <input className={mdsFieldCls} value={mdsForm.phone}
-                      onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))}
-                      placeholder="10-digit phone number" />
+                      onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))} placeholder="10-digit phone number" />
                   </div>
                   <div className="md:col-span-2">
                     <label className={labelCls}>Address</label>
                     <input className={mdsFieldCls} value={mdsForm.address || ''}
-                      onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))}
-                      placeholder="Street address (optional)" />
+                      onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))} placeholder="Street address (optional)" />
                   </div>
                   <div>
                     <label className={labelCls}>City</label>
                     <input className={mdsFieldCls} value={mdsForm.city || ''}
-                      onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))}
-                      placeholder="City (optional)" />
+                      onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))} placeholder="City (optional)" />
                   </div>
                   <div>
                     <label className={labelCls}>State</label>
                     <input className={mdsFieldCls} value={mdsForm.state || ''}
-                      onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))}
-                      placeholder="State (optional)" />
+                      onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} placeholder="State (optional)" />
                   </div>
                 </div>
                 <div className="mt-4">
@@ -1775,14 +1711,12 @@ export default function Clients() {
                         </div>
                         <div>
                           <label className={labelCls}>Email</label>
-                          <input type="email" className={mdsFieldCls} value={cp.email || ''}
-                            placeholder="Optional"
+                          <input type="email" className={mdsFieldCls} value={cp.email || ''} placeholder="Optional"
                             onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, email: e.target.value } : c) }))} />
                         </div>
                         <div>
                           <label className={labelCls}>Phone</label>
-                          <input className={mdsFieldCls} value={cp.phone || ''}
-                            placeholder="Optional"
+                          <input className={mdsFieldCls} value={cp.phone || ''} placeholder="Optional"
                             onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, phone: e.target.value } : c) }))} />
                         </div>
                         <div>
