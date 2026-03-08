@@ -813,11 +813,13 @@ async def get_users(
             query = {"id": {"$in": team_ids + [current_user.id]}}
             users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
     
-    # Staff sees only self
+    # Staff sees only self (can_view_user_page required to access user directory at all)
     else:
+        permissions = get_user_permissions(current_user)
+        if not user_id and not permissions.get("can_view_user_page", False):
+            raise HTTPException(status_code=403, detail="User directory access not permitted")
         if user_id and user_id != current_user.id:
-            permissions = get_user_permissions(current_user)
-            allowed = permissions.get("view_other_users", [])
+            allowed = permissions.get("view_other_activity", [])
             if user_id not in allowed:
                 raise HTTPException(status_code=403, detail="Not allowed")
         users_raw = await db.users.find(
@@ -851,8 +853,10 @@ async def update_user(
     """
     is_own = user_id == current_user.id
     is_admin = current_user.role.lower() == "admin"
+    perms = get_user_permissions(current_user)
+    has_edit_users = perms.get("can_edit_users", False)
 
-    if not is_admin and not is_own:
+    if not is_admin and not is_own and not has_edit_users:
         raise HTTPException(status_code=403, detail="You can only update your own profile.")
 
     existing = await db.users.find_one({"id": user_id})
@@ -896,7 +900,8 @@ async def update_user(
 
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_manage_users", False):
         raise HTTPException(status_code=403, detail="Not authorized")
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
@@ -1181,7 +1186,16 @@ async def create_task(
     task_data: TaskCreate,
     current_user: User = Depends(get_current_user)
 ):
-    # Any authenticated user can create tasks (ownership rule)
+    # PERMISSION GATE: can_assign_tasks required when assigning to another user
+    if (task_data.assigned_to
+            and task_data.assigned_to != current_user.id
+            and current_user.role != "admin"):
+        perms = get_user_permissions(current_user)
+        if not perms.get("can_assign_tasks", False):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to assign tasks to other users"
+            )
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     # Create Task object
@@ -1353,7 +1367,7 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
   task["due_date"] = safe_dt(task.get("due_date"))
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
- return {"data": tasks}
+ return tasks
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
@@ -2272,17 +2286,20 @@ async def get_due_dates(current_user: User = Depends(get_current_user)):
    query["department"] = {"$in": current_user.departments}
  # Staff → see only their departments (ownership via department membership)
  else:
-  if current_user.departments:
-   query["department"] = {"$in": current_user.departments}
-  else:
-   return {"data": []}
+  permissions = get_user_permissions(current_user)
+  # PERMISSION GATE: can_view_all_duedates bypasses dept filter
+  if not permissions.get("can_view_all_duedates", False):
+   if current_user.departments:
+    query["department"] = {"$in": current_user.departments}
+   else:
+    return []
  due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
  for dd in due_dates:
   if isinstance(dd.get("created_at"), str):
    dd["created_at"] = datetime.fromisoformat(dd["created_at"])
   if isinstance(dd.get("due_date"), str):
    dd["due_date"] = datetime.fromisoformat(dd["due_date"])
- return {"data": [DueDate(**dd) for dd in due_dates]}
+ return [DueDate(**dd) for dd in due_dates]
 
 # CHANGE SET 16: Add get_upcoming_due_dates() Endpoint
 @api_router.get("/duedates/upcoming")
@@ -2303,7 +2320,7 @@ async def get_upcoming_due_dates(
         if current_user.departments:
             query["department"] = {"$in": current_user.departments}
         else:
-            return {"data": []}
+            return []
     
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
     
@@ -2320,8 +2337,7 @@ async def get_upcoming_due_dates(
             upcoming.append(dd)
     
     result = sorted(upcoming, key=lambda x: x["days_remaining"])
-    # NEW: Wrap in data object
-    return {"data": result}
+    return result
 
 @api_router.put("/duedates/{due_date_id}", response_model=DueDate)
 async def update_due_date(
@@ -2382,6 +2398,11 @@ async def get_leads_services_meta(
     Returns list of available services for leads module.
     Required by Leads.jsx frontend component.
     """
+    # PERMISSION GATE: can_view_all_leads required (admin always passes)
+    if current_user.role != "admin":
+        perms = get_user_permissions(current_user)
+        if not perms.get("can_view_all_leads", False):
+            raise HTTPException(status_code=403, detail="Leads access not permitted")
     # Fetch unique services from clients collection
     services = await db.clients.distinct("services")
     # Filter out empty strings
@@ -2401,6 +2422,11 @@ async def get_efficiency_report(
  """
  # Default to own report
  target_user_id = user_id or current_user.id
+ # Gate: non-admin without can_view_reports can only see own report
+ if target_user_id != current_user.id:
+  perms = get_user_permissions(current_user)
+  if current_user.role != "admin" and not perms.get("can_view_reports", False):
+   raise HTTPException(status_code=403, detail="You do not have permission to view reports")
  # Ownership check: own report is always accessible
  if target_user_id != current_user.id:
   if current_user.role != "admin":
@@ -2441,6 +2467,10 @@ async def export_reports(
  OWNERSHIP RULE: every user can always export their own report.
  Exporting another user's report requires admin role or explicit grant.
  """
+ # Gate: can_download_reports required to export any report
+ perms = get_user_permissions(current_user)
+ if current_user.role != "admin" and not perms.get("can_download_reports", False):
+  raise HTTPException(status_code=403, detail="You do not have permission to download reports")
  # Default to own report
  target_user_id = user_id or current_user.id
  # Ownership check: own report is always accessible
@@ -3055,23 +3085,27 @@ async def get_clients(current_user: User = Depends(get_current_user)):
  else:
     # Staff: own assigned clients + any explicitly in assigned_clients list
     permissions = get_user_permissions(current_user)
-    extra_clients = permissions.get("assigned_clients", [])
-    if extra_clients:
-        query = {
-            "$or": [
-                {"assigned_to": current_user.id},
-                {"id": {"$in": extra_clients}}
-            ]
-        }
+    # PERMISSION GATE: can_view_all_clients grants full client access to staff
+    if permissions.get("can_view_all_clients", False):
+        query = {}
     else:
-        query = {"assigned_to": current_user.id}
+        extra_clients = permissions.get("assigned_clients", [])
+        if extra_clients:
+            query = {
+                "$or": [
+                    {"assigned_to": current_user.id},
+                    {"id": {"$in": extra_clients}}
+                ]
+            }
+        else:
+            query = {"assigned_to": current_user.id}
  clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
  for client in clients:
   if isinstance(client["created_at"], str):
    client["created_at"] = datetime.fromisoformat(client["created_at"])
   if client.get("birthday") and isinstance(client["birthday"], str):
    client["birthday"] = date.fromisoformat(client["birthday"])
- return {"data": clients}
+ return clients
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
@@ -3096,8 +3130,11 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
  existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
  if not existing:
   raise HTTPException(status_code=404, detail="Client not found")
- # OWNERSHIP RULE: admin or the assigned user can edit their own client
- if current_user.role != "admin" and existing.get("assigned_to") != current_user.id:
+ # OWNERSHIP RULE: admin, assigned user, or can_edit_clients permission holder
+ perms = get_user_permissions(current_user)
+ if (current_user.role != "admin"
+     and existing.get("assigned_to") != current_user.id
+     and not perms.get("can_edit_clients", False)):
   raise HTTPException(status_code=403, detail="Not authorized to edit this client")
  update_data = client_data.model_dump()
  if update_data.get("birthday"):
@@ -3123,8 +3160,11 @@ async def delete_client(client_id: str, current_user: User = Depends(get_current
  existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
  if not existing:
   raise HTTPException(status_code=404, detail="Client not found")
- # OWNERSHIP RULE: admin or assigned user can delete
- if current_user.role != "admin" and existing.get("assigned_to") != current_user.id:
+ # OWNERSHIP RULE: admin, assigned user, or can_edit_clients permission holder
+ perms = get_user_permissions(current_user)
+ if (current_user.role != "admin"
+     and existing.get("assigned_to") != current_user.id
+     and not perms.get("can_edit_clients", False)):
   raise HTTPException(status_code=403, detail="Not authorized to delete this client")
  await create_audit_log(
   current_user,
@@ -3621,8 +3661,9 @@ async def get_user_activity(
 # MANUAL FULL REMINDER
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
- if current_user.role != "admin":
-  raise HTTPException(status_code=403, detail="Admin only")
+ perms = get_user_permissions(current_user)
+ if current_user.role != "admin" and not perms.get("can_send_reminders", False):
+  raise HTTPException(status_code=403, detail="Reminder permission required")
  tasks = await db.tasks.find(
   {"status": {"$ne": "completed"}},
   {"_id": 0}
