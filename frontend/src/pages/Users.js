@@ -16,10 +16,11 @@ import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye, EyeOff,
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
-  MoreVertical, Mail, Phone, Calendar, Camera, Cake, Download, LayoutDashboard
+  MoreVertical, Mail, Phone, Calendar, Camera, Cake, Download, LayoutDashboard,
+  Clock, UserCheck, UserX, AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Brand Colors
 const COLORS = {
@@ -46,8 +47,6 @@ const DEPARTMENTS = [
 
 // ─────────────────────────────────────────────────────────────
 // DEFAULT ROLE PERMISSIONS (mirrors backend DEFAULT_ROLE_PERMISSIONS)
-// Used to: (a) reset permissions state before loading a user's perms,
-//          (b) apply role-based defaults when role changes during edit.
 // ─────────────────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
@@ -91,8 +90,6 @@ const DEFAULT_ROLE_PERMISSIONS = {
   },
 };
 
-// Blank slate — prevents stale values from a previously edited user bleeding
-// through when the permissions dialog is opened for a different user.
 const EMPTY_PERMISSIONS = {
   can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
@@ -136,16 +133,124 @@ const DeptPill = ({ dept, size = 'sm' }) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// STATUS BADGE — maps backend "status" field to visual chip
+// Statuses: active | pending_approval | rejected | inactive
+// ─────────────────────────────────────────────────────────────
+const StatusBadge = ({ status, isActive }) => {
+  // Derive display from status field first, fall back to is_active flag
+  const resolved = status || (isActive !== false ? 'active' : 'inactive');
+
+  const map = {
+    active:           { label: 'Active',           cls: 'bg-emerald-100 text-emerald-700 border-emerald-200',  icon: <CheckCircle className="h-3 w-3" /> },
+    pending_approval: { label: 'Pending Approval',  cls: 'bg-amber-100 text-amber-700 border-amber-200',       icon: <Clock className="h-3 w-3" /> },
+    rejected:         { label: 'Rejected',           cls: 'bg-red-100 text-red-700 border-red-200',             icon: <XCircle className="h-3 w-3" /> },
+    inactive:         { label: 'Inactive',           cls: 'bg-slate-100 text-slate-600 border-slate-200',       icon: <AlertCircle className="h-3 w-3" /> },
+  };
+
+  const cfg = map[resolved] || map.inactive;
+
+  return (
+    <Badge className={`${cfg.cls} border font-semibold text-[10px] sm:text-xs flex items-center gap-1`}>
+      {cfg.icon}
+      {cfg.label}
+    </Badge>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// PENDING APPROVAL CARD — compact card shown in "Pending" tab
+// ─────────────────────────────────────────────────────────────
+const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
+  return (
+    <motion.div
+      variants={itemVariants}
+      layout
+      className="relative bg-white rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all duration-300"
+    >
+      {/* Amber glow strip */}
+      <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
+
+      <div className="flex items-start gap-4 mb-4 pt-1">
+        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-100 flex-shrink-0 shadow">
+          {userData.profile_picture ? (
+            <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center text-white text-lg font-bold"
+              style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' }}
+            >
+              {userData.full_name?.charAt(0)}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-outfit font-semibold text-slate-900 truncate">{userData.full_name}</h3>
+          <p className="text-xs text-slate-500 truncate mt-0.5">{userData.email}</p>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <Badge className="bg-slate-100 text-slate-600 text-[10px] font-semibold capitalize">{userData.role}</Badge>
+            <StatusBadge status={userData.status} isActive={userData.is_active} />
+          </div>
+        </div>
+      </div>
+
+      {/* Departments */}
+      {(userData.departments || []).length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {userData.departments.map(dept => <DeptPill key={dept} dept={dept} />)}
+        </div>
+      )}
+
+      <div className="text-xs text-slate-500 mb-4 space-y-1">
+        <p className="flex items-center gap-2">
+          <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+          {userData.phone || 'No phone'}
+        </p>
+        <p className="flex items-center gap-2">
+          <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+          Registered {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
+        </p>
+      </div>
+
+      {/* Approve / Reject actions */}
+      <div className="flex gap-2 pt-3 border-t border-amber-100">
+        <Button
+          size="sm"
+          disabled={approving === userData.id}
+          onClick={() => onApprove(userData)}
+          className="flex-1 h-9 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs gap-1.5 shadow transition-all hover:scale-[1.02]"
+        >
+          <UserCheck className="h-3.5 w-3.5" />
+          {approving === userData.id ? 'Approving…' : 'Approve'}
+        </Button>
+        <Button
+          size="sm"
+          disabled={approving === userData.id}
+          onClick={() => onReject(userData)}
+          variant="outline"
+          className="flex-1 h-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs gap-1.5 transition-all hover:scale-[1.02]"
+        >
+          <UserX className="h-3.5 w-3.5" />
+          Reject
+        </Button>
+      </div>
+    </motion.div>
+  );
+};
+
 const UserCard = ({
   userData,
   onEdit,
   onDelete,
   onPermissions,
+  onApprove,
+  onReject,
   currentUserId,
   COLORS,
   isAdmin,
   canEditUsers,
-  canManagePermissions
+  canManagePermissions,
+  approving,
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
@@ -167,16 +272,25 @@ const UserCard = ({
   };
 
   const roleStyle = getRoleStyle(userData.role);
+  const isPending = userData.status === 'pending_approval';
 
   return (
     <motion.div
       variants={itemVariants}
-      className="group relative bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 hover:shadow-xl hover:border-blue-200 transition-all duration-300 hover:-translate-y-1"
+      layout
+      className={`group relative bg-white rounded-2xl border p-4 sm:p-5 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 ${
+        isPending ? 'border-amber-300 hover:border-amber-400' : 'border-slate-200 hover:border-blue-200'
+      }`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0 sm:opacity-0'}`}>
-        {canManagePermissions && userData.role !== 'admin' && (
+      {/* Pending top strip */}
+      {isPending && (
+        <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
+      )}
+
+      <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0'}`}>
+        {canManagePermissions && userData.role !== 'admin' && !isPending && (
           <button
             onClick={() => onPermissions(userData)}
             className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors"
@@ -185,7 +299,7 @@ const UserCard = ({
             <Shield className="h-4 w-4" />
           </button>
         )}
-        {canEditUsers && (
+        {canEditUsers && !isPending && (
           <button
             onClick={() => onEdit(userData)}
             className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
@@ -208,15 +322,14 @@ const UserCard = ({
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
-            <img
-              src={userData.profile_picture}
-              alt={userData.full_name}
-              className="w-full h-full object-cover"
-            />
+            <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
           ) : (
             <div
               className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
-              style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)` }}
+              style={{ background: isPending
+                ? 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)'
+                : `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`
+              }}
             >
               {userData.full_name?.charAt(0)}
             </div>
@@ -226,23 +339,19 @@ const UserCard = ({
           <h3 className="text-base sm:text-lg font-outfit font-semibold text-slate-900 truncate">
             {userData.full_name}
           </h3>
-          <div className="flex items-center gap-1.5 mt-1">
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <Badge className={`${roleStyle.bg} ${roleStyle.text} font-medium text-[10px] sm:text-xs capitalize flex items-center gap-1`}>
               {getRoleIcon(userData.role)}
               {userData.role}
             </Badge>
-            <Badge className={`${userData.is_active !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'} font-medium text-[10px] sm:text-xs`}>
-              {userData.is_active !== false ? 'Active' : 'Inactive'}
-            </Badge>
+            <StatusBadge status={userData.status} isActive={userData.is_active} />
           </div>
         </div>
       </div>
 
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {userDepts.map(dept => (
-            <DeptPill key={dept} dept={dept} size="sm" />
-          ))}
+          {userDepts.map(dept => <DeptPill key={dept} dept={dept} size="sm" />)}
         </div>
       )}
 
@@ -257,14 +366,10 @@ const UserCard = ({
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {userData.punch_in_time && (
-            <p className="flex items-center gap-1 text-[10px] text-slate-500">
-              In: {userData.punch_in_time}
-            </p>
+            <p className="flex items-center gap-1 text-[10px] text-slate-500">In: {userData.punch_in_time}</p>
           )}
           {userData.punch_out_time && (
-            <p className="flex items-center gap-1 text-[10px] text-slate-500">
-              Out: {userData.punch_out_time}
-            </p>
+            <p className="flex items-center gap-1 text-[10px] text-slate-500">Out: {userData.punch_out_time}</p>
           )}
         </div>
         <p className="flex items-center gap-2">
@@ -272,6 +377,31 @@ const UserCard = ({
           Joined {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
         </p>
       </div>
+
+      {/* Inline approve/reject for pending users shown in main grid (admin only) */}
+      {isPending && isAdmin && (
+        <div className="flex gap-2 mt-4 pt-3 border-t border-amber-100">
+          <Button
+            size="sm"
+            disabled={approving === userData.id}
+            onClick={() => onApprove(userData)}
+            className="flex-1 h-8 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs gap-1 shadow"
+          >
+            <UserCheck className="h-3.5 w-3.5" />
+            {approving === userData.id ? 'Approving…' : 'Approve'}
+          </Button>
+          <Button
+            size="sm"
+            disabled={approving === userData.id}
+            onClick={() => onReject(userData)}
+            variant="outline"
+            className="flex-1 h-8 rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs gap-1"
+          >
+            <UserX className="h-3.5 w-3.5" />
+            Reject
+          </Button>
+        </div>
+      )}
     </motion.div>
   );
 };
@@ -280,18 +410,6 @@ export default function Users() {
   const { user, hasPermission, refreshUser } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // ─────────────────────────────────────────────────────────────
-  // Permission Matrix — mirrors backend 5-layer evaluation:
-  //   Layer 1: Admin bypass   → always allowed
-  //   Layer 2: Universal flag → allowed if permission flag is true
-  //   Layer 4: Deny
-  //
-  // canViewUserPage      → Admin OR can_view_user_page
-  // canEditUsers         → Admin OR can_manage_users
-  //                        (backend PUT /users requires Admin OR can_manage_users)
-  // canManagePermissions → Admin only
-  //                        (backend PUT /users/{id}/permissions is Admin-only)
-  // ─────────────────────────────────────────────────────────────
   const perms = user?.permissions || {};
   const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
   const canEditUsers         = isAdmin || !!perms.can_manage_users;
@@ -306,7 +424,10 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
 
-  // Form State (Synced with Backend User Model)
+  // ── NEW: approval state ─────────────────────────────────────
+  const [approvingId, setApprovingId] = useState(null); // tracks which user is mid-request
+
+  // Form State
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -323,7 +444,6 @@ export default function Users() {
     is_active: true
   });
 
-  // Permissions State (Synced with Backend UserPermissions Model)
   const [permissions, setPermissions] = useState({
     can_view_all_tasks: false,
     can_view_all_clients: false,
@@ -355,20 +475,15 @@ export default function Users() {
     can_edit_clients: false,
     can_use_chat: false,
     can_view_all_leads: false,
-    // can_edit_leads: false,           ← REMOVED
     can_manage_settings: false,
   });
 
   const [loading, setLoading] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
-  // Tracks when admin changes a user's role during edit so we can offer
-  // resetting their permissions to the new role's defaults.
   const [roleChanged, setRoleChanged] = useState(false);
 
   const handleRoleChange = (newRole) => {
-    if (selectedUser && newRole !== formData.role) {
-      setRoleChanged(true);
-    }
+    if (selectedUser && newRole !== formData.role) setRoleChanged(true);
     setFormData(prev => ({ ...prev, role: newRole }));
   };
 
@@ -399,7 +514,9 @@ export default function Users() {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
-      setUsers(response.data || []);
+      // CS11: backend now returns { data: [...] }
+      const raw = response.data;
+      setUsers(Array.isArray(raw) ? raw : (raw?.data || []));
     } catch (error) {
       toast.error('Failed to fetch users');
     }
@@ -408,7 +525,9 @@ export default function Users() {
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
-      setClients(response.data || []);
+      // CS14: backend now returns { data: [...] }
+      const raw = response.data;
+      setClients(Array.isArray(raw) ? raw : (raw?.data || []));
     } catch (error) {
       console.error('Failed to fetch clients');
     }
@@ -417,13 +536,7 @@ export default function Users() {
   const fetchPermissions = async (userId) => {
     try {
       const response = await api.get(`/users/${userId}/permissions`);
-      // FIX: Reset to a clean slate first, THEN merge server data.
-      // Previously used spread-merge on prev state which caused stale values
-      // from a previously opened user to bleed into the next user's form.
-      setPermissions({
-        ...EMPTY_PERMISSIONS,
-        ...(response.data || {}),
-      });
+      setPermissions({ ...EMPTY_PERMISSIONS, ...(response.data || {}) });
     } catch (error) {
       console.error('Failed to fetch permissions');
       toast.error("Using default permission template");
@@ -450,9 +563,7 @@ export default function Users() {
     if (!file) return;
     try {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData({ ...formData, profile_picture: reader.result });
-      };
+      reader.onloadend = () => setFormData({ ...formData, profile_picture: reader.result });
       reader.readAsDataURL(file);
     } catch (error) {
       toast.error('Failed to process image');
@@ -472,16 +583,12 @@ export default function Users() {
           punch_out_time: formData.punch_out_time || null,
           profile_picture: formData.profile_picture || null
         };
-
         await api.put(`/users/${selectedUser.id}`, updatePayload);
-       
-        if (selectedUser.id === user.id) {
-          await refreshUser();
-        }
+        if (selectedUser.id === user.id) await refreshUser();
         toast.success('User profile successfully synchronized');
       } else {
         await api.post('/auth/register', formData);
-        toast.success('New member registered successfully');
+        toast.success('New member registered — awaiting admin approval');
       }
       setDialogOpen(false);
       fetchUsers();
@@ -517,11 +624,7 @@ export default function Users() {
   };
 
   const handleDelete = async (id) => {
-    // Matrix guard: backend DELETE /users/{id} requires Admin OR can_manage_users
-    if (!canEditUsers) {
-      toast.error('You do not have permission to delete users');
-      return;
-    }
+    if (!canEditUsers) { toast.error('You do not have permission to delete users'); return; }
     if (!window.confirm('Are you sure? This will permanently delete the user and their logs.')) return;
     try {
       await api.delete(`/users/${id}`);
@@ -539,28 +642,20 @@ export default function Users() {
   };
 
   const handleSavePermissions = async () => {
-    // Matrix guard: backend PUT /users/{id}/permissions is Admin-only
-    if (!canManagePermissions) {
-      toast.error('Only administrators can update permissions');
-      return;
-    }
+    if (!canManagePermissions) { toast.error('Only administrators can update permissions'); return; }
     setLoading(true);
     try {
-      // Ensure list-type specific-access fields are always proper arrays (never undefined)
       const payload = {
         ...permissions,
-        assigned_clients:     Array.isArray(permissions.assigned_clients)     ? permissions.assigned_clients     : [],
-        view_other_tasks:     Array.isArray(permissions.view_other_tasks)     ? permissions.view_other_tasks     : [],
-        view_other_attendance:Array.isArray(permissions.view_other_attendance)? permissions.view_other_attendance: [],
-        view_other_reports:   Array.isArray(permissions.view_other_reports)   ? permissions.view_other_reports   : [],
-        view_other_todos:     Array.isArray(permissions.view_other_todos)     ? permissions.view_other_todos     : [],
-        view_other_activity:  Array.isArray(permissions.view_other_activity)  ? permissions.view_other_activity  : [],
+        assigned_clients:      Array.isArray(permissions.assigned_clients)      ? permissions.assigned_clients      : [],
+        view_other_tasks:      Array.isArray(permissions.view_other_tasks)      ? permissions.view_other_tasks      : [],
+        view_other_attendance: Array.isArray(permissions.view_other_attendance) ? permissions.view_other_attendance : [],
+        view_other_reports:    Array.isArray(permissions.view_other_reports)    ? permissions.view_other_reports    : [],
+        view_other_todos:      Array.isArray(permissions.view_other_todos)      ? permissions.view_other_todos      : [],
+        view_other_activity:   Array.isArray(permissions.view_other_activity)   ? permissions.view_other_activity   : [],
       };
       await api.put(`/users/${selectedUserForPermissions.id}/permissions`, payload);
-
-      if (selectedUserForPermissions.id === user.id) {
-        await refreshUser();
-      }
+      if (selectedUserForPermissions.id === user.id) await refreshUser();
       toast.success('System access rules updated');
       setPermissionsDialogOpen(false);
     } catch (error) {
@@ -570,11 +665,53 @@ export default function Users() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // APPROVE / REJECT — call CS10 endpoints
+  // ─────────────────────────────────────────────────────────────
+  const handleApprove = async (userData) => {
+    if (!isAdmin) { toast.error('Only admins can approve users'); return; }
+    setApprovingId(userData.id);
+    try {
+      await api.post(`/users/${userData.id}/approve`);
+      toast.success(`${userData.full_name} has been approved and activated`);
+      fetchUsers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to approve user');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (userData) => {
+    if (!isAdmin) { toast.error('Only admins can reject users'); return; }
+    if (!window.confirm(`Reject ${userData.full_name}? They will not be able to log in.`)) return;
+    setApprovingId(userData.id);
+    try {
+      await api.post(`/users/${userData.id}/reject`);
+      toast.success(`${userData.full_name} has been rejected`);
+      fetchUsers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to reject user');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Derived lists for tabs
+  // ─────────────────────────────────────────────────────────────
+  const pendingUsers  = users.filter(u => u.status === 'pending_approval');
+  const rejectedUsers = users.filter(u => u.status === 'rejected');
+
   const filteredUsers = users.filter(u => {
-    const matchesSearch = (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const matchesSearch =
+      (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesTab = activeTab === 'all' || u.role?.toLowerCase() === activeTab;
-    return matchesSearch && matchesTab;
+
+    if (activeTab === 'pending')  return matchesSearch && u.status === 'pending_approval';
+    if (activeTab === 'rejected') return matchesSearch && u.status === 'rejected';
+    if (activeTab === 'all')      return matchesSearch;
+    return matchesSearch && u.role?.toLowerCase() === activeTab;
   });
 
   if (!canViewUserPage) {
@@ -595,8 +732,17 @@ export default function Users() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>User Directory</h1>
-          <p className="text-slate-500 font-medium">Core team administration and access control</p>
+          <p className="text-slate-500 font-medium">
+            Core team administration and access control
+            {pendingUsers.length > 0 && isAdmin && (
+              <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold border border-amber-200">
+                <Clock className="h-3 w-3" />
+                {pendingUsers.length} awaiting approval
+              </span>
+            )}
+          </p>
         </div>
+
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           {canEditUsers && (
             <DialogTrigger asChild>
@@ -619,6 +765,8 @@ export default function Users() {
               </Button>
             </DialogTrigger>
           )}
+
+          {/* ── User Edit / Create Dialog ── */}
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-outfit font-bold" style={{ color: COLORS.deepBlue }}>
@@ -711,24 +859,15 @@ export default function Users() {
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                  {/* Bug Fix: Role changed — offer to sync permissions to new role defaults */}
                   {roleChanged && selectedUser && (
                     <div className="mt-2 flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                       <span className="text-xs text-amber-700 font-semibold flex-1">
                         Role changed to <b className="capitalize">{formData.role}</b>. Reset permissions to match new role defaults?
                       </span>
-                      <button
-                        type="button"
-                        onClick={handleResetPermissionsToRole}
-                        className="text-xs font-bold px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors whitespace-nowrap"
-                      >
+                      <button type="button" onClick={handleResetPermissionsToRole} className="text-xs font-bold px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors whitespace-nowrap">
                         Reset Permissions
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setRoleChanged(false)}
-                        className="text-xs text-amber-500 hover:text-amber-700 font-semibold"
-                      >
+                      <button type="button" onClick={() => setRoleChanged(false)} className="text-xs text-amber-500 hover:text-amber-700 font-semibold">
                         Keep current
                       </button>
                     </div>
@@ -774,6 +913,35 @@ export default function Users() {
         </Dialog>
       </div>
 
+      {/* ── Pending Approval Banner (admin only, only when there are pending users) ── */}
+      <AnimatePresence>
+        {isAdmin && pendingUsers.length > 0 && activeTab !== 'pending' && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl shadow-sm"
+          >
+            <div className="p-2 bg-amber-100 rounded-xl">
+              <Clock className="h-5 w-5 text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-800">
+                {pendingUsers.length} registration{pendingUsers.length > 1 ? 's' : ''} pending approval
+              </p>
+              <p className="text-xs text-amber-600">These users cannot log in until approved.</p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setActiveTab('pending')}
+              className="rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs h-8 shadow"
+            >
+              Review Now
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Navigation & Search */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
@@ -786,41 +954,101 @@ export default function Users() {
           />
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-white p-1 rounded-2xl border shadow-sm self-start">
-          <TabsList className="bg-transparent h-10">
+          <TabsList className="bg-transparent h-10 flex flex-wrap gap-0.5">
             <TabsTrigger value="all" className="rounded-xl font-bold px-4">All</TabsTrigger>
             <TabsTrigger value="admin" className="rounded-xl font-bold px-4">Admins</TabsTrigger>
             <TabsTrigger value="manager" className="rounded-xl font-bold px-4">Managers</TabsTrigger>
             <TabsTrigger value="staff" className="rounded-xl font-bold px-4">Staff</TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="pending" className="rounded-xl font-bold px-3 relative">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" />
+                  Pending
+                  {pendingUsers.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
+                      {pendingUsers.length}
+                    </span>
+                  )}
+                </span>
+              </TabsTrigger>
+            )}
+            {isAdmin && rejectedUsers.length > 0 && (
+              <TabsTrigger value="rejected" className="rounded-xl font-bold px-3">
+                <span className="flex items-center gap-1.5">
+                  <XCircle className="h-3.5 w-3.5 text-red-400" />
+                  Rejected
+                </span>
+              </TabsTrigger>
+            )}
           </TabsList>
         </Tabs>
       </div>
 
-      {/* Grid Display */}
-      <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredUsers.length === 0 ? (
-          <div className="col-span-full py-24 text-center">
-            <UsersIcon className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-400">No members found matching criteria</h3>
-          </div>
-        ) : (
-          filteredUsers.map((userData) => (
-            <UserCard
-              key={userData.id}
-              userData={userData}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onPermissions={openPermissionsDialog}
-              currentUserId={user?.id}
-              COLORS={COLORS}
-              isAdmin={isAdmin}
-              canEditUsers={canEditUsers}
-              canManagePermissions={canManagePermissions}
-            />
-          ))
-        )}
-      </motion.div>
+      {/* ── Pending Tab: dedicated card layout ── */}
+      {activeTab === 'pending' && isAdmin && (
+        <div>
+          {filteredUsers.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="py-24 text-center"
+            >
+              <CheckCircle className="h-16 w-16 text-emerald-300 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-slate-400">No pending approvals</h3>
+              <p className="text-slate-400 text-sm mt-1">All registrations have been reviewed.</p>
+            </motion.div>
+          ) : (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+            >
+              {filteredUsers.map(userData => (
+                <PendingUserCard
+                  key={userData.id}
+                  userData={userData}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                  approving={approvingId}
+                />
+              ))}
+            </motion.div>
+          )}
+        </div>
+      )}
 
-      {/* Permissions Dialog */}
+      {/* ── All other tabs: standard UserCard grid ── */}
+      {activeTab !== 'pending' && (
+        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredUsers.length === 0 ? (
+            <div className="col-span-full py-24 text-center">
+              <UsersIcon className="h-16 w-16 text-slate-200 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-slate-400">No members found matching criteria</h3>
+            </div>
+          ) : (
+            filteredUsers.map((userData) => (
+              <UserCard
+                key={userData.id}
+                userData={userData}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onPermissions={openPermissionsDialog}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                currentUserId={user?.id}
+                COLORS={COLORS}
+                isAdmin={isAdmin}
+                canEditUsers={canEditUsers}
+                canManagePermissions={canManagePermissions}
+                approving={approvingId}
+              />
+            ))
+          )}
+        </motion.div>
+      )}
+
+      {/* ── Permissions Dialog (unchanged) ── */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
@@ -837,7 +1065,6 @@ export default function Users() {
           </div>
 
           <div className="p-6 space-y-6">
-            {/* Quick-reset banner — matches backend DEFAULT_ROLE_PERMISSIONS */}
             <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
               <span className="text-sm text-amber-800 font-semibold flex-1">
                 Role: <b className="capitalize">{selectedUserForPermissions?.role}</b> — reset all toggles to that role's defaults?
@@ -874,7 +1101,6 @@ export default function Users() {
                     { key: 'can_view_all_leads', label: 'Leads Pipeline Access', desc: 'Can view the global leads and sales dashboard' },
                     { key: 'can_view_user_page', label: 'User Directory Access', desc: 'Can view the team members directory page' },
                     { key: 'can_view_selected_users_reports', label: 'Team Reports Access', desc: 'Can view reports for selected individual users' },
-                    // can_edit_leads removed
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
