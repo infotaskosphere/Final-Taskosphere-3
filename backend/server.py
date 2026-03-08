@@ -1328,13 +1328,11 @@ async def import_tasks_from_csv(
 # =========================================================
 # GET TASKS (WITH CROSS-USER SUPPORT)
 # =========================================================
-# ==========================================================
-# FIX #1: WRAP /api/tasks RESPONSE AS {"data": tasks}
-# Root cause of "A.map is not a function" in Tasks.js:
-# CHANGE SET 13 comment indicated this wrapping was needed to match
-# the /api/users response pattern, but the return was never updated.
-# Frontend now expects response.data (array) not response (array).
-# ==========================================================
+# GET TASKS
+# Returns a plain array so Dashboard.js can call .filter() directly.
+# sub_assignees and comments are normalized to [] if null/missing —
+# this was the real cause of "A.map is not a function" in Tasks.js.
+# =========================================================
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
  query = {"type": {"$ne": "todo"}}
@@ -1383,9 +1381,14 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
   task["due_date"] = safe_dt(task.get("due_date"))
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
- # FIX: Wrap in {"data": tasks} to match /api/users pattern and fix
- # "A.map is not a function" error in Tasks.js frontend component
- return {"data": tasks}
+  # Normalize array fields — null sub_assignees/comments caused
+  # "A.map is not a function" in Tasks.js when iterating these fields
+  if not isinstance(task.get("sub_assignees"), list):
+   task["sub_assignees"] = []
+  if not isinstance(task.get("comments"), list):
+   task["comments"] = []
+ # Return plain array — Dashboard.js calls .filter() directly on this
+ return tasks
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
