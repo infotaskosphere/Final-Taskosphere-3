@@ -32,7 +32,6 @@ class UserRole(str, Enum):
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
     "admin": {
-        # Admin is superuser — all flags true, all lists empty (route logic grants global access)
         "can_view_all_tasks": True,
         "can_view_all_clients": True,
         "can_view_all_dsc": True,
@@ -50,7 +49,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": True,
         "can_manage_settings": True,
-        # ── Feature toggle permissions ──
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": True,
@@ -59,12 +57,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
         "can_view_staff_rankings": True,
-        "can_download_reports": True,
         "can_delete_tasks": True,
-        "can_assign_tasks": True,
-        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -73,16 +67,11 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
     "manager": {
-        # Manager can view/edit their own data + their team's data (via departments).
-        # Universal "view_all_*" flags are False — team access is handled by route-level
-        # department/team logic, not by these flags.
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": True,
         "can_view_all_duedates": False,
-        # Own reports + attendance are always accessible (ownership rule).
-        # True here means they can also view team-level aggregated reports.
         "can_view_reports": True,
         "can_view_attendance": True,
         "can_view_all_leads": False,
@@ -95,7 +84,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": False,
         "can_manage_settings": False,
-        # ── Feature toggle permissions ──
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": False,
@@ -104,13 +92,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
         "can_view_staff_rankings": True,
-        "can_view_staff_activity": True,
-        "can_download_reports": True,
         "can_delete_tasks": False,
-        "can_assign_tasks": True,
-        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -119,50 +102,33 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
     "staff": {
-        # Staff can ALWAYS access their own tasks, todos, attendance, reports,
-        # and any record they own — this is enforced at the route level (Layer 4)
-        # and does NOT require any flag to be True here.
-        #
-        # All "can_view_all_*" and "can_edit_*" flags remain False so staff
-        # cannot browse other users' data unless explicitly granted via
-        # view_other_* lists below.
         "can_view_all_tasks": False,
         "can_view_all_clients": False,
         "can_view_all_dsc": False,
         "can_view_documents": False,
         "can_view_all_duedates": False,
-        # Own report and own attendance are always visible (ownership rule).
-        # True here allows viewing the self-report endpoint without extra checks.
         "can_view_reports": True,
         "can_view_attendance": True,
         "can_view_all_leads": False,
-        "can_edit_tasks": False,       # Cannot edit OTHER users' tasks
+        "can_edit_tasks": False,
         "can_edit_clients": False,
         "can_edit_dsc": False,
         "can_edit_documents": False,
         "can_edit_due_dates": False,
         "can_edit_users": False,
-        "can_download_reports": True,  # Can download their own report
+        "can_download_reports": True,
         "can_manage_users": False,
         "can_manage_settings": False,
-        # ── Feature toggle permissions ──
         "can_assign_tasks": False,
         "can_view_staff_activity": False,
         "can_send_reminders": False,
         "can_view_user_page": False,
         "can_view_audit_logs": False,
         "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard": True,  # Can view their own todo dashboard
+        "can_view_todo_dashboard": True,
         "can_use_chat": True,
-        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
         "can_view_staff_rankings": False,
-        "can_view_staff_activity": False,
-        "can_download_reports": True,
         "can_delete_tasks": False,
-        "can_assign_tasks": False,
-        # These lists are empty by default.
-        # Admin can populate them to grant cross-user visibility.
-        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -171,6 +137,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "assigned_clients": [],
     },
 }
+
 # ======================
 # CORE USER & PERMISSIONS
 # ======================
@@ -191,7 +158,6 @@ class UserPermissions(BaseModel):
         attendance, reports, and any record carrying their user_id.
         No flag is needed for this — routes check ownership first.
     """
-    # ── Universal boolean permissions ──
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
@@ -209,7 +175,6 @@ class UserPermissions(BaseModel):
     can_download_reports: bool = False
     can_manage_users: bool = False
     can_manage_settings: bool = False
-    # ── Feature toggle permissions ──
     can_assign_tasks: bool = False
     can_view_staff_activity: bool = False
     can_send_reminders: bool = False
@@ -218,13 +183,9 @@ class UserPermissions(BaseModel):
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
     can_use_chat: bool = False
-    # ── NEW PERMISSION FLAGS (CHANGE SET 9.1) ──
     can_view_staff_rankings: bool = False
-    can_view_staff_activity: bool = False
-    can_download_reports: bool = False
     can_delete_tasks: bool = False
-    can_assign_tasks: bool = False
-    # ── Specific access lists (Layer 3) ──
+    # Specific access lists (Layer 3)
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -251,7 +212,6 @@ class User(BaseModel):
     permissions: UserPermissions = Field(default_factory=UserPermissions)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
-    # ── APPROVAL WORKFLOW FIELDS (CHANGE SET 1.1 - NEW) ──
     status: str = "pending_approval"
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
@@ -279,7 +239,6 @@ class UserCreate(BaseModel):
     profile_picture: Optional[str] = None
     is_active: bool = True
     permissions: Optional[Dict[str, Any]] = None
-    # ── CHANGE SET 1.2 - NEW ──
     status: Optional[str] = "pending_approval"
 
 
@@ -561,7 +520,6 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
-    # ── CHANGE SET 7 - NEW ──
     assignments: Optional[List[Dict[str, Any]]] = Field(
         default_factory=list,
         description="List of {user_id, services} assignments"
