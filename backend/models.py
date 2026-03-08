@@ -25,7 +25,7 @@ class UserRole(str, Enum):
 #   Layer 4: Ownership (handled at route level)
 #   Layer 5: Deny (fallback)
 #
-# OWNERSHIP RULE (Layer 4 — enforced at route level, not here):
+# OWNERSHIP RULE (Layer 4 — enforced at route level, NOT via flags):
 #   Every user always has full access to their OWN tasks, todos,
 #   attendance, reports, and any record where their user_id is stored.
 #   The flags below only govern access to OTHER users' data.
@@ -50,6 +50,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": True,
         "can_manage_settings": True,
+        # ── Feature toggle permissions ──
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": True,
@@ -58,6 +59,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
+        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
+        "can_view_staff_rankings": True,
+        "can_download_reports": True,
+        "can_delete_tasks": True,
+        "can_assign_tasks": True,
+        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -88,6 +95,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,
         "can_manage_users": False,
         "can_manage_settings": False,
+        # ── Feature toggle permissions ──
         "can_assign_tasks": True,
         "can_view_staff_activity": True,
         "can_send_reminders": False,
@@ -96,6 +104,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": True,
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
+        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
+        "can_view_staff_rankings": True,
+        "can_view_staff_activity": True,
+        "can_download_reports": True,
+        "can_delete_tasks": False,
+        "can_assign_tasks": True,
+        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -130,6 +145,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_download_reports": True,  # Can download their own report
         "can_manage_users": False,
         "can_manage_settings": False,
+        # ── Feature toggle permissions ──
         "can_assign_tasks": False,
         "can_view_staff_activity": False,
         "can_send_reminders": False,
@@ -138,8 +154,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_selected_users_reports": False,
         "can_view_todo_dashboard": True,  # Can view their own todo dashboard
         "can_use_chat": True,
+        # ── NEW PERMISSION FLAGS (CHANGE SET 9.2) ──
+        "can_view_staff_rankings": False,
+        "can_view_staff_activity": False,
+        "can_download_reports": True,
+        "can_delete_tasks": False,
+        "can_assign_tasks": False,
         # These lists are empty by default.
         # Admin can populate them to grant cross-user visibility.
+        # ── Specific access lists (Layer 3) ──
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -195,6 +218,12 @@ class UserPermissions(BaseModel):
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
     can_use_chat: bool = False
+    # ── NEW PERMISSION FLAGS (CHANGE SET 9.1) ──
+    can_view_staff_rankings: bool = False
+    can_view_staff_activity: bool = False
+    can_download_reports: bool = False
+    can_delete_tasks: bool = False
+    can_assign_tasks: bool = False
     # ── Specific access lists (Layer 3) ──
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
@@ -222,6 +251,10 @@ class User(BaseModel):
     permissions: UserPermissions = Field(default_factory=UserPermissions)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
+    # ── APPROVAL WORKFLOW FIELDS (CHANGE SET 1.1 - NEW) ──
+    status: str = "pending_approval"
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
 
     @field_validator('birthday', mode='before')
     @classmethod
@@ -246,6 +279,8 @@ class UserCreate(BaseModel):
     profile_picture: Optional[str] = None
     is_active: bool = True
     permissions: Optional[Dict[str, Any]] = None
+    # ── CHANGE SET 1.2 - NEW ──
+    status: Optional[str] = "pending_approval"
 
 
 class UserUpdate(BaseModel):
@@ -526,6 +561,11 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
+    # ── CHANGE SET 7 - NEW ──
+    assignments: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="List of {user_id, services} assignments"
+    )
 
     @field_validator('phone')
     @classmethod
