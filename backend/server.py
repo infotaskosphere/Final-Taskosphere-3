@@ -1391,9 +1391,8 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
    task["sub_assignees"] = []
   if not isinstance(task.get("comments"), list):
    task["comments"] = []
- # FIX #4: Wrap in {"data": tasks} — Tasks.js reads response.data to get the array.
- # Dashboard.js uses /api/users (plain array) for its .filter() calls, not /api/tasks.
- return {"data": tasks}
+ # Return plain array — both Dashboard.js and Tasks.js call array methods directly on response.data
+ return tasks
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
@@ -2238,11 +2237,8 @@ async def get_staff_attendance_report(
   result.append(data)
  # Sort by highest total minutes
  result.sort(key=lambda x: x["total_minutes"], reverse=True)
- return {
-  "month": target_month,
-  "total_staff": len(result),
-  "staff_report": result
- }
+ # Return plain array — Attendance.js does (response.data || []).filter() directly
+ return result
 
 @api_router.get("/attendance/export-pdf")
 async def export_attendance_pdf(
@@ -3085,7 +3081,7 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
   raise HTTPException(status_code=400, detail=str(e))
 
 # CHANGE SET 14: Update get_clients() - Wrap Response
-@api_router.get("/clients")
+@api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
  # OWNERSHIP RULE: users always see clients assigned to them.
  # Admin sees all; manager sees team; staff sees only assigned clients.
@@ -3118,8 +3114,8 @@ async def get_clients(current_user: User = Depends(get_current_user)):
    client["created_at"] = datetime.fromisoformat(client["created_at"])
   if client.get("birthday") and isinstance(client["birthday"], str):
    client["birthday"] = date.fromisoformat(client["birthday"])
- # FIX #6: Wrap in {"data": clients} — Clients.js reads response.data then calls .filter()
- return {"data": clients}
+ # Return plain array — Clients.js calls array methods directly on response.data
+ return clients
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
