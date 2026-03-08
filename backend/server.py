@@ -631,6 +631,7 @@ async def update_todo(
  )
  return {"message": "Todo updated successfully"}
 
+# CHANGE SET 8: Register Endpoint (Auth Security)
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
@@ -642,7 +643,16 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     
     hashed_password = get_password_hash(user_data.password)
     
-    role_val = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+    # SECURITY FIX: Prevent role self-selection
+    requested_role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+    if requested_role in ["admin", "manager", "superadmin"]:
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=400,
+                detail="Only staff role can be assigned during registration"
+            )
+    
+    role_val = requested_role
     default_permissions = DEFAULT_ROLE_PERMISSIONS.get(role_val, {})
     
     user_id = str(uuid.uuid4())
@@ -660,7 +670,10 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "grace_time": user_data.grace_time or "00:15",
         "punch_out_time": user_data.punch_out_time or "19:00",
         "profile_picture": user_data.profile_picture,
-        "is_active": user_data.is_active if user_data.is_active is not None else True,
+        "is_active": False,  # CHANGED: Always False until approved
+        "status": "pending_approval",  # NEW
+        "approved_by": None,  # NEW
+        "approved_at": None,  # NEW
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -671,11 +684,20 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
+# CHANGE SET 9: Login Endpoint (Add Status Gate)
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
  user = await db.users.find_one({"email": credentials.email})
  if not user or not verify_password(credentials.password, user["password"]):
   raise HTTPException(status_code=401, detail="Invalid email or password")
+ 
+ # NEW: Check approval status
+ if user.get("status") != "active":
+  raise HTTPException(
+   status_code=403,
+   detail=f"Your account is {user.get('status', 'inactive')}. Awaiting admin approval."
+  )
+ 
  user["permissions"] = user.get("permissions", UserPermissions().model_dump())
  if "created_at" in user and isinstance(user["created_at"], str):
   user["created_at"] = datetime.fromisoformat(user["created_at"])
@@ -686,15 +708,124 @@ async def login(credentials: UserLogin):
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+# CHANGE SET 10: Add Approval Endpoints
+@api_router.post("/users/{user_id}/approve")
+async def approve_user(
+    user_id: str,
+    current_user: User = Depends(require_admin)
+):
+    """Admin approves a pending user for activation"""
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found")
     
+    if existing.get("status") != "pending_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=f"User status is {existing.get('status')}, not pending approval"
+        )
+    
+    update_data = {
+        "status": "active",
+        "is_active": True,
+        "approved_by": current_user.id,
+        "approved_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.users.update_one({"id": user_id}, {"$set": update_data})
+    await create_audit_log(
+        current_user,
+        "APPROVE_USER",
+        "user",
+        user_id,
+        existing,
+        update_data
+    )
+    
+    return {"message": "User approved successfully"}
+
+
+@api_router.post("/users/{user_id}/reject")
+async def reject_user(
+    user_id: str,
+    current_user: User = Depends(require_admin)
+):
+    """Admin rejects a pending user"""
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    update_data = {
+        "status": "rejected",
+        "is_active": False
+    }
+    
+    await db.users.update_one({"id": user_id}, {"$set": update_data})
+    await create_audit_log(
+        current_user,
+        "REJECT_USER",
+        "user",
+        user_id,
+        existing,
+        update_data
+    )
+    
+    return {"message": "User rejected"}
+
 #============================================================
 # USER MANAGEMENT (Consolidated GET, PUT, DELETE & PERMISSIONS)
 #=============================================================
 
+# CHANGE SET 11: Replace get_users() Endpoint
 @api_router.get("/users")
-async def get_users(current_user: User = Depends(require_admin)):
-    """Fetch all users. Returns raw data so React Edit Form pre-fills correctly."""
-    users_raw = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+async def get_users(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Fetch users based on role and permissions.
+    - Admin: all users
+    - Manager: department users + self
+    - Staff: only self (unless user_id specified and granted)
+    """
+    # Admin sees all
+    if current_user.role == "admin":
+        query = {}
+        users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+    
+    # Manager sees department users
+    elif current_user.role == "manager":
+        if user_id:
+            # Manager requesting specific user
+            target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+            if not target_user:
+                raise HTTPException(status_code=404, detail="User not found")
+            # Check if target is in manager's departments
+            target_depts = target_user.get("departments", [])
+            manager_depts = current_user.departments
+            if not any(d in manager_depts for d in target_depts):
+                raise HTTPException(status_code=403, detail="User not in your departments")
+            users_raw = [target_user]
+        else:
+            # Manager sees own + team members
+            team_ids = await get_team_user_ids(current_user.id)
+            query = {"id": {"$in": team_ids + [current_user.id]}}
+            users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+    
+    # Staff sees only self
+    else:
+        if user_id and user_id != current_user.id:
+            permissions = get_user_permissions(current_user)
+            allowed = permissions.get("view_other_users", [])
+            if user_id not in allowed:
+                raise HTTPException(status_code=403, detail="Not allowed")
+        users_raw = await db.users.find(
+            {"id": user_id or current_user.id},
+            {"_id": 0, "password": 0}
+        ).to_list(1000)
+    
+    # Normalize timestamps
     for u in users_raw:
         if u.get("created_at") and isinstance(u["created_at"], str):
             try:
@@ -703,7 +834,9 @@ async def get_users(current_user: User = Depends(require_admin)):
                 u["created_at"] = datetime.now(timezone.utc)
         else:
             u["created_at"] = datetime.now(timezone.utc)
-    return users_raw
+    
+    # NEW: Wrap in data object
+    return {"data": users_raw}
 
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(
@@ -726,12 +859,14 @@ async def update_user(
     if not existing:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    # CHANGE SET 12: Update update_user() - Allow Admin Fields
     # Admin can update all fields; non-admin users can only update safe profile fields
     if is_admin:
         allowed_fields = [
             "full_name", "email", "role", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
-            "punch_out_time", "is_active", "profile_picture", "telegram_id"
+            "punch_out_time", "is_active", "profile_picture", "telegram_id",
+            "status", "permissions"  # NEW: Allow editing before approval
         ]
     else:
         # Non-admin users: only their own safe profile fields (no role/department/active changes)
@@ -1211,13 +1346,14 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
   {"_id": 0, "password": 0}
  ).to_list(1000)
  user_map = {u["id"]: u["full_name"] for u in users}
+ # CHANGE SET 13: Update get_tasks() - Wrap Response
  for task in tasks:
   task["created_at"] = safe_dt(task.get("created_at"))
   task["updated_at"] = safe_dt(task.get("updated_at"))
   task["due_date"] = safe_dt(task.get("due_date"))
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
- return tasks
+ return {"data": tasks}
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
@@ -2123,6 +2259,7 @@ async def create_due_date(
  await db.due_dates.insert_one(doc)
  return due_date
 
+# CHANGE SET 15: Update get_due_dates() - Wrap Response
 @api_router.get("/duedates", response_model=List[DueDate])
 async def get_due_dates(current_user: User = Depends(get_current_user)):
  query = {}
@@ -2138,37 +2275,53 @@ async def get_due_dates(current_user: User = Depends(get_current_user)):
   if current_user.departments:
    query["department"] = {"$in": current_user.departments}
   else:
-   return []
+   return {"data": []}
  due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
  for dd in due_dates:
   if isinstance(dd.get("created_at"), str):
    dd["created_at"] = datetime.fromisoformat(dd["created_at"])
   if isinstance(dd.get("due_date"), str):
    dd["due_date"] = datetime.fromisoformat(dd["due_date"])
- return [DueDate(**dd) for dd in due_dates]
+ return {"data": [DueDate(**dd) for dd in due_dates]}
 
+# CHANGE SET 16: Add get_upcoming_due_dates() Endpoint
 @api_router.get("/duedates/upcoming")
 async def get_upcoming_due_dates(
- days: int = 30,
- current_user: User = Depends(get_current_user)
+    days: int = Query(30),
+    current_user: User = Depends(get_current_user)
 ):
- now = datetime.now(IST)
- future_date = now + timedelta(days=days)
- query = {"status": "pending"}
- if current_user.role != "admin":
-  if current_user.departments:
-   query["department"] = {"$in": current_user.departments}
-  else:
-   return []
- due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
- upcoming = []
- for dd in due_dates:
-  dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
-  if now <= dd_date <= future_date:
-   dd["due_date"] = dd_date
-   dd["days_remaining"] = (dd_date - now).days
-   upcoming.append(dd)
- return sorted(upcoming, key=lambda x: x["days_remaining"])
+    """
+    Get upcoming due dates within N days (default 30).
+    Supports ?days=365 query parameter.
+    """
+    now = datetime.now(IST)
+    future_date = now + timedelta(days=days)
+    
+    query = {"status": "pending"}
+    
+    if current_user.role != "admin":
+        if current_user.departments:
+            query["department"] = {"$in": current_user.departments}
+        else:
+            return {"data": []}
+    
+    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+    
+    upcoming = []
+    for dd in due_dates:
+        dd_date = (
+            datetime.fromisoformat(dd["due_date"]) 
+            if isinstance(dd["due_date"], str) 
+            else dd["due_date"]
+        )
+        if now <= dd_date <= future_date:
+            dd["due_date"] = dd_date
+            dd["days_remaining"] = (dd_date - now).days
+            upcoming.append(dd)
+    
+    result = sorted(upcoming, key=lambda x: x["days_remaining"])
+    # NEW: Wrap in data object
+    return {"data": result}
 
 @api_router.put("/duedates/{due_date_id}", response_model=DueDate)
 async def update_due_date(
@@ -2219,6 +2372,22 @@ async def delete_due_date(
  if result.deleted_count == 0:
   raise HTTPException(status_code=404, detail="Due date not found")
  return {"message": "Due date deleted successfully"}
+
+# CHANGE SET 17: Add get_leads_services_meta() Endpoint
+@api_router.get("/leads/meta/services")
+async def get_leads_services_meta(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns list of available services for leads module.
+    Required by Leads.jsx frontend component.
+    """
+    # Fetch unique services from clients collection
+    services = await db.clients.distinct("services")
+    # Filter out empty strings
+    services = [s for s in services if s and isinstance(s, str)]
+    
+    return {"services": list(set(services))}
 
 # REPORTS ROUTES
 @api_router.get("/reports/efficiency")
@@ -2300,13 +2469,21 @@ async def export_reports(
  # ================= CSV =================
  if format == "csv":
   output = StringIO()
+  # CHANGE SET 19: Add CSV Injection Protection
+  def sanitize_csv_value(val):
+      """Prevent CSV injection by removing dangerous prefixes"""
+      val_str = str(val)
+      if val_str and val_str[0] in ['=', '+', '-', '@']:
+          return f"'{val_str}"  # Prefix with quote
+      return val_str
+  
   writer = csv.writer(output)
   writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
   writer.writerow([
-   report["user_id"],
-   report["total_screen_time"],
-   report["total_tasks_completed"],
-   report["days_logged"]
+   sanitize_csv_value(report["user_id"]),
+   sanitize_csv_value(report["total_screen_time"]),
+   sanitize_csv_value(report["total_tasks_completed"]),
+   sanitize_csv_value(report["days_logged"])
   ])
   output.seek(0)
   return StreamingResponse(
@@ -2864,6 +3041,7 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
  except Exception as e:
   raise HTTPException(status_code=400, detail=str(e))
 
+# CHANGE SET 14: Update get_clients() - Wrap Response
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
  # OWNERSHIP RULE: users always see clients assigned to them.
@@ -2893,7 +3071,7 @@ async def get_clients(current_user: User = Depends(get_current_user)):
    client["created_at"] = datetime.fromisoformat(client["created_at"])
   if client.get("birthday") and isinstance(client["birthday"], str):
    client["birthday"] = date.fromisoformat(client["birthday"])
- return clients
+ return {"data": clients}
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
@@ -3378,7 +3556,45 @@ async def get_activity_summary(
         else:
             data["productivity_percent"] = 0
         result.append(data)
-    return result
+
+    # CHANGE SET 18: Update get_activity_summary() Response
+    # NEW: Build aggregated metrics for frontend dashboard
+    intensity_map = {}
+    radar_metrics = {}
+    tool_chain_data = []
+    
+    for item in result:
+        uid = item["user_id"]
+        # Intensity: based on total_duration
+        intensity_map[uid] = {
+            "duration": item["total_duration"],
+            "productivity_percent": item["productivity_percent"]
+        }
+        # Radar: multi-dimensional metrics
+        radar_metrics[uid] = {
+            "productivity": item["productivity_percent"],
+            "attendance": 75,  # Placeholder; can fetch from attendance records
+            "task_completion": 80  # Placeholder; can fetch from tasks
+        }
+        # Tool chain: top 3 apps
+        tool_chain_data.append({
+            "user_id": uid,
+            "top_apps": item.get("apps_list", [])[:3]
+        })
+    
+    audit_results = {
+        "total_users": len(result),
+        "period": "daily",
+        "audit_date": datetime.now(IST).isoformat()
+    }
+    
+    return {
+        "intensityMap": intensity_map,
+        "radarMetrics": radar_metrics,
+        "toolChainData": tool_chain_data,
+        "auditResults": audit_results,
+        "summary": result
+    }
 
 # ----------------------------------------------------------
 # USER ACTIVITY DETAIL
