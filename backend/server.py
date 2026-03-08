@@ -497,6 +497,13 @@ async def get_todos(
   del t["_id"]
  return todos
 
+# ==========================================================
+# FIX #2: STANDARDIZE /dashboard/todo-overview RESPONSE
+# Root cause of "Y.forEach is not a function" in TodoDashboard.jsx:
+# Admin role was returning {"grouped_todos": {}} with NO "todos" key,
+# causing frontend's response.todos.forEach() to call undefined.forEach().
+# Fix: always include a flat "todos" array for all roles.
+# ==========================================================
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
  is_admin = current_user.role == "admin"
@@ -506,6 +513,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
  if is_admin:
   todos = await db.todos.find().to_list(2000)
   grouped_todos = {}
+  all_todos_flat = []  # FIX: build flat list for consistent frontend access
   for todo in todos:
    user = await db.users.find_one({"id": todo["user_id"]}, {"_id": 0})
    user_name = user["full_name"] if user else "Unknown User"
@@ -513,9 +521,11 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     grouped_todos[user_name] = []
    todo["_id"] = str(todo["_id"])
    grouped_todos[user_name].append(todo)
+   all_todos_flat.append(todo)  # FIX: also add to flat list
   return {
    "role": "admin",
-   "grouped_todos": grouped_todos
+   "todos": all_todos_flat,       # FIX: always present flat todos array
+   "grouped_todos": grouped_todos  # keep for admin UI that needs grouping
   }
  # =========================
  # MANAGER VIEW (OWN + TEAM)
@@ -1318,6 +1328,13 @@ async def import_tasks_from_csv(
 # =========================================================
 # GET TASKS (WITH CROSS-USER SUPPORT)
 # =========================================================
+# ==========================================================
+# FIX #1: WRAP /api/tasks RESPONSE AS {"data": tasks}
+# Root cause of "A.map is not a function" in Tasks.js:
+# CHANGE SET 13 comment indicated this wrapping was needed to match
+# the /api/users response pattern, but the return was never updated.
+# Frontend now expects response.data (array) not response (array).
+# ==========================================================
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
  query = {"type": {"$ne": "todo"}}
@@ -1360,14 +1377,15 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
   {"_id": 0, "password": 0}
  ).to_list(1000)
  user_map = {u["id"]: u["full_name"] for u in users}
- # CHANGE SET 13: Update get_tasks() - Wrap Response
  for task in tasks:
   task["created_at"] = safe_dt(task.get("created_at"))
   task["updated_at"] = safe_dt(task.get("updated_at"))
   task["due_date"] = safe_dt(task.get("due_date"))
   task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
   task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
- return tasks
+ # FIX: Wrap in {"data": tasks} to match /api/users pattern and fix
+ # "A.map is not a function" error in Tasks.js frontend component
+ return {"data": tasks}
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
@@ -2823,10 +2841,6 @@ async def sync_master_sheets(
 
 # ==============================================================
 # MDS (MCA) EXCEL SMART PARSER — returns pre-filled client form data
-# Handles the MCA "AllMDSData" format:
-#   • MasterData sheet  → key/value rows  (Company Name, Email, CIN, etc.)
-#   • Director Details  → table rows      (DIN, Name, Designation, etc.)
-#   • Any other sheet   → raw table rows  (stored in notes)
 # ==============================================================
 @api_router.post("/clients/parse-mds-excel")
 async def parse_mds_excel_for_client_form(
@@ -2889,17 +2903,15 @@ async def parse_mds_excel_for_client_form(
             return ""
 
     # ── sheet parsing ───────────────────────────────────────────────────────
-    company_info: dict = {}      # from key-value master sheet
-    directors: list = []         # from Director Details sheet
-    extra_notes_parts: list = [] # raw data from other sheets
+    company_info: dict = {}
+    directors: list = []
+    extra_notes_parts: list = []
 
     for sheet_name in excel.sheet_names:
         df = pd.read_excel(excel, sheet_name=sheet_name, header=None).fillna("")
 
         sheet_lower = sheet_name.lower().strip()
 
-        # ── MasterData (or any sheet whose first cell is a section heading,
-        #    not a column header) — treat as key/value pairs ──────────────
         if "master" in sheet_lower or "company" in sheet_lower or sheet_lower == "masterdata":
             for _, row in df.iterrows():
                 key   = str(row.iloc[0]).strip()
@@ -2907,9 +2919,7 @@ async def parse_mds_excel_for_client_form(
                 if key and key not in ("", "nan") and value not in ("", "nan"):
                     company_info[key] = value
 
-        # ── Director / Signatory Details ───────────────────────────────────
         elif "director" in sheet_lower or "signatory" in sheet_lower:
-            # First row is title, second row is column headers
             rows_list = df.values.tolist()
             if len(rows_list) < 2:
                 continue
@@ -2931,7 +2941,6 @@ async def parse_mds_excel_for_client_form(
                     "din": din if din not in ("nan", "-", "") else None,
                 })
 
-        # ── Any other sheet — capture as plain notes ───────────────────────
         else:
             rows_list = df.values.tolist()
             if len(rows_list) >= 2:
@@ -2943,7 +2952,7 @@ async def parse_mds_excel_for_client_form(
                         data_rows.append(dict(zip(cols, vals)))
                 if data_rows:
                     extra_notes_parts.append(f"[{sheet_name}]")
-                    for r in data_rows[:10]:  # cap at 10 rows for notes
+                    for r in data_rows[:10]:
                         extra_notes_parts.append(
                             " | ".join(f"{k}: {v}" for k, v in r.items() if v not in ("", "nan", "-"))
                         )
@@ -2980,7 +2989,6 @@ async def parse_mds_excel_for_client_form(
 
     client_type = detect_type(company_name)
 
-    # Build notes from CIN, address, authorised capital, etc.
     notes_lines = []
     cin = company_info.get("CIN", "")
     if cin and cin not in ("-", "nan"):
@@ -3005,7 +3013,6 @@ async def parse_mds_excel_for_client_form(
     status_raw = company_info.get("Company Status", "Active").lower()
     status = "active" if "active" in status_raw else "inactive"
 
-    # Extract city and state from address
     city = ""
     state = ""
     if address and address not in ("-", "nan"):
@@ -3014,7 +3021,6 @@ async def parse_mds_excel_for_client_form(
             state = address_parts[-2] if len(address_parts) >= 2 else ""
             city = address_parts[-3] if len(address_parts) >= 3 else ""
 
-    # ── Return the editable preview payload ───────────────────────────────
     return {
         "status": "ok",
         "company_name": company_name,
@@ -3031,7 +3037,6 @@ async def parse_mds_excel_for_client_form(
         "contact_persons": directors,
         "dsc_details": [],
         "assigned_to": "unassigned",
-        # raw info for the preview table
         "raw_company_info": company_info,
         "sheets_parsed": excel.sheet_names,
     }
