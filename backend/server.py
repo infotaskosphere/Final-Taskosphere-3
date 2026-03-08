@@ -3085,7 +3085,7 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
   raise HTTPException(status_code=400, detail=str(e))
 
 # CHANGE SET 14: Update get_clients() - Wrap Response
-@api_router.get("/clients", response_model=List[Client])
+@api_router.get("/clients")
 async def get_clients(current_user: User = Depends(get_current_user)):
  # OWNERSHIP RULE: users always see clients assigned to them.
  # Admin sees all; manager sees team; staff sees only assigned clients.
@@ -3118,7 +3118,8 @@ async def get_clients(current_user: User = Depends(get_current_user)):
    client["created_at"] = datetime.fromisoformat(client["created_at"])
   if client.get("birthday") and isinstance(client["birthday"], str):
    client["birthday"] = date.fromisoformat(client["birthday"])
- return clients
+ # FIX #6: Wrap in {"data": clients} — Clients.js reads response.data then calls .filter()
+ return {"data": clients}
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
@@ -3641,13 +3642,16 @@ async def get_activity_summary(
         "audit_date": datetime.now(IST).isoformat()
     }
     
-    return {
-        "intensityMap": intensity_map,
-        "radarMetrics": radar_metrics,
-        "toolChainData": tool_chain_data,
-        "auditResults": audit_results,
-        "summary": result
-    }
+    # FIX #5: Return plain array — StaffActivity.js calls .map() directly on response.
+    # Previously returned a nested object with "summary", "intensityMap" etc. (CHANGE SET 18),
+    # which caused "ve.map is not a function" in StaffActivity.js:488 because the response
+    # was an object, not an array.
+    for item in result:
+        uid = item["user_id"]
+        item["intensityMap"] = intensity_map.get(uid, {})
+        item["radarMetrics"] = radar_metrics.get(uid, {})
+        item["toolChainData"] = next((t for t in tool_chain_data if t["user_id"] == uid), {})
+    return result
 
 # ----------------------------------------------------------
 # USER ACTIVITY DETAIL
