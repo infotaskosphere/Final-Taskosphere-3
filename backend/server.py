@@ -847,8 +847,12 @@ async def get_users(
         else:
             u["created_at"] = datetime.now(timezone.utc)
     
-    # NEW: Wrap in data object
-    return {"data": users_raw}
+    # FIX #3: Return plain array — Dashboard.js calls .filter() directly on this.
+    # Previously wrapped as {"data": users_raw} (CHANGE SET 11), which caused
+    # "ue.filter is not a function" in Dashboard.js because response.data was an
+    # object, not an array. All other list endpoints (/tasks, /clients, /duedates)
+    # already return plain arrays; users must be consistent.
+    return users_raw
 
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(
@@ -1387,8 +1391,9 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
    task["sub_assignees"] = []
   if not isinstance(task.get("comments"), list):
    task["comments"] = []
- # Return plain array — Dashboard.js calls .filter() directly on this
- return tasks
+ # FIX #4: Wrap in {"data": tasks} — Tasks.js reads response.data to get the array.
+ # Dashboard.js uses /api/users (plain array) for its .filter() calls, not /api/tasks.
+ return {"data": tasks}
 
 # =========================================================
 # GET SINGLE TASK WITH FULL DETAILS (SECURE) — used by task detail popup
