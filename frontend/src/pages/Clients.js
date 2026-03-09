@@ -17,7 +17,7 @@ import {
   FileText, Calendar, Search, Users,
   Briefcase, BarChart3, Archive, MessageCircle, Trash,
   CheckCircle2, AlertCircle, Building2, ChevronDown, ChevronUp,
-  LayoutGrid, List, Phone, MapPin, User, FileCheck,
+  LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import Papa from 'papaparse';
@@ -69,8 +69,10 @@ const getAvatarGradient = (name = '') => {
 
 const SectionHeading = ({ icon, title, subtitle }) => (
   <div className="flex items-center gap-3 mb-6">
-    <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
-      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+    <div
+      className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-sm"
+      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+    >
       {icon}
     </div>
     <div>
@@ -146,6 +148,7 @@ export default function Clients() {
     assignments: [{ ...EMPTY_ASSIGNMENT }],
     notes: '',
     status: 'active',
+    referred_by: '',
   });
   const [formErrors, setFormErrors] = useState({});
   const [contactErrors, setContactErrors] = useState([]);
@@ -187,7 +190,7 @@ export default function Clients() {
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
-    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
+    window.open(`https://wa.me/  ${cleanPhone}?text=${message}`, '_blank');
   };
 
   const stats = useMemo(() => {
@@ -408,6 +411,7 @@ export default function Clients() {
         notes: (data.notes || '').trim(),
         status: data.status_value || 'active',
         contact_persons: contacts,
+        referred_by: (data.referred_by || '').trim(),
       });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to parse Excel file');
@@ -450,6 +454,7 @@ export default function Clients() {
           dsc_details: [],
           assignments: [],
           assigned_to: null,
+          referred_by: mdsForm.referred_by?.trim() || null,
         };
 
         const response = await api.post('/clients', payload);
@@ -481,6 +486,7 @@ export default function Clients() {
           : [{ name: '', designation: '', email: '', phone: '', birthday: '', din: '' }],
         dsc_details: [],
         assignments: [{ ...EMPTY_ASSIGNMENT }],
+        referred_by: mdsForm.referred_by || '',
       });
       setEditingClient(null);
       setFormErrors({});
@@ -533,7 +539,8 @@ export default function Clients() {
         // backward-compat: first assignment user_id as assigned_to
         assigned_to: cleanedAssignments[0]?.user_id || null,
         assignments: cleanedAssignments,
-        status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC
+        status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
+        referred_by: formData.referred_by?.trim() || null,
       };
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
@@ -575,6 +582,7 @@ export default function Clients() {
       })) || [],
       status: client?.status || 'active',
       assignments,
+      referred_by: client?.referred_by || '',
     });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
@@ -587,7 +595,7 @@ export default function Clients() {
       company_name: '', client_type: 'proprietor',
       contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [],
-      assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active'
+      assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
     });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
   };
@@ -778,6 +786,14 @@ export default function Clients() {
                 <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
                   <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
                   <span className="line-clamp-1">{locationStr || addressShort}</span>
+                </div>
+              )}
+
+              {/* Referred By */}
+              {client.referred_by && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">Ref: {client.referred_by}</span>
                 </div>
               )}
 
@@ -998,6 +1014,12 @@ export default function Clients() {
                     Established: {format(new Date(selectedClient.birthday), 'MMM d, yyyy')}
                   </p>
                 )}
+                {selectedClient.referred_by && (
+                  <p className="text-sm text-slate-500 mt-1">
+                    <Share2 className="inline h-3.5 w-3.5 mr-1" />
+                    Referred by: <span className="font-medium text-slate-700">{selectedClient.referred_by}</span>
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1169,377 +1191,400 @@ export default function Clients() {
   return (
     <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: '#F4F6FA' }}>
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-            <Users className="h-6 w-6" />
+      {/* ── PAGE HEADER — modernized ── */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm"
+        style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #2a85cc 100%)' }}>
+        {/* Decorative orb */}
+        <div className="absolute -top-10 -right-10 w-48 h-48 rounded-full opacity-10"
+          style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)' }} />
+        <div className="absolute bottom-0 left-1/3 w-64 h-24 opacity-5"
+          style={{ background: 'radial-gradient(ellipse, #fff 0%, transparent 70%)' }} />
+
+        <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 px-7 py-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0">
+              <Users className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Clients</h1>
+              <p className="text-sm text-blue-200 mt-0.5">Central hub for all client relationships</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Clients</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Central hub for all client relationships</p>
-          </div>
-        </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={downloadTemplate}
-            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl gap-2">
-            <FileText className="h-4 w-4" /> CSV Template
-          </Button>
-          <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading}
-            className="h-9 px-4 text-sm border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl">
-            {importLoading ? 'Importing…' : 'Import CSV'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={downloadTemplate}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm">
+              <FileText className="h-4 w-4" /> CSV Template
+            </Button>
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading}
+              className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">
+              {importLoading ? 'Importing…' : 'Import CSV'}
+            </Button>
 
-          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild>
-              <Button className="h-9 px-5 text-sm rounded-xl text-white shadow-sm gap-2 font-medium"
-                style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                <Plus className="h-4 w-4" /> New Client
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
-              <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
-                <div>
-                  <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
-                    {editingClient ? 'Edit Client Profile' : 'New Client Profile'}
-                  </DialogTitle>
-                  <DialogDescription className="text-sm text-slate-400 mt-0.5">
-                    Complete client information and preferences
-                  </DialogDescription>
-                </div>
-                <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
-                  <Switch
-                    checked={formData.status === 'active'}
-                    onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
-                  />
-                  <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {formData.status === 'active' ? 'Active' : 'Archived'}
-                  </span>
-                </div>
-              </div>
-              <form onSubmit={handleSubmit} className="p-8 space-y-7">
-                {/* Basic Details */}
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
-                  <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelCls}>Company Name <span className="text-red-400">*</span></label>
-                      <Input className={fieldCls(formErrors.company_name)} value={formData.company_name}
-                        onChange={e => { setFormData({...formData, company_name: e.target.value}); if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined})); }} required />
-                      {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
-                    </div>
-                    <div>
-                      <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
-                      <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
-                        <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
-                      <Input className={fieldCls(formErrors.email)} type="email" value={formData.email}
-                        onChange={e => { setFormData({...formData, email: e.target.value}); if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined})); }} required />
-                      {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
-                    </div>
-                    <div>
-                      <label className={labelCls}>Phone Number <span className="text-red-400">*</span></label>
-                      <Input className={fieldCls(formErrors.phone)} value={formData.phone}
-                        onChange={e => { setFormData({...formData, phone: e.target.value}); if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined})); }} required />
-                      {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className={labelCls}>Incorporation / Birthday</label>
-                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
-                        value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className={labelCls}>Address</label>
-                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                        placeholder="Street address (optional)"
-                        value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>City</label>
-                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                        placeholder="City (optional)"
-                        value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>State</label>
-                      <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                        placeholder="State (optional)"
-                        value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
-                    </div>
+            <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+              <DialogTrigger asChild>
+                <Button className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0">
+                  <Plus className="h-4 w-4" /> New Client
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
+                {/* Form header */}
+                <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
+                  <div>
+                    <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
+                      {editingClient ? 'Edit Client Profile' : 'New Client Profile'}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm text-slate-400 mt-0.5">
+                      Complete client information and preferences
+                    </DialogDescription>
+                  </div>
+                  <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
+                    <Switch
+                      checked={formData.status === 'active'}
+                      onCheckedChange={c => setFormData({...formData, status: c ? 'active' : 'inactive'})}
+                    />
+                    <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {formData.status === 'active' ? 'Active' : 'Archived'}
+                    </span>
                   </div>
                 </div>
+                <form onSubmit={handleSubmit} className="p-8 space-y-7">
 
-                {/* Contact Persons */}
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
-                  <div className="flex items-center justify-between mb-5">
-                    <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with" />
-                    <Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
-                      <Plus className="h-3 w-3 mr-1" /> Add Person
-                    </Button>
-                  </div>
-                  {formErrors.contacts && (
-                    <p className="text-red-500 text-xs mb-4 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.contacts}
-                    </p>
-                  )}
-                  <div className="space-y-4">
-                    {formData.contact_persons.map((cp, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                            <span className="text-sm font-semibold text-slate-700">Contact Person</span>
-                          </div>
-                          {formData.contact_persons.length > 1 && (
-                            <button type="button" onClick={() => removeContact(idx)}
-                              className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                              <Trash className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className={labelCls}>Full Name</label>
-                            <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)} className={fieldCls(contactErrors[idx]?.name)} />
-                            {contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}
-                          </div>
-                          <div>
-                            <label className={labelCls}>Designation</label>
-                            <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>Email</label>
-                            <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)} className={fieldCls(contactErrors[idx]?.email)} />
-                            {contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}
-                          </div>
-                          <div>
-                            <label className={labelCls}>Phone</label>
-                            <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} className={fieldCls(contactErrors[idx]?.phone)} />
-                            {contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}
-                          </div>
-                          <div>
-                            <label className={labelCls}>Birthday</label>
-                            <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>DIN (Director ID)</label>
-                            <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                        </div>
+                  {/* ── Basic Details ── */}
+                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                    <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Company Name <span className="text-red-400">*</span></label>
+                        <Input className={fieldCls(formErrors.company_name)} value={formData.company_name}
+                          onChange={e => { setFormData({...formData, company_name: e.target.value}); if (formErrors.company_name) setFormErrors(prev => ({...prev, company_name: undefined})); }} required />
+                        {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* DSC Details */}
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
-                  <div className="flex items-center justify-between mb-5">
-                    <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" />
-                    <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
-                      <Plus className="h-3 w-3 mr-1" /> Add DSC
-                    </Button>
-                  </div>
-                  <div className="space-y-4">
-                    {formData.dsc_details.map((dsc, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                            <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
-                          </div>
-                          {formData.dsc_details.length > 1 && (
-                            <button type="button" onClick={() => removeDSC(idx)}
-                              className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                              <Trash className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className={labelCls}>Certificate Number</label>
-                            <Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>Holder Name</label>
-                            <Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>Issue Date</label>
-                            <Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div>
-                            <label className={labelCls}>Expiry Date</label>
-                            <Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} />
-                          </div>
-                          <div className="md:col-span-2">
-                            <label className={labelCls}>Notes</label>
-                            <Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)}
-                              className="min-h-[80px] bg-white border-slate-200 rounded-xl text-sm resize-y" />
-                          </div>
-                        </div>
+                      <div>
+                        <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
+                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                          <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                        </Select>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Services */}
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
-                  <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
-                  {formErrors.services && (
-                    <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.services}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    {SERVICES.map(s => {
-                      const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
-                      return (
-                        <button key={s} type="button" onClick={() => toggleService(s)}
-                          className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
-                          style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
-                          {s}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {formData.services.includes('Other') && (
-                    <div className="flex gap-3 items-end max-w-sm mt-4">
-                      <div className="flex-1">
-                        <label className={labelCls}>Specify Other Service</label>
-                        <Input placeholder="e.g. IEC Registration" value={otherService}
-                          onChange={e => setOtherService(e.target.value)} className="h-10 rounded-xl text-sm border-slate-200" />
+                      <div>
+                        <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
+                        <Input className={fieldCls(formErrors.email)} type="email" value={formData.email}
+                          onChange={e => { setFormData({...formData, email: e.target.value}); if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined})); }} required />
+                        {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
                       </div>
-                      <Button type="button" size="sm" onClick={addOtherService}
-                        className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                        Add
-                      </Button>
+                      <div>
+                        <label className={labelCls}>Phone Number <span className="text-red-400">*</span></label>
+                        <Input className={fieldCls(formErrors.phone)} value={formData.phone}
+                          onChange={e => { setFormData({...formData, phone: e.target.value}); if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined})); }} required />
+                        {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Incorporation / Birthday</label>
+                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
+                          value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
+                      </div>
+                      {/* ── NEW: Referred By field ── */}
+                      <div>
+                        <label className={labelCls}>Referred By</label>
+                        <div className="relative">
+                          <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                          <Input
+                            className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10"
+                            placeholder="Name or company who referred this client"
+                            value={formData.referred_by}
+                            onChange={e => setFormData({...formData, referred_by: e.target.value})}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Who referred this client to us, or our data coordination contact</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={labelCls}>Address</label>
+                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                          placeholder="Street address (optional)"
+                          value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>City</label>
+                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                          placeholder="City (optional)"
+                          value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>State</label>
+                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                          placeholder="State (optional)"
+                          value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
+                      </div>
                     </div>
-                  )}
-                </div>
+                  </div>
 
-                {/* Notes */}
-                <div>
-                  <label className={labelCls}>Internal Notes</label>
-                  <Textarea className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
-                    placeholder="Internal remarks, preferences, or special instructions…"
-                    value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
-                </div>
-
-                {/* ── NEW: Multi-user Staff Assignments section ─────────────────────── */}
-                {canAssignClients && (
+                  {/* ── Contact Persons ── */}
                   <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                     <div className="flex items-center justify-between mb-5">
-                      <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" />
-                      <Button type="button" size="sm" onClick={addAssignment} variant="outline"
-                        className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
-                        <Plus className="h-3 w-3 mr-1" /> Add Staff
+                      <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with" />
+                      <Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                        <Plus className="h-3 w-3 mr-1" /> Add Person
                       </Button>
                     </div>
+                    {formErrors.contacts && (
+                      <p className="text-red-500 text-xs mb-4 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.contacts}
+                      </p>
+                    )}
                     <div className="space-y-4">
-                      {(formData.assignments || []).map((assignment, idx) => (
-                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5">
+                      {formData.contact_persons.map((cp, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                               <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                              <span className="text-sm font-semibold text-slate-700">Assignment</span>
+                              <span className="text-sm font-semibold text-slate-700">Contact Person</span>
                             </div>
-                            {(formData.assignments || []).length > 1 && (
-                              <button type="button" onClick={() => removeAssignment(idx)}
+                            {formData.contact_persons.length > 1 && (
+                              <button type="button" onClick={() => removeContact(idx)}
                                 className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                                 <Trash className="h-3.5 w-3.5" />
                               </button>
                             )}
                           </div>
-
-                          {/* Staff member select */}
-                          <div className="mb-4">
-                            <label className={labelCls}>Staff Member</label>
-                            <Select value={assignment.user_id || 'unassigned'}
-                              onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
-                              <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
-                                <SelectValue placeholder="Select team member" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unassigned">— Unassigned —</SelectItem>
-                                {users
-                                  .filter(u => {
-                                    // Don't show already-selected users in other rows
-                                    const otherAssignedIds = (formData.assignments || [])
-                                      .filter((_, i) => i !== idx)
-                                      .map(a => a.user_id)
-                                      .filter(Boolean);
-                                    return !otherAssignedIds.includes(u.id);
-                                  })
-                                  .map(u => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.name || u.email}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {/* Per-assignment service selection */}
-                          <div>
-                            <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
-                            <div className="flex flex-wrap gap-2 mt-1">
-                              {formData.services
-                                .filter(s => !s.startsWith('Other:') || s)
-                                .map(svc => {
-                                  const displaySvc = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc;
-                                  const isSelected = assignment.services.includes(svc);
-                                  return (
-                                    <button key={svc} type="button"
-                                      onClick={() => toggleAssignmentService(idx, svc)}
-                                      className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
-                                      style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
-                                      {displaySvc}
-                                    </button>
-                                  );
-                                })}
-                              {formData.services.length === 0 && (
-                                <p className="text-xs text-slate-400 italic">Select services above first to assign specific ones here</p>
-                              )}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className={labelCls}>Full Name</label>
+                              <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)} className={fieldCls(contactErrors[idx]?.name)} />
+                              {contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}
+                            </div>
+                            <div>
+                              <label className={labelCls}>Designation</label>
+                              <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div>
+                              <label className={labelCls}>Email</label>
+                              <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)} className={fieldCls(contactErrors[idx]?.email)} />
+                              {contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}
+                            </div>
+                            <div>
+                              <label className={labelCls}>Phone</label>
+                              <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} className={fieldCls(contactErrors[idx]?.phone)} />
+                              {contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}
+                            </div>
+                            <div>
+                              <label className={labelCls}>Birthday</label>
+                              <Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div>
+                              <label className={labelCls}>DIN (Director ID)</label>
+                              <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)} className={fieldCls(false)} />
                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
 
-                {/* Footer */}
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
-                  <div className="flex gap-2">
-                    <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="h-9 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
-                    <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
+                  {/* ── DSC Details ── */}
+                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-5">
+                      <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" />
+                      <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                        <Plus className="h-3 w-3 mr-1" /> Add DSC
+                      </Button>
+                    </div>
+                    <div className="space-y-4">
+                      {formData.dsc_details.map((dsc, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                              <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
+                            </div>
+                            {formData.dsc_details.length > 1 && (
+                              <button type="button" onClick={() => removeDSC(idx)}
+                                className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                <Trash className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className={labelCls}>Certificate Number</label>
+                              <Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div>
+                              <label className={labelCls}>Holder Name</label>
+                              <Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div>
+                              <label className={labelCls}>Issue Date</label>
+                              <Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div>
+                              <label className={labelCls}>Expiry Date</label>
+                              <Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className={labelCls}>Notes</label>
+                              <Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)}
+                                className="min-h-[80px] bg-white border-slate-200 rounded-xl text-sm resize-y" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
-                      onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
-                    <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
-                      disabled={importLoading} onClick={() => excelInputRef.current?.click()}>Import Master Data</Button>
-                    <Button type="submit" disabled={loading}
-                      className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm"
-                      style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                      {loading ? 'Saving…' : editingClient ? 'Update Client' : 'Create Client'}
-                    </Button>
+
+                  {/* ── Services ── */}
+                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                    <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
+                    {formErrors.services && (
+                      <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.services}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {SERVICES.map(s => {
+                        const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
+                        return (
+                          <button key={s} type="button" onClick={() => toggleService(s)}
+                            className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
+                            style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {formData.services.includes('Other') && (
+                      <div className="flex gap-3 items-end max-w-sm mt-4">
+                        <div className="flex-1">
+                          <label className={labelCls}>Specify Other Service</label>
+                          <Input placeholder="e.g. IEC Registration" value={otherService}
+                            onChange={e => setOtherService(e.target.value)} className="h-10 rounded-xl text-sm border-slate-200" />
+                        </div>
+                        <Button type="button" size="sm" onClick={addOtherService}
+                          className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                          Add
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+
+                  {/* ── Notes ── */}
+                  <div>
+                    <label className={labelCls}>Internal Notes</label>
+                    <Textarea className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
+                      placeholder="Internal remarks, preferences, or special instructions…"
+                      value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                  </div>
+
+                  {/* ── Multi-user Staff Assignments ── */}
+                  {canAssignClients && (
+                    <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" />
+                        <Button type="button" size="sm" onClick={addAssignment} variant="outline"
+                          className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
+                          <Plus className="h-3 w-3 mr-1" /> Add Staff
+                        </Button>
+                      </div>
+                      <div className="space-y-4">
+                        {(formData.assignments || []).map((assignment, idx) => (
+                          <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                                <span className="text-sm font-semibold text-slate-700">Assignment</span>
+                              </div>
+                              {(formData.assignments || []).length > 1 && (
+                                <button type="button" onClick={() => removeAssignment(idx)}
+                                  className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                  <Trash className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Staff member select */}
+                            <div className="mb-4">
+                              <label className={labelCls}>Staff Member</label>
+                              <Select value={assignment.user_id || 'unassigned'}
+                                onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
+                                <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
+                                  <SelectValue placeholder="Select team member" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="unassigned">— Unassigned —</SelectItem>
+                                  {users
+                                    .filter(u => {
+                                      // Don't show already-selected users in other rows
+                                      const otherAssignedIds = (formData.assignments || [])
+                                        .filter((_, i) => i !== idx)
+                                        .map(a => a.user_id)
+                                        .filter(Boolean);
+                                      return !otherAssignedIds.includes(u.id);
+                                    })
+                                    .map(u => (
+                                      <SelectItem key={u.id} value={u.id}>
+                                        {u.full_name || u.name || u.email}
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Per-assignment service selection */}
+                            <div>
+                              <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
+                              <div className="flex flex-wrap gap-2 mt-1">
+                                {formData.services
+                                  .filter(s => !s.startsWith('Other:') || s)
+                                  .map(svc => {
+                                    const displaySvc = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc;
+                                    const isSelected = assignment.services.includes(svc);
+                                    return (
+                                      <button key={svc} type="button"
+                                        onClick={() => toggleAssignmentService(idx, svc)}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                                        style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
+                                        {displaySvc}
+                                      </button>
+                                    );
+                                  })}
+                                {formData.services.length === 0 && (
+                                  <p className="text-xs text-slate-400 italic">Select services above first to assign specific ones here</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Footer ── */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
+                    <div className="flex gap-2">
+                      <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="h-9 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
+                      <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
+                        onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
+                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200"
+                        disabled={importLoading} onClick={() => excelInputRef.current?.click()}>Import Master Data</Button>
+                      <Button type="submit" disabled={loading}
+                        className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm"
+                        style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                        {loading ? 'Saving…' : editingClient ? 'Update Client' : 'Create Client'}
+                      </Button>
+                    </div>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
 
-      {/* Today's Celebrations */}
+      {/* ── Today's Celebrations ── */}
       {canViewAllClients && todayReminders.length > 0 && (
         <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
@@ -1559,30 +1604,31 @@ export default function Clients() {
         </div>
       )}
 
-      {/* Stats Cards */}
+      {/* ── Stats Cards — modernized ── */}
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Total Clients', value: stats.totalClients, icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66', accent: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' },
-            { label: 'Active', value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A', accent: 'linear-gradient(135deg, #065f46, #059669)' },
-            { label: 'Archived', value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', accent: 'linear-gradient(135deg, #92400e, #D97706)' },
-            { label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', accent: 'linear-gradient(135deg, #4c1d95, #7c3aed)', isText: true },
+            { label: 'Total Clients', value: stats.totalClients, icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66', accent: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', bar: '#1F6FB2' },
+            { label: 'Active', value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A', accent: 'linear-gradient(135deg, #065f46, #059669)', bar: '#059669' },
+            { label: 'Archived', value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', accent: 'linear-gradient(135deg, #92400e, #D97706)', bar: '#D97706' },
+            { label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', accent: 'linear-gradient(135deg, #4c1d95, #7c3aed)', bar: '#7c3aed', isText: true },
           ].map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-shadow"
+            <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden"
               style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-              <div className="flex items-start justify-between mb-3">
+              {/* Left accent bar */}
+              <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: s.bar }} />
+              <div className="flex items-start justify-between mb-3 pl-2">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div>
-                <div className="w-1 h-8 rounded-full opacity-30" style={{ background: s.accent }} />
               </div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
-              <p className={`font-bold text-slate-900 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>{s.value}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 pl-2">{s.label}</p>
+              <p className={`font-bold text-slate-900 pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>{s.value}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Filters + View Toggle */}
+      {/* ── Filters + View Toggle — modernized ── */}
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1606,7 +1652,7 @@ export default function Clients() {
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
-          {/* ── NEW: Assigned To filter ──────────────────────────────────── */}
+          {/* ── NEW: Assigned To filter ── */}
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
               <SelectTrigger className="h-10 w-[160px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Staff" /></SelectTrigger>
@@ -1679,7 +1725,7 @@ export default function Clients() {
               <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
               <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
               <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
-              {/* ── NEW: Assigned column header ─────────────────────────── */}
+              {/* ── NEW: Assigned column header ── */}
               <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
               <div className="w-24 flex-shrink-0" />
             </div>
@@ -1752,7 +1798,8 @@ export default function Clients() {
                         client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
                         email: row.email?.trim(), phone: row.phone?.replace(/\D/g, ""), birthday: row.birthday || null,
                         services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-                        notes: row.notes?.trim() || null, assigned_to: null, assignments: [], contact_persons: [], dsc_details: []
+                        notes: row.notes?.trim() || null, assigned_to: null, assignments: [], contact_persons: [], dsc_details: [],
+                        referred_by: null,
                       });
                       success++;
                     } catch (err) { console.error(err); }
@@ -1856,6 +1903,12 @@ export default function Clients() {
                     <label className={labelCls}>State</label>
                     <input className={mdsFieldCls} value={mdsForm.state || ''}
                       onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} placeholder="State (optional)" />
+                  </div>
+                  {/* ── NEW: Referred By in MDS form ── */}
+                  <div className="md:col-span-2">
+                    <label className={labelCls}>Referred By</label>
+                    <input className={mdsFieldCls} value={mdsForm.referred_by || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, referred_by: e.target.value }))} placeholder="Who referred or coordinates data for this client" />
                   </div>
                 </div>
                 <div className="mt-4">
