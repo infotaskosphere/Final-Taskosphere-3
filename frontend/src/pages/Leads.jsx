@@ -252,7 +252,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         category:     form.category,
         status:       'pending',
         due_date:     form.due_date ? new Date(form.due_date).toISOString() : null,
-        assigned_to:  form.assigned_to || null,
+        assigned_to:  form.assigned_to && form.assigned_to !== 'unassigned' ? form.assigned_to : null,
         is_recurring: false,
         sub_assignees: [],
       });
@@ -328,13 +328,14 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
               Assign Task To
             </Label>
             <Select
-              value={form.assigned_to}
-              onValueChange={v => setForm(f => ({ ...f, assigned_to: v }))}
+              value={form.assigned_to || 'unassigned'}
+              onValueChange={v => setForm(f => ({ ...f, assigned_to: v === 'unassigned' ? '' : v }))}
             >
               <SelectTrigger className="h-9 rounded-2xl text-sm">
                 <SelectValue placeholder="Select a team member…" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="unassigned">— Unassigned —</SelectItem>
                 {users.map(u => (
                   <SelectItem key={u.id} value={u.id}>
                     <span className="flex items-center gap-2">
@@ -445,8 +446,8 @@ export default function LeadsPage() {
   const [viewMode,          setViewMode]          = useState('list');
   const [dialogOpen,        setDialogOpen]        = useState(false);
   const [editingLead,       setEditingLead]       = useState(null);
-  const [convertingLead,    setConvertingLead]    = useState(null);       // for task conversion
-  const [clientConvLead,    setClientConvLead]    = useState(null);       // for client conversion popup
+  const [convertingLead,    setConvertingLead]    = useState(null);
+  const [clientConvLead,    setClientConvLead]    = useState(null);
   const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
   const [activeFilters,     setActiveFilters]     = useState([]);
@@ -550,7 +551,7 @@ export default function LeadsPage() {
       source:              formData.source           || 'direct',
       referred_by:         formData.referred_by      || null,
       notes:               formData.notes            || null,
-      assigned_to:         formData.assigned_to      || null,
+      assigned_to:         formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
       status:              formData.status           || 'new',
       next_follow_up:      formData.next_follow_up   || null,
       date_of_meeting:     formData.date_of_meeting  || null,
@@ -584,10 +585,8 @@ export default function LeadsPage() {
     }
   };
 
-  // Stage change — intercept "won" to show client conversion popup instead
   const handleQuickStage = async (lead, newStatus) => {
     if (newStatus === 'won') {
-      // Show client conversion confirmation dialog
       setClientConvLead(lead);
       return;
     }
@@ -598,7 +597,6 @@ export default function LeadsPage() {
     } catch (err) { toast.error('Failed to update stage'); }
   };
 
-  // "Convert to Client Now" — calls /convert endpoint which also marks as won
   const handleClientConvertNow = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
@@ -614,7 +612,6 @@ export default function LeadsPage() {
     }
   };
 
-  // "We'll convert it later" — just marks the lead as won without creating client
   const handleClientConvertLater = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
@@ -633,7 +630,6 @@ export default function LeadsPage() {
     }
   };
 
-  // Convert button — opens the full task-creation flow (which also triggers /convert)
   const handleConvertButtonClick = (lead) => {
     setConvertingLead(lead);
   };
@@ -650,7 +646,6 @@ export default function LeadsPage() {
     if (key === 'status') setStatusFilter('all');
   };
 
-  // Helper to resolve user name from id
   const userNameById = (id) => {
     const u = allUsers.find(u => u.id === id);
     return u ? u.full_name : id || '—';
@@ -1290,15 +1285,16 @@ export default function LeadsPage() {
                 <UserCheck className="h-3.5 w-3.5 text-slate-400" />
                 Assign To
               </Label>
+              {/* FIX: use 'unassigned' sentinel instead of empty string */}
               <Select
-                value={formData.assigned_to || ''}
-                onValueChange={v => handleChange('assigned_to', v)}
+                value={formData.assigned_to || 'unassigned'}
+                onValueChange={v => handleChange('assigned_to', v === 'unassigned' ? null : v)}
               >
                 <SelectTrigger className="h-10 rounded-2xl text-sm">
                   <SelectValue placeholder="Select team member…" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— Unassigned —</SelectItem>
+                  <SelectItem value="unassigned">— Unassigned —</SelectItem>
                   {allUsers.map(u => (
                     <SelectItem key={u.id} value={u.id}>
                       <span className="flex items-center gap-2">
