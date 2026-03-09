@@ -694,26 +694,47 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
-# CHANGE SET 9: Login Endpoint (Add Status Gate)
+# ============================================================
+# BUG FIX: Login Endpoint — status check now handles legacy
+# accounts (admin/staff created before the status field was
+# added) that have status=None.  Previously the check was:
+#
+#     if user.get("status") != "active":   ← blocks None too
+#
+# This caused admin accounts without an explicit "status" field
+# to receive 403 "Insufficient permissions" on every login.
+#
+# Fix: only reject login when status is explicitly set to a
+# non-active value.  If status is absent (None), the account
+# is treated as active for backward compatibility.
+# ============================================================
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
- user = await db.users.find_one({"email": credentials.email})
- if not user or not verify_password(credentials.password, user["password"]):
-  raise HTTPException(status_code=401, detail="Invalid email or password")
- 
- # NEW: Check approval status
- if user.get("status") != "active":
-  raise HTTPException(
-   status_code=403,
-   detail=f"Your account is {user.get('status', 'inactive')}. Awaiting admin approval."
-  )
- 
- user["permissions"] = user.get("permissions", UserPermissions().model_dump())
- if "created_at" in user and isinstance(user["created_at"], str):
-  user["created_at"] = datetime.fromisoformat(user["created_at"])
- user_obj = User(**{k: v for k, v in user.items() if k != "password"})
- access_token = create_access_token({"sub": user_obj.id})
- return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
+    user = await db.users.find_one({"email": credentials.email})
+    if not user or not verify_password(credentials.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # ── STATUS GATE ─────────────────────────────────────────────────────────
+    # Allow login when:
+    #   • status == "active"                     (normal active account)
+    #   • status is None / missing               (legacy account created before
+    #                                             the status field was introduced)
+    # Block login when status is explicitly set to anything else
+    # (e.g. "pending_approval", "rejected", "inactive").
+    user_status = user.get("status")
+    if user_status is not None and user_status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your account is {user_status}. Awaiting admin approval."
+        )
+    # ────────────────────────────────────────────────────────────────────────
+
+    user["permissions"] = user.get("permissions", UserPermissions().model_dump())
+    if "created_at" in user and isinstance(user["created_at"], str):
+        user["created_at"] = datetime.fromisoformat(user["created_at"])
+    user_obj = User(**{k: v for k, v in user.items() if k != "password"})
+    access_token = create_access_token({"sub": user_obj.id})
+    return {"access_token": access_token, "token_type": "bearer", "user": user_obj}
         
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
