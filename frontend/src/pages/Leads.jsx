@@ -21,6 +21,8 @@ import {
   Mail, Calendar, List, LayoutGrid, Check, TrendingUp,
   AlertTriangle, Clock, Zap, CheckCircle2, Loader2,
   Circle, X, ArrowRight, IndianRupee, FileText,
+  UserCheck, Users, Tag, MessageSquare, Target,
+  ChevronRight, Sparkles, ShieldCheck, Timer,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -78,12 +80,22 @@ const TASK_CATEGORIES = [
   { value: 'other',        label: 'Other'        },
 ];
 
-const stageOf  = (id) => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
+const CLIENT_TYPES = [
+  { value: 'proprietorship', label: 'Proprietorship' },
+  { value: 'partnership',    label: 'Partnership'    },
+  { value: 'pvt_ltd',        label: 'Private Limited' },
+  { value: 'llp',            label: 'LLP'            },
+  { value: 'trust',          label: 'Trust'          },
+  { value: 'other',          label: 'Other'          },
+];
+
+const stageOf   = (id) => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
 const isOverdue = (lead) =>
   lead.next_follow_up &&
   new Date(lead.next_follow_up) < new Date() &&
   !['won','lost'].includes(lead.status);
 
+// ─── Strip Card ───────────────────────────────────────────────────────────────
 const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', children }) => (
   <div className={cn(
     'relative rounded-2xl border transition-all duration-300 ease-in-out overflow-hidden group',
@@ -99,6 +111,7 @@ const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', 
   </div>
 );
 
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 const StatCard = ({ label, value, color, onClick, active }) => (
   <Card
     onClick={onClick}
@@ -114,6 +127,78 @@ const StatCard = ({ label, value, color, onClick, active }) => (
   </Card>
 );
 
+// ─── Client Conversion Confirmation Dialog ────────────────────────────────────
+function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLater, converting }) {
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <ShieldCheck className="h-5 w-5 text-emerald-500" />
+            Convert to Client?
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 leading-relaxed">
+            <strong>{lead?.company_name}</strong> has been marked as <strong className="text-emerald-600">Won</strong>.
+            Would you like to convert this lead into a client right now, or do it later?
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          {/* Convert Now Option */}
+          <button
+            onClick={onConvertNow}
+            disabled={converting}
+            className="w-full text-left rounded-2xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 p-4 transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0 group-hover:bg-emerald-200 transition-colors">
+                {converting
+                  ? <Loader2 className="h-4 w-4 text-emerald-600 animate-spin" />
+                  : <Building2 className="h-4 w-4 text-emerald-600" />
+                }
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-emerald-800">Convert to Client Now</p>
+                <p className="text-xs text-emerald-600 mt-0.5 leading-relaxed">
+                  Creates a client profile, marks this lead as Won, and triggers an onboarding task automatically.
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-emerald-400 ml-auto flex-shrink-0 mt-0.5" />
+            </div>
+          </button>
+
+          {/* Later Option */}
+          <button
+            onClick={onConvertLater}
+            disabled={converting}
+            className="w-full text-left rounded-2xl border-2 border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 p-4 transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 transition-colors">
+                <Timer className="h-4 w-4 text-slate-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-700">We'll Convert It Later</p>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  Marks the lead as Won but keeps it in the pipeline for now. You can convert to client anytime.
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-slate-300 ml-auto flex-shrink-0 mt-0.5" />
+            </div>
+          </button>
+        </div>
+
+        <DialogFooter className="pt-2">
+          <Button variant="ghost" onClick={onClose} disabled={converting} className="rounded-2xl h-9 text-slate-500">
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Convert to Task Dialog ───────────────────────────────────────────────────
 function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   const { user: currentUser } = useAuth();
   const [form, setForm] = useState({
@@ -127,7 +212,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   const [users,   setUsers]   = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch users for the assignee dropdown
   useEffect(() => {
     if (open) {
       api.get('/users')
@@ -144,13 +228,14 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         assigned_to: lead.assigned_to || currentUser?.id || '',
         description: [
           `Lead converted to client from pipeline.`,
-          `Contact:  ${lead.contact_name  || '—'}`,
-          `Phone:    ${lead.phone         || '—'}`,
-          `Email:    ${lead.email         || '—'}`,
-          `Services: ${(lead.services||[]).join(', ') || '—'}`,
-          `Value:    ₹${(Number(lead.quotation_amount)||0).toLocaleString()}`,
-          `Referred By: ${lead.referred_by || '—'}`,
-          `Notes:    ${lead.notes         || '—'}`,
+          `Contact:    ${lead.contact_name  || '—'}`,
+          `Phone:      ${lead.phone         || '—'}`,
+          `Email:      ${lead.email         || '—'}`,
+          `Services:   ${(lead.services||[]).join(', ') || '—'}`,
+          `Value:      ₹${(Number(lead.quotation_amount)||0).toLocaleString()}`,
+          `Source:     ${lead.source?.replace('_',' ') || '—'}`,
+          `Referred By:${lead.referred_by   || '—'}`,
+          `Notes:      ${lead.notes         || '—'}`,
         ].join('\n'),
       }));
     }
@@ -181,6 +266,9 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
     }
   };
 
+  // Resolve display name for assigned user
+  const assignedUser = users.find(u => u.id === form.assigned_to);
+
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="max-w-lg">
@@ -190,11 +278,12 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
             Convert Lead → Client + Task
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-500">
-            Marks <strong>{lead?.company_name}</strong> as <strong>Won</strong> and creates a follow-up task automatically.
+            Marks <strong>{lead?.company_name}</strong> as <strong>Won</strong>, creates a client profile, and a follow-up task automatically.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
+          {/* Lead Summary */}
           <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-3">
             <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
               <Building2 className="h-4 w-4 text-emerald-600" />
@@ -203,12 +292,24 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
               <p className="text-sm font-semibold text-slate-800 truncate">{lead?.company_name}</p>
               <p className="text-xs text-slate-500">
                 ₹{(Number(lead?.quotation_amount)||0).toLocaleString()} · {lead?.contact_name || 'No contact'}
+                {lead?.referred_by && <span className="text-emerald-600"> · Ref: {lead.referred_by}</span>}
               </p>
             </div>
             <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-600 text-white flex-shrink-0">
               → WON
             </span>
           </div>
+
+          {/* Assigned To (from lead) */}
+          {assignedUser && (
+            <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
+              <UserCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+              <p className="text-xs text-blue-700">
+                This lead is assigned to <strong>{assignedUser.full_name}</strong>
+                {assignedUser.id === currentUser?.id && <span className="text-blue-500"> (you)</span>}
+              </p>
+            </div>
+          )}
 
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-0.5">Follow-up Task Details</p>
 
@@ -312,6 +413,16 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   );
 }
 
+// ─── Section Label ────────────────────────────────────────────────────────────
+const SectionLabel = ({ icon: Icon, children }) => (
+  <div className="md:col-span-2 flex items-center gap-2 pt-2">
+    <Icon className="h-3.5 w-3.5 text-slate-400" />
+    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{children}</p>
+    <div className="flex-1 h-px bg-slate-100" />
+  </div>
+);
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function LeadsPage() {
   const { user } = useAuth();
 
@@ -326,6 +437,7 @@ export default function LeadsPage() {
 
   const [leads,             setLeads]             = useState([]);
   const [availableServices, setAvailableServices] = useState([]);
+  const [allUsers,          setAllUsers]          = useState([]);
   const [loading,           setLoading]           = useState(true);
   const [submitting,        setSubmitting]        = useState(false);
   const [searchQuery,       setSearchQuery]       = useState('');
@@ -333,24 +445,27 @@ export default function LeadsPage() {
   const [viewMode,          setViewMode]          = useState('list');
   const [dialogOpen,        setDialogOpen]        = useState(false);
   const [editingLead,       setEditingLead]       = useState(null);
-  const [convertingLead,    setConvertingLead]    = useState(null);
+  const [convertingLead,    setConvertingLead]    = useState(null);       // for task conversion
+  const [clientConvLead,    setClientConvLead]    = useState(null);       // for client conversion popup
+  const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
   const [activeFilters,     setActiveFilters]     = useState([]);
 
   const emptyForm = {
-    company_name:    '',
-    contact_name:    null,
-    email:           null,
-    phone:           null,
-    quotation_amount:null,
-    services:        [],
-    source:          'direct',
-    referred_by:     null,
-    notes:           null,
-    assigned_to:     null,
-    status:          'new',
-    next_follow_up:  null,
-    date_of_meeting: null,
+    company_name:        '',
+    contact_name:        null,
+    email:               null,
+    phone:               null,
+    quotation_amount:    null,
+    services:            [],
+    source:              'direct',
+    referred_by:         null,
+    notes:               null,
+    assigned_to:         null,
+    status:              'new',
+    next_follow_up:      null,
+    date_of_meeting:     null,
+    closure_probability: null,
   };
   const [formData, setFormData] = useState(emptyForm);
 
@@ -365,6 +480,7 @@ export default function LeadsPage() {
   useEffect(() => {
     fetchLeads();
     api.get('/leads/meta/services').then(r => setAvailableServices(r.data)).catch(() => {});
+    api.get('/users').then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
   const stats = useMemo(() => ({
@@ -384,7 +500,8 @@ export default function LeadsPage() {
         !q ||
         l.company_name?.toLowerCase().includes(q) ||
         l.contact_name?.toLowerCase().includes(q) ||
-        l.email?.toLowerCase().includes(q)
+        l.email?.toLowerCase().includes(q) ||
+        l.referred_by?.toLowerCase().includes(q)
       )
       .filter(l => statusFilter === 'all' || l.status === statusFilter);
   }, [leads, searchQuery, statusFilter]);
@@ -397,19 +514,20 @@ export default function LeadsPage() {
   const handleEdit = (lead) => {
     setEditingLead(lead);
     setFormData({
-      company_name:    lead.company_name    || '',
-      contact_name:    lead.contact_name    || null,
-      email:           lead.email           || null,
-      phone:           lead.phone           || null,
-      quotation_amount:lead.quotation_amount|| null,
-      services:        Array.isArray(lead.services) ? lead.services : [],
-      source:          lead.source          || 'direct',
-      referred_by:     lead.referred_by     || null,
-      notes:           lead.notes           || null,
-      assigned_to:     lead.assigned_to     || null,
-      status:          lead.status          || 'new',
-      next_follow_up:  lead.next_follow_up  || null,
-      date_of_meeting: lead.date_of_meeting || null,
+      company_name:        lead.company_name    || '',
+      contact_name:        lead.contact_name    || null,
+      email:               lead.email           || null,
+      phone:               lead.phone           || null,
+      quotation_amount:    lead.quotation_amount|| null,
+      services:            Array.isArray(lead.services) ? lead.services : [],
+      source:              lead.source          || 'direct',
+      referred_by:         lead.referred_by     || null,
+      notes:               lead.notes           || null,
+      assigned_to:         lead.assigned_to     || null,
+      status:              lead.status          || 'new',
+      next_follow_up:      lead.next_follow_up  || null,
+      date_of_meeting:     lead.date_of_meeting || null,
+      closure_probability: lead.closure_probability ?? null,
     });
     setDialogOpen(true);
   };
@@ -423,19 +541,20 @@ export default function LeadsPage() {
     }
     setSubmitting(true);
     const payload = {
-      company_name:     formData.company_name?.trim() || '',
-      contact_name:     formData.contact_name     || null,
-      email:            formData.email            || null,
-      phone:            formData.phone            || null,
-      quotation_amount: formData.quotation_amount ? Number(formData.quotation_amount) : null,
-      services:         Array.isArray(formData.services) ? formData.services : [],
-      source:           formData.source           || 'direct',
-      referred_by:      formData.referred_by      || null,
-      notes:            formData.notes            || null,
-      assigned_to:      formData.assigned_to      || null,
-      status:           formData.status           || 'new',
-      next_follow_up:   formData.next_follow_up   || null,
-      date_of_meeting:  formData.date_of_meeting  || null,
+      company_name:        formData.company_name?.trim() || '',
+      contact_name:        formData.contact_name     || null,
+      email:               formData.email            || null,
+      phone:               formData.phone            || null,
+      quotation_amount:    formData.quotation_amount ? Number(formData.quotation_amount) : null,
+      services:            Array.isArray(formData.services) ? formData.services : [],
+      source:              formData.source           || 'direct',
+      referred_by:         formData.referred_by      || null,
+      notes:               formData.notes            || null,
+      assigned_to:         formData.assigned_to      || null,
+      status:              formData.status           || 'new',
+      next_follow_up:      formData.next_follow_up   || null,
+      date_of_meeting:     formData.date_of_meeting  || null,
+      closure_probability: formData.closure_probability != null ? Number(formData.closure_probability) : null,
     };
     try {
       if (editingLead) {
@@ -465,13 +584,58 @@ export default function LeadsPage() {
     }
   };
 
+  // Stage change — intercept "won" to show client conversion popup instead
   const handleQuickStage = async (lead, newStatus) => {
-    if (newStatus === 'won') { setConvertingLead(lead); return; }
+    if (newStatus === 'won') {
+      // Show client conversion confirmation dialog
+      setClientConvLead(lead);
+      return;
+    }
     if (newStatus === 'lost' && !window.confirm(`Mark "${lead.company_name}" as Lost?`)) return;
     try {
       await api.patch(`/leads/${lead.id}`, { status: newStatus });
       fetchLeads();
     } catch (err) { toast.error('Failed to update stage'); }
+  };
+
+  // "Convert to Client Now" — calls /convert endpoint which also marks as won
+  const handleClientConvertNow = async () => {
+    if (!clientConvLead) return;
+    setClientConverting(true);
+    try {
+      await api.post(`/leads/${clientConvLead.id}/convert`);
+      toast.success(`"${clientConvLead.company_name}" converted to client!`);
+      setClientConvLead(null);
+      fetchLeads();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Conversion failed');
+    } finally {
+      setClientConverting(false);
+    }
+  };
+
+  // "We'll convert it later" — just marks the lead as won without creating client
+  const handleClientConvertLater = async () => {
+    if (!clientConvLead) return;
+    setClientConverting(true);
+    try {
+      await api.patch(`/leads/${clientConvLead.id}`, {
+        status: 'won',
+        converted_client_id: null,
+      });
+      toast.success(`"${clientConvLead.company_name}" marked as Won. You can convert to client anytime.`);
+      setClientConvLead(null);
+      fetchLeads();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to mark as won');
+    } finally {
+      setClientConverting(false);
+    }
+  };
+
+  // Convert button — opens the full task-creation flow (which also triggers /convert)
+  const handleConvertButtonClick = (lead) => {
+    setConvertingLead(lead);
   };
 
   useEffect(() => {
@@ -484,6 +648,12 @@ export default function LeadsPage() {
   const removeFilter = (key) => {
     if (key === 'search') setSearchQuery('');
     if (key === 'status') setStatusFilter('all');
+  };
+
+  // Helper to resolve user name from id
+  const userNameById = (id) => {
+    const u = allUsers.find(u => u.id === id);
+    return u ? u.full_name : id || '—';
   };
 
   if (loading) return (
@@ -500,6 +670,7 @@ export default function LeadsPage() {
       animate="visible"
     >
 
+      {/* ── Header ── */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm rounded-3xl overflow-hidden">
           <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-600" />
@@ -547,6 +718,7 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
+      {/* ── Stats ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard label="Total"   value={stats.total}   color="text-slate-800"   onClick={() => setStatusFilter('all')} active={statusFilter === 'all'} />
         <StatCard label="Active"  value={stats.active}  color="text-blue-600"    onClick={() => setStatusFilter('all')} active={false} />
@@ -555,6 +727,7 @@ export default function LeadsPage() {
         <StatCard label="Overdue" value={stats.overdue} color="text-orange-600"  onClick={() => setStatusFilter('all')} active={false} />
       </motion.div>
 
+      {/* ── Revenue ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
         <Card className="rounded-2xl border border-emerald-200 bg-emerald-50">
           <CardContent className="p-4">
@@ -570,6 +743,7 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
+      {/* ── Filters ── */}
       <motion.div
         variants={itemVariants}
         className="flex items-center justify-between gap-3 flex-wrap w-full"
@@ -578,7 +752,7 @@ export default function LeadsPage() {
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="Search leads…"
+              placeholder="Search leads, referrals…"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-10 bg-white rounded-2xl"
@@ -617,6 +791,7 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
+      {/* ── List View ── */}
       {viewMode === 'list' && (
         <motion.div className="space-y-3" variants={containerVariants}>
           {filteredLeads.length === 0 && (
@@ -637,6 +812,7 @@ export default function LeadsPage() {
                 <DashboardStripCard stripeColor={stage.stripe}>
                   <div className="flex flex-col gap-3">
 
+                    {/* Row 1: Name + badge + actions */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
                         <span className="text-base font-semibold text-slate-900 leading-tight">
@@ -658,7 +834,7 @@ export default function LeadsPage() {
                             : prob >= 40 ? 'bg-amber-50 text-amber-700'
                             : 'bg-red-50 text-red-600',
                           )}>
-                            {prob}% close
+                            <Target className="h-3 w-3 mr-1" />{prob}% close
                           </span>
                         )}
 
@@ -679,7 +855,7 @@ export default function LeadsPage() {
                             size="sm"
                             variant="outline"
                             className="h-7 px-3 text-xs font-semibold rounded-xl border-emerald-300 text-emerald-700 hover:bg-emerald-50 gap-1"
-                            onClick={() => setConvertingLead(lead)}
+                            onClick={() => handleConvertButtonClick(lead)}
                           >
                             <Zap className="h-3.5 w-3.5" /> Convert
                           </Button>
@@ -706,6 +882,7 @@ export default function LeadsPage() {
                       </div>
                     </div>
 
+                    {/* Row 2: Contact details */}
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
                       {lead.contact_name && (
                         <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5" />{lead.contact_name}</span>
@@ -726,6 +903,12 @@ export default function LeadsPage() {
                         <span className="flex items-center gap-1.5 font-medium text-emerald-600">
                           <User className="h-3.5 w-3.5" />
                           Ref: {lead.referred_by}
+                        </span>
+                      )}
+                      {lead.assigned_to && (
+                        <span className="flex items-center gap-1.5 font-medium text-blue-600">
+                          <UserCheck className="h-3.5 w-3.5" />
+                          {userNameById(lead.assigned_to)}
                         </span>
                       )}
                       {lead.next_follow_up && (
@@ -752,6 +935,7 @@ export default function LeadsPage() {
                       </span>
                     </div>
 
+                    {/* Row 3: Services */}
                     {(lead.services||[]).length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {lead.services.map(s => (
@@ -762,6 +946,7 @@ export default function LeadsPage() {
                       </div>
                     )}
 
+                    {/* Row 4: Stage bar + buttons */}
                     <div className="space-y-2 pt-1 border-t border-slate-100">
                       <div className="flex items-center gap-1">
                         {ACTIVE_STAGES.map((sid, i) => {
@@ -805,6 +990,12 @@ export default function LeadsPage() {
                             );
                           })}
                           <button
+                            onClick={() => handleQuickStage(lead, 'won')}
+                            className="h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400 transition-all"
+                          >
+                            Won
+                          </button>
+                          <button
                             onClick={() => handleQuickStage(lead, 'lost')}
                             className="h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-red-400 border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-300 transition-all"
                           >
@@ -819,6 +1010,7 @@ export default function LeadsPage() {
             );
           })}
 
+          {/* Closed leads */}
           {filteredLeads.some(l => ['won','lost'].includes(l.status)) && (
             <div className="space-y-2 pt-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Closed</p>
@@ -828,11 +1020,30 @@ export default function LeadsPage() {
                   <motion.div key={lead.id} variants={itemVariants}>
                     <DashboardStripCard stripeColor={stage.stripe} isCompleted>
                       <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
                           <span className="text-sm font-semibold text-slate-600">{lead.company_name}</span>
                           <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border', stage.badge)}>
                             {stage.label}
                           </span>
+                          {lead.assigned_to && (
+                            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600">
+                              <UserCheck className="h-3 w-3" />
+                              {userNameById(lead.assigned_to)}
+                            </span>
+                          )}
+                          {lead.converted_client_id && (
+                            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
+                              <CheckCircle2 className="h-3 w-3" /> Client Created
+                            </span>
+                          )}
+                          {lead.status === 'won' && !lead.converted_client_id && canEditLead(lead) && (
+                            <button
+                              onClick={() => setClientConvLead(lead)}
+                              className="hidden sm:inline-flex items-center gap-1 text-[11px] text-amber-600 font-semibold border border-amber-200 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors"
+                            >
+                              <Building2 className="h-3 w-3" /> Convert to Client
+                            </button>
+                          )}
                           {(lead.services||[]).slice(0,2).map(s => (
                             <span key={s} className="hidden sm:inline px-2 py-0.5 rounded-lg text-[11px] bg-white text-slate-500 border border-slate-200">
                               {s}
@@ -865,6 +1076,7 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
+      {/* ── Kanban View ── */}
       {viewMode === 'kanban' && (
         <motion.div
           className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
@@ -911,6 +1123,11 @@ export default function LeadsPage() {
                                 <User className="h-3 w-3 flex-shrink-0" />{lead.contact_name}
                               </p>
                             )}
+                            {lead.assigned_to && (
+                              <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1">
+                                <UserCheck className="h-3 w-3 flex-shrink-0" />{userNameById(lead.assigned_to)}
+                              </p>
+                            )}
                             {lead.referred_by && (
                               <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
                                 <User className="h-3 w-3 flex-shrink-0" />Ref: {lead.referred_by}
@@ -948,7 +1165,7 @@ export default function LeadsPage() {
                               )}
                               {canEditLead(lead) && (
                                 <button
-                                  onClick={() => setConvertingLead(lead)}
+                                  onClick={() => handleConvertButtonClick(lead)}
                                   className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors flex items-center justify-center gap-1"
                                 >
                                   <Zap className="h-3 w-3" /> Win
@@ -973,6 +1190,7 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
+      {/* ── Lead Form Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={open => { if (!open) closeDialog(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -985,6 +1203,9 @@ export default function LeadsPage() {
           </DialogHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
+
+            {/* ── Company Info ── */}
+            <SectionLabel icon={Building2}>Company Info</SectionLabel>
 
             <div className="md:col-span-2 space-y-1.5">
               <Label>Company Name <span className="text-red-500">*</span></Label>
@@ -1008,15 +1229,6 @@ export default function LeadsPage() {
                 className="h-10 rounded-2xl"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Lead Source</Label>
-              <Select value={formData.source || 'direct'} onValueChange={v => handleChange('source', v)}>
-                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {LEAD_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
 
             <div className="space-y-1.5">
               <Label>Email</Label>
@@ -1028,6 +1240,7 @@ export default function LeadsPage() {
                 className="h-10 rounded-2xl"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label>Phone</Label>
               <Input
@@ -1049,14 +1262,55 @@ export default function LeadsPage() {
               />
             </div>
 
+            {/* ── Lead Source & Assignment ── */}
+            <SectionLabel icon={ArrowRight}>Source & Assignment</SectionLabel>
+
+            <div className="space-y-1.5">
+              <Label>Lead Source</Label>
+              <Select value={formData.source || 'direct'} onValueChange={v => handleChange('source', v)}>
+                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {LEAD_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Referred By</Label>
               <Input
                 value={formData.referred_by || ''}
                 onChange={e => handleChange('referred_by', e.target.value)}
-                placeholder="Name of CA or person who referred this lead"
+                placeholder="Name of person who referred this lead"
                 className="h-10 rounded-2xl"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <UserCheck className="h-3.5 w-3.5 text-slate-400" />
+                Assign To
+              </Label>
+              <Select
+                value={formData.assigned_to || ''}
+                onValueChange={v => handleChange('assigned_to', v)}
+              >
+                <SelectTrigger className="h-10 rounded-2xl text-sm">
+                  <SelectValue placeholder="Select team member…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">— Unassigned —</SelectItem>
+                  {allUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      <span className="flex items-center gap-2">
+                        {u.full_name}
+                        {u.id === user?.id && (
+                          <span className="text-[10px] text-slate-400">(you)</span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {editingLead && (
@@ -1073,6 +1327,9 @@ export default function LeadsPage() {
                 <p className="text-[10px] text-slate-400">To mark as Won, use the Convert button.</p>
               </div>
             )}
+
+            {/* ── Dates ── */}
+            <SectionLabel icon={Calendar}>Dates & Follow-up</SectionLabel>
 
             <div className="space-y-1.5">
               <Label>Next Follow-up</Label>
@@ -1093,10 +1350,31 @@ export default function LeadsPage() {
               />
             </div>
 
+            {/* ── Closure Probability ── */}
+            {editingLead && (
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5">
+                  <Target className="h-3.5 w-3.5 text-slate-400" />
+                  Closure Probability (%)
+                  <span className="text-[10px] text-slate-400 font-normal ml-1">— auto-calculated from notes, or override manually</span>
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={formData.closure_probability ?? ''}
+                  onChange={e => handleChange('closure_probability', e.target.value)}
+                  placeholder="0–100"
+                  className="h-10 rounded-2xl"
+                />
+              </div>
+            )}
+
+            {/* ── Services ── */}
             {availableServices.length > 0 && (
-              <div className="md:col-span-2 space-y-2">
-                <Label>Services</Label>
-                <div className="flex flex-wrap gap-2">
+              <>
+                <SectionLabel icon={Tag}>Services</SectionLabel>
+                <div className="md:col-span-2 flex flex-wrap gap-2">
                   {availableServices.map(service => {
                     const selected = formData.services.includes(service);
                     return (
@@ -1122,18 +1400,24 @@ export default function LeadsPage() {
                     );
                   })}
                 </div>
-              </div>
+              </>
             )}
+
+            {/* ── Notes ── */}
+            <SectionLabel icon={MessageSquare}>Notes</SectionLabel>
 
             <div className="md:col-span-2 space-y-1.5">
               <Label>Notes</Label>
               <Textarea
                 value={formData.notes || ''}
                 onChange={e => handleChange('notes', e.target.value)}
-                placeholder="Notes, requirements, context… affects closure probability score automatically."
+                placeholder="Notes, requirements, context… keywords like 'interested', 'proceed', 'agree' automatically boost closure probability score."
                 rows={3}
                 className="resize-none rounded-2xl text-sm"
               />
+              <p className="text-[10px] text-slate-400">
+                Positive keywords (interested, proceed, agree, sign…) raise closure probability. Negative keywords (decline, reject, not interested…) lower it.
+              </p>
             </div>
           </div>
 
@@ -1154,12 +1438,25 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Convert to Task Dialog (full flow) ── */}
       {convertingLead && (
         <ConvertToTaskDialog
           lead={convertingLead}
           open={!!convertingLead}
           onClose={() => setConvertingLead(null)}
           onSuccess={() => { setConvertingLead(null); fetchLeads(); }}
+        />
+      )}
+
+      {/* ── Client Conversion Confirmation Dialog ── */}
+      {clientConvLead && (
+        <ClientConversionDialog
+          lead={clientConvLead}
+          open={!!clientConvLead}
+          onClose={() => { if (!clientConverting) setClientConvLead(null); }}
+          onConvertNow={handleClientConvertNow}
+          onConvertLater={handleClientConvertLater}
+          converting={clientConverting}
         />
       )}
 
