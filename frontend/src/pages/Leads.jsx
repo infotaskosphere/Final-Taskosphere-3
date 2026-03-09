@@ -27,7 +27,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-// ─── Brand Colours — identical to Tasks.js ──────────────────────────────────
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -35,7 +34,6 @@ const COLORS = {
   lightGreen:   '#5CCB5F',
 };
 
-// ─── Animation variants — identical to Tasks.js ──────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
@@ -45,7 +43,6 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-// ─── Pipeline stages ─────────────────────────────────────────────────────────
 const PIPELINE_STAGES = [
   { id: 'new',         label: 'New',         stripe: 'bg-sky-500',     badge: 'bg-sky-50 text-sky-700 border-sky-200'       },
   { id: 'contacted',   label: 'Contacted',   stripe: 'bg-indigo-500',  badge: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
@@ -81,14 +78,12 @@ const TASK_CATEGORIES = [
   { value: 'other',        label: 'Other'        },
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 const stageOf  = (id) => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
 const isOverdue = (lead) =>
   lead.next_follow_up &&
   new Date(lead.next_follow_up) < new Date() &&
   !['won','lost'].includes(lead.status);
 
-// ─── DashboardStripCard — exact clone from Tasks.js ──────────────────────────
 const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', children }) => (
   <div className={cn(
     'relative rounded-2xl border transition-all duration-300 ease-in-out overflow-hidden group',
@@ -104,7 +99,6 @@ const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', 
   </div>
 );
 
-// ─── Stat Card — exact style from Tasks.js ───────────────────────────────────
 const StatCard = ({ label, value, color, onClick, active }) => (
   <Card
     onClick={onClick}
@@ -120,7 +114,6 @@ const StatCard = ({ label, value, color, onClick, active }) => (
   </Card>
 );
 
-// ─── Convert-to-Task Dialog ───────────────────────────────────────────────────
 function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   const [form, setForm] = useState({
     title:       '',
@@ -143,6 +136,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
           `Email:    ${lead.email         || '—'}`,
           `Services: ${(lead.services||[]).join(', ') || '—'}`,
           `Value:    ₹${(Number(lead.quotation_amount)||0).toLocaleString()}`,
+          `Referred By: ${lead.referred_by || '—'}`,
           `Notes:    ${lead.notes         || '—'}`,
         ].join('\n'),
       }));
@@ -152,9 +146,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   const handleConvert = async () => {
     setLoading(true);
     try {
-      // 1. Mark lead as Won via backend convert endpoint
       await api.post(`/leads/${lead.id}/convert`);
-      // 2. Create follow-up task
       await api.post('/tasks', {
         title:        form.title,
         description:  form.description,
@@ -189,7 +181,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Lead summary pill */}
           <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-3">
             <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
               <Building2 className="h-4 w-4 text-emerald-600" />
@@ -205,7 +196,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
             </span>
           </div>
 
-          {/* Task fields */}
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-0.5">Follow-up Task Details</p>
 
           <div className="space-y-1.5">
@@ -281,13 +271,9 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ═════════════════════════════════════════════════════════════════════════════
 export default function LeadsPage() {
   const { user } = useAuth();
 
-  // ─── Permissions — mirrors backend leads.py exactly ──────────────────────
   const isAdmin       = user?.role === 'admin';
   const perms         = user?.permissions || {};
   const canDeleteLead = isAdmin || !!perms.can_manage_users;
@@ -297,7 +283,6 @@ export default function LeadsPage() {
     (lead?.assigned_to && lead.assigned_to === user?.id) ||
     (lead?.created_by  && lead.created_by  === user?.id);
 
-  // ─── State ────────────────────────────────────────────────────────────────
   const [leads,             setLeads]             = useState([]);
   const [availableServices, setAvailableServices] = useState([]);
   const [loading,           setLoading]           = useState(true);
@@ -319,6 +304,7 @@ export default function LeadsPage() {
     quotation_amount:null,
     services:        [],
     source:          'direct',
+    referred_by:     null,
     notes:           null,
     assigned_to:     null,
     status:          'new',
@@ -327,7 +313,6 @@ export default function LeadsPage() {
   };
   const [formData, setFormData] = useState(emptyForm);
 
-  // ─── Fetch ────────────────────────────────────────────────────────────────
   const fetchLeads = async () => {
     try {
       const res = await api.get('/leads/');
@@ -341,7 +326,6 @@ export default function LeadsPage() {
     api.get('/leads/meta/services').then(r => setAvailableServices(r.data)).catch(() => {});
   }, []);
 
-  // ─── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
     total:     leads.length,
     active:    leads.filter(l => ACTIVE_STAGES.includes(l.status)).length,
@@ -352,7 +336,6 @@ export default function LeadsPage() {
     pipeValue: leads.filter(l => ACTIVE_STAGES.includes(l.status)).reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
   }), [leads]);
 
-  // ─── Filter ───────────────────────────────────────────────────────────────
   const filteredLeads = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return leads
@@ -365,7 +348,6 @@ export default function LeadsPage() {
       .filter(l => statusFilter === 'all' || l.status === statusFilter);
   }, [leads, searchQuery, statusFilter]);
 
-  // ─── Form helpers ─────────────────────────────────────────────────────────
   const resetForm = () => { setFormData(emptyForm); setErrors({}); };
 
   const handleChange = (field, value) =>
@@ -381,6 +363,7 @@ export default function LeadsPage() {
       quotation_amount:lead.quotation_amount|| null,
       services:        Array.isArray(lead.services) ? lead.services : [],
       source:          lead.source          || 'direct',
+      referred_by:     lead.referred_by     || null,
       notes:           lead.notes           || null,
       assigned_to:     lead.assigned_to     || null,
       status:          lead.status          || 'new',
@@ -406,6 +389,7 @@ export default function LeadsPage() {
       quotation_amount: formData.quotation_amount ? Number(formData.quotation_amount) : null,
       services:         Array.isArray(formData.services) ? formData.services : [],
       source:           formData.source           || 'direct',
+      referred_by:      formData.referred_by      || null,
       notes:            formData.notes            || null,
       assigned_to:      formData.assigned_to      || null,
       status:           formData.status           || 'new',
@@ -449,7 +433,6 @@ export default function LeadsPage() {
     } catch (err) { toast.error('Failed to update stage'); }
   };
 
-  // ─── Filter pills ─────────────────────────────────────────────────────────
   useEffect(() => {
     const pills = [];
     if (searchQuery)       pills.push({ key: 'search', label: `Search: ${searchQuery}` });
@@ -462,7 +445,6 @@ export default function LeadsPage() {
     if (key === 'status') setStatusFilter('all');
   };
 
-  // ─── Loading skeleton ─────────────────────────────────────────────────────
   if (loading) return (
     <div className="space-y-4 p-6">
       {[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-2xl" />)}
@@ -477,7 +459,6 @@ export default function LeadsPage() {
       animate="visible"
     >
 
-      {/* ── Header ────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <Card className="border border-slate-200 shadow-sm rounded-3xl overflow-hidden">
           <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-600" />
@@ -496,7 +477,6 @@ export default function LeadsPage() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* View toggle — exact Tasks.js style */}
               <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm">
                 <Button
                   variant="ghost" size="sm"
@@ -514,7 +494,6 @@ export default function LeadsPage() {
                 </Button>
               </div>
 
-              {/* New Lead button — same style as Tasks.js New Task */}
               <Button
                 size="sm"
                 className="h-9 px-4 text-sm font-medium rounded-2xl shadow-sm hover:shadow-md bg-blue-700 hover:bg-blue-800 text-white"
@@ -527,7 +506,6 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
-      {/* ── Stat Cards — exact Tasks.js grid ──────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard label="Total"   value={stats.total}   color="text-slate-800"   onClick={() => setStatusFilter('all')} active={statusFilter === 'all'} />
         <StatCard label="Active"  value={stats.active}  color="text-blue-600"    onClick={() => setStatusFilter('all')} active={false} />
@@ -536,7 +514,6 @@ export default function LeadsPage() {
         <StatCard label="Overdue" value={stats.overdue} color="text-orange-600"  onClick={() => setStatusFilter('all')} active={false} />
       </motion.div>
 
-      {/* ── Value cards ───────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
         <Card className="rounded-2xl border border-emerald-200 bg-emerald-50">
           <CardContent className="p-4">
@@ -552,7 +529,6 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
-      {/* ── Search + Filter bar — mirrors Tasks.js ────────────────────────── */}
       <motion.div
         variants={itemVariants}
         className="flex items-center justify-between gap-3 flex-wrap w-full"
@@ -584,7 +560,6 @@ export default function LeadsPage() {
         </p>
       </motion.div>
 
-      {/* Active filter pills */}
       {activeFilters.length > 0 && (
         <motion.div variants={itemVariants} className="flex flex-wrap gap-2">
           {activeFilters.map(pill => (
@@ -601,9 +576,6 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════ */}
-      {/* ── LIST VIEW ──────────────────────────────────────────────────── */}
-      {/* ════════════════════════════════════════════════════════════════════ */}
       {viewMode === 'list' && (
         <motion.div className="space-y-3" variants={containerVariants}>
           {filteredLeads.length === 0 && (
@@ -614,7 +586,6 @@ export default function LeadsPage() {
             </div>
           )}
 
-          {/* Active leads */}
           {filteredLeads.filter(l => !['won','lost'].includes(l.status)).map((lead) => {
             const stage   = stageOf(lead.status);
             const overdue = isOverdue(lead);
@@ -625,15 +596,12 @@ export default function LeadsPage() {
                 <DashboardStripCard stripeColor={stage.stripe}>
                   <div className="flex flex-col gap-3">
 
-                    {/* Row 1: Company + badges + actions */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-                        {/* Company name */}
                         <span className="text-base font-semibold text-slate-900 leading-tight">
                           {lead.company_name}
                         </span>
 
-                        {/* Stage badge */}
                         <span className={cn(
                           'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold border',
                           stage.badge,
@@ -642,7 +610,6 @@ export default function LeadsPage() {
                           {stage.label}
                         </span>
 
-                        {/* Closure probability */}
                         {prob != null && (
                           <span className={cn(
                             'hidden sm:inline-flex px-2.5 py-0.5 rounded-xl text-[11px] font-bold',
@@ -654,7 +621,6 @@ export default function LeadsPage() {
                           </span>
                         )}
 
-                        {/* Overdue badge */}
                         {overdue && (
                           <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold bg-red-50 text-red-600 border border-red-200">
                             <AlertTriangle className="h-3 w-3" /> Overdue
@@ -662,13 +628,11 @@ export default function LeadsPage() {
                         )}
                       </div>
 
-                      {/* Right: value + actions */}
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className="hidden md:inline text-sm font-bold text-slate-700">
                           ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
                         </span>
 
-                        {/* Convert button */}
                         {canEditLead(lead) && (
                           <Button
                             size="sm"
@@ -701,7 +665,6 @@ export default function LeadsPage() {
                       </div>
                     </div>
 
-                    {/* Row 2: Contact meta */}
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
                       {lead.contact_name && (
                         <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5" />{lead.contact_name}</span>
@@ -716,6 +679,12 @@ export default function LeadsPage() {
                         <span className="flex items-center gap-1.5 capitalize">
                           <ArrowRight className="h-3.5 w-3.5" />
                           {lead.source.replace('_',' ')}
+                        </span>
+                      )}
+                      {lead.referred_by && (
+                        <span className="flex items-center gap-1.5 font-medium text-emerald-600">
+                          <User className="h-3.5 w-3.5" />
+                          Ref: {lead.referred_by}
                         </span>
                       )}
                       {lead.next_follow_up && (
@@ -736,14 +705,12 @@ export default function LeadsPage() {
                           Meeting: {format(new Date(lead.date_of_meeting), 'dd MMM yyyy')}
                         </span>
                       )}
-                      {/* Mobile value */}
                       <span className="md:hidden flex items-center gap-1 font-bold text-slate-700">
                         <IndianRupee className="h-3.5 w-3.5" />
                         {(Number(lead.quotation_amount)||0).toLocaleString()}
                       </span>
                     </div>
 
-                    {/* Row 3: Services */}
                     {(lead.services||[]).length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {lead.services.map(s => (
@@ -754,9 +721,7 @@ export default function LeadsPage() {
                       </div>
                     )}
 
-                    {/* Row 4: Pipeline progress bar + quick-stage buttons */}
                     <div className="space-y-2 pt-1 border-t border-slate-100">
-                      {/* Visual pipeline progress */}
                       <div className="flex items-center gap-1">
                         {ACTIVE_STAGES.map((sid, i) => {
                           const currentIdx = ACTIVE_STAGES.indexOf(lead.status);
@@ -777,7 +742,6 @@ export default function LeadsPage() {
                         })}
                       </div>
 
-                      {/* Quick-stage text buttons */}
                       {canEditLead(lead) && (
                         <div className="flex gap-1 flex-wrap">
                           {ACTIVE_STAGES.map(sid => {
@@ -814,7 +778,6 @@ export default function LeadsPage() {
             );
           })}
 
-          {/* Closed leads section */}
           {filteredLeads.some(l => ['won','lost'].includes(l.status)) && (
             <div className="space-y-2 pt-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Closed</p>
@@ -861,9 +824,6 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════ */}
-      {/* ── KANBAN BOARD ───────────────────────────────────────────────── */}
-      {/* ════════════════════════════════════════════════════════════════════ */}
       {viewMode === 'kanban' && (
         <motion.div
           className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
@@ -876,7 +836,6 @@ export default function LeadsPage() {
 
             return (
               <motion.div key={sid} variants={itemVariants} className="flex flex-col gap-2">
-                {/* Column header */}
                 <div className={cn('rounded-2xl border px-3 py-2 flex items-center justify-between', stage.badge)}>
                   <span className="text-xs font-bold">{stage.label}</span>
                   <span className="text-xs font-bold bg-white/80 px-1.5 py-0.5 rounded-full">{colLeads.length}</span>
@@ -887,7 +846,6 @@ export default function LeadsPage() {
                   </p>
                 )}
 
-                {/* Lead cards */}
                 <div className="space-y-2 min-h-[80px]">
                   <AnimatePresence>
                     {colLeads.map(lead => {
@@ -912,12 +870,16 @@ export default function LeadsPage() {
                                 <User className="h-3 w-3 flex-shrink-0" />{lead.contact_name}
                               </p>
                             )}
+                            {lead.referred_by && (
+                              <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
+                                <User className="h-3 w-3 flex-shrink-0" />Ref: {lead.referred_by}
+                              </p>
+                            )}
                             {lead.quotation_amount && (
                               <p className="text-xs font-bold text-slate-700">
                                 ₹{Number(lead.quotation_amount).toLocaleString()}
                               </p>
                             )}
-                            {/* Probability bar */}
                             {prob != null && (
                               <div className="flex items-center gap-1.5">
                                 <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
@@ -934,7 +896,6 @@ export default function LeadsPage() {
                                 <AlertTriangle className="h-3 w-3" /> Overdue
                               </span>
                             )}
-                            {/* Card actions */}
                             <div className="flex gap-1 pt-1 border-t border-slate-100">
                               {canEditLead(lead) && (
                                 <button
@@ -971,9 +932,6 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════ */}
-      {/* ── CREATE / EDIT DIALOG ──────────────────────────────────────── */}
-      {/* ════════════════════════════════════════════════════════════════════ */}
       <Dialog open={dialogOpen} onOpenChange={open => { if (!open) closeDialog(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -987,7 +945,6 @@ export default function LeadsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
 
-            {/* Company Name */}
             <div className="md:col-span-2 space-y-1.5">
               <Label>Company Name <span className="text-red-500">*</span></Label>
               <Input
@@ -1001,7 +958,6 @@ export default function LeadsPage() {
               )}
             </div>
 
-            {/* Contact + Source */}
             <div className="space-y-1.5">
               <Label>Contact Person</Label>
               <Input
@@ -1021,7 +977,6 @@ export default function LeadsPage() {
               </Select>
             </div>
 
-            {/* Email + Phone */}
             <div className="space-y-1.5">
               <Label>Email</Label>
               <Input
@@ -1042,7 +997,6 @@ export default function LeadsPage() {
               />
             </div>
 
-            {/* Quotation */}
             <div className="space-y-1.5">
               <Label>Quotation Amount (₹)</Label>
               <Input
@@ -1054,7 +1008,16 @@ export default function LeadsPage() {
               />
             </div>
 
-            {/* Pipeline Stage (edit only) */}
+            <div className="space-y-1.5">
+              <Label>Referred By</Label>
+              <Input
+                value={formData.referred_by || ''}
+                onChange={e => handleChange('referred_by', e.target.value)}
+                placeholder="Name of CA or person who referred this lead"
+                className="h-10 rounded-2xl"
+              />
+            </div>
+
             {editingLead && (
               <div className="space-y-1.5">
                 <Label>Pipeline Stage</Label>
@@ -1070,7 +1033,6 @@ export default function LeadsPage() {
               </div>
             )}
 
-            {/* Follow-up + Meeting */}
             <div className="space-y-1.5">
               <Label>Next Follow-up</Label>
               <Input
@@ -1090,7 +1052,6 @@ export default function LeadsPage() {
               />
             </div>
 
-            {/* Services */}
             {availableServices.length > 0 && (
               <div className="md:col-span-2 space-y-2">
                 <Label>Services</Label>
@@ -1123,7 +1084,6 @@ export default function LeadsPage() {
               </div>
             )}
 
-            {/* Notes */}
             <div className="md:col-span-2 space-y-1.5">
               <Label>Notes</Label>
               <Textarea
@@ -1153,7 +1113,6 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Convert-to-Client + Task dialog ──────────────────────────────── */}
       {convertingLead && (
         <ConvertToTaskDialog
           lead={convertingLead}
