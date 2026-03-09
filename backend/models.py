@@ -18,17 +18,6 @@ class UserRole(str, Enum):
 
 # ────────────────────────────────────────────────
 # DEFAULT ROLE PERMISSION TEMPLATES
-# Aligned with the 5-layer permission matrix:
-#   Layer 1: Core Roles
-#   Layer 2: Universal Permissions (can_view_all_*, can_edit_*, etc.)
-#   Layer 3: Specific Access Permissions (view_other_*, assigned_clients)
-#   Layer 4: Ownership (handled at route level)
-#   Layer 5: Deny (fallback)
-#
-# OWNERSHIP RULE (Layer 4 — enforced at route level, NOT via flags):
-#   Every user always has full access to their OWN tasks, todos,
-#   attendance, reports, and any record where their user_id is stored.
-#   The flags below only govern access to OTHER users' data.
 # ────────────────────────────────────────────────
 DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
     "admin": {
@@ -50,6 +39,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_manage_users": True,
         "can_manage_settings": True,
         "can_assign_tasks": True,
+        "can_assign_clients": True,
         "can_view_staff_activity": True,
         "can_send_reminders": True,
         "can_view_user_page": True,
@@ -58,6 +48,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
         "can_view_staff_rankings": True,
+        "can_delete_data": True,
         "can_delete_tasks": True,
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -85,6 +76,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_manage_users": False,
         "can_manage_settings": False,
         "can_assign_tasks": True,
+        "can_assign_clients": False,
         "can_view_staff_activity": True,
         "can_send_reminders": False,
         "can_view_user_page": False,
@@ -93,6 +85,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
         "can_view_staff_rankings": True,
+        "can_delete_data": False,
         "can_delete_tasks": False,
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -120,6 +113,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_manage_users": False,
         "can_manage_settings": False,
         "can_assign_tasks": False,
+        "can_assign_clients": False,
         "can_view_staff_activity": False,
         "can_send_reminders": False,
         "can_view_user_page": False,
@@ -128,6 +122,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_todo_dashboard": True,
         "can_use_chat": True,
         "can_view_staff_rankings": False,
+        "can_delete_data": False,
         "can_delete_tasks": False,
         "view_other_tasks": [],
         "view_other_attendance": [],
@@ -142,22 +137,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # CORE USER & PERMISSIONS
 # ======================
 class UserPermissions(BaseModel):
-    """
-    5-layer permission matrix implementation.
-
-    Layer 2 — Universal permissions (bool flags):
-        can_view_all_* → grants access to ALL records in that module
-        can_edit_*     → grants edit access to ALL records in that module
-
-    Layer 3 — Specific access permissions (list of IDs):
-        view_other_*   → grants access to records belonging to listed user IDs
-        assigned_clients → grants access to records for listed client IDs
-
-    Layer 4 — Ownership (enforced at route level, NOT via flags):
-        Every user unconditionally accesses their own tasks, todos,
-        attendance, reports, and any record carrying their user_id.
-        No flag is needed for this — routes check ownership first.
-    """
     can_view_all_tasks: bool = False
     can_view_all_clients: bool = False
     can_view_all_dsc: bool = False
@@ -176,6 +155,7 @@ class UserPermissions(BaseModel):
     can_manage_users: bool = False
     can_manage_settings: bool = False
     can_assign_tasks: bool = False
+    can_assign_clients: bool = False
     can_view_staff_activity: bool = False
     can_send_reminders: bool = False
     can_view_user_page: bool = False
@@ -184,6 +164,7 @@ class UserPermissions(BaseModel):
     can_view_todo_dashboard: bool = False
     can_use_chat: bool = False
     can_view_staff_rankings: bool = False
+    can_delete_data: bool = False
     can_delete_tasks: bool = False
     # Specific access lists (Layer 3)
     view_other_tasks: List[str] = Field(default_factory=list)
@@ -520,6 +501,7 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
+    referred_by: Optional[str] = None          # ── NEW: referral source (CA name or any person)
     assignments: Optional[List[Dict[str, Any]]] = Field(
         default_factory=list,
         description="List of {user_id, services} assignments"
@@ -570,6 +552,7 @@ class MasterClientForm(BaseModel):
     services: List[str] = Field(default_factory=list)
     contact_persons: List[Any] = Field(default_factory=list)
     notes: Optional[str] = None
+    referred_by: Optional[str] = None         # ── NEW
 
     @model_validator(mode='before')
     @classmethod
@@ -579,6 +562,33 @@ class MasterClientForm(BaseModel):
                 if v == "":
                     data[k] = None
         return data
+
+
+# ======================
+# LEADS MODEL
+# ======================
+class LeadBase(BaseModel):
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    services: List[str] = Field(default_factory=list)
+    status: str = "new"
+    source: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    referred_by: Optional[str] = None         # ── NEW: referral source for leads
+
+
+class LeadCreate(LeadBase):
+    pass
+
+
+class Lead(LeadBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ======================
