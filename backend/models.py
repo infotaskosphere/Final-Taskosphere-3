@@ -311,6 +311,19 @@ class Task(TaskBase):
 # ATTENDANCE & ACTIVITY
 # ======================
 class Attendance(BaseModel):
+    """
+    Attendance record for a single user on a single date.
+
+    is_late:
+        Set to True at punch-in time when the user punches in AFTER their
+        configured punch_in_time + grace_time window (both stored on the
+        User document as HH:MM strings).  Stored permanently so historical
+        reports stay accurate even if the shift schedule is later changed.
+
+    punched_out_early:
+        Set to True at punch-out time when the user punches out BEFORE their
+        configured punch_out_time.  Stored permanently for the same reason.
+    """
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -320,6 +333,8 @@ class Attendance(BaseModel):
     punch_out: Optional[datetime] = None
     duration_minutes: Optional[int] = 0
     leave_reason: Optional[str] = None
+    is_late: bool = False
+    punched_out_early: bool = False
 
 
 class AttendanceBase(BaseModel):
@@ -501,7 +516,7 @@ class ClientBase(BaseModel):
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
     notes: Optional[str] = None
-    referred_by: Optional[str] = None          # ── NEW: referral source (CA name or any person)
+    referred_by: Optional[str] = None
     assignments: Optional[List[Dict[str, Any]]] = Field(
         default_factory=list,
         description="List of {user_id, services} assignments"
@@ -552,7 +567,7 @@ class MasterClientForm(BaseModel):
     services: List[str] = Field(default_factory=list)
     contact_persons: List[Any] = Field(default_factory=list)
     notes: Optional[str] = None
-    referred_by: Optional[str] = None         # ── NEW
+    referred_by: Optional[str] = None
 
     @model_validator(mode='before')
     @classmethod
@@ -577,7 +592,7 @@ class LeadBase(BaseModel):
     source: Optional[str] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
-    referred_by: Optional[str] = None         # ── NEW: referral source for leads
+    referred_by: Optional[str] = None
 
 
 class LeadCreate(LeadBase):
