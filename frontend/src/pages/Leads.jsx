@@ -115,20 +115,33 @@ const StatCard = ({ label, value, color, onClick, active }) => (
 );
 
 function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
+  const { user: currentUser } = useAuth();
   const [form, setForm] = useState({
     title:       '',
     description: '',
     priority:    'high',
     category:    'other',
     due_date:    '',
+    assigned_to: '',
   });
+  const [users,   setUsers]   = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Fetch users for the assignee dropdown
+  useEffect(() => {
+    if (open) {
+      api.get('/users')
+        .then(r => setUsers(Array.isArray(r.data) ? r.data : []))
+        .catch(() => {});
+    }
+  }, [open]);
 
   useEffect(() => {
     if (lead) {
       setForm(f => ({
         ...f,
         title:       `Client Onboarding: ${lead.company_name}`,
+        assigned_to: lead.assigned_to || currentUser?.id || '',
         description: [
           `Lead converted to client from pipeline.`,
           `Contact:  ${lead.contact_name  || '—'}`,
@@ -141,7 +154,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         ].join('\n'),
       }));
     }
-  }, [lead]);
+  }, [lead, currentUser]);
 
   const handleConvert = async () => {
     setLoading(true);
@@ -154,6 +167,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         category:     form.category,
         status:       'pending',
         due_date:     form.due_date ? new Date(form.due_date).toISOString() : null,
+        assigned_to:  form.assigned_to || null,
         is_recurring: false,
         sub_assignees: [],
       });
@@ -205,6 +219,33 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
               onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
               className="h-9 rounded-2xl text-sm"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5 text-slate-400" />
+              Assign Task To
+            </Label>
+            <Select
+              value={form.assigned_to}
+              onValueChange={v => setForm(f => ({ ...f, assigned_to: v }))}
+            >
+              <SelectTrigger className="h-9 rounded-2xl text-sm">
+                <SelectValue placeholder="Select a team member…" />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map(u => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <span className="flex items-center gap-2">
+                      {u.full_name}
+                      {u.id === currentUser?.id && (
+                        <span className="text-[10px] text-slate-400">(you)</span>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
