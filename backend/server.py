@@ -3066,35 +3066,41 @@ async def send_pending_task_reminders_internal():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO DAILY REMINDER MIDDLEWARE
-# Uses in-memory cache to avoid DB query on every request.
 # ─────────────────────────────────────────────────────────────────────────────
+async def _run_daily_reminder_job(today_str: str):
+    """Background job - never blocks requests."""
+    global _last_reminder_date_cache
+    try:
+        setting = await db.system_settings.find_one({"key": "last_reminder_date"})
+        db_last_date = setting["value"] if setting else None
+        if db_last_date != today_str:
+            logger.info("Auto daily reminder triggered at 10:00 AM IST")
+            await send_pending_task_reminders_internal()
+            await db.system_settings.update_one(
+                {"key": "last_reminder_date"},
+                {"$set": {"value": today_str}},
+                upsert=True
+            )
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+            await db.staff_activity.delete_many({"timestamp": {"$lt": cutoff}})
+        _last_reminder_date_cache = today_str
+    except Exception as e:
+        logger.error(f"Auto daily reminder job failed: {e}")
+
+
 @app.middleware("http")
-async def auto_daily_reminder(request, call_next):
+async def auto_daily_reminder(request: Request, call_next):
     global _last_reminder_date_cache
     try:
         india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
         today_str = india_time.date().isoformat()
-        if india_time.hour >= 10:
-            if _last_reminder_date_cache != today_str:
-                setting = await db.system_settings.find_one({"key": "last_reminder_date"})
-                db_last_date = setting["value"] if setting else None
-                if db_last_date != today_str:
-                    logger.info("Auto daily reminder triggered at 10:00 AM IST")
-                    await send_pending_task_reminders_internal()
-                    await db.system_settings.update_one(
-                        {"key": "last_reminder_date"},
-                        {"$set": {"value": today_str}},
-                        upsert=True
-                    )
-                    # Auto cleanup: delete staff_activity records older than 90 days
-                    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-                    await db.staff_activity.delete_many({"timestamp": {"$lt": cutoff}})
-                _last_reminder_date_cache = today_str
+        if india_time.hour >= 10 and _last_reminder_date_cache != today_str:
+            _last_reminder_date_cache = today_str  # optimistic lock
+            asyncio.ensure_future(_run_daily_reminder_job(today_str))  # fire-and-forget
     except Exception as e:
-        logger.error(f"Auto job failed: {e}")
+        logger.error(f"Auto reminder middleware error: {e}")
     response = await call_next(request)
     return response
-
 # ==================== HOLIDAY ROUTES ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
