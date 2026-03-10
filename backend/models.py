@@ -435,6 +435,25 @@ class MovementUpdateRequest(BaseModel):
     person_name: Optional[str] = None
     notes: Optional[str] = None
 
+# =====================
+# REMINDER MODELS
+# =====================
+class ReminderCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    remind_at: datetime   # ISO8601 string from frontend, Pydantic parses it
+
+
+class Reminder(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    remind_at: datetime
+    is_dismissed: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 # ======================
 # DOCUMENT MANAGEMENT
