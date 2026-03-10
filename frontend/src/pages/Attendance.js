@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,7 +18,10 @@ import {
   isBefore,
   isAfter,
   isToday as dateFnsIsToday,
-  startOfDay
+  startOfDay,
+  addMinutes,
+  isPast,
+  differenceInMinutes,
 } from 'date-fns';
 import {
   Calendar as CalendarIcon,
@@ -32,6 +35,14 @@ import {
   Timer,
   Zap,
   Users,
+  Bell,
+  BellRing,
+  Plus,
+  Trash2,
+  ExternalLink,
+  X,
+  CalendarPlus,
+  AlarmClock,
 } from 'lucide-react';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -47,6 +58,7 @@ const COLORS = {
   red:          '#EF4444',
   slate50:      '#F8FAFC',
   slate200:     '#E2E8F0',
+  purple:       '#8B5CF6',
 };
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -162,15 +174,34 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
 // UTILITY FUNCTIONS
 // ═════════════════════════════════════════════════════════════════════════════
 const formatDuration = (minutes) => {
-  if (!minutes) return '0h 0m';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
+  if (minutes === null || minutes === undefined || isNaN(minutes)) return '0h 0m';
+  const mins = parseInt(minutes, 10);
+  if (isNaN(mins)) return '0h 0m';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
   return `${h}h ${m}m`;
 };
 
 /**
- * Correctly converts any ISO string or Date object to IST display time.
- * Naive strings (no timezone suffix) are treated as UTC — matching MongoDB storage.
+ * FIX #3 — Parse "5h 30m" → fractional hours safely (no NaN).
+ */
+const parseDurationToHours = (str) => {
+  if (!str) return 0;
+  const match = String(str).match(/^(\d+)h\s*(\d+)m$/);
+  if (!match) return 0;
+  return parseInt(match[1], 10) + parseInt(match[2], 10) / 60;
+};
+
+/**
+ * FIX #1/#2/#4 — Correctly converts any ISO/datetime value to IST display time.
+ *
+ * Root cause of original bug:
+ *   The old regex `/[Z+\-]\d*$/` failed to match `+05:30` (the backend's safe_dt()
+ *   serialises datetimes in IST format), so it appended a second Z and double-shifted
+ *   the time.
+ *
+ * Fix: use `/Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/` which correctly detects all TZ formats.
+ * Bare datetime strings (no TZ) are treated as UTC — matching MongoDB storage.
  */
 const formatAttendanceTime = (isoStringOrDate) => {
   if (!isoStringOrDate) return '—';
@@ -179,8 +210,10 @@ const formatAttendanceTime = (isoStringOrDate) => {
     if (isoStringOrDate instanceof Date) {
       date = isoStringOrDate;
     } else {
-      const str = String(isoStringOrDate);
-      const normalized = /[Z+\-]\d*$/.test(str.trim()) ? str : str + 'Z';
+      const str = String(isoStringOrDate).trim();
+      // Correctly detects: Z, +05:30, -08:00, +0530 — but NOT bare "2024-01-15T10:30:00"
+      const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
+      const normalized = hasTZ ? str : str + 'Z';
       date = new Date(normalized);
     }
     if (isNaN(date.getTime())) return '—';
@@ -198,17 +231,47 @@ const calculateTodayLiveDuration = (todayAtt) => {
   if (todayAtt.punch_in instanceof Date) {
     start = todayAtt.punch_in;
   } else {
-    const str = String(todayAtt.punch_in);
-    const normalized = /[Z+\-]\d*$/.test(str.trim()) ? str : str + 'Z';
-    start = new Date(normalized);
+    const str = String(todayAtt.punch_in).trim();
+    const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
+    start = new Date(hasTZ ? str : str + 'Z');
   }
 
+  if (isNaN(start.getTime())) return '0h 0m';
   const diffMs = Date.now() - start.getTime();
   if (diffMs < 0) return '0h 0m';
 
   const h = Math.floor(diffMs / 3600000);
   const m = Math.floor((diffMs % 3600000) / 60000);
   return `${h}h ${m}m`;
+};
+
+/** Format a Date/ISO string for display in reminder list */
+const formatReminderTime = (isoStr) => {
+  if (!isoStr) return '—';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '—';
+    return format(d, 'MMM d, yyyy • hh:mm a');
+  } catch {
+    return '—';
+  }
+};
+
+/** Build a Google Calendar "Add Event" URL — no OAuth required */
+const buildGCalURL = (reminder) => {
+  try {
+    const start = new Date(reminder.remind_at);
+    const end   = addMinutes(start, 30);
+    const fmt   = (d) => format(d, "yyyyMMdd'T'HHmmss");
+    return (
+      'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+      `&text=${encodeURIComponent(reminder.title)}` +
+      `&details=${encodeURIComponent(reminder.description || '')}` +
+      `&dates=${fmt(start)}/${fmt(end)}`
+    );
+  } catch {
+    return 'https://calendar.google.com';
+  }
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -229,22 +292,18 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   let isSpecial = false;
 
   if (holiday) {
-    // Yellow — holiday takes highest priority
     ringColor = COLORS.amber;
     bgColor   = '#FEF3C720';
     isSpecial = true;
   } else if (dayRecord?.status === 'leave') {
-    // Orange — explicitly marked on leave
     ringColor = COLORS.orange;
     bgColor   = '#FFF7ED20';
     isSpecial = true;
   } else if (dayRecord?.punch_in && dayRecord?.is_late) {
-    // Red — punched in but late
     ringColor = COLORS.red;
     bgColor   = '#FEE2E220';
     isSpecial = true;
   } else if (dayRecord?.punch_in) {
-    // Green — present and on time
     ringColor = COLORS.emeraldGreen;
     bgColor   = '#D1FAE520';
   }
@@ -320,6 +379,81 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// REMINDER POPUP — fires automatically when a reminder's time arrives
+// ═════════════════════════════════════════════════════════════════════════════
+function ReminderPopup({ reminder, onDismiss }) {
+  return (
+    <motion.div
+      className="fixed top-6 right-6 z-[99999] w-96 max-w-[calc(100vw-2rem)]"
+      initial={{ opacity: 0, x: 80, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0,  scale: 1  }}
+      exit={{   opacity: 0, x: 80,  scale: 0.9 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+    >
+      <div
+        className="rounded-2xl shadow-2xl overflow-hidden border border-purple-200"
+        style={{ background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)' }}
+      >
+        {/* Header bar */}
+        <div
+          className="flex items-center justify-between px-5 py-3"
+          style={{ backgroundColor: COLORS.purple }}
+        >
+          <div className="flex items-center gap-2">
+            <motion.div
+              animate={{ rotate: [0, -15, 15, -10, 10, 0] }}
+              transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 1.4 }}
+            >
+              <BellRing className="w-5 h-5 text-white" />
+            </motion.div>
+            <span className="text-white font-bold text-sm uppercase tracking-wider">
+              Reminder
+            </span>
+          </div>
+          <button
+            onClick={onDismiss}
+            className="text-purple-200 hover:text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4">
+          <p className="font-black text-slate-800 text-lg leading-snug mb-1">
+            {reminder.title}
+          </p>
+          {reminder.description && (
+            <p className="text-slate-600 text-sm mb-3">{reminder.description}</p>
+          )}
+          <p className="text-xs text-slate-400 font-medium mb-4">
+            ⏰ {formatReminderTime(reminder.remind_at)}
+          </p>
+          <div className="flex gap-3">
+            <a
+              href={buildGCalURL(reminder)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-colors"
+              style={{ backgroundColor: COLORS.deepBlue }}
+            >
+              <CalendarPlus className="w-3.5 h-3.5" />
+              Add to Google Calendar
+            </a>
+            <button
+              onClick={onDismiss}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-white border-2 border-slate-200 hover:bg-slate-50 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
@@ -338,6 +472,7 @@ export default function Attendance() {
 
   // Attendance data
   const [attendanceHistory, setAttendanceHistory] = useState([]);
+
   /**
    * todayAttendance — ALWAYS the logged-in user's own today record.
    * It drives the punch-in / punch-out buttons and the live duration ticker.
@@ -347,6 +482,7 @@ export default function Attendance() {
   const [mySummary, setMySummary]                 = useState(null);
   const [holidays, setHolidays]                   = useState([]);
   const [pendingHolidays, setPendingHolidays]     = useState([]);
+
   // allUsers is only populated for admin (dropdown)
   const [allUsers, setAllUsers]                   = useState([]);
   const [tasksCompleted, setTasksCompleted]       = useState(0);
@@ -358,8 +494,8 @@ export default function Attendance() {
   const [showHolidayModal, setShowHolidayModal]   = useState(false);
 
   // Leave form
-  const [leaveFrom, setLeaveFrom]   = useState(null);
-  const [leaveTo, setLeaveTo]       = useState(null);
+  const [leaveFrom, setLeaveFrom]     = useState(null);
+  const [leaveTo, setLeaveTo]         = useState(null);
   const [leaveReason, setLeaveReason] = useState('');
 
   // Holiday form
@@ -370,7 +506,18 @@ export default function Attendance() {
   // Live duration ticker — always the logged-in user's own session
   const [liveDuration, setLiveDuration] = useState('0h 0m');
 
+  // ── Reminder State ───────────────────────────────────────────────────────
+  const [reminders, setReminders]               = useState([]);
+  const [firedReminder, setFiredReminder]       = useState(null);
+  const [showReminderForm, setShowReminderForm] = useState(false);
+  const [reminderTitle, setReminderTitle]       = useState('');
+  const [reminderDesc, setReminderDesc]         = useState('');
+  const [reminderDatetime, setReminderDatetime] = useState('');
+  // Tracks which reminder IDs have already fired this session (avoids re-firing)
+  const firedIdsRef = useRef(new Set());
+
   // ── Key derived state ────────────────────────────────────────────────────
+
   // True when admin has selected a different user in the dropdown
   const isViewingOther = isAdmin && !!selectedUserId;
 
@@ -398,7 +545,10 @@ export default function Attendance() {
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
 
   // ── Effects ──────────────────────────────────────────────────────────────
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fetchData();
+    fetchReminders();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show punch-in prompt only when viewing own data and not yet punched in
   useEffect(() => {
@@ -419,6 +569,28 @@ export default function Attendance() {
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
+
+  // Reminder firing check — runs every 30 seconds
+  useEffect(() => {
+    const check = () => {
+      const now = new Date();
+      for (const r of reminders) {
+        if (r.is_dismissed || firedIdsRef.current.has(r.id)) continue;
+        const due  = new Date(r.remind_at);
+        if (isNaN(due.getTime())) continue;
+        const diff = differenceInMinutes(due, now);
+        // Fire when the reminder is between 0 and 2 minutes past due
+        if (diff <= 0 && diff >= -2) {
+          firedIdsRef.current.add(r.id);
+          setFiredReminder(r);
+          break;
+        }
+      }
+    };
+    check(); // run immediately on mount / reminders change
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, [reminders]);
 
   // ── Data Fetching ────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
@@ -530,6 +702,20 @@ export default function Attendance() {
     }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
 
+  // ── Reminder fetch ───────────────────────────────────────────────────────
+  const fetchReminders = useCallback(async (overrideUserId = undefined) => {
+    try {
+      const uid = overrideUserId !== undefined
+        ? overrideUserId
+        : (isViewingOther ? selectedUserId : null);
+      const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
+      const res = await api.get(url);
+      setReminders(res.data || []);
+    } catch {
+      // Silently fail if endpoint not yet deployed
+    }
+  }, [isViewingOther, selectedUserId]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   // Punch in/out always acts on the LOGGED-IN user's own attendance
@@ -623,6 +809,50 @@ export default function Attendance() {
       toast.error('Failed to update holiday');
     }
   }, [fetchData]);
+
+  // ── Reminder handlers ────────────────────────────────────────────────────
+  const handleCreateReminder = useCallback(async () => {
+    if (!reminderTitle.trim() || !reminderDatetime) {
+      toast.error('Title and date/time are required');
+      return;
+    }
+    try {
+      await api.post('/reminders', {
+        title:       reminderTitle.trim(),
+        description: reminderDesc.trim() || null,
+        remind_at:   new Date(reminderDatetime).toISOString(),
+      });
+      toast.success('✓ Reminder set!');
+      setShowReminderForm(false);
+      setReminderTitle('');
+      setReminderDesc('');
+      setReminderDatetime('');
+      await fetchReminders();
+    } catch {
+      toast.error('Failed to create reminder');
+    }
+  }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
+
+  const handleDeleteReminder = useCallback(async (id) => {
+    try {
+      await api.delete(`/reminders/${id}`);
+      setReminders(prev => prev.filter(r => r.id !== id));
+      toast.success('Reminder deleted');
+    } catch {
+      toast.error('Failed to delete reminder');
+    }
+  }, []);
+
+  const handleDismissPopup = useCallback(async () => {
+    if (!firedReminder) return;
+    try {
+      await api.patch(`/reminders/${firedReminder.id}`, { is_dismissed: true });
+    } catch {}
+    setReminders(prev =>
+      prev.map(r => r.id === firedReminder.id ? { ...r, is_dismissed: true } : r)
+    );
+    setFiredReminder(null);
+  }, [firedReminder]);
 
   const handleExportPDF = useCallback(() => {
     const employeeName = (isAdmin && selectedUserId)
@@ -772,11 +1002,38 @@ export default function Attendance() {
     return allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isViewingOther, selectedUserId, allUsers]);
 
+  /**
+   * FIX #3 — safe progress percentage (parseDurationToHours never returns NaN).
+   */
+  const progressPct = useMemo(() => {
+    const hrs = parseDurationToHours(displayLiveDuration);
+    return Math.min(100, Math.round((hrs / 8.5) * 100));
+  }, [displayLiveDuration]);
+
+  // Upcoming (non-dismissed) reminders sorted chronologically
+  const upcomingReminders = useMemo(() =>
+    reminders
+      .filter(r => !r.is_dismissed)
+      .sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)),
+    [reminders]
+  );
+
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
   return (
     <TooltipProvider>
+
+      {/* ── Reminder Popup (fires automatically) ───────────────────────── */}
+      <AnimatePresence>
+        {firedReminder && (
+          <ReminderPopup
+            reminder={firedReminder}
+            onDismiss={handleDismissPopup}
+          />
+        )}
+      </AnimatePresence>
+
       <motion.div
         className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
         style={{
@@ -812,7 +1069,6 @@ export default function Attendance() {
             {/*
               USER FILTER DROPDOWN — Admin only.
               Managers and staff never see this selector.
-              The backend also enforces this: non-admin cannot query other users.
             */}
             {isAdmin && (
               <motion.select
@@ -822,7 +1078,8 @@ export default function Attendance() {
                 onChange={e => {
                   const val = e.target.value || null;
                   setSelectedUserId(val);
-                  fetchData(val); // pass directly to avoid stale closure
+                  fetchData(val);
+                  fetchReminders(val);
                 }}
                 disabled={allUsers.length === 0}
               >
@@ -866,7 +1123,6 @@ export default function Attendance() {
 
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* VIEWING-AS BANNER                                               */}
-        {/* Only shown when admin has selected another user in the filter.  */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         {isViewingOther && (
           <motion.div
@@ -884,6 +1140,7 @@ export default function Attendance() {
               onClick={() => {
                 setSelectedUserId(null);
                 fetchData(null);
+                fetchReminders(null);
               }}
             >
               Clear — show my data
@@ -930,7 +1187,7 @@ export default function Attendance() {
                     </div>
                   </div>
 
-                  {/* Status info — always shows the viewed user's record */}
+                  {/* FIX #1 — punch times always displayed in correct IST */}
                   {displayTodayAttendance?.punch_in && (
                     <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
                       <p className="text-blue-100 text-sm">
@@ -1092,7 +1349,6 @@ export default function Attendance() {
 
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* STATS GRID                                                      */}
-        {/* All stats reflect the currently-viewed user (own or selected). */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div
           className={`grid gap-4 mb-8 items-stretch ${
@@ -1142,8 +1398,7 @@ export default function Attendance() {
         </motion.div>
 
         {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* DAILY PROGRESS                                                  */}
-        {/* displayLiveDuration reflects the viewed user's duration.        */}
+        {/* DAILY PROGRESS — FIX #3 (no NaN%)                              */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants} className="mb-8">
           <Card className="border-0 shadow-md overflow-hidden">
@@ -1179,15 +1434,157 @@ export default function Attendance() {
                   </div>
                   <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
                     <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
+                    {/* FIX #3: progressPct always a safe integer, never NaN */}
                     <p className="text-2xl font-bold text-emerald-600">
-                      {Math.min(
-                        100,
-                        Math.round((parseInt(displayLiveDuration) / 8.5) * 100)
-                      )}%
+                      {progressPct}%
                     </p>
                   </div>
                 </div>
               </div>
+              {/* Animated progress bar */}
+              <div className="mt-6 bg-slate-100 rounded-full h-3 overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{
+                    background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                  }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${progressPct}%` }}
+                  transition={{ duration: 1, ease: 'easeOut' }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* REMINDERS & MEETINGS                                            */}
+        {/* Visible for own view + admin viewing another user.             */}
+        {/* Create/Delete only available for own view.                     */}
+        {/* Popup fires automatically at reminder time.                    */}
+        {/* Each card links directly to Google Calendar.                   */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <motion.div variants={itemVariants} className="mb-8">
+          <Card className="border-0 shadow-md overflow-hidden">
+            {/* Section header */}
+            <div
+              className="px-6 py-4 flex items-center justify-between"
+              style={{
+                background:   `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`,
+                borderBottom: `2px solid ${COLORS.purple}25`,
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: `${COLORS.purple}20` }}
+                >
+                  <AlarmClock className="w-5 h-5" style={{ color: COLORS.purple }} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-800" style={{ color: COLORS.deepBlue }}>
+                    {isViewingOther
+                      ? `${viewedUserName?.split(' ')[0]}'s Reminders`
+                      : 'Reminders & Meetings'}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {upcomingReminders.length} upcoming
+                    {!isViewingOther && ' • popups fire automatically at reminder time'}
+                  </p>
+                </div>
+              </div>
+              {/* Create button — own view only */}
+              {!isViewingOther && (
+                <Button
+                  onClick={() => setShowReminderForm(true)}
+                  className="font-bold rounded-xl text-white px-5 py-2.5"
+                  style={{ backgroundColor: COLORS.purple }}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Reminder
+                </Button>
+              )}
+            </div>
+
+            <CardContent className="p-6">
+              {upcomingReminders.length === 0 ? (
+                <div className="text-center py-10">
+                  <Bell className="w-10 h-10 mx-auto text-slate-300 mb-3" />
+                  <p className="text-slate-500 font-medium text-sm">
+                    {isViewingOther
+                      ? 'No upcoming reminders for this user'
+                      : 'No upcoming reminders. Create one to get started!'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {upcomingReminders.map(r => {
+                    const isDue = isPast(new Date(r.remind_at));
+                    return (
+                      <motion.div
+                        key={r.id}
+                        variants={itemVariants}
+                        className="relative p-4 rounded-xl border-2 transition-all"
+                        style={{
+                          borderColor:     isDue ? `${COLORS.red}40` : `${COLORS.purple}30`,
+                          backgroundColor: isDue ? `${COLORS.red}08`  : `${COLORS.purple}08`,
+                        }}
+                      >
+                        {isDue && (
+                          <span className="absolute top-3 right-3 text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase">
+                            Past Due
+                          </span>
+                        )}
+                        <div className="flex items-start gap-3 mb-3 pr-16">
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ backgroundColor: `${COLORS.purple}20` }}
+                          >
+                            <Bell className="w-4 h-4" style={{ color: COLORS.purple }} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-800 text-sm leading-snug truncate">
+                              {r.title}
+                            </p>
+                            {r.description && (
+                              <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
+                                {r.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <p
+                          className="text-xs font-mono font-bold mb-3 pl-11"
+                          style={{ color: isDue ? COLORS.red : COLORS.purple }}
+                        >
+                          ⏰ {formatReminderTime(r.remind_at)}
+                        </p>
+                        <div className="flex gap-2 pl-11">
+                          <a
+                            href={buildGCalURL(r)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white transition-colors"
+                            style={{ backgroundColor: COLORS.deepBlue }}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Google Cal
+                          </a>
+                          {!isViewingOther && (
+                            <button
+                              onClick={() => handleDeleteReminder(r.id)}
+                              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -1301,7 +1698,7 @@ export default function Attendance() {
               </CardContent>
             </Card>
 
-            {/* ── Selected Day Details ─────────────────────────────────── */}
+            {/* ── Selected Day Details — FIX #2 ────────────────────────── */}
             <Card className="border-0 shadow-md overflow-hidden">
               <CardContent className="p-0">
                 {selectedAttendance?.punch_in ? (
@@ -1316,6 +1713,7 @@ export default function Attendance() {
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600 font-medium">Punch In</span>
                         <span className="font-mono font-bold text-slate-900">
+                          {/* FIX #2 — correct IST time even for admin viewing other user */}
                           {formatAttendanceTime(selectedAttendance.punch_in)}
                         </span>
                       </div>
@@ -1350,8 +1748,8 @@ export default function Attendance() {
                   <div
                     className="p-6 border-l-4"
                     style={{
-                      borderColor:     COLORS.orange,
-                      background:      'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)',
+                      borderColor: COLORS.orange,
+                      background:  'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)',
                     }}
                   >
                     <p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>
@@ -1454,7 +1852,7 @@ export default function Attendance() {
             })()}
           </motion.div>
 
-          {/* ─── Recent Attendance Table ──────────────────────────────── */}
+          {/* ─── Recent Attendance Table — FIX #4 ────────────────────── */}
           <motion.div variants={itemVariants} className="xl:col-span-2">
             <Card className="border-0 shadow-md h-fit">
               <CardHeader className="border-b border-slate-100">
@@ -1482,6 +1880,7 @@ export default function Attendance() {
                           <p className="font-bold text-slate-800 text-sm">
                             {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
                           </p>
+                          {/* FIX #4 — correct IST times using fixed formatAttendanceTime */}
                           <p className="text-xs text-slate-500 mt-1 font-mono">
                             {record.status === 'leave'
                               ? `🟠 On Leave${
@@ -1880,6 +2279,143 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* NEW REMINDER MODAL                                              */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <AnimatePresence>
+          {showReminderForm && (
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1,    y: 0  }}
+                exit={{   scale: 0.95, y: 20 }}
+              >
+                {/* Header */}
+                <div
+                  className="px-8 py-6 text-white"
+                  style={{
+                    background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)`,
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                      <AlarmClock className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black">New Reminder</h2>
+                      <p className="text-purple-200 text-sm mt-0.5">
+                        Set a meeting or task reminder with Google Calendar sync
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form */}
+                <div className="p-8 space-y-5">
+                  <div>
+                    <label className="text-sm font-bold text-slate-700 mb-2 block">
+                      Title *
+                    </label>
+                    <input
+                      type="text"
+                      value={reminderTitle}
+                      onChange={e => setReminderTitle(e.target.value)}
+                      placeholder="e.g., Team standup, Client call, Tax filing deadline…"
+                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold text-slate-700 mb-2 block">
+                      Date & Time *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={reminderDatetime}
+                      onChange={e => setReminderDatetime(e.target.value)}
+                      min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
+                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold text-slate-700 mb-2 block">
+                      Description (Optional)
+                    </label>
+                    <textarea
+                      value={reminderDesc}
+                      onChange={e => setReminderDesc(e.target.value)}
+                      placeholder="Add notes, agenda, meeting link…"
+                      rows={3}
+                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 resize-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Google Calendar integration preview */}
+                  {reminderTitle && reminderDatetime && (
+                    <motion.div
+                      className="p-4 rounded-xl flex items-start gap-3"
+                      style={{
+                        backgroundColor: `${COLORS.deepBlue}08`,
+                        border:          `1.5px solid ${COLORS.deepBlue}20`,
+                      }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      <CalendarPlus
+                        className="w-5 h-5 flex-shrink-0 mt-0.5"
+                        style={{ color: COLORS.deepBlue }}
+                      />
+                      <div>
+                        <p className="text-xs font-bold text-slate-700">
+                          Google Calendar Integration
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          After saving, click "Google Cal" on the reminder card to
+                          open the event pre-filled in your Google Calendar.
+                          No sign-in required — uses your browser's active session.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setShowReminderForm(false);
+                      setReminderTitle('');
+                      setReminderDesc('');
+                      setReminderDatetime('');
+                    }}
+                    className="font-bold rounded-lg"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={!reminderTitle.trim() || !reminderDatetime}
+                    onClick={handleCreateReminder}
+                    className="font-bold text-white rounded-lg px-6"
+                    style={{ backgroundColor: COLORS.purple }}
+                  >
+                    <Bell className="w-4 h-4 mr-2" />
+                    Set Reminder
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
       </motion.div>
     </TooltipProvider>
   );
