@@ -1937,6 +1937,254 @@ async def update_document_movement(
  return {"message": "Movement updated successfully"}
 
 # DUE DATE ROUTES
+# ── Compliance extraction helpers ──────────────────────────────────────────
+COMPLIANCE_RULES = [
+    {"keywords": ["gstr-1", "gstr1", "outward supply"],          "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-3b", "gstr3b", "summary return"],        "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-9", "annual return gst"],                "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-4", "composition"],                      "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-7", "tds return gst"],                   "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-8", "tcs statement"],                    "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-5", "non-resident"],                     "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-6", "isd return"],                       "category": "GST",          "department": "GST"},
+    {"keywords": ["gstr-10", "final return"],                    "category": "GST",          "department": "GST"},
+    {"keywords": ["gst", "goods and service"],                   "category": "GST",          "department": "GST"},
+    {"keywords": ["itr", "income tax return"],                   "category": "Income Tax",   "department": "IT"},
+    {"keywords": ["advance tax", "advance income tax"],          "category": "Income Tax",   "department": "IT"},
+    {"keywords": ["tax audit", "form 3ca", "form 3cb"],          "category": "Audit",        "department": "IT"},
+    {"keywords": ["form 16", "form 26as"],                       "category": "Income Tax",   "department": "IT"},
+    {"keywords": ["income tax", "direct tax"],                   "category": "Income Tax",   "department": "IT"},
+    {"keywords": ["tds", "tax deducted at source", "form 24q", "form 26q", "form 27q"], "category": "TDS", "department": "TDS"},
+    {"keywords": ["tcs", "tax collected at source"],             "category": "TDS",          "department": "TDS"},
+    {"keywords": ["challan 281"],                                "category": "TDS",          "department": "TDS"},
+    {"keywords": ["mgt-7", "annual return roc", "annual return mca"], "category": "ROC",     "department": "ROC"},
+    {"keywords": ["aoc-4", "financial statement", "filing of financial"], "category": "ROC", "department": "ROC"},
+    {"keywords": ["dir-3", "director kyc", "din kyc"],           "category": "ROC",          "department": "ROC"},
+    {"keywords": ["dir-8", "disqualification"],                  "category": "ROC",          "department": "ROC"},
+    {"keywords": ["dir-12", "appointment", "resignation of director"], "category": "ROC",    "department": "ROC"},
+    {"keywords": ["mbp-1", "disclosure of interest"],            "category": "ROC",          "department": "ROC"},
+    {"keywords": ["agm", "annual general meeting"],              "category": "ROC",          "department": "ROC"},
+    {"keywords": ["dpt-3", "return of deposits"],                "category": "ROC",          "department": "ROC"},
+    {"keywords": ["msme-1", "msme samadhaan"],                   "category": "ROC",          "department": "MSME"},
+    {"keywords": ["pas-6", "reconciliation of share"],           "category": "ROC",          "department": "ROC"},
+    {"keywords": ["roc", "mca", "companies act", "registrar of companies"], "category": "ROC", "department": "ROC"},
+    {"keywords": ["msme"],                                       "category": "Other",        "department": "MSME"},
+    {"keywords": ["statutory audit", "internal audit", "audit report"], "category": "Audit", "department": "ACC"},
+    {"keywords": ["adt-1", "appointment of auditor"],            "category": "Audit",        "department": "ROC"},
+    {"keywords": ["trademark", "tm renewal"],                    "category": "Trademark",    "department": "TM"},
+    {"keywords": ["fema", "foreign exchange", "fdi"],            "category": "FEMA",         "department": "FEMA"},
+    {"keywords": ["rera", "real estate"],                        "category": "RERA",         "department": "OTHER"},
+    {"keywords": ["pf", "provident fund", "epfo"],               "category": "Other",        "department": "ACC"},
+    {"keywords": ["esi", "esic"],                                "category": "Other",        "department": "ACC"},
+    {"keywords": ["board meeting", "minute book"],               "category": "ROC",          "department": "ROC"},
+]
+
+MONTH_MAP = {
+    "january":1,"jan":1,"february":2,"feb":2,"march":3,"mar":3,
+    "april":4,"apr":4,"may":5,"june":6,"jun":6,"july":7,"jul":7,
+    "august":8,"aug":8,"september":9,"sep":9,"sept":9,
+    "october":10,"oct":10,"november":11,"nov":11,"december":12,"dec":12,
+}
+
+def parse_date_from_text(text: str):
+    text = text.strip()
+    now = datetime.now()
+    year = now.year
+    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b', text, re.IGNORECASE)
+    if m:
+        try: return date(int(m.group(3)), MONTH_MAP[m.group(2).lower()], int(m.group(1))).isoformat()
+        except: pass
+    m = re.search(r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+(\d{4})\b', text, re.IGNORECASE)
+    if m:
+        try: return date(int(m.group(3)), MONTH_MAP[m.group(1).lower()], int(m.group(2))).isoformat()
+        except: pass
+    m = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b', text)
+    if m:
+        try: return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
+        except: pass
+    m = re.search(r'\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b', text)
+    if m:
+        try: return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except: pass
+    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b', text, re.IGNORECASE)
+    if m:
+        try:
+            mo, d_val = MONTH_MAP[m.group(2).lower()], int(m.group(1))
+            target = date(year, mo, d_val)
+            if target < date.today(): target = date(year+1, mo, d_val)
+            return target.isoformat()
+        except: pass
+    m = re.search(r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})\b', text, re.IGNORECASE)
+    if m:
+        try:
+            mo, d_val = MONTH_MAP[m.group(1).lower()], int(m.group(2))
+            target = date(year, mo, d_val)
+            if target < date.today(): target = date(year+1, mo, d_val)
+            return target.isoformat()
+        except: pass
+    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+next\s+month\b', text, re.IGNORECASE)
+    if m:
+        try:
+            day = int(m.group(1))
+            today = date.today()
+            target = date(today.year, today.month+1, day) if today.month < 12 else date(today.year+1, 1, day)
+            return target.isoformat()
+        except: pass
+    m = re.search(r'within\s+(\d+)\s+days?', text, re.IGNORECASE)
+    if m:
+        try: return (date.today() + timedelta(days=int(m.group(1)))).isoformat()
+        except: pass
+    m = re.search(r'\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b', text, re.IGNORECASE)
+    if m:
+        try:
+            mo, d_val = MONTH_MAP[m.group(2).lower()], int(m.group(1))
+            target = date(year, mo, d_val)
+            if target < date.today(): target = date(year+1, mo, d_val)
+            return target.isoformat()
+        except: pass
+    return None
+
+def classify_compliance(line: str):
+    lower = line.lower()
+    for rule in COMPLIANCE_RULES:
+        if any(kw in lower for kw in rule["keywords"]):
+            return {"category": rule["category"], "department": rule["department"]}
+    return {"category": "Other", "department": "OTHER"}
+
+def extract_title(line: str) -> str:
+    title = re.sub(r'\s+', ' ', line).strip()
+    title = re.sub(r'^[\-\*\•\|]+\s*', '', title)
+    if len(title) > 80:
+        title = title[:77].rsplit(' ', 1)[0] + '...'
+    return title or "Compliance Task"
+
+def parse_compliance_dates(raw_text: str):
+    results = []
+    seen = set()
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+
+    # Pass 1: table rows with | separators
+    for i, line in enumerate(lines):
+        if "|" not in line: continue
+        cols = [c.strip() for c in line.split("|") if c.strip()]
+        if len(cols) < 2: continue
+        date_val, date_col_idx = None, None
+        for idx, col in enumerate(cols):
+            d = parse_date_from_text(col)
+            if d: date_col_idx, date_val = idx, d; break
+        if not date_val and i+1 < len(lines):
+            date_val = parse_date_from_text(lines[i+1])
+        if not date_val: continue
+        title_col = next((c for idx,c in enumerate(cols) if idx!=date_col_idx and len(c)>3), None)
+        if not title_col: continue
+        title = extract_title(title_col)
+        if title.lower() in seen: continue
+        seen.add(title.lower())
+        clf = classify_compliance(line)
+        results.append({"title": title, "due_date": date_val, "category": clf["category"], "department": clf["department"], "description": title_col[:300], "status": "pending"})
+
+    # Pass 2: free-form lines
+    for i, line in enumerate(lines):
+        if len(line) < 8: continue
+        if re.match(r'^(form|compliance|particulars|due date|applicability|sl\.?\s*no)', line, re.IGNORECASE): continue
+        date_val = parse_date_from_text(line)
+        if not date_val and i+1 < len(lines): date_val = parse_date_from_text(lines[i+1])
+        if not date_val: continue
+        clf = classify_compliance(line)
+        if clf["category"]=="Other" and clf["department"]=="OTHER" and i>0:
+            clf = classify_compliance(lines[i-1])
+        title = extract_title(line)
+        if title.lower() in seen: continue
+        seen.add(title.lower())
+        stripped = re.sub(r'\d{1,2}(?:st|nd|rd|th)?\s+\w+\s*\d{0,4}', '', line, flags=re.IGNORECASE).strip()
+        if len(stripped) < 5: continue
+        results.append({"title": title, "due_date": date_val, "category": clf["category"], "department": clf["department"], "description": line[:300], "status": "pending"})
+
+    # Pass 3: form number pattern
+    form_pat = re.compile(r'((?:GSTR?|ITR|MGT|AOC|DIR|DPT|ADT|PAS|INC|CHG|BEN|SH|CSR|MSME)-[\w\/]+)', re.IGNORECASE)
+    for i, line in enumerate(lines):
+        m = form_pat.search(line)
+        if not m: continue
+        form_name = m.group(1).upper()
+        date_val = None
+        for j in range(i, min(i+3, len(lines))):
+            date_val = parse_date_from_text(lines[j])
+            if date_val: break
+        if not date_val: continue
+        title = f"{form_name} Filing"
+        if title.lower() in seen: continue
+        seen.add(title.lower())
+        clf = classify_compliance(form_name + " " + line)
+        results.append({"title": title, "due_date": date_val, "category": clf["category"], "department": clf["department"], "description": extract_title(line), "status": "pending"})
+
+    results.sort(key=lambda x: x.get("due_date","9999-12-31"))
+    return results
+
+
+@api_router.post("/duedates/extract-from-file")
+async def extract_due_dates_from_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    filename = (file.filename or "").lower()
+    content_type = file.content_type or ""
+    file_bytes = await file.read()
+
+    try:
+        if content_type.startswith("image/") or filename.endswith((".jpg",".jpeg",".png",".webp",".bmp")):
+            from PIL import Image
+            import pytesseract
+            img = Image.open(BytesIO(file_bytes))
+            w, h = img.size
+            if w < 1200:
+                scale = 1200 / w
+                img = img.resize((int(w*scale), int(h*scale)))
+            raw_text = pytesseract.image_to_string(img, config="--psm 6")
+
+        elif content_type == "application/pdf" or filename.endswith(".pdf"):
+            import pdfplumber
+            parts = []
+            with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t: parts.append(t)
+                    for table in page.extract_tables():
+                        for row in table:
+                            if row: parts.append("  |  ".join(str(c or "") for c in row))
+            raw_text = "\n".join(parts)
+
+        elif filename.endswith((".docx",".doc")):
+            from docx import Document as DocxDocument
+            doc = DocxDocument(BytesIO(file_bytes))
+            parts = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    parts.append("  |  ".join(cell.text for cell in row.cells))
+            raw_text = "\n".join(parts)
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type. Use JPG, PNG, PDF, or DOCX.")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"File extraction error: {e}")
+        raise HTTPException(status_code=422, detail=f"Could not read file: {str(e)}")
+
+    if not raw_text or len(raw_text.strip()) < 20:
+        raise HTTPException(status_code=422, detail="No readable text found. Try a clearer image or PDF.")
+
+    extracted = parse_compliance_dates(raw_text)
+
+    if not extracted:
+        raise HTTPException(status_code=404, detail="No compliance dates detected in this document.")
+
+    return {"extracted": extracted, "count": len(extracted)}
+
+@api_router.post("/duedates", response_model=DueDate)
+async def create_due_date(
+    ...  # your existing code unchanged
+
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
  due_date_data: DueDateCreate,
