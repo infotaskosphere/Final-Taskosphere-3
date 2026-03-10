@@ -1204,7 +1204,14 @@ export default function Attendance() {
                       {!isViewingOther && (
                         <p className="text-blue-100 text-xs">
                           Expected: {user?.punch_in_time || '10:30'}{' '}
-                          ({user?.grace_time || '15'} min grace) •{' '}
+                          ({(() => {
+                            const gt = user?.grace_time || '00:15';
+                            if (gt.includes(':')) {
+                            const [h, m] = gt.split(':').map(Number);
+                            return h * 60 + m;
+                          }
+                          return gt;
+                        })()} min grace) •{' '}
                           {user?.punch_out_time || '19:00'}
                         </p>
                       )}
