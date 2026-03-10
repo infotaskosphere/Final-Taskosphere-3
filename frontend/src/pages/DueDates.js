@@ -117,6 +117,10 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
   return (
     <Dialog open={open} onOpenChange={o => !o && close()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Smart Import</DialogTitle>
+          <DialogDescription>Upload PDF or Word to extract compliance dates</DialogDescription>
+        </DialogHeader>
 
         {/* Header */}
         <div className="sticky top-0 z-10 px-6 py-4 border-b" style={{ background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)` }}>
