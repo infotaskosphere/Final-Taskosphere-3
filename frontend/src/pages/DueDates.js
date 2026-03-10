@@ -12,7 +12,7 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User,
-  CheckCircle, Filter, Upload, Sparkles, FileImage, FileText,
+  CheckCircle, Filter, Upload, Sparkles, FileText,
   X, CheckSquare, Loader2, SkipForward
 } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
@@ -42,24 +42,23 @@ const iv = { hidden:{ opacity:0, y:16 }, visible:{ opacity:1, y:0, transition:{ 
 // ─────────────────────────────────────────────
 function SmartImportModal({ open, onClose, clients, users, user, onImportDone }) {
   const [file, setFile]                     = useState(null);
-  const [filePreview, setFilePreview]       = useState(null);
   const [extracting, setExtracting]         = useState(false);
   const [extractedDates, setExtractedDates] = useState([]);
   const [step, setStep]                     = useState('upload');
   const [selected, setSelected]             = useState({});
   const [saving, setSaving]                 = useState(false);
 
-  const reset = () => { setFile(null); setFilePreview(null); setExtracting(false); setExtractedDates([]); setStep('upload'); setSelected({}); };
+  const reset = () => { setFile(null); setExtracting(false); setExtractedDates([]); setStep('upload'); setSelected({}); };
   const close = () => { reset(); onClose(); };
 
   const onFile = (f) => {
     if (!f) return;
-    setFile(f);
+    // Block image files — server does not support OCR
     if (f.type.startsWith('image/')) {
-      const r = new FileReader();
-      r.onload = e => setFilePreview(e.target.result);
-      r.readAsDataURL(f);
-    } else { setFilePreview(null); }
+      toast.error('Image files are not supported. Please upload a PDF or DOCX file.');
+      return;
+    }
+    setFile(f);
   };
 
   const extract = async () => {
@@ -70,7 +69,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
       fd.append('file', file);
       const res  = await api.post('/duedates/extract-from-file', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const list = res.data?.extracted || [];
-      if (!list.length) { toast.error('No compliance dates found. Try a clearer image or PDF.'); return; }
+      if (!list.length) { toast.error('No compliance dates found. Try a clearer PDF or DOCX.'); return; }
       const withIds = list.map((item, i) => ({ ...item, _id:`ex_${i}`, reminder_days:30, assigned_to:'unassigned', client_id:'no_client' }));
       const sel = {};
       withIds.forEach(d => { sel[d._id] = true; });
@@ -83,10 +82,10 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
     } finally { setExtracting(false); }
   };
 
-  const toggle     = id  => setSelected(p => ({ ...p, [id]: !p[id] }));
-  const selectAll  = ()  => { const m={}; extractedDates.forEach(d=>{m[d._id]=true;});  setSelected(m); };
-  const clearAll   = ()  => { const m={}; extractedDates.forEach(d=>{m[d._id]=false;}); setSelected(m); };
-  const selCount   = Object.values(selected).filter(Boolean).length;
+  const toggle    = id => setSelected(p => ({ ...p, [id]: !p[id] }));
+  const selectAll = ()  => { const m={}; extractedDates.forEach(d=>{m[d._id]=true;});  setSelected(m); };
+  const clearAll  = ()  => { const m={}; extractedDates.forEach(d=>{m[d._id]=false;}); setSelected(m); };
+  const selCount  = Object.values(selected).filter(Boolean).length;
 
   const doImport = async () => {
     const list = extractedDates.filter(d => selected[d._id]);
@@ -96,15 +95,15 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
     for (const item of list) {
       try {
         await api.post('/duedates', {
-          title:        item.title,
-          description:  item.description || '',
-          due_date:     new Date(item.due_date).toISOString(),
+          title:         item.title,
+          description:   item.description || '',
+          due_date:      new Date(item.due_date).toISOString(),
           reminder_days: item.reminder_days || 30,
-          category:     item.category   || 'Other',
-          department:   item.department || 'OTHER',
-          assigned_to:  item.assigned_to === 'unassigned' ? null : item.assigned_to,
-          client_id:    item.client_id   === 'no_client'  ? null : item.client_id,
-          status:       'pending',
+          category:      item.category   || 'Other',
+          department:    item.department || 'OTHER',
+          assigned_to:   item.assigned_to === 'unassigned' ? null : item.assigned_to,
+          client_id:     item.client_id   === 'no_client'  ? null : item.client_id,
+          status:        'pending',
         });
         ok++;
       } catch {}
@@ -118,6 +117,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
   return (
     <Dialog open={open} onOpenChange={o => !o && close()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+
         {/* Header */}
         <div className="sticky top-0 z-10 px-6 py-4 border-b" style={{ background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)` }}>
           <div className="flex items-center gap-3">
@@ -126,7 +126,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
             </div>
             <div>
               <h2 className="text-white font-bold text-lg">Smart Import</h2>
-              <p className="text-blue-200 text-xs">Upload image, PDF, or Word — server extracts compliance dates via OCR</p>
+              <p className="text-blue-200 text-xs">Upload PDF or Word — server extracts compliance dates automatically</p>
             </div>
           </div>
           <div className="flex items-center gap-2 mt-4">
@@ -145,7 +145,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
         <div className="p-6">
           <AnimatePresence mode="wait">
 
-            {/* ── STEP 1 UPLOAD ── */}
+            {/* ── STEP 1: UPLOAD ── */}
             {step === 'upload' && (
               <motion.div key="upload" initial={{opacity:0,x:-20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:20}}>
                 <div
@@ -154,30 +154,45 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                   onClick={()=>document.getElementById('smart-file').click()}
                   className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${file?'border-blue-400 bg-blue-50':'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}
                 >
-                  <input id="smart-file" type="file" accept="image/*,.pdf,.docx,.doc" className="hidden" onChange={e=>onFile(e.target.files?.[0])} />
+                  {/* accept only PDF and DOCX */}
+                  <input
+                    id="smart-file"
+                    type="file"
+                    accept=".pdf,.docx,.doc"
+                    className="hidden"
+                    onChange={e=>onFile(e.target.files?.[0])}
+                  />
+
                   {file ? (
                     <div className="space-y-3">
-                      {filePreview
-                        ? <img src={filePreview} alt="preview" className="max-h-48 mx-auto rounded-xl shadow-md object-contain" />
-                        : <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-100 flex items-center justify-center"><FileText className="h-8 w-8 text-blue-500"/></div>
-                      }
+                      <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-100 flex items-center justify-center">
+                        <FileText className="h-8 w-8 text-blue-500"/>
+                      </div>
                       <p className="font-semibold text-slate-700">{file.name}</p>
                       <p className="text-xs text-slate-400">{(file.size/1024).toFixed(1)} KB</p>
-                      <button onClick={e=>{e.stopPropagation();setFile(null);setFilePreview(null);}} className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-700">
+                      <button
+                        onClick={e=>{e.stopPropagation();setFile(null);}}
+                        className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                      >
                         <X className="h-3 w-3"/>Remove
                       </button>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center"><Upload className="h-7 w-7 text-slate-400"/></div>
+                      <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center">
+                        <Upload className="h-7 w-7 text-slate-400"/>
+                      </div>
                       <div>
                         <p className="font-semibold text-slate-700 mb-1">Drop file or click to browse</p>
-                        <p className="text-xs text-slate-400">PNG, JPG, PDF, DOCX supported</p>
+                        <p className="text-xs text-slate-400">PDF and DOCX supported</p>
                       </div>
-                      <div className="flex justify-center gap-3 flex-wrap">
-                        {[{icon:FileImage,label:'Image',color:'text-purple-500',bg:'bg-purple-50'},{icon:FileText,label:'PDF',color:'text-red-500',bg:'bg-red-50'},{icon:FileText,label:'Word',color:'text-blue-500',bg:'bg-blue-50'}].map(({icon:I,label,color,bg})=>(
-                          <span key={label} className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full ${bg} ${color}`}><I className="h-3.5 w-3.5"/>{label}</span>
-                        ))}
+                      <div className="flex justify-center gap-3">
+                        <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-red-50 text-red-500">
+                          <FileText className="h-3.5 w-3.5"/>PDF
+                        </span>
+                        <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-blue-50 text-blue-500">
+                          <FileText className="h-3.5 w-3.5"/>Word
+                        </span>
                       </div>
                     </div>
                   )}
@@ -185,19 +200,30 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
 
                 <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-100 flex gap-3">
                   <Sparkles className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5"/>
-                  <p className="text-xs text-amber-700">Our server uses OCR to scan your document and extract compliance deadlines. No external API is used — all processing happens on your backend.</p>
+                  <p className="text-xs text-amber-700">
+                    Our server scans your document and extracts compliance deadlines automatically.
+                    No external API is used — all processing happens on your backend.
+                  </p>
                 </div>
 
                 <div className="flex justify-end gap-3 mt-6">
                   <Button variant="outline" onClick={close}>Cancel</Button>
-                  <Button onClick={extract} disabled={!file||extracting} className="text-white px-6" style={{background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)`}}>
-                    {extracting?<><Loader2 className="h-4 w-4 mr-2 animate-spin"/>Extracting...</>:<><Sparkles className="h-4 w-4 mr-2"/>Extract Dates</>}
+                  <Button
+                    onClick={extract}
+                    disabled={!file || extracting}
+                    className="text-white px-6"
+                    style={{background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)`}}
+                  >
+                    {extracting
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin"/>Extracting...</>
+                      : <><Sparkles className="h-4 w-4 mr-2"/>Extract Dates</>
+                    }
                   </Button>
                 </div>
               </motion.div>
             )}
 
-            {/* ── STEP 2 REVIEW ── */}
+            {/* ── STEP 2: REVIEW ── */}
             {step === 'review' && (
               <motion.div key="review" initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-20}} className="space-y-4">
                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
@@ -216,7 +242,9 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                   {extractedDates.map(item => {
                     const isSel = selected[item._id];
                     return (
-                      <motion.div key={item._id} layout onClick={()=>toggle(item._id)}
+                      <motion.div
+                        key={item._id} layout
+                        onClick={()=>toggle(item._id)}
                         className={`rounded-xl border-2 p-4 cursor-pointer transition-all duration-200 ${isSel?'border-blue-300 bg-blue-50':'border-slate-200 bg-white opacity-60'}`}
                       >
                         <div className="flex items-start gap-3">
@@ -237,7 +265,8 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                               </span>
                             </div>
                           </div>
-                          <button onClick={e=>{e.stopPropagation();toggle(item._id);}}
+                          <button
+                            onClick={e=>{e.stopPropagation();toggle(item._id);}}
                             className={`flex-shrink-0 text-xs px-2 py-1 rounded-lg font-medium transition-all ${isSel?'bg-red-50 text-red-500 hover:bg-red-100':'bg-blue-50 text-blue-500 hover:bg-blue-100'}`}
                           >
                             {isSel
@@ -255,13 +284,22 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                   <Button variant="outline" onClick={()=>setStep('upload')}>← Back</Button>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={close}>Cancel</Button>
-                    <Button onClick={doImport} disabled={saving||selCount===0} className="text-white px-6" style={{background:`linear-gradient(135deg,${COLORS.emeraldGreen} 0%,#17a34a 100%)`}}>
-                      {saving?<><Loader2 className="h-4 w-4 mr-2 animate-spin"/>Importing...</>:<><CheckCircle className="h-4 w-4 mr-2"/>Import {selCount} Date{selCount!==1?'s':''}</>}
+                    <Button
+                      onClick={doImport}
+                      disabled={saving || selCount===0}
+                      className="text-white px-6"
+                      style={{background:`linear-gradient(135deg,${COLORS.emeraldGreen} 0%,#17a34a 100%)`}}
+                    >
+                      {saving
+                        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin"/>Importing...</>
+                        : <><CheckCircle className="h-4 w-4 mr-2"/>Import {selCount} Date{selCount!==1?'s':''}</>
+                      }
                     </Button>
                   </div>
                 </div>
               </motion.div>
             )}
+
           </AnimatePresence>
         </div>
       </DialogContent>
@@ -326,7 +364,10 @@ export default function DueDates() {
     catch { toast.error('Failed to delete'); }
   };
 
-  const resetForm = () => { setFormData({ title:'', description:'', due_date:'', reminder_days:30, category:'', department:'', assigned_to:'unassigned', client_id:'no_client', status:'pending' }); setEditing(null); };
+  const resetForm = () => {
+    setFormData({ title:'', description:'', due_date:'', reminder_days:30, category:'', department:'', assigned_to:'unassigned', client_id:'no_client', status:'pending' });
+    setEditing(null);
+  };
 
   const getUserName   = id => users.find(u=>u.id===id)?.full_name||'Unassigned';
   const getClientName = id => clients.find(c=>c.id===id)?.company_name||'-';
@@ -357,14 +398,19 @@ export default function DueDates() {
     .map((label,i) => ({ value:String(i), label }));
 
   const addToCalendar = dd => {
-    const t = encodeURIComponent(dd.title), desc = encodeURIComponent(dd.description||'');
-    const s = format(new Date(dd.due_date),'yyyyMMdd'), e = format(new Date(new Date(dd.due_date).getTime()+86400000),'yyyyMMdd');
+    const t    = encodeURIComponent(dd.title);
+    const desc = encodeURIComponent(dd.description||'');
+    const s    = format(new Date(dd.due_date),'yyyyMMdd');
+    const e    = format(new Date(new Date(dd.due_date).getTime()+86400000),'yyyyMMdd');
     window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${t}&details=${desc}&dates=${s}/${e}`,'_blank');
   };
 
   const StatCard = ({ label, value, color, status, ring }) => (
     <motion.div whileHover={{y:-2}} whileTap={{scale:0.98}}>
-      <Card className={`border cursor-pointer transition-all hover:shadow-lg ${filterStatus===status?`ring-2 ${ring}`:'border-slate-200'}`} onClick={()=>setFilterStatus(filterStatus===status?'all':status)}>
+      <Card
+        className={`border cursor-pointer transition-all hover:shadow-lg ${filterStatus===status?`ring-2 ${ring}`:'border-slate-200'}`}
+        onClick={()=>setFilterStatus(filterStatus===status?'all':status)}
+      >
         <CardContent className="p-5">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2">{label}</p>
           <p className={`text-4xl font-bold tabular-nums ${color}`}>{value}</p>
@@ -383,19 +429,31 @@ export default function DueDates() {
           <p className="text-slate-500 mt-1 text-sm">Track and manage all statutory filing deadlines</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" onClick={()=>setImportOpen(true)} className="border-2 gap-2 font-semibold transition-all hover:scale-105" style={{borderColor:COLORS.mediumBlue,color:COLORS.mediumBlue}}>
+          <Button
+            variant="outline"
+            onClick={()=>setImportOpen(true)}
+            className="border-2 gap-2 font-semibold transition-all hover:scale-105"
+            style={{borderColor:COLORS.mediumBlue, color:COLORS.mediumBlue}}
+          >
             <Sparkles className="h-4 w-4"/>Smart Import
           </Button>
           <Dialog open={dialogOpen} onOpenChange={o=>{setDialogOpen(o);if(!o)resetForm();}}>
             <DialogTrigger asChild>
-              <Button className="text-white gap-2 font-semibold px-5 shadow-lg transition-all hover:scale-105" style={{background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)`}}>
+              <Button
+                className="text-white gap-2 font-semibold px-5 shadow-lg transition-all hover:scale-105"
+                style={{background:`linear-gradient(135deg,${COLORS.deepBlue} 0%,${COLORS.mediumBlue} 100%)`}}
+              >
                 <Plus className="h-4 w-4"/>New Due Date
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg">
               <DialogHeader>
-                <DialogTitle className="text-2xl" style={{color:COLORS.deepBlue}}>{editingDueDate?'Edit Due Date':'Add New Due Date'}</DialogTitle>
-                <DialogDescription>{editingDueDate?'Update compliance due date details.':'Create a new compliance due date reminder.'}</DialogDescription>
+                <DialogTitle className="text-2xl" style={{color:COLORS.deepBlue}}>
+                  {editingDueDate?'Edit Due Date':'Add New Due Date'}
+                </DialogTitle>
+                <DialogDescription>
+                  {editingDueDate?'Update compliance due date details.':'Create a new compliance due date reminder.'}
+                </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
@@ -495,7 +553,9 @@ export default function DueDates() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-36 bg-white border-slate-200"><Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Status"/></SelectTrigger>
+            <SelectTrigger className="w-36 bg-white border-slate-200">
+              <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Status"/>
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="upcoming">Upcoming</SelectItem>
@@ -512,7 +572,9 @@ export default function DueDates() {
             </SelectContent>
           </Select>
           <Select value={filterMonth} onValueChange={setFilterMonth}>
-            <SelectTrigger className="w-36 bg-white border-slate-200"><Calendar className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Month"/></SelectTrigger>
+            <SelectTrigger className="w-36 bg-white border-slate-200">
+              <Calendar className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Month"/>
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Months</SelectItem>
               {months.map(m=><SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
@@ -537,17 +599,21 @@ export default function DueDates() {
                 {filtered.length===0 ? (
                   <tr><td colSpan={8} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
-                      <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center"><Calendar className="h-6 w-6 text-slate-300"/></div>
+                      <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
+                        <Calendar className="h-6 w-6 text-slate-300"/>
+                      </div>
                       <p className="text-slate-400 text-sm font-medium">No due dates found</p>
                       <p className="text-slate-300 text-xs">Try Smart Import to extract from a compliance document</p>
                     </div>
                   </td></tr>
                 ) : filtered.map((dd, idx) => {
-                  const ds  = getStatus(dd);
-                  const sty = STATUS_STYLES[ds];
+                  const ds    = getStatus(dd);
+                  const sty   = STATUS_STYLES[ds];
                   const dLeft = differenceInDays(new Date(dd.due_date), new Date());
                   return (
-                    <motion.tr key={dd.id} initial={{opacity:0}} animate={{opacity:1}} transition={{delay:idx*0.03}}
+                    <motion.tr
+                      key={dd.id}
+                      initial={{opacity:0}} animate={{opacity:1}} transition={{delay:idx*0.03}}
                       className="hover:bg-slate-50/70 transition-colors group border-b border-slate-100 last:border-0"
                     >
                       <td className="px-5 py-4">
@@ -570,11 +636,17 @@ export default function DueDates() {
                       <td className="px-5 py-4">
                         {dd.client_id
                           ? <div className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-300"/><span className="text-xs text-slate-500">{getClientName(dd.client_id)}</span></div>
-                          : <span className="text-slate-300 text-xs">—</span>}
+                          : <span className="text-slate-300 text-xs">—</span>
+                        }
                       </td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{format(new Date(dd.due_date),'dd MMM yyyy')}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                        {format(new Date(dd.due_date),'dd MMM yyyy')}
+                      </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-300"/><span className="text-xs text-slate-500">{getUserName(dd.assigned_to)}</span></div>
+                        <div className="flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-slate-300"/>
+                          <span className="text-xs text-slate-500">{getUserName(dd.assigned_to)}</span>
+                        </div>
                       </td>
                       <td className="px-5 py-4">
                         {dd.status==='completed'
@@ -587,9 +659,15 @@ export default function DueDates() {
                       <td className="px-5 py-4">
                         {(user?.role==='admin'||dd.assigned_to===user?.id) && (
                           <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 rounded-lg"   onClick={()=>handleEdit(dd)}><Edit  className="h-3.5 w-3.5 text-blue-500"/></Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 rounded-lg"    onClick={()=>handleDelete(dd.id)}><Trash2 className="h-3.5 w-3.5 text-red-400"/></Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-emerald-50 rounded-lg" onClick={()=>addToCalendar(dd)}><Calendar className="h-3.5 w-3.5 text-emerald-500"/></Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 rounded-lg"    onClick={()=>handleEdit(dd)}>
+                              <Edit className="h-3.5 w-3.5 text-blue-500"/>
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 rounded-lg"     onClick={()=>handleDelete(dd.id)}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-400"/>
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-emerald-50 rounded-lg" onClick={()=>addToCalendar(dd)}>
+                              <Calendar className="h-3.5 w-3.5 text-emerald-500"/>
+                            </Button>
                           </div>
                         )}
                       </td>
@@ -601,13 +679,23 @@ export default function DueDates() {
           </div>
           {filtered.length>0 && (
             <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50">
-              <p className="text-xs text-slate-400">Showing <span className="font-semibold text-slate-600">{filtered.length}</span> of <span className="font-semibold text-slate-600">{dueDates.length}</span> due dates</p>
+              <p className="text-xs text-slate-400">
+                Showing <span className="font-semibold text-slate-600">{filtered.length}</span> of{' '}
+                <span className="font-semibold text-slate-600">{dueDates.length}</span> due dates
+              </p>
             </div>
           )}
         </Card>
       </motion.div>
 
-      <SmartImportModal open={importOpen} onClose={()=>setImportOpen(false)} clients={clients} users={users} user={user} onImportDone={fetchDueDates}/>
+      <SmartImportModal
+        open={importOpen}
+        onClose={()=>setImportOpen(false)}
+        clients={clients}
+        users={users}
+        user={user}
+        onImportDone={fetchDueDates}
+      />
     </motion.div>
   );
 }
