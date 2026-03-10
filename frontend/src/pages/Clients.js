@@ -95,7 +95,6 @@ const TypePill = ({ type }) => {
   );
 };
 
-// ── NEW: Empty assignment row ─────────────────────────────────────────────────
 const EMPTY_ASSIGNMENT = { user_id: '', services: [] };
 
 export default function Clients() {
@@ -123,7 +122,6 @@ export default function Clients() {
   const [searchTerm, setSearchTerm] = useState('');
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  // ── NEW: assigned-to filter ───────────────────────────────────────────────
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
@@ -144,7 +142,6 @@ export default function Clients() {
     state: '',
     services: [],
     dsc_details: [],
-    // ── CHANGED: assignments replaces assigned_to ─────────────────────────
     assignments: [{ ...EMPTY_ASSIGNMENT }],
     notes: '',
     status: 'active',
@@ -190,7 +187,7 @@ export default function Clients() {
   const openWhatsApp = (phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
-    window.open(`https://wa.me/  ${cleanPhone}?text=${message}`, '_blank');
+    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
 
   const stats = useMemo(() => {
@@ -223,7 +220,6 @@ export default function Clients() {
     });
   }, [clients]);
 
-  // ── UPDATED: filteredClients now respects assignedToFilter ────────────────
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -234,10 +230,8 @@ export default function Clients() {
         (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
 
-      // ── NEW: assigned-to filter logic ─────────────────────────────────────
       let matchesAssigned = true;
       if (assignedToFilter !== 'all') {
-        // Support both legacy assigned_to (string) and new assignments (array)
         const assignments = c?.assignments || [];
         const legacyAssignedTo = c?.assigned_to;
         if (assignments.length > 0) {
@@ -312,12 +306,81 @@ export default function Clients() {
     return Object.keys(errors).length === 0 && cErrors.length === 0;
   };
 
+  // ── UPDATED: Full CSV template matching all form fields ──────────────────
   const downloadTemplate = () => {
     const headers = [
-      'company_name', 'client_type', 'email', 'phone', 'birthday', 'services',
-      'contact_name_1', 'contact_designation_1', 'contact_email_1', 'contact_phone_1'
+      // Basic details
+      'company_name',
+      'client_type',           // proprietor | pvt_ltd | llp | partnership | huf | trust
+      'email',
+      'phone',
+      'birthday',              // YYYY-MM-DD (incorporation date or DOB)
+      'address',
+      'city',
+      'state',
+      'referred_by',
+      // Services — comma-separated values e.g. "GST,Trademark,ROC"
+      'services',
+      'notes',
+      'status',                // active | inactive
+      // Contact person 1
+      'contact_name_1',
+      'contact_designation_1',
+      'contact_email_1',
+      'contact_phone_1',
+      'contact_birthday_1',    // YYYY-MM-DD
+      'contact_din_1',
+      // Contact person 2
+      'contact_name_2',
+      'contact_designation_2',
+      'contact_email_2',
+      'contact_phone_2',
+      'contact_birthday_2',
+      'contact_din_2',
+      // Contact person 3
+      'contact_name_3',
+      'contact_designation_3',
+      'contact_email_3',
+      'contact_phone_3',
+      'contact_birthday_3',
+      'contact_din_3',
     ];
-    const csvContent = headers.join(',') + '\n';
+
+    // Add one sample row so users understand the expected format
+    const sampleRow = [
+      'ABC Pvt Ltd',
+      'pvt_ltd',
+      'abc@example.com',
+      '9876543210',
+      '2015-04-01',
+      '123 MG Road',
+      'Surat',
+      'Gujarat',
+      'John Smith',
+      'GST,ROC',
+      'Sample client notes',
+      'active',
+      'Rahul Mehta',
+      'Director',
+      'rahul@example.com',
+      '9876500001',
+      '1985-06-15',
+      'DIN00001234',
+      'Priya Shah',
+      'CFO',
+      'priya@example.com',
+      '9876500002',
+      '1990-03-22',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ];
+
+    const csvContent = headers.join(',') + '\n' + sampleRow.join(',') + '\n';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -367,11 +430,11 @@ export default function Clients() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const data = response.data;
-      
+
       let address = (data.address || data.registered_address || '').trim();
       let city = (data.city || '').trim();
       let state = (data.state || '').trim();
-      
+
       if (address && (!city || !state)) {
         const addressParts = address.split(',').map(p => p.trim()).filter(p => p);
         if (addressParts.length > 0) {
@@ -383,7 +446,7 @@ export default function Clients() {
           }
         }
       }
-      
+
       setMdsData(data);
 
       const contacts = (data.contact_persons || []).map(cp => ({
@@ -522,7 +585,6 @@ export default function Clients() {
         notes: dsc.notes?.trim() || null
       }));
 
-      // ── NEW: build assignments payload ────────────────────────────────────
       const cleanedAssignments = (formData.assignments || [])
         .filter(a => a.user_id && a.user_id !== 'unassigned')
         .map(a => ({ user_id: a.user_id, services: a.services || [] }));
@@ -536,7 +598,6 @@ export default function Clients() {
         state: formData.state?.trim() || null,
         services: finalServices,
         notes: formData.notes?.trim() || null,
-        // backward-compat: first assignment user_id as assigned_to
         assigned_to: cleanedAssignments[0]?.user_id || null,
         assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
@@ -556,11 +617,9 @@ export default function Clients() {
     }
   };
 
-  // ── UPDATED: handleEdit normalises legacy assigned_to → assignments ────────
   const handleEdit = (client) => {
     setEditingClient(client);
 
-    // Normalise assignments
     let assignments = client?.assignments || [];
     if (assignments.length === 0 && client?.assigned_to) {
       assignments = [{ user_id: client.assigned_to, services: [] }];
@@ -633,7 +692,6 @@ export default function Clients() {
     ...p, dsc_details: p.dsc_details.filter((_, i) => i !== idx)
   }));
 
-  // ── NEW: assignment helpers ───────────────────────────────────────────────
   const addAssignment = () => setFormData(p => ({
     ...p, assignments: [...(p.assignments || []), { ...EMPTY_ASSIGNMENT }]
   }));
@@ -685,14 +743,12 @@ export default function Clients() {
     return 'proprietor';
   };
 
-  // ── Helper: get all assigned users for a client (supports both schemas) ──
   const getClientAssignments = (client) => {
     if (client?.assignments && client.assignments.length > 0) return client.assignments;
     if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }];
     return [];
   };
 
-  // ── REDESIGNED: Compact Board Card — no blank space, all info visible ──
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
@@ -703,7 +759,6 @@ export default function Clients() {
     const serviceCount = client.services?.length || 0;
     const isArchived = client.status === 'inactive';
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
-    // ── UPDATED: use getClientAssignments ────────────────────────────────
     const clientAssignments = getClientAssignments(client);
     const locationStr = [client.city, client.state].filter(Boolean).join(', ');
     const addressShort = client.address
@@ -717,13 +772,10 @@ export default function Clients() {
           style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
-          {/* Colored top strip */}
           <div className="h-[5px] w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
 
-          {/* ── CARD BODY ── tight padding, dense layout */}
           <div className="flex flex-col p-3 gap-2 overflow-hidden flex-1">
 
-            {/* Row 1: Avatar + Company name + Type pill */}
             <div className="flex items-start gap-2">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
@@ -747,12 +799,9 @@ export default function Clients() {
               <TypePill type={client.client_type} />
             </div>
 
-            {/* Divider */}
             <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
 
-            {/* Row 2: Contact info block — phone, email, location, assignees */}
             <div className="flex flex-col gap-1">
-              {/* Primary contact person name + designation */}
               {primaryContact?.name && (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-700 font-semibold">
                   <User className="h-3 w-3 text-slate-400 flex-shrink-0" />
@@ -765,7 +814,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Phone */}
               {client.phone && (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
                   <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
@@ -773,7 +821,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Email */}
               {client.email && (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                   <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
@@ -781,7 +828,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Address */}
               {(locationStr || addressShort) && (
                 <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
                   <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
@@ -789,7 +835,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* Referred By */}
               {client.referred_by && (
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                   <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0" />
@@ -797,7 +842,6 @@ export default function Clients() {
                 </div>
               )}
 
-              {/* ── UPDATED: Multi-user assignments display ─────────────────── */}
               {clientAssignments.length > 0 && (
                 <div className="flex flex-col gap-0.5">
                   {clientAssignments.map((a, i) => {
@@ -823,7 +867,6 @@ export default function Clients() {
               )}
             </div>
 
-            {/* Row 3: Services tags */}
             {serviceCount > 0 && (
               <div className="flex items-center gap-1 flex-wrap">
                 {client.services?.slice(0, 4).map((svc, i) => (
@@ -843,7 +886,6 @@ export default function Clients() {
               </div>
             )}
 
-            {/* Row 4: Action buttons */}
             <div
               className="flex items-center gap-1 pt-2 border-t"
               style={{ borderColor: cfg.border }}
@@ -886,14 +928,12 @@ export default function Clients() {
     );
   };
 
-  // ── List Row (virtualized) ────────────────────────────────────────────────
   const ListRow = ({ index, style }) => {
     const client = filteredClients[index];
     if (!client) return null;
     const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
     const isArchived = client.status === 'inactive';
     const serviceCount = client.services?.length || 0;
-    // ── UPDATED: multi-user assignments in list row ───────────────────────
     const clientAssignments = getClientAssignments(client);
 
     return (
@@ -940,7 +980,6 @@ export default function Clients() {
               </span>
             )}
           </div>
-          {/* ── UPDATED: show assignee names in list row ─────────────────── */}
           <div className="w-32 flex-shrink-0 flex flex-col gap-0.5">
             {clientAssignments.slice(0, 2).map((a, i) => {
               const u = users.find(x => x.id === a.user_id);
@@ -982,12 +1021,10 @@ export default function Clients() {
     );
   };
 
-  // ── Client Detail Popup ───────────────────────────────────────────────────
   const ClientDetailPopup = () => {
     if (!selectedClient) return null;
     const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
     const avatarGrad = getAvatarGradient(selectedClient.company_name);
-    // ── UPDATED: use getClientAssignments ────────────────────────────────
     const clientAssignments = getClientAssignments(selectedClient);
 
     return (
@@ -1115,7 +1152,6 @@ export default function Clients() {
                   </div>
                 </div>
               )}
-              {/* ── UPDATED: Multi-assignment section in detail popup ──────── */}
               {(clientAssignments.length > 0 || selectedClient.notes) && (
                 <div className="grid grid-cols-2 gap-4">
                   {clientAssignments.length > 0 && (
@@ -1191,10 +1227,9 @@ export default function Clients() {
   return (
     <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: '#F4F6FA' }}>
 
-      {/* ── PAGE HEADER — modernized ── */}
+      {/* ── PAGE HEADER ── */}
       <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm"
         style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #2a85cc 100%)' }}>
-        {/* Decorative orb */}
         <div className="absolute -top-10 -right-10 w-48 h-48 rounded-full opacity-10"
           style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)' }} />
         <div className="absolute bottom-0 left-1/3 w-64 h-24 opacity-5"
@@ -1228,7 +1263,6 @@ export default function Clients() {
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
-                {/* Form header */}
                 <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
                   <div>
                     <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
@@ -1285,7 +1319,6 @@ export default function Clients() {
                         <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
-                      {/* ── NEW: Referred By field ── */}
                       <div>
                         <label className={labelCls}>Referred By</label>
                         <div className="relative">
@@ -1476,7 +1509,7 @@ export default function Clients() {
                       value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                   </div>
 
-                  {/* ── Multi-user Staff Assignments ── */}
+                  {/* ── Staff Assignments ── */}
                   {canAssignClients && (
                     <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                       <div className="flex items-center justify-between mb-5">
@@ -1502,7 +1535,6 @@ export default function Clients() {
                               )}
                             </div>
 
-                            {/* Staff member select */}
                             <div className="mb-4">
                               <label className={labelCls}>Staff Member</label>
                               <Select value={assignment.user_id || 'unassigned'}
@@ -1514,7 +1546,6 @@ export default function Clients() {
                                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
                                   {users
                                     .filter(u => {
-                                      // Don't show already-selected users in other rows
                                       const otherAssignedIds = (formData.assignments || [])
                                         .filter((_, i) => i !== idx)
                                         .map(a => a.user_id)
@@ -1530,7 +1561,6 @@ export default function Clients() {
                               </Select>
                             </div>
 
-                            {/* Per-assignment service selection */}
                             <div>
                               <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
                               <div className="flex flex-wrap gap-2 mt-1">
@@ -1604,7 +1634,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Stats Cards — modernized ── */}
+      {/* ── Stats Cards ── */}
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -1615,7 +1645,6 @@ export default function Clients() {
           ].map((s, i) => (
             <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden"
               style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-              {/* Left accent bar */}
               <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: s.bar }} />
               <div className="flex items-start justify-between mb-3 pl-2">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -1628,7 +1657,7 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── Filters + View Toggle — modernized ── */}
+      {/* ── Filters + View Toggle ── */}
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1652,7 +1681,6 @@ export default function Clients() {
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
-          {/* ── NEW: Assigned To filter ── */}
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
               <SelectTrigger className="h-10 w-[160px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Staff" /></SelectTrigger>
@@ -1725,7 +1753,6 @@ export default function Clients() {
               <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
               <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
               <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
-              {/* ── NEW: Assigned column header ── */}
               <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
               <div className="w-24 flex-shrink-0" />
             </div>
@@ -1796,10 +1823,34 @@ export default function Clients() {
                       await api.post('/clients', {
                         company_name: row.company_name?.trim(),
                         client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
-                        email: row.email?.trim(), phone: row.phone?.replace(/\D/g, ""), birthday: row.birthday || null,
+                        email: row.email?.trim(),
+                        phone: row.phone?.replace(/\D/g, ""),
+                        birthday: row.birthday || null,
+                        address: row.address?.trim() || null,
+                        city: row.city?.trim() || null,
+                        state: row.state?.trim() || null,
                         services: row.services ? row.services.split(',').map(s => s.trim()) : [],
-                        notes: row.notes?.trim() || null, assigned_to: null, assignments: [], contact_persons: [], dsc_details: [],
-                        referred_by: null,
+                        notes: row.notes?.trim() || null,
+                        status: row.status || 'active',
+                        referred_by: row.referred_by?.trim() || null,
+                        assigned_to: null,
+                        assignments: [],
+                        // Map contact columns to contact_persons array
+                        contact_persons: [1, 2, 3].reduce((acc, n) => {
+                          const name = row[`contact_name_${n}`]?.trim();
+                          if (name) {
+                            acc.push({
+                              name,
+                              designation: row[`contact_designation_${n}`]?.trim() || null,
+                              email: row[`contact_email_${n}`]?.trim() || null,
+                              phone: row[`contact_phone_${n}`]?.replace(/\D/g, '') || null,
+                              birthday: row[`contact_birthday_${n}`] || null,
+                              din: row[`contact_din_${n}`]?.trim() || null,
+                            });
+                          }
+                          return acc;
+                        }, []),
+                        dsc_details: [],
                       });
                       success++;
                     } catch (err) { console.error(err); }
@@ -1904,7 +1955,6 @@ export default function Clients() {
                     <input className={mdsFieldCls} value={mdsForm.state || ''}
                       onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} placeholder="State (optional)" />
                   </div>
-                  {/* ── NEW: Referred By in MDS form ── */}
                   <div className="md:col-span-2">
                     <label className={labelCls}>Referred By</label>
                     <input className={mdsFieldCls} value={mdsForm.referred_by || ''}
