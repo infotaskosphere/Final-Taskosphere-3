@@ -229,18 +229,23 @@ export default function Dashboard() {
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
 
-  // ── FIXED: Todos query with staleTime 0 for real-time updates ──────────────
+  // ── DASHBOARD TODOS — always scoped to the current user only.
+  // We explicitly pass user_id so that even admins only see their own
+  // todos on the dashboard "My To-Do" card. The full Todo Dashboard page
+  // handles cross-user visibility separately via its own dropdown.
   const { data: todosRaw = [] } = useQuery({
-    queryKey: ["todos"],
+    queryKey: ["todos", "dashboard-card", user?.id],
     queryFn: async () => {
-      const res = await api.get("/todos");
+      if (!user?.id) return [];
+      const res = await api.get("/todos", { params: { user_id: user.id } });
       return res.data;
     },
+    enabled: !!user?.id,
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
 
-  // ── FIXED: Properly check both completed status fields ────────────────────
+  // ── Normalise completed flag across both field conventions ─────────────────
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
@@ -249,8 +254,7 @@ export default function Dashboard() {
     [todosRaw]
   );
 
-  // ── Pending todos only — completed ones are removed from the dashboard card
-  // but remain visible on the Todo page and in the Todo Log
+  // Only show pending todos on the dashboard card
   const pendingTodos = useMemo(() =>
     todos.filter(todo => !todo.completed),
     [todos]
@@ -287,24 +291,26 @@ export default function Dashboard() {
     fetchRankings();
   }, [rankingPeriod]);
 
-  // ── Mutations
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const createTodo = useMutation({
     mutationFn: data => api.post("/todos", data),
     onSuccess: () => {
+      // Invalidate only the dashboard-card cache key
+      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
+      // Also invalidate the full todos page cache so it stays in sync
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo added");
     },
     onError: () => toast.error("Failed to add todo"),
   });
 
-  // ── FIXED: Update todo mutation with proper invalidation ───────────────────
   const updateTodo = useMutation({
     mutationFn: ({ id, status }) => {
-      const todoId = id;
       const isCompleting = status === "completed";
-      return api.patch(`/todos/${todoId}`, { is_completed: isCompleting });
+      return api.patch(`/todos/${id}`, { is_completed: isCompleting });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo updated");
     },
@@ -317,6 +323,7 @@ export default function Dashboard() {
   const deleteTodo = useMutation({
     mutationFn: id => api.delete(`/todos/${id}`),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo deleted");
     },
@@ -335,18 +342,12 @@ export default function Dashboard() {
     setSelectedDueDate(undefined);
   };
 
-  // ── FIXED: Proper toggle handler with correct status logic ─────────────────
   const handleToggleTodo = (id) => {
     const todo = todosRaw.find(t => (t.id === id || t._id === id));
     if (!todo) return;
-    
     const currentCompleted = todo.is_completed === true || todo.status === "completed";
     const newStatus = currentCompleted ? "pending" : "completed";
-    
-    updateTodo.mutate({ 
-      id: todo.id || todo._id, 
-      status: newStatus 
-    });
+    updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
   };
 
   const handleDeleteTodo = (id) => {
@@ -355,10 +356,7 @@ export default function Dashboard() {
 
   const updateAssignedTaskStatus = (taskId, newStatus) => {
     updateTaskMutation.mutate(
-      {
-        id: taskId,
-        data: { status: newStatus, updated_at: new Date().toISOString() },
-      },
+      { id: taskId, data: { status: newStatus, updated_at: new Date().toISOString() } },
       {
         onSuccess: () => {
           toast.success(newStatus === 'completed' ? 'Task completed!' : 'Task in progress!');
@@ -447,18 +445,14 @@ export default function Dashboard() {
   };
 
   // ── Ranking Item (Memoized) ─────────────────────────────────────────────────
-  // Gold = 1st, Silver = 2nd, Bronze = 3rd, rest = plain
   const RankingItem = React.memo(({ member, index, period }) => {
     const rank = index + 1;
     const isGold   = index === 0;
     const isSilver = index === 1;
     const isBronze = index === 2;
     const isPodium = isGold || isSilver || isBronze;
-
-    // Medal emoji
     const medal = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
 
-    // Row gradient styles — Gold / Silver / Bronze
     const rowStyle = isGold
       ? { background: 'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)', border: '1px solid #E2AA00' }
       : isSilver
@@ -476,14 +470,11 @@ export default function Dashboard() {
         style={rowStyle}
       >
         <div className="flex items-center gap-3">
-          {/* Rank badge */}
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold ${
             isPodium ? 'bg-black/20 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-600'
           }`}>
             {medal || `#${rank}`}
           </div>
-
-          {/* Avatar */}
           <div className={`w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 ring-2 ${
             isGold ? 'ring-yellow-300/60' : isSilver ? 'ring-slate-300/60' : isBronze ? 'ring-orange-300/60' : isDark ? 'ring-slate-600' : 'ring-slate-200'
           }`}>
@@ -503,8 +494,6 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-
-          {/* Name + badge */}
           <div className="min-w-0">
             <p className={`font-semibold text-sm leading-tight truncate ${isPodium ? 'text-white' : isDark ? 'text-slate-100' : 'text-slate-800'}`}>
               {member.user_name || 'Unknown'}
@@ -521,8 +510,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-
-        {/* Hours */}
         <div className="text-right flex-shrink-0 ml-2">
           <p className={`text-sm font-bold tracking-tight ${isPodium ? 'text-white' : isDark ? 'text-slate-200' : 'text-slate-700'}`}>
             {member.total_hours
@@ -566,7 +553,6 @@ export default function Dashboard() {
     return () => { document.body.style.overflow = "auto"; };
   }, [todayAttendance]);
 
-  // ── Shared dark-aware metric card bg
   const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
   const metricCardDefault = isDark
     ? "bg-slate-800 border-slate-700 hover:border-slate-600"
@@ -593,7 +579,6 @@ export default function Dashboard() {
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
           <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5"
             style={{ background: 'white' }} />
-
           <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
@@ -606,7 +591,6 @@ export default function Dashboard() {
                 Here's your business overview for today.
               </p>
             </div>
-
             {nextDeadline && (
               <motion.div
                 whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
@@ -913,7 +897,6 @@ export default function Dashboard() {
                     </div>
                     <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
                   </div>
-
                   {todayAttendance.punch_out ? (
                     <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
                       <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
@@ -931,7 +914,6 @@ export default function Dashboard() {
                       Punch Out
                     </Button>
                   )}
-
                   <div
                     className="text-center py-3 rounded-xl"
                     style={{
@@ -1044,7 +1026,7 @@ export default function Dashboard() {
       {/* ── Star Performers + To-Do List ────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-3">
 
-        {/* Star Performers — shows ALL users */}
+        {/* Star Performers */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'}
@@ -1086,13 +1068,13 @@ export default function Dashboard() {
           </div>
         </SectionCard>
 
-        {/* My To-Do List */}
+        {/* My To-Do List — scoped to logged-in user only regardless of role */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
             icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
             title="My To-Do List"
-            subtitle="Personal tasks"
+            subtitle="Your personal tasks"
             action={
               <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
                 onClick={() => navigate('/todos')}>
@@ -1204,7 +1186,6 @@ export default function Dashboard() {
 
       {/* ── Quick Access Tiles ───────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
-
         {[
           {
             path: '/leads',
@@ -1315,12 +1296,10 @@ export default function Dashboard() {
                   {format(new Date(), 'EEEE, MMMM d')}
                 </p>
               </div>
-
               <div className="px-7 py-6 space-y-3">
                 <p className={`text-center text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   Please punch in to begin your workday.
                 </p>
-
                 <motion.div
                   initial={{ y: 0 }}
                   animate={{ y: [0, -2, 0] }}
@@ -1339,7 +1318,6 @@ export default function Dashboard() {
                     {loading ? "Punching In..." : "Punch In Now"}
                   </Button>
                 </motion.div>
-
                 <Button
                   variant="ghost"
                   className={`w-full h-10 rounded-xl text-sm ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
