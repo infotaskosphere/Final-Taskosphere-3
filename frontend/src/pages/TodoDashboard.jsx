@@ -40,7 +40,7 @@ import {
   History,
 } from 'lucide-react';
 
-// ── BRAND COLORS (exact match with main Dashboard) ───────────────────────────
+// ── BRAND COLORS ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
@@ -50,7 +50,7 @@ const COLORS = {
   amber: '#F59E0B',
 };
 
-// ── SPRING PHYSICS (centralized from Dashboard + patterns) ───────────────────
+// ── SPRING PHYSICS ────────────────────────────────────────────────────────────
 const springPhysics = {
   card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
   lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
@@ -60,7 +60,7 @@ const springPhysics = {
   micro: { type: "spring", stiffness: 600, damping: 35 },
 };
 
-// ── ANIMATION VARIANTS (exact match with main Dashboard) ─────────────────────
+// ── ANIMATION VARIANTS ────────────────────────────────────────────────────────
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
@@ -93,12 +93,6 @@ const listItemVariants = {
     scale: 0.98,
     transition: { duration: 0.25 }
   }
-};
-
-// ── REUSABLE MOTION HELPERS ─────────────────────────────────────────────────
-const cardMotion = {
-  whileHover: { y: -6, scale: 1.01, transition: springPhysics.lift },
-  whileTap: { scale: 0.985, transition: springPhysics.tap }
 };
 
 const buttonMotion = {
@@ -193,68 +187,94 @@ function TodoItem({ todo, onToggle, onPromote, onDelete }) {
   );
 }
 
-// ── MAIN TODO DASHBOARD COMPONENT ────────────────────────────────────────────
+// ── MAIN TODO DASHBOARD ───────────────────────────────────────────────────────
 export default function TodoDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = user?.role === 'admin';
+  const isManager = user?.role === 'manager';
 
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [selectedUser, setSelectedUser] = useState("all");
+
+  // ── selectedUser: "self" = own todos (default for everyone).
+  // Admin can change this to any user id to view their todos.
+  // Non-admins with view_other_todos permission can switch to permitted user ids.
+  const [selectedUser, setSelectedUser] = useState("self");
   const [activeTab, setActiveTab] = useState("todos"); // "todos" | "log"
 
-  // ── TODO LOG — records every completion/undo action in-session ────────────
+  // ── TODO LOG ──────────────────────────────────────────────────────────────
   const [todoLog, setTodoLog] = useState([]);
-  const logSectionRef = useRef(null);
 
-  // ── DATA FETCHING ─────────────────────────────────────────────────────────
-  // FIX: Admin fetches ALL todos by default (no user_id filter unless explicitly chosen)
-  const { data: todosRaw = [], isLoading } = useQuery({
-    queryKey: ["todos", selectedUser],
-    queryFn: async () => {
-      let endpoint = "/todos";
-      if (isAdmin && selectedUser !== "all") {
-        endpoint += `?user_id=${selectedUser}`;
-      }
-      // Admin with "all" selected → no user_id param → backend returns all todos
-      const res = await api.get(endpoint);
-      return res.data;
-    },
-  });
-
-  const { data: users = [] } = useQuery({
+  // ── USERS — fetch all users (admin/manager only, used to build dropdown) ──
+  const { data: allUsers = [] } = useQuery({
     queryKey: ["users"],
-    enabled: isAdmin,
+    enabled: isAdmin || isManager,
     queryFn: async () => {
       const res = await api.get("/users");
       return res.data || [];
     },
   });
 
+  // ── Build the permitted user list for the dropdown ─────────────────────────
+  // Admin: all users from the users list
+  // Manager: their team members (backend already scopes /users for manager)
+  // Staff: only users listed in view_other_todos permission
+  // In all cases "self" (own todos) is always the default option.
+  const permittedUsers = useMemo(() => {
+    if (isAdmin) {
+      // Admin sees every user in the system
+      return allUsers;
+    }
+    if (isManager) {
+      // Manager sees their team (allUsers is already scoped by backend)
+      return allUsers.filter(u => (u.id || u._id) !== user?.id);
+    }
+    // Staff: only explicitly permitted user ids from view_other_todos
+    const viewOtherTodos = user?.permissions?.view_other_todos || [];
+    if (!Array.isArray(viewOtherTodos) || viewOtherTodos.length === 0) return [];
+    return allUsers.filter(u => viewOtherTodos.includes(u.id || u._id));
+  }, [isAdmin, isManager, allUsers, user]);
+
+  // Whether the current user should see the dropdown at all
+  const showDropdown = isAdmin || isManager || permittedUsers.length > 0;
+
+  // ── Resolve the actual user_id to query ───────────────────────────────────
+  // "self" means current user's own todos; anything else is an explicit user id.
+  const resolvedUserId = selectedUser === "self" ? user?.id : selectedUser;
+
+  // ── TODOS DATA — always passes user_id so the backend scopes correctly ─────
+  const { data: todosRaw = [], isLoading } = useQuery({
+    queryKey: ["todos", "page", resolvedUserId],
+    queryFn: async () => {
+      if (!resolvedUserId) return [];
+      const res = await api.get("/todos", { params: { user_id: resolvedUserId } });
+      return res.data;
+    },
+    enabled: !!resolvedUserId,
+  });
+
   const todos = useMemo(() => todosRaw, [todosRaw]);
 
-  // ── USER ID → NAME MAP (for log display) ──────────────────────────────────
+  // ── USER ID → NAME MAP (for log display) ─────────────────────────────────
   const userMap = useMemo(() => {
     const map = {};
-    users.forEach(u => {
+    allUsers.forEach(u => {
       if (u.id || u._id) map[u.id || u._id] = u.full_name || u.user_name || 'Unknown';
     });
-    // Always include the current user themselves
     if (user?.id) map[user.id] = user.full_name || user.email || 'Me';
     return map;
-  }, [users, user]);
+  }, [allUsers, user]);
 
-  // Helper: resolve a user_id to a display name
   const resolveUserName = (userId) => {
     if (!userId) return 'Unknown';
     if (userId === user?.id) return user?.full_name || 'Me';
     return userMap[userId] || userId;
   };
 
-  // ── SEED LOG from already-completed todos whenever data loads/changes ─────
+  // ── Seed log from already-completed todos ─────────────────────────────────
   useEffect(() => {
     const completedTodos = todos.filter(t => t.is_completed === true || t.status === "completed");
     if (completedTodos.length === 0) return;
@@ -265,7 +285,6 @@ export default function TodoDashboard() {
         .map(t => ({
           id: t.id || t._id,
           title: t.title || 'Untitled Todo',
-          // FIX: store user_id so we can resolve name at render time
           created_by_id: t.user_id || t.created_by || null,
           created_at: t.created_at || null,
           completed_at: t.completed_at
@@ -287,7 +306,7 @@ export default function TodoDashboard() {
     });
   }, [todos]);
 
-  // ── STATS (same calculation style as main Dashboard) ──────────────────────
+  // ── STATS ─────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const total = todos.length;
     const completed = todos.filter(t => t.is_completed === true || t.status === "completed").length;
@@ -296,7 +315,6 @@ export default function TodoDashboard() {
     ).length;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
     const healthScore = Math.max(10, 100 - (overdue * 8));
-
     return { total, completed, overdue, completionRate, healthScore };
   }, [todos]);
 
@@ -310,13 +328,18 @@ export default function TodoDashboard() {
   };
 
   // ── MUTATIONS ─────────────────────────────────────────────────────────────
+  const invalidateTodos = () => {
+    queryClient.invalidateQueries({ queryKey: ["todos", "page", resolvedUserId] });
+    queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
+    queryClient.invalidateQueries({ queryKey: ["todos"] });
+  };
+
   const addTodoMutation = useMutation({
     mutationFn: (payload) => api.post("/todos", payload),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      invalidateTodos();
       toast.success("Todo created successfully");
       setTitle(""); setDescription(""); setDueDate("");
-      // ── NOTIFICATION ──────────────────────────────────────────────────────
       if (!isAdmin) {
         sendTodoNotification({
           title: '📝 New Todo Created',
@@ -334,11 +357,10 @@ export default function TodoDashboard() {
       return api.patch(`/todos/${id}`, { is_completed: newCompleted });
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      invalidateTodos();
       const todo = todos.find(t => (t.id || t._id) === variables.id);
       if (todo) {
         const wasCompleted = todo.is_completed === true || todo.status === "completed";
-        // FIX: store user_id not resolved name — resolve at render time
         setTodoLog(prev => [{
           id: todo.id || todo._id,
           title: todo.title || 'Untitled Todo',
@@ -348,7 +370,6 @@ export default function TodoDashboard() {
           deleted_at: null,
           event: wasCompleted ? 'uncompleted' : 'completed',
         }, ...prev].slice(0, 100));
-        // ── NOTIFICATION ────────────────────────────────────────────────────
         if (!wasCompleted) {
           sendTodoNotification({
             title: '✅ Todo Completed',
@@ -363,8 +384,7 @@ export default function TodoDashboard() {
     mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
     onSuccess: (_, id) => {
       toast.success("Todo promoted to Master Task!");
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
-      // ── NOTIFICATION ──────────────────────────────────────────────────────
+      invalidateTodos();
       const todo = todos.find(t => (t.id || t._id) === id);
       sendTodoNotification({
         title: '⚡ Todo Promoted to Task',
@@ -379,7 +399,6 @@ export default function TodoDashboard() {
     onSuccess: (_, variables) => {
       const deletedTodo = todos.find(t => (t.id || t._id) === variables);
       if (deletedTodo) {
-        // FIX: store user_id not resolved name — resolve at render time
         setTodoLog(prev => [{
           id: deletedTodo.id || deletedTodo._id,
           title: deletedTodo.title || 'Untitled Todo',
@@ -390,7 +409,7 @@ export default function TodoDashboard() {
           event: 'deleted',
         }, ...prev].slice(0, 100));
       }
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      invalidateTodos();
       toast.success("Todo deleted");
     },
     onError: () => toast.error("Failed to delete todo"),
@@ -410,6 +429,14 @@ export default function TodoDashboard() {
   const handleToggle = (id) => toggleMutation.mutate({ id });
   const handlePromote = (id) => promoteMutation.mutate(id);
   const handleDelete = (id) => deleteMutation.mutate(id);
+
+  // ── Dropdown label helpers ─────────────────────────────────────────────────
+  const selectedUserLabel = useMemo(() => {
+    if (selectedUser === "self") return "My Todos";
+    const u = allUsers.find(u => (u.id || u._id) === selectedUser);
+    if (!u) return "Selected User";
+    return `${u.full_name || u.user_name}'s Todos`;
+  }, [selectedUser, allUsers]);
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
@@ -432,14 +459,12 @@ export default function TodoDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {/* ── Tab buttons ── */}
+            {/* Tab buttons */}
             <div className="flex items-center rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
               <button
                 onClick={() => setActiveTab("todos")}
                 className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors ${
-                  activeTab === "todos"
-                    ? "text-white"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                  activeTab === "todos" ? "text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
                 }`}
                 style={activeTab === "todos" ? { backgroundColor: COLORS.deepBlue } : {}}
               >
@@ -449,9 +474,7 @@ export default function TodoDashboard() {
               <button
                 onClick={() => setActiveTab("log")}
                 className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors border-l border-slate-200 ${
-                  activeTab === "log"
-                    ? "text-white"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                  activeTab === "log" ? "text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
                 }`}
                 style={activeTab === "log" ? { backgroundColor: COLORS.deepBlue } : {}}
               >
@@ -482,7 +505,7 @@ export default function TodoDashboard() {
         </div>
       </motion.div>
 
-      {/* ── KPI Strip + Main Content (Todos tab) ─────────────────────────── */}
+      {/* ── Todos tab ────────────────────────────────────────────────────── */}
       {activeTab === "todos" && <>
 
       {/* ── KPI Strip ────────────────────────────────────────────────────── */}
@@ -544,7 +567,6 @@ export default function TodoDashboard() {
 
           {/* Create Todo Card */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            {/* Card header strip */}
             <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
             <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
               <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
@@ -552,7 +574,7 @@ export default function TodoDashboard() {
               </div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800 tracking-tight">New Todo</h2>
-                <p className="text-[11px] text-slate-400">Add to your personal or team list</p>
+                <p className="text-[11px] text-slate-400">Add to your personal list</p>
               </div>
             </div>
             <div className="p-5 space-y-4">
@@ -562,6 +584,7 @@ export default function TodoDashboard() {
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddTodo()}
                   placeholder="What needs to get done?"
                   className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
                 />
@@ -638,28 +661,43 @@ export default function TodoDashboard() {
           </div>
         </div>
 
-        {/* ── Right: Todo List + Admin Filter ─────────────────────────────── */}
+        {/* ── Right: Filter + Todo List ─────────────────────────────────── */}
         <div className="xl:col-span-8 space-y-4">
 
-          {/* Admin Filter — layout only, all logic identical */}
-          {isAdmin && (
+          {/* ── User Filter Dropdown ─────────────────────────────────────────
+               Visible only when:
+               - Admin: always (can see all users)
+               - Manager: always (can see their team)
+               - Staff: only if they have at least one permitted user in view_other_todos
+               The dropdown always starts on "My Todos" (own) and only lists
+               users the current role is actually allowed to view.
+          ─────────────────────────────────────────────────────────────────── */}
+          {showDropdown && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  <span className="text-sm font-semibold text-slate-700">Filter by Team Member</span>
+                  <span className="text-sm font-semibold text-slate-700">
+                    {isAdmin ? 'Filter by Team Member' : 'View Todo List'}
+                  </span>
                 </div>
-                <Badge variant="outline" className="text-[10px] font-semibold uppercase tracking-widest border-slate-300 text-slate-500">
-                  Admin Only
-                </Badge>
+                {isAdmin && (
+                  <Badge variant="outline" className="text-[10px] font-semibold uppercase tracking-widest border-slate-300 text-slate-500">
+                    Admin Only
+                  </Badge>
+                )}
               </div>
               <Select value={selectedUser} onValueChange={setSelectedUser}>
                 <SelectTrigger className="h-9 rounded-lg border-slate-200 text-sm">
-                  <SelectValue placeholder="All team members" />
+                  <SelectValue placeholder="My Todos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Everyone</SelectItem>
-                  {users.map((u) => (
+                  {/* Always show own todos as first option */}
+                  <SelectItem value="self">
+                    My Todos ({user?.full_name || 'Me'})
+                  </SelectItem>
+                  {/* Show permitted other users */}
+                  {permittedUsers.map((u) => (
                     <SelectItem key={u.id || u._id} value={u.id || u._id}>
                       {u.full_name || u.user_name} ({u.role})
                     </SelectItem>
@@ -671,16 +709,12 @@ export default function TodoDashboard() {
 
           {/* Todo List Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            {/* Table header */}
             <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
             <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                 <span className="text-sm font-bold text-slate-800 tracking-tight">
-                  {isAdmin && selectedUser !== 'all'
-                    ? `${users.find(u => (u.id || u._id) === selectedUser)?.full_name || 'User'}'s Todos`
-                    : 'Your Todos'
-                  }
+                  {selectedUserLabel}
                 </span>
                 <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
                   {todos.length}
@@ -733,102 +767,90 @@ export default function TodoDashboard() {
 
       </> /* end activeTab === "todos" */}
 
-      {/* ── Todo Log Tab ─────────────────────────────────────────────────────── */}
+      {/* ── Todo Log Tab ─────────────────────────────────────────────────── */}
       {activeTab === "log" && (
-      <motion.div variants={itemVariants}>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.deepBlue})` }} />
-          <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <History className="h-4 w-4 text-slate-500" />
-              <span className="text-sm font-bold text-slate-800 tracking-tight">Todo Log</span>
-              <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                {todoLog.length}
-              </span>
+        <motion.div variants={itemVariants}>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.deepBlue})` }} />
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <History className="h-4 w-4 text-slate-500" />
+                <span className="text-sm font-bold text-slate-800 tracking-tight">Todo Log</span>
+                <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                  {todoLog.length}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400">Completed, deleted &amp; activity history</span>
             </div>
-            <span className="text-[11px] text-slate-400">Completed, deleted &amp; activity history</span>
+
+            {/* Column headers */}
+            <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Todo Title</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created By</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created On</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Event</span>
+            </div>
+
+            {todoLog.length === 0 ? (
+              <div className="py-16 text-center">
+                <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
+                <p className="text-sm text-slate-400 font-medium">No activity yet</p>
+                <p className="text-xs text-slate-300 mt-1">Complete or delete a todo and it will appear here</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                <AnimatePresence>
+                  {todoLog.map((entry, idx) => {
+                    const creatorName = resolveUserName(entry.created_by_id);
+                    const createdDate = entry.created_at
+                      ? format(new Date(entry.created_at), 'MMM d, yyyy h:mm a')
+                      : '—';
+
+                    let eventPill = null;
+                    if (entry.deleted_at) {
+                      eventPill = (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
+                          ✕ Deleted · {format(entry.deleted_at, 'MMM d, h:mm a')}
+                        </span>
+                      );
+                    } else if (entry.completed_at) {
+                      eventPill = (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">
+                          ✓ Completed · {format(entry.completed_at, 'MMM d, h:mm a')}
+                        </span>
+                      );
+                    } else if (entry.event === 'uncompleted') {
+                      eventPill = (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-700 whitespace-nowrap">
+                          ↩ Reopened
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <motion.div
+                        key={`${entry.id}-${idx}`}
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2 }}
+                        className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-slate-800 truncate" title={entry.title}>
+                          {entry.title}
+                        </p>
+                        <span className="text-xs text-slate-500 whitespace-nowrap">{creatorName}</span>
+                        <span className="text-xs text-slate-400 whitespace-nowrap">{createdDate}</span>
+                        <div className="flex justify-end">{eventPill}</div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
-
-          {/* ── Column headers ── */}
-          <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Todo Title</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created By</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created On</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Event</span>
-          </div>
-
-          {todoLog.length === 0 ? (
-            <div className="py-16 text-center">
-              <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
-              <p className="text-sm text-slate-400 font-medium">No activity yet</p>
-              <p className="text-xs text-slate-300 mt-1">Complete or delete a todo and it will appear here</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-50">
-              <AnimatePresence>
-                {todoLog.map((entry, idx) => {
-                  // FIX: resolve user_id → name at render time using userMap
-                  const creatorName = resolveUserName(entry.created_by_id);
-                  const createdDate = entry.created_at
-                    ? format(new Date(entry.created_at), 'MMM d, yyyy h:mm a')
-                    : '—';
-
-                  // Build a single event pill
-                  let eventPill = null;
-                  if (entry.deleted_at) {
-                    eventPill = (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
-                        ✕ Deleted · {format(entry.deleted_at, 'MMM d, h:mm a')}
-                      </span>
-                    );
-                  } else if (entry.completed_at) {
-                    eventPill = (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">
-                        ✓ Completed · {format(entry.completed_at, 'MMM d, h:mm a')}
-                      </span>
-                    );
-                  } else if (entry.event === 'uncompleted') {
-                    eventPill = (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-700 whitespace-nowrap">
-                        ↩ Reopened
-                      </span>
-                    );
-                  }
-
-                  return (
-                    <motion.div
-                      key={`${entry.id}-${idx}`}
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.2 }}
-                      className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors"
-                    >
-                      {/* Title */}
-                      <p className="text-sm font-medium text-slate-800 truncate" title={entry.title}>
-                        {entry.title}
-                      </p>
-                      {/* Created by */}
-                      <span className="text-xs text-slate-500 whitespace-nowrap">
-                        {creatorName}
-                      </span>
-                      {/* Created on */}
-                      <span className="text-xs text-slate-400 whitespace-nowrap">
-                        {createdDate}
-                      </span>
-                      {/* Event pill */}
-                      <div className="flex justify-end">
-                        {eventPill}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-      </motion.div>
-      )} {/* end activeTab === "log" */}
+        </motion.div>
+      )}
 
     </motion.div>
   );
