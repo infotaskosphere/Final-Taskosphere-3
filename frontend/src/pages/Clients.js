@@ -32,6 +32,7 @@ const CLIENT_TYPES = [
   { value: 'partnership', label: 'Partnership' },
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
+  { value: 'other', label: 'Other' },
 ];
 
 const SERVICES = [
@@ -46,6 +47,7 @@ const TYPE_CONFIG = {
   huf:         { label: 'HUF',         bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', accent: 'from-teal-600 to-teal-800',      strip: '#0D9488' },
   trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', accent: 'from-rose-600 to-rose-800',      strip: '#E11D48' },
   proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', accent: 'from-slate-500 to-slate-700',    strip: '#64748B' },
+  other:       { label: 'Other',       bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', accent: 'from-sky-600 to-sky-800',        strip: '#0284C7' },
 };
 
 const TYPE_BADGE = {
@@ -55,6 +57,7 @@ const TYPE_BADGE = {
   huf:         'bg-teal-50 text-teal-700 border-teal-200',
   trust:       'bg-rose-50 text-rose-700 border-rose-200',
   proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
+  other:       'bg-sky-50 text-sky-700 border-sky-200',
 };
 
 const AVATAR_GRADIENTS = [
@@ -82,15 +85,16 @@ const SectionHeading = ({ icon, title, subtitle }) => (
   </div>
 );
 
-const TypePill = ({ type }) => {
+const TypePill = ({ type, customLabel }) => {
   const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.proprietor;
+  const displayLabel = type === 'other' && customLabel ? customLabel : cfg.label;
   return (
     <span
       className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border tracking-wide"
       style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
-      {cfg.label}
+      {displayLabel}
     </span>
   );
 };
@@ -133,6 +137,7 @@ export default function Clients() {
   const [formData, setFormData] = useState({
     company_name: '',
     client_type: 'proprietor',
+    client_type_other: '',
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
     email: '',
     phone: '',
@@ -311,7 +316,8 @@ export default function Clients() {
     const headers = [
       // Basic details
       'company_name',
-      'client_type',           // proprietor | pvt_ltd | llp | partnership | huf | trust
+      'client_type',           // proprietor | pvt_ltd | llp | partnership | huf | trust | other
+      'client_type_label',     // Only used when client_type = other (e.g. "Section 8 Company")
       'email',
       'phone',
       'birthday',              // YYYY-MM-DD (incorporation date or DOB)
@@ -350,6 +356,7 @@ export default function Clients() {
     const sampleRow = [
       'ABC Pvt Ltd',
       'pvt_ltd',
+      '',
       'abc@example.com',
       '9876543210',
       '2015-04-01',
@@ -471,7 +478,7 @@ export default function Clients() {
         city: city,
         state: state,
         services: data.services || [],
-        notes: (data.notes || '').trim(),
+        notes: '',
         status: data.status_value || 'active',
         contact_persons: contacts,
         referred_by: (data.referred_by || '').trim(),
@@ -590,7 +597,9 @@ export default function Clients() {
         .map(a => ({ user_id: a.user_id, services: a.services || [] }));
 
       const payload = {
-        company_name: formData.company_name.trim(), client_type: formData.client_type,
+        company_name: formData.company_name.trim(),
+        client_type: formData.client_type,
+        client_type_label: formData.client_type === 'other' ? (formData.client_type_other?.trim() || 'Other') : null,
         email: formData.email?.trim(), phone: cleanPhone,
         birthday: safeDate(formData.birthday),
         address: formData.address?.trim() || null,
@@ -630,6 +639,7 @@ export default function Clients() {
 
     setFormData({
       ...client,
+      client_type_other: client?.client_type === 'other' ? (client?.client_type_label || '') : '',
       contact_persons: client?.contact_persons?.map(cp => ({
         ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || ''
       })) || [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
@@ -651,7 +661,7 @@ export default function Clients() {
 
   const resetForm = () => {
     setFormData({
-      company_name: '', client_type: 'proprietor',
+      company_name: '', client_type: 'proprietor', client_type_other: '',
       contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [],
       assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
@@ -796,7 +806,7 @@ export default function Clients() {
                   {client.company_name}
                 </h3>
               </div>
-              <TypePill type={client.client_type} />
+              <TypePill type={client.client_type} customLabel={client.client_type_label} />
             </div>
 
             <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
@@ -957,7 +967,7 @@ export default function Clients() {
             </div>
             <p className="text-sm font-semibold text-slate-900 truncate">{client.company_name}</p>
           </div>
-          <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} /></div>
+          <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
           <div className="w-36 flex-shrink-0">
             <p className="text-xs text-slate-600 font-medium">{client.phone || '—'}</p>
           </div>
@@ -1040,7 +1050,7 @@ export default function Clients() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <h2 className="text-2xl font-bold text-slate-900">{selectedClient.company_name}</h2>
-                  <TypePill type={selectedClient.client_type} />
+                  <TypePill type={selectedClient.client_type} customLabel={selectedClient.client_type_label} />
                   {selectedClient.status === 'inactive' && (
                     <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>
                   )}
@@ -1297,10 +1307,22 @@ export default function Clients() {
                       </div>
                       <div>
                         <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
-                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v})}>
+                        <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v, client_type_other: ''})}>
                           <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm"><SelectValue /></SelectTrigger>
                           <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                         </Select>
+                        {formData.client_type === 'other' && (
+                          <div className="mt-2">
+                            <Input
+                              className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                              placeholder="Specify client type (e.g. Section 8 Company, AOP…)"
+                              value={formData.client_type_other}
+                              onChange={e => setFormData({...formData, client_type_other: e.target.value})}
+                              autoFocus
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Describe the entity type for your records</p>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
@@ -1823,6 +1845,7 @@ export default function Clients() {
                       await api.post('/clients', {
                         company_name: row.company_name?.trim(),
                         client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
+                        client_type_label: row.client_type === 'other' ? (row.client_type_label?.trim() || null) : null,
                         email: row.email?.trim(),
                         phone: row.phone?.replace(/\D/g, ""),
                         birthday: row.birthday || null,
