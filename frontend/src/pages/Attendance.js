@@ -331,19 +331,44 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
               }}
             />
           ) : isTodayDate ? (
-            <span
-              className="absolute rounded-full"
-              style={{ width: 30, height: 30, backgroundColor: COLORS.deepBlue }}
+            /*
+             * Today with no punch-in, no leave, no holiday.
+             * Show a pulsing red dashed ring so the user clearly sees
+             * they haven't punched in yet. Previously this was a solid
+             * blue dot which gave no attendance status information.
+             */
+            <motion.span
+              className="absolute rounded-full border-2"
+              style={{
+                width:           30,
+                height:          30,
+                borderColor:     COLORS.red,
+                borderStyle:     'dashed',
+                backgroundColor: `${COLORS.red}12`,
+              }}
+              animate={{
+                scale:  [1, 1.1, 1],
+                opacity:[1, 0.7, 1],
+              }}
+              transition={{
+                duration: 1.8,
+                repeat:   Infinity,
+                ease:     'easeInOut',
+              }}
             />
           ) : null}
 
           <span
             className={`relative z-10 text-[13px] leading-none select-none
-              ${isTodayDate && !ringColor ? 'text-white font-black' : ''}
-              ${isTodayDate && ringColor  ? 'font-black' : ''}
-              ${!isTodayDate             ? 'font-medium' : ''}
+              ${isTodayDate ? 'font-black' : 'font-medium'}
             `}
-            style={isTodayDate && ringColor ? { color: COLORS.deepBlue } : undefined}
+            style={
+              isTodayDate && ringColor
+                ? { color: COLORS.deepBlue }
+                : isTodayDate && !ringColor
+                  ? { color: COLORS.red }
+                  : undefined
+            }
           >
             {date.getDate()}
           </span>
@@ -370,8 +395,13 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
               <p className="text-red-500 font-semibold">Late arrival</p>
             )}
           </>
+        ) : dateFnsIsToday(date) ? (
+          <div>
+            <p className="text-red-600 font-bold">⚠️ Not punched in yet</p>
+            <p className="text-slate-400 text-[10px] mt-1">Punch in to mark attendance</p>
+          </div>
         ) : (
-          <p className="text-red-600">No record</p>
+          <p className="text-slate-400 font-medium">No record</p>
         )}
       </TooltipContent>
     </Tooltip>
@@ -1204,14 +1234,7 @@ export default function Attendance() {
                       {!isViewingOther && (
                         <p className="text-blue-100 text-xs">
                           Expected: {user?.punch_in_time || '10:30'}{' '}
-                          ({(() => {
-                            const gt = user?.grace_time || '00:15';
-                            if (gt.includes(':')) {
-                            const [h, m] = gt.split(':').map(Number);
-                            return h * 60 + m;
-                          }
-                          return gt;
-                        })()} min grace) •{' '}
+                          ({user?.grace_time || '15'} min grace) •{' '}
                           {user?.punch_out_time || '19:00'}
                         </p>
                       )}
@@ -1786,7 +1809,7 @@ export default function Attendance() {
                     />
                     <span className="text-slate-600">Present</span>
                   </div>
-                  {/* Red — late arrival */}
+                  {/* Red solid — late arrival */}
                   <div className="flex items-center gap-1.5">
                     <span
                       className="w-4 h-4 rounded-full border-2 flex-shrink-0"
@@ -1796,6 +1819,18 @@ export default function Attendance() {
                       }}
                     />
                     <span className="text-slate-600">Late</span>
+                  </div>
+                  {/* Red dashed — not punched in today */}
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 flex-shrink-0"
+                      style={{
+                        borderColor:     COLORS.red,
+                        borderStyle:     'dashed',
+                        backgroundColor: `${COLORS.red}12`,
+                      }}
+                    />
+                    <span className="text-slate-600">Not in yet</span>
                   </div>
                   {/* Yellow — holiday */}
                   <div className="flex items-center gap-1.5">
