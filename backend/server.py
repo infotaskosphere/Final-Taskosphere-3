@@ -693,6 +693,89 @@ async def reject_user(user_id: str, current_user: User = Depends(require_admin))
     await create_audit_log(current_user, "REJECT_USER", "user", user_id, existing, update_data)
     return {"message": "User rejected"}
 
+# ==========================================================
+# REMINDER ROUTES
+# ==========================================================
+
+@api_router.post("/reminders")
+async def create_reminder(
+    data: ReminderCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a reminder for the current user."""
+    reminder = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.id,
+        "title": data.title,
+        "description": data.description,
+        "remind_at": data.remind_at.isoformat() if isinstance(data.remind_at, datetime) else str(data.remind_at),
+        "is_dismissed": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.reminders.insert_one(reminder)
+    reminder.pop("_id", None)
+    return reminder
+
+
+@api_router.get("/reminders")
+async def get_reminders(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get reminders.
+    - Admins can pass user_id to see another user's reminders.
+    - Regular users always see only their own.
+    """
+    if user_id and user_id != current_user.id:
+        if current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Not authorized")
+        query = {"user_id": user_id}
+    else:
+        query = {"user_id": current_user.id}
+
+    reminders = await db.reminders.find(query, {"_id": 0}).sort("remind_at", 1).to_list(500)
+    return reminders
+
+
+@api_router.patch("/reminders/{reminder_id}")
+async def update_reminder(
+    reminder_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Update a reminder (e.g., dismiss it, change title/time)."""
+    existing = await db.reminders.find_one({"id": reminder_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if existing["user_id"] != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    allowed = {"title", "description", "remind_at", "is_dismissed"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    if "remind_at" in update and isinstance(update["remind_at"], str):
+        pass  # keep as string
+    if update:
+        await db.reminders.update_one({"id": reminder_id}, {"$set": update})
+    return {"message": "Reminder updated"}
+
+
+@api_router.delete("/reminders/{reminder_id}")
+async def delete_reminder(
+    reminder_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a reminder."""
+    existing = await db.reminders.find_one({"id": reminder_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if existing["user_id"] != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    await db.reminders.delete_one({"id": reminder_id})
+    return {"message": "Reminder deleted"}
+
+
+
 #============================================================
 # USER MANAGEMENT
 #=============================================================
