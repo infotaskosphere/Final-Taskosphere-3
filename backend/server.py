@@ -436,29 +436,47 @@ async def get_team_user_ids(manager_id: str):
 
 @api_router.get("/todos")
 async def get_todos(
- user_id: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- if current_user.role == "admin":
-    query = {} if not user_id else {"user_id": user_id}
- elif current_user.role == "manager":
-    team_ids = await get_team_user_ids(current_user.id)
-    if user_id:
-        if user_id not in team_ids and user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Not allowed")
-        query = {"user_id": user_id}
-    else:
-        query = {"user_id": {"$in": team_ids + [current_user.id]}}
- else:
-    if user_id and user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not allowed")
-    query = {"user_id": current_user.id}
- todos = await db.todos.find(query).to_list(1000)
- for t in todos:
-  t["id"] = str(t["_id"])
-  del t["_id"]
- return todos
+    if current_user.role == "admin":
+        # user_id="all"  → explicit request to fetch every user's todos (TodoDashboard dropdown)
+        # user_id=<some id> → fetch that specific user's todos
+        # user_id not provided → fetch only the admin's own todos (Dashboard card)
+        if user_id == "all":
+            query = {}
+        elif user_id:
+            query = {"user_id": user_id}
+        else:
+            query = {"user_id": current_user.id}
 
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        if user_id:
+            if user_id not in team_ids and user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not allowed")
+            query = {"user_id": user_id}
+        else:
+            # Manager default: only own todos on Dashboard card
+            query = {"user_id": current_user.id}
+
+    else:
+        # Staff: own todos only; view_other_todos permission respected when user_id is passed
+        permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
+        allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
+        if user_id:
+            if user_id != current_user.id and user_id not in allowed_others:
+                raise HTTPException(status_code=403, detail="Not allowed")
+            query = {"user_id": user_id}
+        else:
+            query = {"user_id": current_user.id}
+
+    todos = await db.todos.find(query).to_list(1000)
+    for t in todos:
+        t["id"] = str(t["_id"])
+        del t["_id"]
+    return todos
+    
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
  is_admin = current_user.role == "admin"
