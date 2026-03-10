@@ -2240,14 +2240,10 @@ async def extract_due_dates_from_file(
 
     try:
         if content_type.startswith("image/") or filename.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
-            from PIL import Image
-            import pytesseract
-            img = Image.open(BytesIO(file_bytes))
-            w, h = img.size
-            if w < 1200:
-                scale = 1200 / w
-                img = img.resize((int(w * scale), int(h * scale)))
-            raw_text = pytesseract.image_to_string(img, config="--psm 6")
+            raise HTTPException(
+                status_code=400,
+                detail="Image upload is not supported on this server. Please upload a PDF or DOCX file instead."
+            )
 
         elif content_type == "application/pdf" or filename.endswith(".pdf"):
             import pdfplumber
