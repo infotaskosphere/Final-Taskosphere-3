@@ -38,7 +38,8 @@ from backend.models import (
     Document, DocumentCreate, DocumentMovementRequest,
     DashboardStats, AuditLog,
     HolidayResponse, HolidayCreate,
-    DEFAULT_ROLE_PERMISSIONS
+    DEFAULT_ROLE_PERMISSIONS,
+    Reminder, ReminderCreate
 )
 from backend.dependencies import (
     db,
