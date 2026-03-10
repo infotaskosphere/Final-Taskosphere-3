@@ -1458,15 +1458,119 @@ export default function Attendance() {
         </motion.div>
 
         {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* REMINDERS & MEETINGS                                            */}
-        {/* Visible for own view + admin viewing another user.             */}
-        {/* Create/Delete only available for own view.                     */}
-        {/* Popup fires automatically at reminder time.                    */}
-        {/* Each card links directly to Google Calendar.                   */}
+        {/* HOLIDAYS + REMINDERS — equal 2-column grid                      */}
+        {/* Left  : Holidays this month                                      */}
+        {/* Right : Reminders & Meetings                                     */}
         {/* ═══════════════════════════════════════════════════════════════ */}
-        <motion.div variants={itemVariants} className="mb-8">
-          <Card className="border-0 shadow-md overflow-hidden">
-            {/* Section header */}
+        <motion.div
+          variants={itemVariants}
+          className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8"
+        >
+
+          {/* ── LEFT: Holidays This Month ────────────────────────────── */}
+          {(() => {
+            const monthHolidaysGrid = holidays.filter(h => {
+              try {
+                return (
+                  format(parseISO(h.date), 'yyyy-MM') ===
+                  format(selectedDate, 'yyyy-MM')
+                );
+              } catch { return false; }
+            });
+
+            return (
+              <Card className="border-0 shadow-md overflow-hidden flex flex-col">
+                {/* Header */}
+                <div
+                  className="px-6 py-4 flex items-center gap-3"
+                  style={{
+                    background:   `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`,
+                    borderBottom: `2px solid ${COLORS.amber}30`,
+                  }}
+                >
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: `${COLORS.amber}25` }}
+                  >
+                    <span className="text-xl">🎉</span>
+                  </div>
+                  <div>
+                    <h3
+                      className="font-black text-slate-800"
+                      style={{ color: COLORS.deepBlue }}
+                    >
+                      Holidays — {format(selectedDate, 'MMMM yyyy')}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {monthHolidaysGrid.length} holiday
+                      {monthHolidaysGrid.length !== 1 ? 's' : ''} this month
+                    </p>
+                  </div>
+                </div>
+
+                <CardContent className="p-6 flex-1">
+                  {monthHolidaysGrid.length === 0 ? (
+                    <div className="text-center py-10">
+                      <span className="text-4xl block mb-3">🗓️</span>
+                      <p className="text-slate-400 font-medium text-sm">
+                        No holidays this month
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {monthHolidaysGrid.map(h => (
+                        <motion.div
+                          key={h.date}
+                          variants={itemVariants}
+                          className="flex items-center gap-4 p-3.5 rounded-xl"
+                          style={{
+                            backgroundColor: `${COLORS.amber}12`,
+                            border:          `1.5px solid ${COLORS.amber}35`,
+                          }}
+                        >
+                          <div
+                            className="w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-white font-black shadow-sm"
+                            style={{
+                              background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)`,
+                            }}
+                          >
+                            <span className="text-[10px] leading-none uppercase tracking-wide">
+                              {format(parseISO(h.date), 'MMM')}
+                            </span>
+                            <span className="text-lg leading-none font-black">
+                              {format(parseISO(h.date), 'd')}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-slate-800 truncate leading-snug">
+                              {h.name}
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium mt-0.5">
+                              {format(parseISO(h.date), 'EEEE')}
+                            </p>
+                          </div>
+                          <span
+                            className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full flex-shrink-0"
+                            style={{
+                              color:           COLORS.amber,
+                              backgroundColor: `${COLORS.amber}20`,
+                              border:          `1px solid ${COLORS.amber}40`,
+                            }}
+                          >
+                            Holiday
+                          </span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* ── RIGHT: Reminders & Meetings ──────────────────────────── */}
+          <Card className="border-0 shadow-md overflow-hidden flex flex-col">
+            {/* Header */}
             <div
               className="px-6 py-4 flex items-center justify-between"
               style={{
@@ -1476,20 +1580,23 @@ export default function Attendance() {
             >
               <div className="flex items-center gap-3">
                 <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: `${COLORS.purple}20` }}
                 >
                   <AlarmClock className="w-5 h-5" style={{ color: COLORS.purple }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-800" style={{ color: COLORS.deepBlue }}>
+                  <h3
+                    className="font-black text-slate-800"
+                    style={{ color: COLORS.deepBlue }}
+                  >
                     {isViewingOther
                       ? `${viewedUserName?.split(' ')[0]}'s Reminders`
                       : 'Reminders & Meetings'}
                   </h3>
                   <p className="text-xs text-slate-500 font-medium">
                     {upcomingReminders.length} upcoming
-                    {!isViewingOther && ' • popups fire automatically at reminder time'}
+                    {!isViewingOther && ' • popups fire automatically'}
                   </p>
                 </div>
               </div>
@@ -1497,16 +1604,16 @@ export default function Attendance() {
               {!isViewingOther && (
                 <Button
                   onClick={() => setShowReminderForm(true)}
-                  className="font-bold rounded-xl text-white px-5 py-2.5"
+                  className="font-bold rounded-xl text-white px-4 py-2"
                   style={{ backgroundColor: COLORS.purple }}
                 >
-                  <Plus className="w-4 h-4 mr-2" />
-                  New Reminder
+                  <Plus className="w-4 h-4 mr-1.5" />
+                  New
                 </Button>
               )}
             </div>
 
-            <CardContent className="p-6">
+            <CardContent className="p-6 flex-1">
               {upcomingReminders.length === 0 ? (
                 <div className="text-center py-10">
                   <Bell className="w-10 h-10 mx-auto text-slate-300 mb-3" />
@@ -1517,68 +1624,78 @@ export default function Attendance() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="space-y-3">
                   {upcomingReminders.map(r => {
                     const isDue = isPast(new Date(r.remind_at));
                     return (
                       <motion.div
                         key={r.id}
                         variants={itemVariants}
-                        className="relative p-4 rounded-xl border-2 transition-all"
+                        className="relative flex items-start gap-4 p-4 rounded-xl border-2 transition-all"
                         style={{
-                          borderColor:     isDue ? `${COLORS.red}40` : `${COLORS.purple}30`,
-                          backgroundColor: isDue ? `${COLORS.red}08`  : `${COLORS.purple}08`,
+                          borderColor:     isDue ? `${COLORS.red}40`    : `${COLORS.purple}30`,
+                          backgroundColor: isDue ? `${COLORS.red}06`    : `${COLORS.purple}06`,
                         }}
                       >
-                        {isDue && (
-                          <span className="absolute top-3 right-3 text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase">
-                            Past Due
-                          </span>
-                        )}
-                        <div className="flex items-start gap-3 mb-3 pr-16">
-                          <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                            style={{ backgroundColor: `${COLORS.purple}20` }}
-                          >
-                            <Bell className="w-4 h-4" style={{ color: COLORS.purple }} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-800 text-sm leading-snug truncate">
+                        {/* Icon */}
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                          style={{
+                            backgroundColor: isDue
+                              ? `${COLORS.red}15`
+                              : `${COLORS.purple}18`,
+                          }}
+                        >
+                          <Bell
+                            className="w-5 h-5"
+                            style={{ color: isDue ? COLORS.red : COLORS.purple }}
+                          />
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <p className="font-bold text-slate-800 text-sm leading-snug">
                               {r.title}
                             </p>
-                            {r.description && (
-                              <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
-                                {r.description}
-                              </p>
+                            {isDue && (
+                              <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase flex-shrink-0">
+                                Past Due
+                              </span>
                             )}
                           </div>
-                        </div>
-                        <p
-                          className="text-xs font-mono font-bold mb-3 pl-11"
-                          style={{ color: isDue ? COLORS.red : COLORS.purple }}
-                        >
-                          ⏰ {formatReminderTime(r.remind_at)}
-                        </p>
-                        <div className="flex gap-2 pl-11">
-                          <a
-                            href={buildGCalURL(r)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white transition-colors"
-                            style={{ backgroundColor: COLORS.deepBlue }}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            Google Cal
-                          </a>
-                          {!isViewingOther && (
-                            <button
-                              onClick={() => handleDeleteReminder(r.id)}
-                              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Delete
-                            </button>
+                          {r.description && (
+                            <p className="text-xs text-slate-500 mb-2 line-clamp-1">
+                              {r.description}
+                            </p>
                           )}
+                          <p
+                            className="text-xs font-mono font-bold mb-3"
+                            style={{ color: isDue ? COLORS.red : COLORS.purple }}
+                          >
+                            ⏰ {formatReminderTime(r.remind_at)}
+                          </p>
+                          <div className="flex gap-2">
+                            <a
+                              href={buildGCalURL(r)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white transition-colors"
+                              style={{ backgroundColor: COLORS.deepBlue }}
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Google Cal
+                            </a>
+                            {!isViewingOther && (
+                              <button
+                                onClick={() => handleDeleteReminder(r.id)}
+                                className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </motion.div>
                     );
@@ -1587,6 +1704,7 @@ export default function Attendance() {
               )}
             </CardContent>
           </Card>
+
         </motion.div>
 
         {/* ═══════════════════════════════════════════════════════════════ */}
@@ -1783,73 +1901,7 @@ export default function Attendance() {
               </CardContent>
             </Card>
 
-            {/* ── Holidays This Month ──────────────────────────────────── */}
-            {(() => {
-              const monthHolidays = holidays.filter(h => {
-                try {
-                  return (
-                    format(parseISO(h.date), 'yyyy-MM') ===
-                    format(selectedDate, 'yyyy-MM')
-                  );
-                } catch { return false; }
-              });
 
-              return (
-                <Card className="border-0 shadow-md overflow-hidden w-full">
-                  <CardHeader className="pb-3 border-b border-slate-100">
-                    <CardTitle
-                      className="text-sm flex items-center gap-2 min-w-0"
-                      style={{ color: COLORS.deepBlue }}
-                    >
-                      <span className="text-base flex-shrink-0">🎉</span>
-                      <span className="truncate">
-                        Holidays — {format(selectedDate, 'MMMM yyyy')}
-                      </span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {monthHolidays.length === 0 ? (
-                      <p className="text-xs text-slate-400 font-medium text-center py-3">
-                        No holidays this month
-                      </p>
-                    ) : (
-                      <div className="space-y-2 w-full">
-                        {monthHolidays.map(h => (
-                          <div
-                            key={h.date}
-                            className="flex items-center gap-2 p-2.5 rounded-xl w-full min-w-0"
-                            style={{
-                              backgroundColor: `${COLORS.amber}15`,
-                              border:          `1.5px solid ${COLORS.amber}40`,
-                            }}
-                          >
-                            <div
-                              className="w-9 h-9 rounded-full flex flex-col items-center justify-center flex-shrink-0 text-white font-black"
-                              style={{ backgroundColor: COLORS.amber }}
-                            >
-                              <span className="text-[9px] leading-none">
-                                {format(parseISO(h.date), 'MMM')}
-                              </span>
-                              <span className="text-xs leading-none">
-                                {format(parseISO(h.date), 'd')}
-                              </span>
-                            </div>
-                            <div className="min-w-0 flex-1 overflow-hidden">
-                              <p className="text-xs font-bold text-slate-800 truncate leading-snug">
-                                {h.name}
-                              </p>
-                              <p className="text-[10px] text-slate-500 font-medium truncate">
-                                {format(parseISO(h.date), 'EEEE')}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })()}
           </motion.div>
 
           {/* ─── Recent Attendance Table — FIX #4 ────────────────────── */}
