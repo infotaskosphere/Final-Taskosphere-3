@@ -924,14 +924,21 @@ def get_real_client_ip(request: Request):
 # ── ATTENDANCE HELPER: Check if punch-in is late ───────────────────────────
 def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
     """
-    Returns True if punch_in_ist is after the user's scheduled punch-in time
-    plus grace period. All comparisons done in IST.
-    user dict must have keys: punch_in_time (HH:MM), grace_time (HH:MM)
+    Uses late_grace_minutes (int) if available,
+    otherwise falls back to parsing grace_time as HH:MM deadline or duration.
     """
     try:
         pit = datetime.strptime(user.get("punch_in_time", "10:30"), "%H:%M")
-        gt  = datetime.strptime(user.get("grace_time",   "00:15"), "%H:%M")
-        grace_minutes = gt.hour * 60 + gt.minute
+
+        # Prefer the dedicated field — stored as plain integer e.g. 15
+        if user.get("late_grace_minutes") is not None:
+            grace_minutes = int(user["late_grace_minutes"])
+        else:
+            # Fallback: treat grace_time as a duration HH:MM e.g. "00:15"
+            raw = str(user.get("grace_time", "00:15"))
+            gt  = datetime.strptime(raw, "%H:%M")
+            grace_minutes = gt.hour * 60 + gt.minute
+
         deadline = punch_in_ist.replace(
             hour=pit.hour, minute=pit.minute, second=0, microsecond=0
         ) + timedelta(minutes=grace_minutes)
