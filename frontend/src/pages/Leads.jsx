@@ -22,7 +22,7 @@ import {
   AlertTriangle, Clock, Zap, CheckCircle2, Loader2,
   Circle, X, ArrowRight, IndianRupee, FileText,
   UserCheck, Users, Tag, MessageSquare, Target,
-  ChevronRight, Sparkles, ShieldCheck, Timer,
+  ChevronRight, Sparkles, ShieldCheck, Timer, Layers,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -66,6 +66,27 @@ const LEAD_SOURCES = [
   { label: 'Social Media', value: 'social_media' },
   { label: 'Event',        value: 'event'        },
 ];
+
+// ── All services matching TASK_CATEGORIES from backend ──────────────────────
+const LEAD_SERVICES = [
+  { value: 'GST',          label: 'GST',          color: 'bg-blue-50 text-blue-700 border-blue-200',       dot: 'bg-blue-500'    },
+  { value: 'Income Tax',   label: 'Income Tax',   color: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500'  },
+  { value: 'Accounts',     label: 'Accounts',     color: 'bg-teal-50 text-teal-700 border-teal-200',       dot: 'bg-teal-500'    },
+  { value: 'TDS',          label: 'TDS',          color: 'bg-amber-50 text-amber-700 border-amber-200',    dot: 'bg-amber-500'   },
+  { value: 'ROC',          label: 'ROC',          color: 'bg-indigo-50 text-indigo-700 border-indigo-200', dot: 'bg-indigo-500'  },
+  { value: 'Trademark',    label: 'Trademark',    color: 'bg-pink-50 text-pink-700 border-pink-200',       dot: 'bg-pink-500'    },
+  { value: 'MSME',         label: 'MSME',         color: 'bg-orange-50 text-orange-700 border-orange-200', dot: 'bg-orange-500'  },
+  { value: 'FEMA',         label: 'FEMA',         color: 'bg-sky-50 text-sky-700 border-sky-200',          dot: 'bg-sky-500'     },
+  { value: 'DSC',          label: 'DSC',          color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+  { value: 'Audit',        label: 'Audit',        color: 'bg-cyan-50 text-cyan-700 border-cyan-200',       dot: 'bg-cyan-500'    },
+  { value: 'Payroll',      label: 'Payroll',      color: 'bg-lime-50 text-lime-700 border-lime-200',       dot: 'bg-lime-500'    },
+  { value: 'PF/ESIC',      label: 'PF/ESIC',      color: 'bg-rose-50 text-rose-700 border-rose-200',       dot: 'bg-rose-500'    },
+  { value: 'Other',        label: 'Other',        color: 'bg-slate-50 text-slate-600 border-slate-200',    dot: 'bg-slate-400'   },
+];
+
+// helper to get service style
+const serviceStyle = (val) =>
+  LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length - 1];
 
 const TASK_CATEGORIES = [
   { value: 'gst',          label: 'GST'          },
@@ -127,6 +148,88 @@ const StatCard = ({ label, value, color, onClick, active }) => (
   </Card>
 );
 
+// ─── Service Badge (reusable) ─────────────────────────────────────────────────
+const ServiceBadge = ({ value, size = 'sm' }) => {
+  const s = serviceStyle(value);
+  return (
+    <span className={cn(
+      'inline-flex items-center gap-1 rounded-lg border font-semibold',
+      s.color,
+      size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',
+    )}>
+      <span className={cn('rounded-full flex-shrink-0', s.dot, size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2')} />
+      {value}
+    </span>
+  );
+};
+
+// ─── Service Selector (form component) ────────────────────────────────────────
+const ServiceSelector = ({ selected = [], onChange, availableFromServer = [] }) => {
+  // Merge server services (from clients) + our fixed LEAD_SERVICES list, deduplicate
+  const serverExtras = availableFromServer
+    .filter(s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase()))
+    .map(s => ({ value: s, label: s, color: 'bg-slate-50 text-slate-600 border-slate-200', dot: 'bg-slate-400' }));
+
+  const allServices = [...LEAD_SERVICES, ...serverExtras];
+
+  const toggle = (val) => {
+    if (selected.includes(val)) {
+      onChange(selected.filter(s => s !== val));
+    } else {
+      onChange([...selected, val]);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Selected preview */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 p-3 bg-blue-50 rounded-2xl border border-blue-100">
+          <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider w-full mb-0.5">Selected Services</span>
+          {selected.map(val => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => toggle(val)}
+              className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-lg border text-[11px] font-semibold bg-white border-blue-200 text-blue-700 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-colors group"
+            >
+              {val}
+              <X className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* All service chips */}
+      <div className="flex flex-wrap gap-2">
+        {allServices.map(svc => {
+          const isSelected = selected.includes(svc.value);
+          return (
+            <button
+              key={svc.value}
+              type="button"
+              onClick={() => toggle(svc.value)}
+              className={cn(
+                'inline-flex items-center gap-1.5 h-8 px-3 rounded-2xl text-xs font-semibold border transition-all duration-150',
+                isSelected
+                  ? cn(svc.color, 'shadow-sm ring-1 ring-offset-1', svc.color.split(' ')[2])
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50',
+              )}
+            >
+              {isSelected && <Check className="h-3 w-3 flex-shrink-0" />}
+              {svc.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {selected.length === 0 && (
+        <p className="text-[11px] text-slate-400 italic">No services selected — click any service above to add it to this lead.</p>
+      )}
+    </div>
+  );
+};
+
 // ─── Client Conversion Confirmation Dialog ────────────────────────────────────
 function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLater, converting }) {
   return (
@@ -144,7 +247,6 @@ function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLa
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* Convert Now Option */}
           <button
             onClick={onConvertNow}
             disabled={converting}
@@ -167,7 +269,6 @@ function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLa
             </div>
           </button>
 
-          {/* Later Option */}
           <button
             onClick={onConvertLater}
             disabled={converting}
@@ -266,7 +367,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
     }
   };
 
-  // Resolve display name for assigned user
   const assignedUser = users.find(u => u.id === form.assigned_to);
 
   return (
@@ -283,7 +383,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Lead Summary */}
           <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-3">
             <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
               <Building2 className="h-4 w-4 text-emerald-600" />
@@ -294,13 +393,17 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
                 ₹{(Number(lead?.quotation_amount)||0).toLocaleString()} · {lead?.contact_name || 'No contact'}
                 {lead?.referred_by && <span className="text-emerald-600"> · Ref: {lead.referred_by}</span>}
               </p>
+              {(lead?.services||[]).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {lead.services.map(s => <ServiceBadge key={s} value={s} />)}
+                </div>
+              )}
             </div>
             <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-600 text-white flex-shrink-0">
               → WON
             </span>
           </div>
 
-          {/* Assigned To (from lead) */}
           {assignedUser && (
             <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
               <UserCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
@@ -443,6 +546,7 @@ export default function LeadsPage() {
   const [submitting,        setSubmitting]        = useState(false);
   const [searchQuery,       setSearchQuery]       = useState('');
   const [statusFilter,      setStatusFilter]      = useState('all');
+  const [serviceFilter,     setServiceFilter]     = useState('all');   // ← NEW
   const [viewMode,          setViewMode]          = useState('list');
   const [dialogOpen,        setDialogOpen]        = useState(false);
   const [editingLead,       setEditingLead]       = useState(null);
@@ -480,9 +584,22 @@ export default function LeadsPage() {
 
   useEffect(() => {
     fetchLeads();
-    api.get('/leads/meta/services').then(r => setAvailableServices(r.data)).catch(() => {});
+    api.get('/leads/meta/services').then(r => {
+      const raw = r.data;
+      // API returns either { services: [...] } or a plain array
+      const list = Array.isArray(raw) ? raw : (raw?.services || []);
+      setAvailableServices(list);
+    }).catch(() => {});
     api.get('/users').then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
+
+  // Merged service list: fixed LEAD_SERVICES + anything extra from server
+  const mergedServices = useMemo(() => {
+    const extras = availableServices.filter(
+      s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase())
+    );
+    return [...LEAD_SERVICES.map(s => s.value), ...extras];
+  }, [availableServices]);
 
   const stats = useMemo(() => ({
     total:     leads.length,
@@ -494,6 +611,15 @@ export default function LeadsPage() {
     pipeValue: leads.filter(l => ACTIVE_STAGES.includes(l.status)).reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
   }), [leads]);
 
+  // Service tab counts
+  const serviceTabCounts = useMemo(() => {
+    const counts = { all: leads.length };
+    mergedServices.forEach(svc => {
+      counts[svc] = leads.filter(l => (l.services || []).includes(svc)).length;
+    });
+    return counts;
+  }, [leads, mergedServices]);
+
   const filteredLeads = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return leads
@@ -504,8 +630,9 @@ export default function LeadsPage() {
         l.email?.toLowerCase().includes(q) ||
         l.referred_by?.toLowerCase().includes(q)
       )
-      .filter(l => statusFilter === 'all' || l.status === statusFilter);
-  }, [leads, searchQuery, statusFilter]);
+      .filter(l => statusFilter === 'all' || l.status === statusFilter)
+      .filter(l => serviceFilter === 'all' || (l.services || []).includes(serviceFilter)); // ← NEW
+  }, [leads, searchQuery, statusFilter, serviceFilter]);
 
   const resetForm = () => { setFormData(emptyForm); setErrors({}); };
 
@@ -616,10 +743,7 @@ export default function LeadsPage() {
     if (!clientConvLead) return;
     setClientConverting(true);
     try {
-      await api.patch(`/leads/${clientConvLead.id}`, {
-        status: 'won',
-        converted_client_id: null,
-      });
+      await api.patch(`/leads/${clientConvLead.id}`, { status: 'won', converted_client_id: null });
       toast.success(`"${clientConvLead.company_name}" marked as Won. You can convert to client anytime.`);
       setClientConvLead(null);
       fetchLeads();
@@ -630,20 +754,20 @@ export default function LeadsPage() {
     }
   };
 
-  const handleConvertButtonClick = (lead) => {
-    setConvertingLead(lead);
-  };
+  const handleConvertButtonClick = (lead) => setConvertingLead(lead);
 
   useEffect(() => {
     const pills = [];
-    if (searchQuery)       pills.push({ key: 'search', label: `Search: ${searchQuery}` });
-    if (statusFilter !== 'all') pills.push({ key: 'status', label: `Stage: ${stageOf(statusFilter).label}` });
+    if (searchQuery)           pills.push({ key: 'search',  label: `Search: ${searchQuery}` });
+    if (statusFilter !== 'all') pills.push({ key: 'status',  label: `Stage: ${stageOf(statusFilter).label}` });
+    if (serviceFilter !== 'all') pills.push({ key: 'service', label: `Service: ${serviceFilter}` });
     setActiveFilters(pills);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, serviceFilter]);
 
   const removeFilter = (key) => {
-    if (key === 'search') setSearchQuery('');
-    if (key === 'status') setStatusFilter('all');
+    if (key === 'search')  setSearchQuery('');
+    if (key === 'status')  setStatusFilter('all');
+    if (key === 'service') setServiceFilter('all');
   };
 
   const userNameById = (id) => {
@@ -738,6 +862,67 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
+      {/* ── Service Tabs ── NEW ─────────────────────────────────────────────── */}
+      {mergedServices.length > 0 && (
+        <motion.div variants={itemVariants}>
+          <Card className="border border-slate-200 rounded-2xl">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <Tag className="h-3.5 w-3.5 text-slate-400" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Filter by Service</p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {/* All tab */}
+                <button
+                  onClick={() => setServiceFilter('all')}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 h-7 px-3 rounded-xl text-xs font-semibold border transition-all',
+                    serviceFilter === 'all'
+                      ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700',
+                  )}
+                >
+                  All
+                  <span className={cn(
+                    'text-[10px] font-bold px-1.5 py-0.5 rounded-full',
+                    serviceFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500',
+                  )}>
+                    {serviceTabCounts.all}
+                  </span>
+                </button>
+
+                {/* Per-service tabs — only show ones that have leads */}
+                {mergedServices.filter(svc => serviceTabCounts[svc] > 0).map(svc => {
+                  const s = serviceStyle(svc);
+                  const isActive = serviceFilter === svc;
+                  return (
+                    <button
+                      key={svc}
+                      onClick={() => setServiceFilter(isActive ? 'all' : svc)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 h-7 px-3 rounded-xl text-xs font-semibold border transition-all',
+                        isActive
+                          ? cn(s.color, 'shadow-sm')
+                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700',
+                      )}
+                    >
+                      <span className={cn('h-1.5 w-1.5 rounded-full flex-shrink-0', s.dot)} />
+                      {svc}
+                      <span className={cn(
+                        'text-[10px] font-bold px-1.5 py-0.5 rounded-full',
+                        isActive ? 'bg-white/60' : 'bg-slate-100 text-slate-500',
+                      )}>
+                        {serviceTabCounts[svc]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
       {/* ── Filters ── */}
       <motion.div
         variants={itemVariants}
@@ -767,6 +952,7 @@ export default function LeadsPage() {
         </div>
         <p className="text-xs text-slate-400 ml-auto">
           {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''}
+          {serviceFilter !== 'all' && <span className="text-blue-500 font-medium"> · {serviceFilter}</span>}
         </p>
       </motion.div>
 
@@ -930,13 +1116,12 @@ export default function LeadsPage() {
                       </span>
                     </div>
 
-                    {/* Row 3: Services */}
+                    {/* Row 3: Services — coloured badges */}
                     {(lead.services||[]).length > 0 && (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <Tag className="h-3 w-3 text-slate-300 flex-shrink-0" />
                         {lead.services.map(s => (
-                          <span key={s} className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                            {s}
-                          </span>
+                          <ServiceBadge key={s} value={s} />
                         ))}
                       </div>
                     )}
@@ -1039,10 +1224,8 @@ export default function LeadsPage() {
                               <Building2 className="h-3 w-3" /> Convert to Client
                             </button>
                           )}
-                          {(lead.services||[]).slice(0,2).map(s => (
-                            <span key={s} className="hidden sm:inline px-2 py-0.5 rounded-lg text-[11px] bg-white text-slate-500 border border-slate-200">
-                              {s}
-                            </span>
+                          {(lead.services||[]).slice(0,3).map(s => (
+                            <ServiceBadge key={s} value={s} />
                           ))}
                         </div>
                         <div className="flex items-center gap-3 flex-shrink-0">
@@ -1127,6 +1310,17 @@ export default function LeadsPage() {
                               <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
                                 <User className="h-3 w-3 flex-shrink-0" />Ref: {lead.referred_by}
                               </p>
+                            )}
+                            {/* Services in kanban card */}
+                            {(lead.services||[]).length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-0.5">
+                                {lead.services.slice(0, 2).map(s => (
+                                  <ServiceBadge key={s} value={s} size="xs" />
+                                ))}
+                                {lead.services.length > 2 && (
+                                  <span className="text-[10px] text-slate-400 font-medium">+{lead.services.length - 2}</span>
+                                )}
+                              </div>
                             )}
                             {lead.quotation_amount && (
                               <p className="text-xs font-bold text-slate-700">
@@ -1257,6 +1451,33 @@ export default function LeadsPage() {
               />
             </div>
 
+            {/* ── Services (prominent section) ── */}
+            <SectionLabel icon={Tag}>Services Required</SectionLabel>
+
+            <div className="md:col-span-2 space-y-2">
+              {/* Summary line */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-500">
+                  Select all services this lead is interested in
+                </p>
+                {formData.services.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData(p => ({ ...p, services: [] }))}
+                    className="text-[11px] text-red-400 hover:text-red-600 font-medium transition-colors"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              <ServiceSelector
+                selected={formData.services}
+                onChange={(val) => setFormData(p => ({ ...p, services: val }))}
+                availableFromServer={availableServices}
+              />
+            </div>
+
             {/* ── Lead Source & Assignment ── */}
             <SectionLabel icon={ArrowRight}>Source & Assignment</SectionLabel>
 
@@ -1285,7 +1506,6 @@ export default function LeadsPage() {
                 <UserCheck className="h-3.5 w-3.5 text-slate-400" />
                 Assign To
               </Label>
-              {/* FIX: use 'unassigned' sentinel instead of empty string */}
               <Select
                 value={formData.assigned_to || 'unassigned'}
                 onValueChange={v => handleChange('assigned_to', v === 'unassigned' ? null : v)}
@@ -1346,13 +1566,12 @@ export default function LeadsPage() {
               />
             </div>
 
-            {/* ── Closure Probability ── */}
             {editingLead && (
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5">
                   <Target className="h-3.5 w-3.5 text-slate-400" />
                   Closure Probability (%)
-                  <span className="text-[10px] text-slate-400 font-normal ml-1">— auto-calculated from notes, or override manually</span>
+                  <span className="text-[10px] text-slate-400 font-normal ml-1">— auto-calculated, or override</span>
                 </Label>
                 <Input
                   type="number"
@@ -1364,39 +1583,6 @@ export default function LeadsPage() {
                   className="h-10 rounded-2xl"
                 />
               </div>
-            )}
-
-            {/* ── Services ── */}
-            {availableServices.length > 0 && (
-              <>
-                <SectionLabel icon={Tag}>Services</SectionLabel>
-                <div className="md:col-span-2 flex flex-wrap gap-2">
-                  {availableServices.map(service => {
-                    const selected = formData.services.includes(service);
-                    return (
-                      <button
-                        key={service}
-                        type="button"
-                        onClick={() => setFormData(prev => ({
-                          ...prev,
-                          services: selected
-                            ? prev.services.filter(s => s !== service)
-                            : [...prev.services, service],
-                        }))}
-                        className={cn(
-                          'h-8 px-3 rounded-2xl text-xs font-semibold transition-all flex items-center gap-1.5',
-                          selected
-                            ? 'bg-blue-700 text-white shadow-sm'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
-                        )}
-                      >
-                        {service}
-                        {selected && <Check className="h-3 w-3" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
             )}
 
             {/* ── Notes ── */}
@@ -1434,7 +1620,7 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Convert to Task Dialog (full flow) ── */}
+      {/* ── Convert to Task Dialog ── */}
       {convertingLead && (
         <ConvertToTaskDialog
           lead={convertingLead}
@@ -1444,7 +1630,7 @@ export default function LeadsPage() {
         />
       )}
 
-      {/* ── Client Conversion Confirmation Dialog ── */}
+      {/* ── Client Conversion Dialog ── */}
       {clientConvLead && (
         <ClientConversionDialog
           lead={clientConvLead}
