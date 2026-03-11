@@ -1,857 +1,1038 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { format, isPast, parseISO } from 'date-fns';
+import { format, isPast, parseISO, isToday, isTomorrow } from 'date-fns';
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-
 import {
-  Plus,
-  Zap,
-  Trash2,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  ShieldCheck,
-  ArrowUpRight,
-  RefreshCw,
-  Target,
-  TrendingUp,
-  AlertCircle,
-  Calendar as CalendarIcon,
-  History,
+  Plus, Zap, Trash2, CheckCircle2, Sparkles, ShieldCheck,
+  RefreshCw, Target, TrendingUp, AlertCircle,
+  Calendar as CalendarIcon, History, Users, Search, X,
+  User as UserIcon, Activity, Layers, CheckSquare, Circle,
 } from 'lucide-react';
 
-// ── BRAND COLORS ─────────────────────────────────────────────────────────────
-const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
-  emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
+// ── DESIGN TOKENS ─────────────────────────────────────────────────────────────
+const T = {
+  navy:    '#0B2545',
+  blue:    '#1366B0',
+  sky:     '#2A9D8F',
+  emerald: '#0D9E6A',
+  amber:   '#E9A62A',
+  coral:   '#E05A4E',
+  slate:   '#475569',
+  muted:   '#94A3B8',
+  bg:      '#F0F4F9',
+  card:    '#FFFFFF',
+  border:  '#E2E8F0',
+  text:    '#0F172A',
 };
 
-// ── SPRING PHYSICS ────────────────────────────────────────────────────────────
-const springPhysics = {
-  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
-  lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
-  button: { type: "spring", stiffness: 400, damping: 28 },
-  icon: { type: "spring", stiffness: 450, damping: 25 },
-  tap: { type: "spring", stiffness: 500, damping: 30 },
-  micro: { type: "spring", stiffness: 600, damping: 35 },
+// ── SPRING CONFIGS ────────────────────────────────────────────────────────────
+const spring = {
+  snappy: { type: 'spring', stiffness: 420, damping: 28 },
+  smooth: { type: 'spring', stiffness: 280, damping: 24 },
 };
 
 // ── ANIMATION VARIANTS ────────────────────────────────────────────────────────
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06, delayChildren: 0.1 }
-  }
+const fadeUp = {
+  hidden:  { opacity: 0, y: 18, scale: 0.985 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.38, ease: [0.22, 1, 0.36, 1] } },
+  exit:    { opacity: 0, y: -8, scale: 0.99, transition: { duration: 0.22 } },
 };
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 24 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] }
-  },
-  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } }
+const stagger = {
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
 };
 
-const listItemVariants = {
-  hidden: { opacity: 0, y: 20, scale: 0.98 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
-  },
-  exit: {
-    opacity: 0,
-    y: -10,
-    scale: 0.98,
-    transition: { duration: 0.25 }
-  }
+const rowVariant = {
+  hidden:  { opacity: 0, x: -10 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] } },
+  exit:    { opacity: 0, x: 10, transition: { duration: 0.18 } },
 };
 
-const buttonMotion = {
-  whileHover: { scale: 1.05 },
-  whileTap: { scale: 0.92, transition: springPhysics.button }
+// ── DUE LABEL HELPER ──────────────────────────────────────────────────────────
+const getDueLabel = (due_date) => {
+  if (!due_date) return null;
+  try {
+    const d = parseISO(due_date);
+    if (isToday(d))    return { label: 'Today',    color: T.amber  };
+    if (isTomorrow(d)) return { label: 'Tomorrow', color: T.sky    };
+    if (isPast(d))     return { label: 'Overdue',  color: T.coral  };
+    return { label: format(d, 'MMM d'), color: T.muted };
+  } catch { return null; }
 };
+
+// ── STAT CARD ─────────────────────────────────────────────────────────────────
+function StatCard({ icon: Icon, label, value, sub, accent, progress }) {
+  return (
+    <motion.div
+      variants={fadeUp}
+      className="relative bg-white rounded-2xl border overflow-hidden"
+      style={{ borderColor: T.border }}
+      whileHover={{ y: -2, boxShadow: '0 8px 32px rgba(11,37,69,0.08)' }}
+      transition={spring.snappy}
+    >
+      <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: `linear-gradient(90deg, ${accent}, ${accent}88)` }} />
+      <div className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${accent}14` }}>
+            <Icon size={18} style={{ color: accent }} />
+          </div>
+          <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: T.muted }}>{label}</span>
+        </div>
+        <div className="text-3xl font-black tracking-tight mb-0.5" style={{ color: T.navy, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </div>
+        {sub && <div className="text-[11px] font-medium" style={{ color: T.muted }}>{sub}</div>}
+        {progress !== undefined && (
+          <div className="mt-3">
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: `${accent}18` }}>
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: accent }}
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(progress, 100)}%` }}
+                transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 // ── TODO ITEM ─────────────────────────────────────────────────────────────────
-function TodoItem({ todo, onToggle, onPromote, onDelete }) {
-  const isCompleted = todo.is_completed === true || todo.status === "completed";
-  const isOverdue = todo.due_date && isPast(parseISO(todo.due_date)) && !isCompleted;
+function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName }) {
+  const isCompleted = todo.is_completed === true || todo.status === 'completed';
+  const due         = getDueLabel(todo.due_date);
+  const isOverdue   = due?.label === 'Overdue';
 
   return (
     <motion.div
       layout
-      variants={listItemVariants}
+      variants={rowVariant}
       initial="hidden"
       animate="visible"
       exit="exit"
-      className={`group relative flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-b-0 transition-colors
-        ${isOverdue ? 'bg-red-50/60 border-l-4 border-l-red-500' : ''}
-        ${isCompleted ? 'bg-slate-50/70' : 'hover:bg-blue-50/30'}
-      `}
+      className="group relative flex items-center gap-3 px-5 py-3.5 border-b last:border-b-0 transition-colors"
+      style={{
+        borderColor: T.border,
+        background:  isOverdue && !isCompleted ? '#FFF5F4' : 'transparent',
+      }}
+      whileHover={{ backgroundColor: isOverdue && !isCompleted ? '#FFF0EF' : '#F8FAFF' }}
     >
+      {/* Overdue accent bar */}
+      {isOverdue && !isCompleted && (
+        <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r" style={{ background: T.coral }} />
+      )}
+
       {/* Checkbox */}
       <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9, transition: springPhysics.button }}
+        whileHover={{ scale: 1.12 }}
+        whileTap={{ scale: 0.88 }}
+        transition={spring.snappy}
         onClick={() => onToggle(todo.id || todo._id)}
-        className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
-          ${isCompleted
-            ? 'bg-emerald-500 border-emerald-500 text-white'
-            : 'border-slate-300 hover:border-emerald-400'
-          }`}
+        className="w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
+        style={{
+          background:  isCompleted ? T.emerald : 'transparent',
+          borderColor: isCompleted ? T.emerald : T.border,
+        }}
       >
-        {isCompleted && <CheckCircle2 className="h-3.5 w-3.5" />}
+        {isCompleted && (
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={spring.snappy}>
+            <CheckCircle2 size={11} color="#fff" />
+          </motion.div>
+        )}
       </motion.button>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-3 flex-wrap">
-          <p className={`font-medium text-sm leading-snug truncate max-w-xs transition
-            ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
-            {todo.title || 'Untitled Todo'}
-          </p>
-          {isOverdue && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-100 px-2 py-0.5 rounded uppercase tracking-wide">
-              <AlertCircle className="h-3 w-3" /> Overdue
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className="text-sm font-semibold truncate max-w-[260px]"
+            style={{
+              color:          isCompleted ? T.muted : T.text,
+              textDecoration: isCompleted ? 'line-through' : 'none',
+            }}
+          >
+            {todo.title || 'Untitled'}
+          </span>
+          {showOwner && ownerName && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `${T.blue}12`, color: T.blue }}>
+              <UserIcon size={9} />{ownerName}
+            </span>
+          )}
+          {due && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${due.color}14`, color: due.color }}>
+              <CalendarIcon size={9} />{due.label}
             </span>
           )}
           {isCompleted && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded uppercase tracking-wide">
-              Done
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${T.emerald}12`, color: T.emerald }}>
+              ✓ Done
             </span>
           )}
         </div>
         {todo.description && (
-          <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{todo.description}</p>
-        )}
-        {todo.due_date && (
-          <span className={`inline-flex items-center gap-1 text-[11px] mt-1 font-medium
-            ${isOverdue ? 'text-red-500' : 'text-slate-400'}`}>
-            <CalendarIcon className="h-3 w-3" />
-            {format(parseISO(todo.due_date), 'MMM d, yyyy')}
-          </span>
+          <p className="text-xs mt-0.5 line-clamp-1" style={{ color: T.muted }}>{todo.description}</p>
         )}
       </div>
 
-      {/* Actions — appear on hover */}
-      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
+      {/* Actions — visible on row hover */}
+      <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
         <motion.button
-          {...buttonMotion}
+          whileTap={{ scale: 0.88 }}
           onClick={(e) => { e.stopPropagation(); onPromote(todo.id || todo._id); }}
           disabled={isCompleted}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded border transition
-            ${isCompleted
-              ? 'bg-slate-100 text-slate-300 cursor-not-allowed border-slate-200'
-              : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-            }`}
+          className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all"
+          style={isCompleted
+            ? { background: T.bg, color: T.muted, borderColor: T.border, cursor: 'not-allowed' }
+            : { background: `${T.amber}12`, color: '#92400E', borderColor: `${T.amber}40` }
+          }
         >
-          <Zap className="h-3.5 w-3.5" /> Promote
+          <Zap size={11} /> Promote
         </motion.button>
         <motion.button
-          {...buttonMotion}
+          whileTap={{ scale: 0.88 }}
           onClick={(e) => { e.stopPropagation(); onDelete(todo.id || todo._id); }}
-          className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 text-slate-400 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition"
+          className="w-7 h-7 flex items-center justify-center rounded-lg border transition-all"
+          style={{ borderColor: T.border, color: T.muted }}
+          onMouseEnter={e => { e.currentTarget.style.background = `${T.coral}12`; e.currentTarget.style.color = T.coral; e.currentTarget.style.borderColor = `${T.coral}40`; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = T.muted; e.currentTarget.style.borderColor = T.border; }}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 size={13} />
         </motion.button>
       </div>
     </motion.div>
   );
 }
 
-// ── MAIN TODO DASHBOARD ───────────────────────────────────────────────────────
+// ── LOG EVENT BADGE ────────────────────────────────────────────────────────────
+function EventBadge({ entry }) {
+  const safeFormat = (dt) => { try { return format(new Date(dt), 'MMM d, h:mm a'); } catch { return '—'; } };
+  if (entry.event === 'deleted' || entry.deleted_at) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.coral}12`, color: T.coral }}>
+        <X size={10} /> Deleted · {safeFormat(entry.deleted_at || Date.now())}
+      </span>
+    );
+  }
+  if (entry.event === 'uncompleted') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.amber}12`, color: '#92400E' }}>
+        ↩ Reopened
+      </span>
+    );
+  }
+  if (entry.completed_at) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.emerald}12`, color: T.emerald }}>
+        <CheckCircle2 size={10} /> Completed · {safeFormat(entry.completed_at)}
+      </span>
+    );
+  }
+  return null;
+}
+
+// ── SEARCH INPUT ──────────────────────────────────────────────────────────────
+function SearchInput({ value, onChange, placeholder }) {
+  return (
+    <div className="relative">
+      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.muted }} />
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full h-9 pl-8 pr-8 text-sm rounded-xl border outline-none transition-all"
+        style={{ background: T.bg, borderColor: T.border, color: T.text }}
+        onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
+        onBlur={e => { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+      />
+      {value && (
+        <button onClick={() => onChange('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded" style={{ color: T.muted }}>
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── TAB PILL ──────────────────────────────────────────────────────────────────
+function TabPill({ id, label, icon: Icon, count, activeTab, setActiveTab }) {
+  const active = activeTab === id;
+  return (
+    <button
+      onClick={() => setActiveTab(id)}
+      className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all"
+      style={active
+        ? { background: T.navy, color: '#fff', boxShadow: `0 2px 12px ${T.navy}30` }
+        : { background: 'transparent', color: T.slate }
+      }
+    >
+      <Icon size={13} />
+      {label}
+      {count > 0 && (
+        <span
+          className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+          style={active
+            ? { background: 'rgba(255,255,255,0.2)', color: '#fff' }
+            : { background: `${T.navy}12`, color: T.navy }
+          }
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ── FILTER CHIP ───────────────────────────────────────────────────────────────
+function FilterChip({ id, label, count, todoFilter, setTodoFilter }) {
+  const active = todoFilter === id;
+  return (
+    <button
+      onClick={() => setTodoFilter(id)}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-all"
+      style={active
+        ? { background: T.blue, color: '#fff', borderColor: T.blue }
+        : { background: 'transparent', color: T.slate, borderColor: T.border }
+      }
+    >
+      {label}
+      {count !== undefined && <span className="text-[9px] font-black opacity-75">{count}</span>}
+    </button>
+  );
+}
+
+// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function TodoDashboard() {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const isAdmin = user?.role === 'admin';
-  const isManager = user?.role === 'manager';
+  const { user }       = useAuth();
+  const queryClient    = useQueryClient();
+  const isAdmin        = user?.role === 'admin';
+  const isManager      = user?.role === 'manager';
 
-  // Form state
-  const [title, setTitle] = useState('');
+  // ── Form state ───────────────────────────────────────────────────────────
+  const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [dueDate,     setDueDate]     = useState('');
 
-  // ── selectedUser: "self" = own todos (default for everyone).
-  // Admin can change this to any user id to view their todos.
-  // Non-admins with view_other_todos permission can switch to permitted user ids.
-  const [selectedUser, setSelectedUser] = useState("self");
-  const [activeTab, setActiveTab] = useState("todos"); // "todos" | "log"
+  // ── UI state ─────────────────────────────────────────────────────────────
+  const [activeTab,    setActiveTab]    = useState('todos');   // 'todos' | 'log'
+  const [selectedUser, setSelectedUser] = useState('self');   // 'self' | 'everyone' | <userId>
+  const [todoFilter,   setTodoFilter]   = useState('all');    // 'all' | 'pending' | 'completed' | 'overdue'
+  const [search,       setSearch]       = useState('');
+  const [logSearch,    setLogSearch]    = useState('');
 
-  // ── TODO LOG ──────────────────────────────────────────────────────────────
+  // ── In-memory todo activity log ───────────────────────────────────────────
   const [todoLog, setTodoLog] = useState([]);
 
-  // ── USERS — fetch all users (admin/manager only, used to build dropdown) ──
+  // ── Fetch all users (admin / manager only) ────────────────────────────────
   const { data: allUsers = [] } = useQuery({
-    queryKey: ["users"],
-    enabled: isAdmin || isManager,
-    queryFn: async () => {
-      const res = await api.get("/users");
+    queryKey: ['users'],
+    enabled:  isAdmin || isManager,
+    queryFn:  async () => {
+      const res = await api.get('/users');
       return res.data || [];
     },
   });
 
-  // ── Build the permitted user list for the dropdown ─────────────────────────
-  // Admin: all users from the users list
-  // Manager: their team members (backend already scopes /users for manager)
-  // Staff: only users listed in view_other_todos permission
-  // In all cases "self" (own todos) is always the default option.
+  // ── Determine "Everyone" visibility ───────────────────────────────────────
+  // Admin always gets it.
+  // Staff: gets it only if their view_other_todos array contains the special
+  // token "everyone" (admin sets this in the permissions editor).
+  const canSeeEveryone = useMemo(() => {
+    if (isAdmin) return true;
+    const list = Array.isArray(user?.permissions?.view_other_todos)
+      ? user.permissions.view_other_todos
+      : [];
+    return list.includes('everyone');
+  }, [isAdmin, user]);
+
+  // ── Build permitted-user list for dropdown ────────────────────────────────
   const permittedUsers = useMemo(() => {
-    if (isAdmin) {
-      // Admin sees every user in the system
-      return allUsers;
-    }
-    if (isManager) {
-      // Manager sees their team (allUsers is already scoped by backend)
-      return allUsers.filter(u => (u.id || u._id) !== user?.id);
-    }
-    // Staff: only explicitly permitted user ids from view_other_todos
-    const viewOtherTodos = user?.permissions?.view_other_todos || [];
-    if (!Array.isArray(viewOtherTodos) || viewOtherTodos.length === 0) return [];
-    return allUsers.filter(u => viewOtherTodos.includes(u.id || u._id));
+    if (isAdmin) return allUsers;
+    if (isManager) return allUsers.filter(u => (u.id || u._id) !== user?.id);
+    const list = Array.isArray(user?.permissions?.view_other_todos)
+      ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
+      : [];
+    return allUsers.filter(u => list.includes(u.id || u._id));
   }, [isAdmin, isManager, allUsers, user]);
 
-  // Whether the current user should see the dropdown at all
-  const showDropdown = isAdmin || isManager || permittedUsers.length > 0;
+  const showDropdown = isAdmin || isManager || permittedUsers.length > 0 || canSeeEveryone;
 
-  // ── Resolve the actual user_id to query ───────────────────────────────────
-  // "self" means current user's own todos; anything else is an explicit user id.
-  const resolvedUserId = selectedUser === "self" ? user?.id : selectedUser;
+  // ── Resolve query user_id param ───────────────────────────────────────────
+  // 'self'     → own id
+  // 'everyone' → 'all' (backend supports ?user_id=all for admin)
+  // <id>       → that user's id
+  const resolvedUserId = useMemo(() => {
+    if (selectedUser === 'self')     return user?.id ?? null;
+    if (selectedUser === 'everyone') return 'all';
+    return selectedUser;
+  }, [selectedUser, user?.id]);
 
-  // ── TODOS DATA — always passes user_id so the backend scopes correctly ─────
+  // ── Fetch todos ───────────────────────────────────────────────────────────
   const { data: todosRaw = [], isLoading } = useQuery({
-    queryKey: ["todos", "page", resolvedUserId],
-    queryFn: async () => {
-      if (!resolvedUserId) return [];
-      const res = await api.get("/todos", { params: { user_id: resolvedUserId } });
-      return res.data;
+    queryKey: ['todos', 'page', resolvedUserId],
+    enabled:  !!resolvedUserId,
+    queryFn:  async () => {
+      const res = await api.get('/todos', { params: { user_id: resolvedUserId } });
+      return res.data || [];
     },
-    enabled: !!resolvedUserId,
   });
 
   const todos = useMemo(() => todosRaw, [todosRaw]);
 
-  // ── USER ID → NAME MAP (for log display) ─────────────────────────────────
+  // ── User id → display name map ────────────────────────────────────────────
   const userMap = useMemo(() => {
     const map = {};
     allUsers.forEach(u => {
-      if (u.id || u._id) map[u.id || u._id] = u.full_name || u.user_name || 'Unknown';
+      const id = u.id || u._id;
+      if (id) map[id] = u.full_name || u.user_name || 'Unknown';
     });
     if (user?.id) map[user.id] = user.full_name || user.email || 'Me';
     return map;
   }, [allUsers, user]);
 
-  const resolveUserName = (userId) => {
+  const resolveUserName = useCallback((userId) => {
     if (!userId) return 'Unknown';
     if (userId === user?.id) return user?.full_name || 'Me';
     return userMap[userId] || userId;
-  };
+  }, [userMap, user]);
 
   // ── Seed log from already-completed todos ─────────────────────────────────
   useEffect(() => {
-    const completedTodos = todos.filter(t => t.is_completed === true || t.status === "completed");
-    if (completedTodos.length === 0) return;
+    const completed = todos.filter(t => t.is_completed === true || t.status === 'completed');
+    if (!completed.length) return;
     setTodoLog(prev => {
       const existingIds = new Set(prev.map(e => e.id));
-      const newEntries = completedTodos
+      const fresh = completed
         .filter(t => !existingIds.has(t.id || t._id))
         .map(t => ({
-          id: t.id || t._id,
-          title: t.title || 'Untitled Todo',
+          id:            t.id || t._id,
+          title:         t.title || 'Untitled',
           created_by_id: t.user_id || t.created_by || null,
-          created_at: t.created_at || null,
-          completed_at: t.completed_at
+          owner_id:      t.user_id || null,
+          created_at:    t.created_at || null,
+          completed_at:  t.completed_at
             ? new Date(t.completed_at)
-            : t.updated_at
-              ? new Date(t.updated_at)
-              : new Date(),
-          deleted_at: null,
-          event: 'completed',
+            : t.updated_at ? new Date(t.updated_at) : new Date(),
+          deleted_at:    null,
+          event:         'completed',
         }));
-      if (newEntries.length === 0) return prev;
-      return [...newEntries, ...prev]
+      if (!fresh.length) return prev;
+      return [...fresh, ...prev]
         .sort((a, b) => {
-          const aTime = a.completed_at || a.deleted_at || new Date(a.created_at || 0);
-          const bTime = b.completed_at || b.deleted_at || new Date(b.created_at || 0);
-          return bTime - aTime;
+          const at = a.completed_at || a.deleted_at || new Date(a.created_at || 0);
+          const bt = b.completed_at || b.deleted_at || new Date(b.created_at || 0);
+          return bt - at;
         })
-        .slice(0, 100);
+        .slice(0, 200);
     });
   }, [todos]);
 
-  // ── STATS ─────────────────────────────────────────────────────────────────
+  // ── Derived stats ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const total = todos.length;
-    const completed = todos.filter(t => t.is_completed === true || t.status === "completed").length;
-    const overdue = todos.filter(t =>
-      t.due_date && isPast(parseISO(t.due_date)) && !(t.is_completed === true || t.status === "completed")
-    ).length;
+    const total     = todos.length;
+    const completed = todos.filter(t => t.is_completed === true || t.status === 'completed').length;
+    const pending   = total - completed;
+    const overdue   = todos.filter(t => {
+      if (!t.due_date) return false;
+      if (t.is_completed === true || t.status === 'completed') return false;
+      try { return isPast(parseISO(t.due_date)); } catch { return false; }
+    }).length;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const healthScore = Math.max(10, 100 - (overdue * 8));
-    return { total, completed, overdue, completionRate, healthScore };
+    const healthScore    = Math.max(0, Math.min(100, 100 - (overdue * 10)));
+    return { total, completed, pending, overdue, completionRate, healthScore };
   }, [todos]);
 
-  // ── NOTIFICATION HELPER ───────────────────────────────────────────────────
-  const sendTodoNotification = async ({ title: notifTitle, message, userId }) => {
-    try {
-      const payload = { title: notifTitle, message, type: 'todo' };
-      if (userId) payload.user_id = userId;
-      await api.post('/notifications/send', payload);
-    } catch (_) {}
-  };
-
-  // ── MUTATIONS ─────────────────────────────────────────────────────────────
-  const invalidateTodos = () => {
-    queryClient.invalidateQueries({ queryKey: ["todos", "page", resolvedUserId] });
-    queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-    queryClient.invalidateQueries({ queryKey: ["todos"] });
-  };
-
-  const addTodoMutation = useMutation({
-    mutationFn: (payload) => api.post("/todos", payload),
-    onSuccess: (_, variables) => {
-      invalidateTodos();
-      toast.success("Todo created successfully");
-      setTitle(""); setDescription(""); setDueDate("");
-      if (!isAdmin) {
-        sendTodoNotification({
-          title: '📝 New Todo Created',
-          message: `${user?.full_name || user?.email || 'A team member'} created a new todo: "${variables.title}".`,
+  // ── Filtered todos for list ───────────────────────────────────────────────
+  const filteredTodos = useMemo(() => {
+    let list = todos;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(t =>
+        (t.title || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q)
+      );
+    }
+    switch (todoFilter) {
+      case 'pending':
+        list = list.filter(t => !(t.is_completed === true || t.status === 'completed'));
+        break;
+      case 'completed':
+        list = list.filter(t => t.is_completed === true || t.status === 'completed');
+        break;
+      case 'overdue':
+        list = list.filter(t => {
+          if (!t.due_date || t.is_completed === true || t.status === 'completed') return false;
+          try { return isPast(parseISO(t.due_date)); } catch { return false; }
         });
-      }
+        break;
+      default: break;
+    }
+    return list;
+  }, [todos, search, todoFilter]);
+
+  // ── Filtered log ──────────────────────────────────────────────────────────
+  // Scoped by selected user:
+  // • 'self'     → only current user's entries
+  // • 'everyone' → all entries (admin / permitted)
+  // • <userId>   → only that user's entries
+  const filteredLog = useMemo(() => {
+    let list = todoLog;
+    if (logSearch) {
+      const q = logSearch.toLowerCase();
+      list = list.filter(e => (e.title || '').toLowerCase().includes(q));
+    }
+    if (selectedUser === 'self') {
+      list = list.filter(e => e.owner_id === user?.id);
+    } else if (selectedUser !== 'everyone') {
+      list = list.filter(e => e.owner_id === selectedUser);
+    }
+    return list;
+  }, [todoLog, logSearch, selectedUser, user?.id]);
+
+  // ── Dropdown label ────────────────────────────────────────────────────────
+  const selectedUserLabel = useMemo(() => {
+    if (selectedUser === 'self')     return `My Todos — ${user?.full_name || 'Me'}`;
+    if (selectedUser === 'everyone') return 'Everyone — All Users';
+    const u = allUsers.find(u => (u.id || u._id) === selectedUser);
+    return u ? `${u.full_name || u.user_name}'s Todos` : 'Selected User';
+  }, [selectedUser, allUsers, user]);
+
+  // ── Notification helper ───────────────────────────────────────────────────
+  const sendNotification = useCallback(async ({ title: t, message }) => {
+    try { await api.post('/notifications/send', { title: t, message, type: 'todo' }); } catch (_) {}
+  }, []);
+
+  // ── Invalidate all relevant queries ──────────────────────────────────────
+  const invalidateTodos = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['todos', 'page', resolvedUserId] });
+    queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
+    queryClient.invalidateQueries({ queryKey: ['todos'] });
+  }, [queryClient, resolvedUserId, user?.id]);
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const addMutation = useMutation({
+    mutationFn: (payload) => api.post('/todos', payload),
+    onSuccess: (_, vars) => {
+      invalidateTodos();
+      toast.success('Todo created');
+      setTitle(''); setDescription(''); setDueDate('');
+      sendNotification({ title: '📝 New Todo', message: `"${vars.title}" created by ${user?.full_name || 'a user'}.` });
     },
-    onError: () => toast.error("Failed to create todo"),
+    onError: () => toast.error('Failed to create todo'),
   });
 
   const toggleMutation = useMutation({
     mutationFn: ({ id }) => {
       const todo = todos.find(t => (t.id || t._id) === id);
-      const newCompleted = !(todo.is_completed === true || todo.status === "completed");
-      return api.patch(`/todos/${id}`, { is_completed: newCompleted });
+      if (!todo) throw new Error('Todo not found');
+      const nowCompleted = !(todo.is_completed === true || todo.status === 'completed');
+      return api.patch(`/todos/${id}`, { is_completed: nowCompleted });
     },
-    onSuccess: (_, variables) => {
-      invalidateTodos();
-      const todo = todos.find(t => (t.id || t._id) === variables.id);
+    onSuccess: (_, { id }) => {
+      const todo = todos.find(t => (t.id || t._id) === id);
       if (todo) {
-        const wasCompleted = todo.is_completed === true || todo.status === "completed";
+        const wasCompleted = todo.is_completed === true || todo.status === 'completed';
         setTodoLog(prev => [{
-          id: todo.id || todo._id,
-          title: todo.title || 'Untitled Todo',
+          id:            todo.id || todo._id,
+          title:         todo.title || 'Untitled',
           created_by_id: todo.user_id || todo.created_by || null,
-          created_at: todo.created_at || null,
-          completed_at: wasCompleted ? null : new Date(),
-          deleted_at: null,
-          event: wasCompleted ? 'uncompleted' : 'completed',
-        }, ...prev].slice(0, 100));
+          owner_id:      todo.user_id || null,
+          created_at:    todo.created_at || null,
+          completed_at:  wasCompleted ? null : new Date(),
+          deleted_at:    null,
+          event:         wasCompleted ? 'uncompleted' : 'completed',
+        }, ...prev].slice(0, 200));
         if (!wasCompleted) {
-          sendTodoNotification({
-            title: '✅ Todo Completed',
-            message: `"${todo.title || 'Untitled Todo'}" was marked as completed by ${user?.full_name || user?.email || 'a team member'}.`,
-          });
+          sendNotification({ title: '✅ Todo Completed', message: `"${todo.title}" completed by ${user?.full_name || 'a user'}.` });
         }
       }
+      invalidateTodos();
     },
+    onError: () => toast.error('Failed to update todo'),
   });
 
   const promoteMutation = useMutation({
     mutationFn: (id) => api.post(`/todos/${id}/promote-to-task`),
     onSuccess: (_, id) => {
-      toast.success("Todo promoted to Master Task!");
+      toast.success('Promoted to Master Task!');
       invalidateTodos();
       const todo = todos.find(t => (t.id || t._id) === id);
-      sendTodoNotification({
-        title: '⚡ Todo Promoted to Task',
-        message: `"${todo?.title || 'A todo'}" was promoted to a task by ${user?.full_name || user?.email || 'a team member'}.`,
-      });
+      sendNotification({ title: '⚡ Todo Promoted', message: `"${todo?.title || 'A todo'}" promoted by ${user?.full_name || 'a user'}.` });
     },
-    onError: () => toast.error("Failed to promote todo"),
+    onError: () => toast.error('Failed to promote todo'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/todos/${id}`),
-    onSuccess: (_, variables) => {
-      const deletedTodo = todos.find(t => (t.id || t._id) === variables);
-      if (deletedTodo) {
+    onSuccess: (_, id) => {
+      const deleted = todos.find(t => (t.id || t._id) === id);
+      if (deleted) {
         setTodoLog(prev => [{
-          id: deletedTodo.id || deletedTodo._id,
-          title: deletedTodo.title || 'Untitled Todo',
-          created_by_id: deletedTodo.user_id || deletedTodo.created_by || null,
-          created_at: deletedTodo.created_at || null,
-          completed_at: null,
-          deleted_at: new Date(),
-          event: 'deleted',
-        }, ...prev].slice(0, 100));
+          id:            deleted.id || deleted._id,
+          title:         deleted.title || 'Untitled',
+          created_by_id: deleted.user_id || deleted.created_by || null,
+          owner_id:      deleted.user_id || null,
+          created_at:    deleted.created_at || null,
+          completed_at:  null,
+          deleted_at:    new Date(),
+          event:         'deleted',
+        }, ...prev].slice(0, 200));
       }
       invalidateTodos();
-      toast.success("Todo deleted");
+      toast.success('Todo deleted');
     },
-    onError: () => toast.error("Failed to delete todo"),
+    onError: () => toast.error('Failed to delete todo'),
   });
 
-  // ── HANDLERS ──────────────────────────────────────────────────────────────
-  const handleAddTodo = () => {
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleAdd     = () => {
     if (!title.trim()) return;
-    addTodoMutation.mutate({
-      title: title.trim(),
-      description: description.trim(),
-      due_date: dueDate ? new Date(dueDate).toISOString() : null,
+    addMutation.mutate({
+      title:        title.trim(),
+      description:  description.trim(),
+      due_date:     dueDate ? new Date(dueDate).toISOString() : null,
       is_completed: false,
     });
   };
-
-  const handleToggle = (id) => toggleMutation.mutate({ id });
+  const handleToggle  = (id) => toggleMutation.mutate({ id });
   const handlePromote = (id) => promoteMutation.mutate(id);
-  const handleDelete = (id) => deleteMutation.mutate(id);
+  const handleDelete  = (id) => deleteMutation.mutate(id);
 
-  // ── Dropdown label helpers ─────────────────────────────────────────────────
-  const selectedUserLabel = useMemo(() => {
-    if (selectedUser === "self") return "My Todos";
-    const u = allUsers.find(u => (u.id || u._id) === selectedUser);
-    if (!u) return "Selected User";
-    return `${u.full_name || u.user_name}'s Todos`;
-  }, [selectedUser, allUsers]);
+  // ── User selector (shared between both tabs) ──────────────────────────────
+  const UserSelector = ({ label = 'Filter by user' }) => (
+    showDropdown ? (
+      <Select value={selectedUser} onValueChange={setSelectedUser}>
+        <SelectTrigger className="h-9 rounded-xl border text-sm font-semibold" style={{ borderColor: T.border, minWidth: 200 }}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="self">My Todos ({user?.full_name || 'Me'})</SelectItem>
+          {canSeeEveryone && (
+            <SelectItem value="everyone">
+              <span className="flex items-center gap-2">
+                <Users size={12} style={{ color: T.blue }} />
+                Everyone — All Users
+              </span>
+            </SelectItem>
+          )}
+          {permittedUsers.map(u => (
+            <SelectItem key={u.id || u._id} value={u.id || u._id}>
+              {u.full_name || u.user_name} ({u.role})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : null
+  );
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <motion.div
-      className="space-y-5 pb-10 p-5 md:p-6 bg-slate-50/60 min-h-screen"
-      style={{ fontFamily: "'Inter', 'DM Sans', 'Segoe UI', system-ui, sans-serif" }}
-      variants={containerVariants}
+      variants={stagger}
       initial="hidden"
       animate="visible"
+      className="min-h-screen pb-12"
+      style={{ background: T.bg, fontFamily: "'DM Sans', 'Outfit', system-ui, sans-serif" }}
     >
-      {/* ── Page Header ──────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariants}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>
-              Todo Management
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {format(new Date(), 'EEEE, MMMM d, yyyy')} · {stats.total} items
-            </p>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Tab buttons */}
-            <div className="flex items-center rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
-              <button
-                onClick={() => setActiveTab("todos")}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors ${
-                  activeTab === "todos" ? "text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                }`}
-                style={activeTab === "todos" ? { backgroundColor: COLORS.deepBlue } : {}}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Todos
-              </button>
-              <button
-                onClick={() => setActiveTab("log")}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold transition-colors border-l border-slate-200 ${
-                  activeTab === "log" ? "text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                }`}
-                style={activeTab === "log" ? { backgroundColor: COLORS.deepBlue } : {}}
-              >
-                <History className="h-3.5 w-3.5" />
-                Todo Log
-                {todoLog.length > 0 && (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                    activeTab === "log" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-                  }`}>
-                    {todoLog.length}
-                  </span>
-                )}
-              </button>
-            </div>
 
-            {/* Status pills */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-white border border-slate-200 text-xs font-medium text-slate-600">
-              <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              {stats.completed} completed
+      {/* ── Page Header ────────────────────────────────────────────────── */}
+      <motion.div
+        variants={fadeUp}
+        className="px-6 pt-6 pb-5 border-b"
+        style={{ background: T.card, borderColor: T.border }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div
+              className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm"
+              style={{ background: `linear-gradient(135deg, ${T.navy}, ${T.blue})` }}
+            >
+              <CheckSquare size={20} color="#fff" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight" style={{ color: T.navy }}>
+                Todo Management
+              </h1>
+              <p className="text-xs font-medium mt-0.5" style={{ color: T.muted }}>
+                {format(new Date(), 'EEEE, MMMM d, yyyy')}
+                {selectedUser === 'everyone' && ' · All users view'}
+                {selectedUser !== 'self' && selectedUser !== 'everyone' && (() => {
+                  const u = allUsers.find(u => (u.id || u._id) === selectedUser);
+                  return u ? ` · ${u.full_name || u.user_name}'s list` : '';
+                })()}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold" style={{ background: `${T.emerald}0F`, borderColor: `${T.emerald}30`, color: T.emerald }}>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.emerald }} />
+              {stats.completed} done
             </div>
             {stats.overdue > 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-50 border border-red-200 text-xs font-semibold text-red-600">
-                <AlertCircle className="h-3.5 w-3.5" />
-                {stats.overdue} overdue
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold" style={{ background: `${T.coral}0F`, borderColor: `${T.coral}30`, color: T.coral }}>
+                <AlertCircle size={11} />{stats.overdue} overdue
               </div>
             )}
+            {/* Tab switcher */}
+            <div className="flex items-center gap-1 p-1 rounded-xl border" style={{ background: T.bg, borderColor: T.border }}>
+              <TabPill id="todos" label="Todos"    icon={CheckSquare} count={stats.pending}       activeTab={activeTab} setActiveTab={setActiveTab} />
+              <TabPill id="log"   label="Activity" icon={History}     count={filteredLog.length}  activeTab={activeTab} setActiveTab={setActiveTab} />
+            </div>
           </div>
         </div>
       </motion.div>
 
-      {/* ── Todos tab ────────────────────────────────────────────────────── */}
-      {activeTab === "todos" && <>
+      <div className="px-6 pt-6 space-y-6">
+        <AnimatePresence mode="wait">
 
-      {/* ── KPI Strip ────────────────────────────────────────────────────── */}
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
-        {/* Total */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Total</p>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.deepBlue}12` }}>
-              <Target className="h-3.5 w-3.5" style={{ color: COLORS.deepBlue }} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>{stats.total}</p>
-          <p className="text-[11px] text-slate-400 mt-1">todos tracked</p>
-        </div>
+          {/* ─────────────────── TODOS TAB ─────────────────────────────── */}
+          {activeTab === 'todos' && (
+            <motion.div key="todos" variants={stagger} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-6">
 
-        {/* Overdue */}
-        <div className={`bg-white rounded-xl border p-4 shadow-sm ${stats.overdue > 0 ? 'border-red-200' : 'border-slate-200'}`}>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Overdue</p>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.coral}12` }}>
-              <AlertCircle className="h-3.5 w-3.5" style={{ color: COLORS.coral }} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold tracking-tight" style={{ color: stats.overdue > 0 ? COLORS.coral : '#94a3b8' }}>{stats.overdue}</p>
-          <p className="text-[11px] text-slate-400 mt-1">need attention</p>
-        </div>
+              {/* KPI Strip */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard icon={Layers}      label="Total"      value={stats.total}             sub="todos tracked"                             accent={T.navy}    />
+                <StatCard icon={AlertCircle} label="Overdue"    value={stats.overdue}           sub="need attention"                            accent={stats.overdue > 0 ? T.coral : T.muted} />
+                <StatCard icon={TrendingUp}  label="Completion" value={`${stats.completionRate}%`} sub={`${stats.completed} of ${stats.total}`} accent={T.emerald} progress={stats.completionRate} />
+                <StatCard icon={Sparkles}    label="Health"     value={`${stats.healthScore}%`} sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'} accent={stats.healthScore >= 80 ? T.sky : T.amber} progress={stats.healthScore} />
+              </div>
 
-        {/* Completion */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Completion</p>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
-              <TrendingUp className="h-3.5 w-3.5" style={{ color: COLORS.emeraldGreen }} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.emeraldGreen }}>{stats.completionRate}%</p>
-          <Progress value={stats.completionRate} className="mt-2 h-1" />
-        </div>
+              {/* Two-column layout */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
 
-        {/* Health */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Health</p>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.mediumBlue}12` }}>
-              <Sparkles className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>{stats.healthScore}%</p>
-          <p className="text-[11px] text-emerald-600 mt-1 font-medium">Excellent</p>
-        </div>
-      </motion.div>
+                {/* LEFT — Create form */}
+                <div className="xl:col-span-4 space-y-4">
 
-      {/* ── Main Two-Column Layout ────────────────────────────────────────── */}
-      <motion.div className="grid grid-cols-1 xl:grid-cols-12 gap-5" variants={itemVariants}>
+                  {/* Create card */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
+                    <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.navy}, ${T.sky})` }} />
+                    <div className="px-5 py-4 border-b flex items-center gap-3" style={{ borderColor: T.border }}>
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: `${T.emerald}12` }}>
+                        <Plus size={15} style={{ color: T.emerald }} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-black" style={{ color: T.navy }}>New Todo</div>
+                        <div className="text-[11px] font-medium" style={{ color: T.muted }}>Add to your list</div>
+                      </div>
+                    </div>
+                    <div className="p-5 space-y-4">
 
-        {/* ── Left: Add Form ──────────────────────────────────────────────── */}
-        <div className="xl:col-span-4 space-y-4">
+                      {/* Title */}
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Title *</label>
+                        <input
+                          type="text" value={title} onChange={e => setTitle(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                          placeholder="What needs to get done?"
+                          className="w-full h-10 rounded-xl border px-3 text-sm font-semibold placeholder:font-normal outline-none transition-all"
+                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
+                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
+                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                        />
+                      </div>
 
-          {/* Create Todo Card */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${COLORS.emeraldGreen}15` }}>
-                <Plus className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-slate-800 tracking-tight">New Todo</h2>
-                <p className="text-[11px] text-slate-400">Add to your personal list</p>
-              </div>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Title *</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddTodo()}
-                  placeholder="What needs to get done?"
-                  className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Notes</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Additional context (optional)"
-                  rows={3}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition placeholder:text-slate-400"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest block mb-1.5">Due Date</label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
-                />
-              </div>
-              <Button
-                onClick={handleAddTodo}
-                disabled={!title.trim() || addTodoMutation.isPending}
-                className="w-full h-10 text-sm font-semibold rounded-lg"
-                style={{ backgroundColor: COLORS.deepBlue }}
-              >
-                {addTodoMutation.isPending
-                  ? <><RefreshCw className="animate-spin h-4 w-4 mr-2" /> Creating…</>
-                  : <><Plus className="h-4 w-4 mr-2" /> Create Todo</>
-                }
-              </Button>
-            </div>
-          </div>
+                      {/* Notes */}
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Notes</label>
+                        <textarea
+                          value={description} onChange={e => setDescription(e.target.value)}
+                          placeholder="Additional context…" rows={3}
+                          className="w-full rounded-xl border px-3 py-2.5 text-sm resize-none outline-none transition-all placeholder:text-slate-400"
+                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
+                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
+                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                        />
+                      </div>
 
-          {/* AI Insight Card */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="h-4 w-4 text-violet-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800">AI Audit</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {stats.overdue} todos are overdue · {stats.completionRate}% on track
-                </p>
-              </div>
-              <Button variant="ghost" className="text-violet-700 text-xs font-medium h-auto py-1 px-2 shrink-0">
-                Review →
-              </Button>
-            </div>
-          </div>
+                      {/* Due Date */}
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Due Date</label>
+                        <input
+                          type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                          className="w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all"
+                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
+                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
+                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                        />
+                      </div>
 
-          {/* Footer Summary Strip */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="grid grid-cols-3 divide-x divide-slate-100">
-              <div className="px-3 py-4 text-center">
-                <div className="text-xl font-bold font-mono" style={{ color: COLORS.emeraldGreen }}>{stats.completionRate}%</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Avg Done</div>
-              </div>
-              <div className="px-3 py-4 text-center">
-                <div className="text-xl font-bold font-mono text-amber-500">{stats.overdue}</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Attention</div>
-              </div>
-              <div className="px-3 py-4 text-center">
-                <div className="text-xl font-bold font-mono" style={{ color: COLORS.deepBlue }}>
-                  {todos.filter(t => !(t.is_completed === true || t.status === "completed")).length}
+                      {/* Submit */}
+                      <motion.button
+                        whileTap={{ scale: 0.96 }}
+                        transition={spring.snappy}
+                        onClick={handleAdd}
+                        disabled={!title.trim() || addMutation.isPending}
+                        className="w-full h-10 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: `linear-gradient(135deg, ${T.navy}, ${T.blue})`, color: '#fff', boxShadow: `0 4px 16px ${T.navy}28` }}
+                      >
+                        {addMutation.isPending
+                          ? <><RefreshCw size={14} className="animate-spin" /> Creating…</>
+                          : <><Plus size={14} /> Create Todo</>
+                        }
+                      </motion.button>
+                    </div>
+                  </motion.div>
+
+                  {/* Quick stats strip */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
+                    <div className="grid grid-cols-3 divide-x" style={{ divideColor: T.border }}>
+                      {[
+                        { label: 'Done',  value: `${stats.completionRate}%`, color: T.emerald },
+                        { label: 'Alert', value: stats.overdue,              color: T.amber   },
+                        { label: 'Left',  value: stats.pending,              color: T.navy    },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="px-3 py-4 text-center border-r last:border-r-0" style={{ borderColor: T.border }}>
+                          <div className="text-xl font-black tabular-nums" style={{ color }}>{value}</div>
+                          <div className="text-[9px] font-black uppercase tracking-widest mt-0.5" style={{ color: T.muted }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {/* AI Audit insight */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4 flex items-center gap-3" style={{ borderColor: T.border }}>
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#EDE9FE' }}>
+                      <Sparkles size={16} style={{ color: '#7C3AED' }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-bold" style={{ color: T.text }}>AI Audit</div>
+                      <div className="text-xs font-medium" style={{ color: T.muted }}>
+                        {stats.overdue > 0 ? `${stats.overdue} overdue · ` : ''}{stats.completionRate}% on track
+                      </div>
+                    </div>
+                    <button className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all" style={{ background: '#EDE9FE', color: '#7C3AED' }}>
+                      Review →
+                    </button>
+                  </motion.div>
                 </div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Remaining</div>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* ── Right: Filter + Todo List ─────────────────────────────────── */}
-        <div className="xl:col-span-8 space-y-4">
+                {/* RIGHT — User filter + Todo list */}
+                <div className="xl:col-span-8 space-y-4">
 
-          {/* ── User Filter Dropdown ─────────────────────────────────────────
-               Visible only when:
-               - Admin: always (can see all users)
-               - Manager: always (can see their team)
-               - Staff: only if they have at least one permitted user in view_other_todos
-               The dropdown always starts on "My Todos" (own) and only lists
-               users the current role is actually allowed to view.
-          ─────────────────────────────────────────────────────────────────── */}
-          {showDropdown && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  <span className="text-sm font-semibold text-slate-700">
-                    {isAdmin ? 'Filter by Team Member' : 'View Todo List'}
-                  </span>
+                  {/* User filter card */}
+                  {showDropdown && (
+                    <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Users size={14} style={{ color: T.blue }} />
+                          <span className="text-sm font-black" style={{ color: T.navy }}>
+                            {isAdmin ? 'Filter by Team Member' : 'View Todo List'}
+                          </span>
+                        </div>
+                        {isAdmin && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-widest" style={{ background: `${T.navy}0F`, color: T.navy }}>
+                            Admin
+                          </span>
+                        )}
+                      </div>
+                      <UserSelector />
+                    </motion.div>
+                  )}
+
+                  {/* Todo list card */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
+                    <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.navy}, ${T.sky})` }} />
+
+                    {/* List header */}
+                    <div className="px-5 py-3.5 border-b" style={{ borderColor: T.border }}>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <CheckCircle2 size={15} style={{ color: T.emerald }} />
+                          <span className="text-sm font-black truncate" style={{ color: T.navy }}>{selectedUserLabel}</span>
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: T.bg, color: T.slate }}>
+                            {filteredTodos.length}
+                          </span>
+                        </div>
+                        <div className="flex-shrink-0 w-full sm:w-52">
+                          <SearchInput value={search} onChange={setSearch} placeholder="Search todos…" />
+                        </div>
+                      </div>
+
+                      {/* Filter chips */}
+                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                        <FilterChip id="all"       label="All"       count={todos.length}      todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        <FilterChip id="pending"   label="Pending"   count={stats.pending}     todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        <FilterChip id="completed" label="Completed" count={stats.completed}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        {stats.overdue > 0 && (
+                          <FilterChip id="overdue" label="Overdue"   count={stats.overdue}     todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Column headers */}
+                    <div className="px-5 py-2 border-b grid grid-cols-[20px_1fr_auto] gap-4 items-center" style={{ background: `${T.bg}88`, borderColor: T.border }}>
+                      <div />
+                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Task</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Actions</span>
+                    </div>
+
+                    {/* Body */}
+                    <div style={{ maxHeight: 560, overflowY: 'auto' }}>
+                      {isLoading ? (
+                        <div className="py-16 flex flex-col items-center gap-3">
+                          <RefreshCw size={22} className="animate-spin" style={{ color: T.muted }} />
+                          <p className="text-xs font-medium" style={{ color: T.muted }}>Loading todos…</p>
+                        </div>
+                      ) : filteredTodos.length === 0 ? (
+                        <div className="py-16 flex flex-col items-center gap-3">
+                          <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: T.bg }}>
+                            <CheckSquare size={24} style={{ color: T.border }} />
+                          </div>
+                          <p className="text-sm font-bold" style={{ color: T.slate }}>
+                            {search || todoFilter !== 'all' ? 'No matching todos' : 'No todos yet'}
+                          </p>
+                          <p className="text-xs font-medium" style={{ color: T.muted }}>
+                            {search || todoFilter !== 'all' ? 'Try adjusting your filters' : 'Create one using the form on the left'}
+                          </p>
+                        </div>
+                      ) : (
+                        <AnimatePresence>
+                          {filteredTodos.map(todo => (
+                            <TodoItem
+                              key={todo.id || todo._id}
+                              todo={todo}
+                              onToggle={handleToggle}
+                              onPromote={handlePromote}
+                              onDelete={handleDelete}
+                              showOwner={selectedUser === 'everyone'}
+                              ownerName={resolveUserName(todo.user_id)}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      )}
+                    </div>
+                  </motion.div>
                 </div>
-                {isAdmin && (
-                  <Badge variant="outline" className="text-[10px] font-semibold uppercase tracking-widest border-slate-300 text-slate-500">
-                    Admin Only
-                  </Badge>
-                )}
               </div>
-              <Select value={selectedUser} onValueChange={setSelectedUser}>
-                <SelectTrigger className="h-9 rounded-lg border-slate-200 text-sm">
-                  <SelectValue placeholder="My Todos" />
-                </SelectTrigger>
-                <SelectContent>
-                  {/* Always show own todos as first option */}
-                  <SelectItem value="self">
-                    My Todos ({user?.full_name || 'Me'})
-                  </SelectItem>
-                  {/* Show permitted other users */}
-                  {permittedUsers.map((u) => (
-                    <SelectItem key={u.id || u._id} value={u.id || u._id}>
-                      {u.full_name || u.user_name} ({u.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            </motion.div>
           )}
 
-          {/* Todo List Table */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                <span className="text-sm font-bold text-slate-800 tracking-tight">
-                  {selectedUserLabel}
-                </span>
-                <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {todos.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400 font-medium">{stats.completed} completed</span>
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                <span className="text-[11px] text-slate-400 font-medium">{stats.overdue} overdue</span>
-              </div>
-            </div>
+          {/* ─────────────────── LOG TAB ────────────────────────────────── */}
+          {activeTab === 'log' && (
+            <motion.div key="log" variants={stagger} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-5">
 
-            {/* Column labels */}
-            <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[20px_1fr_auto] gap-4 items-center">
-              <div />
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Task</span>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Actions</span>
-            </div>
+              {/* Log controls */}
+              <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="flex-1 min-w-0 max-w-sm">
+                  <SearchInput value={logSearch} onChange={setLogSearch} placeholder="Search activity log…" />
+                </div>
+                {showDropdown && (
+                  <div className="flex-shrink-0 w-64">
+                    <UserSelector />
+                  </div>
+                )}
+                <div className="flex-shrink-0">
+                  <span className="text-xs font-bold px-3 py-2 rounded-xl" style={{ background: `${T.navy}0A`, color: T.slate }}>
+                    {filteredLog.length} entries
+                  </span>
+                </div>
+              </motion.div>
 
-            {/* List body */}
-            {isLoading ? (
-              <div className="py-16 text-center">
-                <RefreshCw className="animate-spin h-6 w-6 mx-auto text-slate-300" />
-                <p className="text-xs text-slate-400 mt-3">Loading todos…</p>
-              </div>
-            ) : todos.length === 0 ? (
-              <div className="py-16 text-center">
-                <CheckCircle2 className="h-10 w-10 mx-auto text-slate-200" />
-                <p className="text-sm text-slate-400 mt-3 font-medium">No todos yet</p>
-                <p className="text-xs text-slate-300 mt-1">Create one using the form on the left</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
-                <AnimatePresence>
-                  {todos.map((todo) => (
-                    <TodoItem
-                      key={todo.id || todo._id}
-                      todo={todo}
-                      onToggle={handleToggle}
-                      onPromote={handlePromote}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
+              {/* Log card */}
+              <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
+                <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.blue}, ${T.navy})` }} />
 
-      </> /* end activeTab === "todos" */}
-
-      {/* ── Todo Log Tab ─────────────────────────────────────────────────── */}
-      {activeTab === "log" && (
-        <motion.div variants={itemVariants}>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.deepBlue})` }} />
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <History className="h-4 w-4 text-slate-500" />
-                <span className="text-sm font-bold text-slate-800 tracking-tight">Todo Log</span>
-                <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {todoLog.length}
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400">Completed, deleted &amp; activity history</span>
-            </div>
-
-            {/* Column headers */}
-            <div className="px-5 py-2 bg-slate-50/80 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Todo Title</span>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created By</span>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Created On</span>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Event</span>
-            </div>
-
-            {todoLog.length === 0 ? (
-              <div className="py-16 text-center">
-                <History className="h-10 w-10 mx-auto text-slate-200 mb-3" />
-                <p className="text-sm text-slate-400 font-medium">No activity yet</p>
-                <p className="text-xs text-slate-300 mt-1">Complete or delete a todo and it will appear here</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                <AnimatePresence>
-                  {todoLog.map((entry, idx) => {
-                    const creatorName = resolveUserName(entry.created_by_id);
-                    const createdDate = entry.created_at
-                      ? format(new Date(entry.created_at), 'MMM d, yyyy h:mm a')
-                      : '—';
-
-                    let eventPill = null;
-                    if (entry.deleted_at) {
-                      eventPill = (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
-                          ✕ Deleted · {format(entry.deleted_at, 'MMM d, h:mm a')}
-                        </span>
-                      );
-                    } else if (entry.completed_at) {
-                      eventPill = (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">
-                          ✓ Completed · {format(entry.completed_at, 'MMM d, h:mm a')}
-                        </span>
-                      );
-                    } else if (entry.event === 'uncompleted') {
-                      eventPill = (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-700 whitespace-nowrap">
-                          ↩ Reopened
-                        </span>
-                      );
+                {/* Header */}
+                <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: T.border }}>
+                  <div className="flex items-center gap-2.5">
+                    <Activity size={14} style={{ color: T.blue }} />
+                    <span className="text-sm font-black" style={{ color: T.navy }}>Todo Activity Log</span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: T.bg, color: T.slate }}>
+                      {filteredLog.length}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-medium" style={{ color: T.muted }}>
+                    {selectedUser === 'everyone'
+                      ? 'All users'
+                      : selectedUser === 'self'
+                        ? 'My activity'
+                        : (() => { const u = allUsers.find(u => (u.id||u._id) === selectedUser); return u ? `${u.full_name || u.user_name}'s activity` : 'Selected user'; })()
                     }
+                  </span>
+                </div>
 
-                    return (
-                      <motion.div
-                        key={`${entry.id}-${idx}`}
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.2 }}
-                        className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors"
-                      >
-                        <p className="text-sm font-medium text-slate-800 truncate" title={entry.title}>
-                          {entry.title}
-                        </p>
-                        <span className="text-xs text-slate-500 whitespace-nowrap">{creatorName}</span>
-                        <span className="text-xs text-slate-400 whitespace-nowrap">{createdDate}</span>
-                        <div className="flex justify-end">{eventPill}</div>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
-        </motion.div>
-      )}
+                {/* Column headers */}
+                <div className="px-5 py-2.5 border-b" style={{ background: `${T.bg}88`, borderColor: T.border }}>
+                  <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Todo Title</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Owner</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Created On</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Event</span>
+                  </div>
+                </div>
 
+                {/* Body */}
+                {filteredLog.length === 0 ? (
+                  <div className="py-16 flex flex-col items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: T.bg }}>
+                      <History size={24} style={{ color: T.border }} />
+                    </div>
+                    <p className="text-sm font-bold" style={{ color: T.slate }}>No activity yet</p>
+                    <p className="text-xs font-medium" style={{ color: T.muted }}>Complete or delete a todo and it will appear here</p>
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                    <AnimatePresence>
+                      {filteredLog.map((entry, idx) => {
+                        const ownerName   = resolveUserName(entry.owner_id || entry.created_by_id);
+                        const createdDate = entry.created_at
+                          ? (() => { try { return format(new Date(entry.created_at), 'MMM d, yyyy'); } catch { return '—'; } })()
+                          : '—';
+                        return (
+                          <motion.div
+                            key={`${entry.id}-${idx}`}
+                            variants={rowVariant}
+                            initial="hidden"
+                            animate="visible"
+                            exit="exit"
+                            className="px-5 py-3 border-b last:border-b-0 transition-colors"
+                            style={{ borderColor: T.border }}
+                            whileHover={{ backgroundColor: '#F8FAFF' }}
+                          >
+                            <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
+                              <p className="text-sm font-semibold truncate" style={{ color: T.text }} title={entry.title}>
+                                {entry.title}
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${T.blue}12` }}>
+                                  <UserIcon size={10} style={{ color: T.blue }} />
+                                </div>
+                                <span className="text-xs font-medium truncate" style={{ color: T.slate }}>{ownerName}</span>
+                              </div>
+                              <span className="text-xs font-medium" style={{ color: T.muted }}>{createdDate}</span>
+                              <div className="flex justify-start">
+                                <EventBadge entry={entry} />
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 }
