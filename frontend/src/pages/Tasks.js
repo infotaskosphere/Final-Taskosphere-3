@@ -215,22 +215,24 @@ const TaskRow = ({
         {/* Left accent stripe */}
         <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
 
-        {/* Main row — flex with fixed column widths matching header exactly */}
-        <div className="pl-6 pr-4 py-3 flex items-center">
-
-          {/* #index — w-6 */}
-          <span className="w-6 flex-shrink-0 text-[11px] font-medium text-slate-400 select-none">
+        {/* ── Main row — CSS grid, columns cannot overlap ── */}
+        <div
+          className="pl-5 pr-3 py-2.5 grid items-center gap-0"
+          style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
+        >
+          {/* 1 · stripe placeholder (the stripe is absolute) */}
+          <span className="text-[11px] font-medium text-slate-400 select-none">
             {String(index + 1).padStart(2, '0')}
           </span>
 
-          {/* Cycle-status dot — w-6 */}
+          {/* 2 · cycle-dot */}
           <button
             onClick={() => {
               const next = task.status === 'pending' ? 'in_progress'
                 : task.status === 'in_progress' ? 'completed' : 'pending';
               handleQuickStatusChange(task, next);
             }}
-            className="w-6 flex-shrink-0 flex items-center justify-center"
+            className="flex items-center justify-center"
             title="Cycle status"
           >
             <span className="w-4 h-4 rounded-full border-2 border-slate-300 flex items-center justify-center hover:border-blue-400 transition-colors">
@@ -239,132 +241,121 @@ const TaskRow = ({
             </span>
           </button>
 
-          {/* Title — flex-1 */}
+          {/* 3 · Title */}
           <button
-            className={`flex-1 min-w-0 text-left font-medium truncate transition-colors mr-2
+            className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2
               ${isCompleted ? 'text-slate-400 line-through text-sm' : 'text-slate-800 hover:text-blue-700 text-sm'}`}
             onClick={() => openTaskDetail(task)}
           >
             {task.title}
           </button>
 
-          {/* STATUS PILLS — w-[168px], between Task and Dept */}
-          {canModifyTask(task) ? (
-            <div className="w-[168px] flex-shrink-0 flex items-center justify-center gap-1">
-              {[
-                {
-                  s: 'pending',
-                  label: 'To Do',
-                  active: 'bg-red-500 text-white border-red-500',
-                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500',
-                },
-                {
-                  s: 'in_progress',
-                  label: 'WIP',
-                  active: 'bg-amber-500 text-white border-amber-500',
-                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500',
-                },
-                {
-                  s: 'completed',
-                  label: 'Done',
-                  active: 'bg-blue-600 text-white border-blue-600',
-                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500',
-                },
-              ].map(({ s, label, active, idle }) => (
-                <button
-                  key={s}
-                  onClick={() => handleQuickStatusChange(task, s)}
-                  className={`h-[22px] px-2.5 text-[10px] font-semibold tracking-wide rounded-md border transition-all whitespace-nowrap
-                    ${task.status === s ? active : idle}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            /* Non-editable: just show current status badge */
-            <span className="w-[168px] flex-shrink-0 flex justify-center">
-              <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-md whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
-                {isOverdue ? 'OVERDUE' : statusStyle.label}
+          {/* 4 · STATUS PILLS — 160px */}
+          <div className="flex items-center justify-center gap-1 overflow-hidden">
+            {canModifyTask(task) ? (
+              <>
+                {[
+                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
+                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
+                ].map(({ s, label, active, idle }) => (
+                  <button key={s} onClick={() => handleQuickStatusChange(task, s)}
+                    className={`h-[20px] px-2 text-[9px] font-semibold tracking-wide rounded border transition-all whitespace-nowrap
+                      ${task.status === s ? active : idle}`}>
+                    {label}
+                  </button>
+                ))}
+              </>
+            ) : (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
+                {statusStyle.label}
               </span>
-            </span>
-          )}
+            )}
+          </div>
 
-          {/* DEPT — w-24 */}
-          <span className="w-24 flex-shrink-0 flex justify-center">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-[88px]">
+          {/* 5 · DEPT — 88px */}
+          <div className="flex items-center justify-center overflow-hidden">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-full">
               {task.category?.toUpperCase() || 'OTHER'}
             </span>
-          </span>
+          </div>
 
-          {/* PRIORITY — w-16 */}
-          <span className="w-16 flex-shrink-0 flex justify-center">
-            <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
+          {/* 6 · PRIORITY — 64px */}
+          <div className="flex items-center justify-center overflow-hidden">
+            <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
-          </span>
+          </div>
 
-          {/* OVERDUE badge — w-20 */}
-          <span className="w-20 flex-shrink-0 flex justify-center">
+          {/* 7 · OVERDUE — 72px */}
+          <div className="flex items-center justify-center overflow-hidden">
             {isOverdue ? (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-100 text-red-700 whitespace-nowrap">
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
                 OVERDUE
               </span>
             ) : (
               <span className="text-slate-200 text-[10px]">—</span>
             )}
-          </span>
+          </div>
 
-          {/* ASSIGNEE — w-28, hidden below lg */}
-          <span className="w-28 flex-shrink-0 hidden lg:flex items-center justify-center gap-1 text-xs text-slate-500">
-            <User className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">{getUserName(task.assigned_to)}</span>
-          </span>
+          {/* 8 · ASSIGNEE — 110px */}
+          <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
+            <User className="h-3 w-3 flex-shrink-0 text-slate-400" />
+            <span className="text-[10px] text-slate-600 truncate">{getUserName(task.assigned_to)}</span>
+          </div>
 
-          {/* DUE — w-24 */}
-          <span className={`w-24 flex-shrink-0 flex items-center justify-center gap-1 text-xs font-medium
+          {/* 9 · ASSIGNOR — 110px */}
+          <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
+            <User className="h-3 w-3 flex-shrink-0 text-slate-300" />
+            <span className="text-[10px] text-slate-400 truncate">
+              {task.created_by ? getUserName(task.created_by) : '—'}
+            </span>
+          </div>
+
+          {/* 10 · DUE — 88px */}
+          <div className={`flex items-center justify-center gap-1 overflow-hidden px-1
             ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
             {task.due_date ? (
               <>
                 <Clock className="h-3 w-3 flex-shrink-0" />
-                <span className="truncate">{getRelativeDueDate(task.due_date)}</span>
+                <span className="text-[10px] font-medium truncate">{getRelativeDueDate(task.due_date)}</span>
               </>
-            ) : <span className="text-slate-300">—</span>}
-          </span>
+            ) : <span className="text-slate-300 text-[10px]">—</span>}
+          </div>
 
-          {/* ACTIONS — w-[72px]: icon buttons only, reveal on hover */}
-          <div className="w-[72px] flex-shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* 11 · ACTIONS — 100px: icons, reveal on hover */}
+          <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity overflow-hidden">
             {canModifyTask(task) && (
               <button onClick={() => setExpanded(v => !v)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
                 title="Expand">
                 <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => handleEdit(task)}
-                className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
                 title="Edit">
                 <Edit className="h-3.5 w-3.5" />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => handleDuplicateTask(task)}
-                className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
+                className="p-1 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
                 title="Duplicate">
                 <Copy className="h-3.5 w-3.5" />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
-                className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
+                className="p-1 rounded hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
                 title="Comments">
                 <MessageSquare className="h-3.5 w-3.5" />
               </button>
             )}
             {canDeleteTasks && (
               <button onClick={() => handleDelete(task.id)}
-                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
                 title="Delete">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -1494,18 +1485,22 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
           <motion.div className="space-y-1.5" variants={containerVariants}>
-            {/* Column headers — exact same padding + widths as TaskRow */}
-            <div className="hidden sm:flex items-center pl-6 pr-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none border-b border-slate-100 mb-1">
-              <span className="w-6 flex-shrink-0" />{/* index spacer */}
-              <span className="w-6 flex-shrink-0" />{/* dot spacer */}
-              <span className="flex-1 min-w-0 mr-2">Task</span>
-              <span className="w-[168px] flex-shrink-0 text-center">Status</span>
-              <span className="w-24 flex-shrink-0 text-center">Dept</span>
-              <span className="w-16 flex-shrink-0 text-center">Priority</span>
-              <span className="w-20 flex-shrink-0 text-center">Overdue</span>
-              <span className="w-28 flex-shrink-0 text-center hidden lg:block">Assignee</span>
-              <span className="w-24 flex-shrink-0 text-center">Due</span>
-              <span className="w-[72px] flex-shrink-0 text-center">Actions</span>
+            {/* ── Column headers — CSS grid, exact mirror of TaskRow grid ── */}
+            <div
+              className="hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none border-b border-slate-100 mb-1.5"
+              style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
+            >
+              <span />{/* stripe */}
+              <span />{/* dot */}
+              <span className="pl-1">Task</span>
+              <span className="text-center">Status</span>
+              <span className="text-center">Dept</span>
+              <span className="text-center">Priority</span>
+              <span className="text-center">Overdue</span>
+              <span className="text-center">Assignee</span>
+              <span className="text-center">Assignor</span>
+              <span className="text-center">Due</span>
+              <span className="text-center">Actions</span>
             </div>
 
             {displayTasks.map((task, index) => {
