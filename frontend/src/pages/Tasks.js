@@ -958,12 +958,15 @@ export default function Tasks() {
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
   // ── Stats — BUG FIX: count actual status, not getDisplayStatus ──────────────
+  // Stats always use the raw full tasks list — never the filtered displayTasks.
+  // This ensures card counts (Total 17, To Do 3, etc.) stay constant even
+  // when the user clicks a filter card or applies search/status filters.
   const stats = {
-    total:      displayTasks.length,
-    todo:       displayTasks.filter(t => t.status === 'pending'     && !isOverdue(t)).length,
-    inProgress: displayTasks.filter(t => t.status === 'in_progress').length,  // ← includes overdue in_progress
-    completed:  displayTasks.filter(t => t.status === 'completed').length,
-    overdue:    displayTasks.filter(t => isOverdue(t)).length,
+    total:      tasks.length,
+    todo:       tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
+    inProgress: tasks.filter(t => t.status === 'in_progress').length,
+    completed:  tasks.filter(t => t.status === 'completed').length,
+    overdue:    tasks.filter(t => isOverdue(t)).length,
   };
 
   // ── Active filter pills ──────────────────────────────────────────────────────
