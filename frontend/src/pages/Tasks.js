@@ -248,9 +248,51 @@ const TaskRow = ({
             {task.title}
           </button>
 
+          {/* STATUS PILLS — w-[168px], between Task and Dept */}
+          {canModifyTask(task) ? (
+            <div className="w-[168px] flex-shrink-0 flex items-center justify-center gap-1">
+              {[
+                {
+                  s: 'pending',
+                  label: 'To Do',
+                  active: 'bg-red-500 text-white border-red-500',
+                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500',
+                },
+                {
+                  s: 'in_progress',
+                  label: 'WIP',
+                  active: 'bg-amber-500 text-white border-amber-500',
+                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500',
+                },
+                {
+                  s: 'completed',
+                  label: 'Done',
+                  active: 'bg-blue-600 text-white border-blue-600',
+                  idle: 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500',
+                },
+              ].map(({ s, label, active, idle }) => (
+                <button
+                  key={s}
+                  onClick={() => handleQuickStatusChange(task, s)}
+                  className={`h-[22px] px-2.5 text-[10px] font-semibold tracking-wide rounded-md border transition-all whitespace-nowrap
+                    ${task.status === s ? active : idle}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            /* Non-editable: just show current status badge */
+            <span className="w-[168px] flex-shrink-0 flex justify-center">
+              <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-md whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
+                {isOverdue ? 'OVERDUE' : statusStyle.label}
+              </span>
+            </span>
+          )}
+
           {/* DEPT — w-24 */}
           <span className="w-24 flex-shrink-0 flex justify-center">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-full">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-[88px]">
               {task.category?.toUpperCase() || 'OTHER'}
             </span>
           </span>
@@ -262,15 +304,19 @@ const TaskRow = ({
             </span>
           </span>
 
-          {/* STATUS — w-20 */}
+          {/* OVERDUE badge — w-20 */}
           <span className="w-20 flex-shrink-0 flex justify-center">
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
-              {isOverdue ? 'OVERDUE' : statusStyle.label}
-            </span>
+            {isOverdue ? (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-100 text-red-700 whitespace-nowrap">
+                OVERDUE
+              </span>
+            ) : (
+              <span className="text-slate-200 text-[10px]">—</span>
+            )}
           </span>
 
           {/* ASSIGNEE — w-28, hidden below lg */}
-          <span className="w-28 flex-shrink-0 hidden lg:flex items-center justify-center gap-1 text-xs text-slate-500 truncate">
+          <span className="w-28 flex-shrink-0 hidden lg:flex items-center justify-center gap-1 text-xs text-slate-500">
             <User className="h-3 w-3 flex-shrink-0" />
             <span className="truncate">{getUserName(task.assigned_to)}</span>
           </span>
@@ -286,63 +332,43 @@ const TaskRow = ({
             ) : <span className="text-slate-300">—</span>}
           </span>
 
-          {/* ACTIONS — w-[220px]: status pills + icon buttons */}
-          <div className="w-[220px] flex-shrink-0 flex items-center justify-end gap-1">
-            {/* Status switcher pills */}
+          {/* ACTIONS — w-[72px]: icon buttons only, reveal on hover */}
+          <div className="w-[72px] flex-shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             {canModifyTask(task) && (
-              <div className="hidden sm:flex items-center gap-1">
-                {[
-                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     hover: 'hover:bg-red-50 hover:text-red-600 hover:border-red-300' },
-                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', hover: 'hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300' },
-                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   hover: 'hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300' },
-                ].map(({ s, label, active, hover }) => (
-                  <button key={s} onClick={() => handleQuickStatusChange(task, s)}
-                    className={`h-6 px-2 text-[10px] font-bold rounded-full border transition-all whitespace-nowrap
-                      ${task.status === s ? active : `bg-white border-slate-200 text-slate-400 ${hover}`}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <button onClick={() => setExpanded(v => !v)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                title="Expand">
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              </button>
             )}
-
-            {/* Icon action buttons — reveal on hover */}
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              {canModifyTask(task) && (
-                <button onClick={() => setExpanded(v => !v)}
-                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                  title="Expand">
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-              {canModifyTask(task) && (
-                <button onClick={() => handleEdit(task)}
-                  className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
-                  title="Edit">
-                  <Edit className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {canModifyTask(task) && (
-                <button onClick={() => handleDuplicateTask(task)}
-                  className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
-                  title="Duplicate">
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {canModifyTask(task) && (
-                <button onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
-                  className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
-                  title="Comments">
-                  <MessageSquare className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {canDeleteTasks && (
-                <button onClick={() => handleDelete(task.id)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                  title="Delete">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            {canModifyTask(task) && (
+              <button onClick={() => handleEdit(task)}
+                className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                title="Edit">
+                <Edit className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {canModifyTask(task) && (
+              <button onClick={() => handleDuplicateTask(task)}
+                className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
+                title="Duplicate">
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {canModifyTask(task) && (
+              <button onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
+                className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
+                title="Comments">
+                <MessageSquare className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {canDeleteTasks && (
+              <button onClick={() => handleDelete(task.id)}
+                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                title="Delete">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1473,12 +1499,13 @@ export default function Tasks() {
               <span className="w-6 flex-shrink-0" />{/* index spacer */}
               <span className="w-6 flex-shrink-0" />{/* dot spacer */}
               <span className="flex-1 min-w-0 mr-2">Task</span>
+              <span className="w-[168px] flex-shrink-0 text-center">Status</span>
               <span className="w-24 flex-shrink-0 text-center">Dept</span>
               <span className="w-16 flex-shrink-0 text-center">Priority</span>
-              <span className="w-20 flex-shrink-0 text-center">Status</span>
+              <span className="w-20 flex-shrink-0 text-center">Overdue</span>
               <span className="w-28 flex-shrink-0 text-center hidden lg:block">Assignee</span>
               <span className="w-24 flex-shrink-0 text-center">Due</span>
-              <span className="w-[220px] flex-shrink-0 text-center">Actions</span>
+              <span className="w-[72px] flex-shrink-0 text-center">Actions</span>
             </div>
 
             {displayTasks.map((task, index) => {
