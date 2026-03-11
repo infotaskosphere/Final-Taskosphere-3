@@ -215,115 +215,101 @@ const TaskRow = ({
         {/* Left accent stripe */}
         <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
 
-        {/* Main row */}
-        <div className="pl-5 pr-4 py-3.5 flex items-center gap-3">
-          {/* Index */}
-          <span className="text-[11px] font-medium text-slate-400 w-5 flex-shrink-0 select-none">
+        {/* Main row — flex with fixed column widths matching header exactly */}
+        <div className="pl-6 pr-4 py-3 flex items-center">
+
+          {/* #index — w-6 */}
+          <span className="w-6 flex-shrink-0 text-[11px] font-medium text-slate-400 select-none">
             {String(index + 1).padStart(2, '0')}
           </span>
 
-          {/* Status quick-toggle dot */}
+          {/* Cycle-status dot — w-6 */}
           <button
             onClick={() => {
               const next = task.status === 'pending' ? 'in_progress'
                 : task.status === 'in_progress' ? 'completed' : 'pending';
               handleQuickStatusChange(task, next);
             }}
-            className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 flex items-center justify-center hover:border-blue-400 transition-colors group/dot"
+            className="w-6 flex-shrink-0 flex items-center justify-center"
             title="Cycle status"
           >
-            {task.status === 'completed' && <Check className="h-3 w-3 text-blue-600" />}
-            {task.status === 'in_progress' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+            <span className="w-4 h-4 rounded-full border-2 border-slate-300 flex items-center justify-center hover:border-blue-400 transition-colors">
+              {task.status === 'completed' && <Check className="h-2.5 w-2.5 text-blue-600" />}
+              {task.status === 'in_progress' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+            </span>
           </button>
 
-          {/* Title */}
+          {/* Title — flex-1 */}
           <button
-            className={`flex-1 text-left font-medium truncate transition-colors
+            className={`flex-1 min-w-0 text-left font-medium truncate transition-colors mr-2
               ${isCompleted ? 'text-slate-400 line-through text-sm' : 'text-slate-800 hover:text-blue-700 text-sm'}`}
             onClick={() => openTaskDetail(task)}
           >
             {task.title}
           </button>
 
-          {/* Badges row */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Dept badge */}
-            <span className="hidden md:inline-flex text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+          {/* DEPT — w-24 */}
+          <span className="w-24 flex-shrink-0 flex justify-center">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-full">
               {task.category?.toUpperCase() || 'OTHER'}
             </span>
+          </span>
 
-            {/* Priority */}
+          {/* PRIORITY — w-16 */}
+          <span className="w-16 flex-shrink-0 flex justify-center">
             <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
+          </span>
 
-            {/* Status */}
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${statusStyle.bg} ${statusStyle.text}`}>
+          {/* STATUS — w-20 */}
+          <span className="w-20 flex-shrink-0 flex justify-center">
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
               {isOverdue ? 'OVERDUE' : statusStyle.label}
             </span>
+          </span>
 
-            {/* Recurring */}
-            {task.is_recurring && (
-              <span className="hidden lg:inline-flex text-[10px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">
-                ↺ REC
-              </span>
-            )}
+          {/* ASSIGNEE — w-28, hidden below lg */}
+          <span className="w-28 flex-shrink-0 hidden lg:flex items-center justify-center gap-1 text-xs text-slate-500 truncate">
+            <User className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{getUserName(task.assigned_to)}</span>
+          </span>
 
-            {/* Checklist progress */}
-            {checklistItems.length > 0 && (
-              <span className={`hidden lg:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-md
-                ${progress === 100 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                {progress}%
-              </span>
-            )}
+          {/* DUE — w-24 */}
+          <span className={`w-24 flex-shrink-0 flex items-center justify-center gap-1 text-xs font-medium
+            ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+            {task.due_date ? (
+              <>
+                <Clock className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">{getRelativeDueDate(task.due_date)}</span>
+              </>
+            ) : <span className="text-slate-300">—</span>}
+          </span>
 
-            {/* Assignee */}
-            <span className="hidden xl:flex items-center gap-1 text-xs text-slate-500">
-              <User className="h-3.5 w-3.5" />
-              {getUserName(task.assigned_to)}
-            </span>
-
-            {/* Client */}
-            {task.client_id && (
-              <span className="hidden xl:flex items-center gap-1 text-xs text-slate-500">
-                <Building2 className="h-3.5 w-3.5" />
-                {getClientName(task.client_id)}
-              </span>
-            )}
-
-            {/* Due date */}
-            {task.due_date && (
-              <span className={`hidden sm:flex items-center gap-1 text-xs font-medium
-                ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
-                <Clock className="h-3.5 w-3.5" />
-                {getRelativeDueDate(task.due_date)}
-              </span>
-            )}
-
-            {/* ── Status switcher buttons — always visible ── */}
+          {/* ACTIONS — w-[220px]: status pills + icon buttons */}
+          <div className="w-[220px] flex-shrink-0 flex items-center justify-end gap-1">
+            {/* Status switcher pills */}
             {canModifyTask(task) && (
-              <div className="hidden sm:flex items-center gap-1 flex-shrink-0 ml-1">
+              <div className="hidden sm:flex items-center gap-1">
                 {[
-                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500 shadow-sm',     hover: 'hover:bg-red-50 hover:text-red-600 hover:border-red-300' },
-                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500 shadow-sm', hover: 'hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300' },
-                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600 shadow-sm',   hover: 'hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300' },
+                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     hover: 'hover:bg-red-50 hover:text-red-600 hover:border-red-300' },
+                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', hover: 'hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   hover: 'hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300' },
                 ].map(({ s, label, active, hover }) => (
                   <button key={s} onClick={() => handleQuickStatusChange(task, s)}
-                    className={`h-6 px-2.5 text-[10px] font-bold rounded-full border transition-all whitespace-nowrap
-                      ${task.status === s
-                        ? active
-                        : `bg-white border-slate-200 text-slate-400 ${hover}`}`}>
+                    className={`h-6 px-2 text-[10px] font-bold rounded-full border transition-all whitespace-nowrap
+                      ${task.status === s ? active : `bg-white border-slate-200 text-slate-400 ${hover}`}`}>
                     {label}
                   </button>
                 ))}
               </div>
             )}
 
-            {/* Action buttons — visible on hover */}
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+            {/* Icon action buttons — reveal on hover */}
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               {canModifyTask(task) && (
                 <button onClick={() => setExpanded(v => !v)}
-                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
                   title="Expand">
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
@@ -1482,17 +1468,17 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
           <motion.div className="space-y-1.5" variants={containerVariants}>
-            {/* Column headers */}
-            <div className="flex items-center gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              <span className="w-5" />
-              <span className="w-5" />
-              <span className="flex-1">Task</span>
-              <span className="hidden md:block w-20 text-right">Dept</span>
-              <span className="hidden sm:block w-20 text-right">Priority</span>
-              <span className="w-24 text-right">Status</span>
-              <span className="hidden lg:block w-24 text-right">Assignee</span>
-              <span className="hidden sm:block w-24 text-right">Due</span>
-              <span className="w-20" />
+            {/* Column headers — exact same padding + widths as TaskRow */}
+            <div className="hidden sm:flex items-center pl-6 pr-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none border-b border-slate-100 mb-1">
+              <span className="w-6 flex-shrink-0" />{/* index spacer */}
+              <span className="w-6 flex-shrink-0" />{/* dot spacer */}
+              <span className="flex-1 min-w-0 mr-2">Task</span>
+              <span className="w-24 flex-shrink-0 text-center">Dept</span>
+              <span className="w-16 flex-shrink-0 text-center">Priority</span>
+              <span className="w-20 flex-shrink-0 text-center">Status</span>
+              <span className="w-28 flex-shrink-0 text-center hidden lg:block">Assignee</span>
+              <span className="w-24 flex-shrink-0 text-center">Due</span>
+              <span className="w-[220px] flex-shrink-0 text-center">Actions</span>
             </div>
 
             {displayTasks.map((task, index) => {
