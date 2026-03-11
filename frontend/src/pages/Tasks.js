@@ -963,7 +963,7 @@ export default function Tasks() {
   // when the user clicks a filter card or applies search/status filters.
   const stats = {
     total:      tasks.length,
-    todo:       tasks.filter(t => t.status === 'pending' && !isOverdue(t)).length,
+    todo:       tasks.filter(t => t.status === 'pending').length,
     inProgress: tasks.filter(t => t.status === 'in_progress').length,
     completed:  tasks.filter(t => t.status === 'completed').length,
     overdue:    tasks.filter(t => isOverdue(t)).length,
