@@ -348,9 +348,6 @@ export default function TodoDashboard() {
   });
 
   // ── Determine "Everyone" visibility ───────────────────────────────────────
-  // Admin always gets it.
-  // Staff: gets it only if their view_other_todos array contains the special
-  // token "everyone" (admin sets this in the permissions editor).
   const canSeeEveryone = useMemo(() => {
     if (isAdmin) return true;
     const list = Array.isArray(user?.permissions?.view_other_todos)
@@ -360,21 +357,20 @@ export default function TodoDashboard() {
   }, [isAdmin, user]);
 
   // ── Build permitted-user list for dropdown ────────────────────────────────
+  // FIX: Always exclude self — self is already represented by the "My Todos" option
   const permittedUsers = useMemo(() => {
-    if (isAdmin) return allUsers;
-    if (isManager) return allUsers.filter(u => (u.id || u._id) !== user?.id);
+    const selfId = user?.id;
+    if (isAdmin) return allUsers.filter(u => (u.id || u._id) !== selfId);
+    if (isManager) return allUsers.filter(u => (u.id || u._id) !== selfId);
     const list = Array.isArray(user?.permissions?.view_other_todos)
       ? user.permissions.view_other_todos.filter(id => id !== 'everyone')
       : [];
-    return allUsers.filter(u => list.includes(u.id || u._id));
+    return allUsers.filter(u => list.includes(u.id || u._id) && (u.id || u._id) !== selfId);
   }, [isAdmin, isManager, allUsers, user]);
 
   const showDropdown = isAdmin || isManager || permittedUsers.length > 0 || canSeeEveryone;
 
   // ── Resolve query user_id param ───────────────────────────────────────────
-  // 'self'     → own id
-  // 'everyone' → 'all' (backend supports ?user_id=all for admin)
-  // <id>       → that user's id
   const resolvedUserId = useMemo(() => {
     if (selectedUser === 'self')     return user?.id ?? null;
     if (selectedUser === 'everyone') return 'all';
@@ -485,10 +481,6 @@ export default function TodoDashboard() {
   }, [todos, search, todoFilter]);
 
   // ── Filtered log ──────────────────────────────────────────────────────────
-  // Scoped by selected user:
-  // • 'self'     → only current user's entries
-  // • 'everyone' → all entries (admin / permitted)
-  // • <userId>   → only that user's entries
   const filteredLog = useMemo(() => {
     let list = todoLog;
     if (logSearch) {
@@ -806,21 +798,114 @@ export default function TodoDashboard() {
                     </div>
                   </motion.div>
 
-                  {/* AI Audit insight */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4 flex items-center gap-3" style={{ borderColor: T.border }}>
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#EDE9FE' }}>
-                      <Sparkles size={16} style={{ color: '#7C3AED' }} />
+                  {/* ── FIX: Progress Visualisation Bar ───────────────────── */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Overall Progress</span>
+                      <span className="text-xs font-black tabular-nums" style={{ color: T.navy }}>{stats.completionRate}%</span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold" style={{ color: T.text }}>AI Audit</div>
-                      <div className="text-xs font-medium" style={{ color: T.muted }}>
-                        {stats.overdue > 0 ? `${stats.overdue} overdue · ` : ''}{stats.completionRate}% on track
-                      </div>
+                    {/* Segmented bar: completed / overdue / pending */}
+                    <div className="h-2.5 rounded-full overflow-hidden flex gap-0.5" style={{ background: T.bg }}>
+                      {stats.total > 0 ? (
+                        <>
+                          {/* Completed segment */}
+                          {stats.completed > 0 && (
+                            <motion.div
+                              className="h-full rounded-l-full"
+                              style={{ background: T.emerald, width: `${(stats.completed / stats.total) * 100}%`, minWidth: 4 }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(stats.completed / stats.total) * 100}%` }}
+                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }}
+                            />
+                          )}
+                          {/* Overdue segment */}
+                          {stats.overdue > 0 && (
+                            <motion.div
+                              className="h-full"
+                              style={{ background: T.coral, width: `${(stats.overdue / stats.total) * 100}%`, minWidth: 4 }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(stats.overdue / stats.total) * 100}%` }}
+                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }}
+                            />
+                          )}
+                          {/* Pending (non-overdue) segment */}
+                          {(stats.pending - stats.overdue) > 0 && (
+                            <motion.div
+                              className="h-full rounded-r-full flex-1"
+                              style={{ background: `${T.navy}22`, minWidth: 4 }}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ duration: 0.5, delay: 0.4 }}
+                            />
+                          )}
+                        </>
+                      ) : (
+                        <div className="h-full w-full rounded-full" style={{ background: T.border }} />
+                      )}
                     </div>
-                    <button className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all" style={{ background: '#EDE9FE', color: '#7C3AED' }}>
-                      Review →
-                    </button>
+                    {/* Legend */}
+                    <div className="flex items-center gap-4 mt-2.5 flex-wrap">
+                      {[
+                        { color: T.emerald,       label: 'Completed', count: stats.completed,                  hide: false },
+                        { color: T.coral,         label: 'Overdue',   count: stats.overdue,                    hide: stats.overdue === 0 },
+                        { color: `${T.navy}44`,   label: 'Pending',   count: stats.pending - stats.overdue,    hide: false },
+                      ].filter(i => !i.hide).map(({ color, label, count }) => (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                          <span className="text-[10px] font-semibold" style={{ color: T.muted }}>
+                            {label} <span className="font-black" style={{ color: T.slate }}>{count}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </motion.div>
+
+                  {/* ── FIX: AI Audit — now reactive with real stats ───────── */}
+                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#EDE9FE' }}>
+                        <Sparkles size={16} style={{ color: '#7C3AED' }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold" style={{ color: T.text }}>AI Audit</div>
+                        <div className="text-xs font-medium" style={{ color: T.muted }}>
+                          {stats.total === 0
+                            ? 'No todos yet — add some to get started'
+                            : stats.overdue > 0
+                              ? `⚠️ ${stats.overdue} overdue ${stats.overdue === 1 ? 'todo' : 'todos'} need attention`
+                              : stats.completionRate === 100
+                                ? '🎉 All todos completed — great work!'
+                                : stats.completionRate >= 75
+                                  ? `✅ ${stats.completionRate}% done — almost there!`
+                                  : `📋 ${stats.pending} remaining · ${stats.completionRate}% on track`
+                          }
+                        </div>
+                      </div>
+                      {/* Live health indicator dot */}
+                      <div
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{
+                          background: stats.overdue > 0 ? T.coral : stats.completionRate >= 75 ? T.emerald : T.amber,
+                          boxShadow:  `0 0 0 3px ${(stats.overdue > 0 ? T.coral : stats.completionRate >= 75 ? T.emerald : T.amber)}28`,
+                        }}
+                      />
+                    </div>
+                    {/* Actionable tip */}
+                    {stats.total > 0 && (
+                      <div className="mt-3 pt-3 border-t flex items-start gap-2" style={{ borderColor: T.border }}>
+                        <AlertCircle size={12} style={{ color: stats.overdue > 0 ? T.coral : T.sky, marginTop: 1, flexShrink: 0 }} />
+                        <p className="text-[11px] font-medium leading-relaxed" style={{ color: T.muted }}>
+                          {stats.overdue > 0
+                            ? `Address your ${stats.overdue} overdue ${stats.overdue === 1 ? 'item' : 'items'} first to improve your health score from ${stats.healthScore}%.`
+                            : stats.pending > 0
+                              ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
+                              : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+
                 </div>
 
                 {/* RIGHT — User filter + Todo list */}
