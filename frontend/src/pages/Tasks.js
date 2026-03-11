@@ -178,8 +178,8 @@ const getStripeColor = (task, overdue) => {
 };
 
 // ─── Animation variants ──────────────────────────────────────────────────────
-const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.04 } } };
-const itemVariants = { hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.28 } } };
+const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.04 } } };
+const itemVariants = { hidden: { opacity: 0, y: 18, scale: 0.98 }, visible: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } } };
 
 // ─── Empty form state ────────────────────────────────────────────────────────
 const EMPTY_FORM = {
@@ -300,6 +300,25 @@ const TaskRow = ({
               </span>
             )}
 
+            {/* ── Status switcher buttons — always visible ── */}
+            {canModifyTask(task) && (
+              <div className="hidden sm:flex items-center gap-1 flex-shrink-0 ml-1">
+                {[
+                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500 shadow-sm',     hover: 'hover:bg-red-50 hover:text-red-600 hover:border-red-300' },
+                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500 shadow-sm', hover: 'hover:bg-amber-50 hover:text-amber-600 hover:border-amber-300' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600 shadow-sm',   hover: 'hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300' },
+                ].map(({ s, label, active, hover }) => (
+                  <button key={s} onClick={() => handleQuickStatusChange(task, s)}
+                    className={`h-6 px-2.5 text-[10px] font-bold rounded-full border transition-all whitespace-nowrap
+                      ${task.status === s
+                        ? active
+                        : `bg-white border-slate-200 text-slate-400 ${hover}`}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Action buttons — visible on hover */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
               {canModifyTask(task) && (
@@ -352,23 +371,6 @@ const TaskRow = ({
               className="overflow-hidden"
             >
               <div className="mx-5 mb-4 space-y-3 border-t border-slate-100 pt-3">
-                {/* Status quick-switch */}
-                {!isCompleted && canModifyTask(task) && (
-                  <div className="flex gap-2">
-                    {[
-                      { s: 'pending',     label: 'To Do',       cls: 'hover:bg-red-50 hover:text-red-700 hover:border-red-300',    active: 'bg-red-600 text-white border-red-600' },
-                      { s: 'in_progress', label: 'In Progress', cls: 'hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300', active: 'bg-amber-500 text-white border-amber-500' },
-                      { s: 'completed',   label: 'Completed',   cls: 'hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300',  active: 'bg-blue-600 text-white border-blue-600' },
-                    ].map(({ s, label, cls, active }) => (
-                      <button key={s} onClick={() => handleQuickStatusChange(task, s)}
-                        className={`flex-1 h-7 text-xs font-medium rounded-lg border transition-all
-                          ${task.status === s ? active : `bg-white border-slate-200 text-slate-500 ${cls}`}`}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 {/* Checklist */}
                 {checklistItems.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
@@ -608,29 +610,55 @@ const BoardCard = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Stat Card
+// Stat Card — no bottom line, per-stat active color, smooth spring animations
 // ═══════════════════════════════════════════════════════════════════════════════
-const StatCard = ({ label, value, color, icon: Icon, active, onClick, subLabel }) => (
-  <button
-    onClick={onClick}
-    className={`relative rounded-xl border p-4 text-left transition-all duration-200 w-full
-      ${active
-        ? 'border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200'
-        : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'}`}
-  >
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">{label}</p>
-        <p className={`text-3xl font-bold leading-none ${color}`}>{value}</p>
-        {subLabel && <p className="text-[10px] text-slate-400 mt-1">{subLabel}</p>}
+const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClasses }) => {
+  const activeBg     = activeClasses?.bg     || 'bg-blue-50';
+  const activeBorder = activeClasses?.border || 'border-blue-300';
+  const activeRing   = activeClasses?.ring   || 'ring-blue-200';
+  const activeIcon   = activeClasses?.icon   || 'bg-blue-100';
+  const activeIconFg = activeClasses?.iconFg || 'text-blue-600';
+  const activeBar    = activeClasses?.bar    || 'bg-blue-500';
+
+  return (
+    <motion.button
+      onClick={onClick}
+      whileHover={{ y: -2, boxShadow: '0 6px 20px 0 rgba(0,0,0,0.07)' }}
+      whileTap={{ scale: 0.97 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+      className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
+        ${active
+          ? `${activeBg} ${activeBorder} ring-1 ${activeRing} shadow-sm`
+          : 'border-slate-200 bg-white'}`}
+    >
+      {/* Top accent bar — slides in when active, no bottom line */}
+      <motion.div
+        initial={false}
+        animate={{ scaleX: active ? 1 : 0, opacity: active ? 1 : 0 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        className={`absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl ${activeBar}`}
+      />
+
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{label}</p>
+          <motion.p
+            key={value}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className={`text-3xl font-bold leading-none ${color}`}
+          >
+            {value}
+          </motion.p>
+        </div>
+        <div className={`p-2 rounded-lg transition-colors duration-200 ${active ? activeIcon : 'bg-slate-100'}`}>
+          <Icon className={`h-4 w-4 transition-colors duration-200 ${active ? activeIconFg : 'text-slate-400'}`} />
+        </div>
       </div>
-      <div className={`p-2 rounded-lg ${active ? 'bg-blue-100' : 'bg-slate-100'}`}>
-        <Icon className={`h-4 w-4 ${active ? 'text-blue-600' : 'text-slate-400'}`} />
-      </div>
-    </div>
-    {active && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-b-xl" />}
-  </button>
-);
+    </motion.button>
+  );
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Tasks Component
@@ -1323,15 +1351,25 @@ export default function Tasks() {
       {/* ── Stat Cards ───────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard label="Total"       value={stats.total}      color="text-slate-800"  icon={SlidersHorizontal}
-          active={filterStatus === 'all'}         onClick={() => setFilterStatus('all')} />
+          active={filterStatus === 'all'}
+          activeClasses={{ bg: 'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
+          onClick={() => setFilterStatus('all')} />
         <StatCard label="To Do"       value={stats.todo}       color="text-red-600"    icon={Circle}
-          active={filterStatus === 'pending'}     onClick={() => setFilterStatus(filterStatus === 'pending'     ? 'all' : 'pending')} />
+          active={filterStatus === 'pending'}
+          activeClasses={{ bg: 'bg-red-50', border: 'border-red-300', ring: 'ring-red-100', icon: 'bg-red-100', iconFg: 'text-red-600', bar: 'bg-red-500' }}
+          onClick={() => setFilterStatus(filterStatus === 'pending'     ? 'all' : 'pending')} />
         <StatCard label="In Progress" value={stats.inProgress} color="text-amber-600"  icon={TrendingUp}
-          active={filterStatus === 'in_progress'} onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} />
+          active={filterStatus === 'in_progress'}
+          activeClasses={{ bg: 'bg-amber-50', border: 'border-amber-300', ring: 'ring-amber-100', icon: 'bg-amber-100', iconFg: 'text-amber-600', bar: 'bg-amber-500' }}
+          onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} />
         <StatCard label="Completed"   value={stats.completed}  color="text-blue-600"   icon={CheckCircle2}
-          active={filterStatus === 'completed'}   onClick={() => setFilterStatus(filterStatus === 'completed'   ? 'all' : 'completed')} />
+          active={filterStatus === 'completed'}
+          activeClasses={{ bg: 'bg-blue-50', border: 'border-blue-300', ring: 'ring-blue-100', icon: 'bg-blue-100', iconFg: 'text-blue-600', bar: 'bg-blue-600' }}
+          onClick={() => setFilterStatus(filterStatus === 'completed'   ? 'all' : 'completed')} />
         <StatCard label="Overdue"     value={stats.overdue}    color="text-red-700"    icon={AlertCircle}
-          active={filterStatus === 'overdue'}     onClick={() => setFilterStatus(filterStatus === 'overdue'     ? 'all' : 'overdue')} />
+          active={filterStatus === 'overdue'}
+          activeClasses={{ bg: 'bg-red-50', border: 'border-red-400', ring: 'ring-red-200', icon: 'bg-red-100', iconFg: 'text-red-700', bar: 'bg-red-700' }}
+          onClick={() => setFilterStatus(filterStatus === 'overdue'     ? 'all' : 'overdue')} />
       </motion.div>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
