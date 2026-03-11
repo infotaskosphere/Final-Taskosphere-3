@@ -22,7 +22,6 @@ import {
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Brand Colors
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
@@ -31,7 +30,6 @@ const COLORS = {
   lightGreen: '#5CCB5F',
 };
 
-// Department categories with colors (Synced with backend logic)
 const DEPARTMENTS = [
   { value: 'GST', label: 'GST', color: '#1E3A8A' },
   { value: 'IT', label: 'IT', color: '#374151' },
@@ -45,9 +43,6 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
 
-// ─────────────────────────────────────────────────────────────
-// DEFAULT ROLE PERMISSIONS (mirrors backend DEFAULT_ROLE_PERMISSIONS)
-// ─────────────────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
     can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
@@ -59,6 +54,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_download_reports: true, can_view_selected_users_reports: true,
     can_view_todo_dashboard: true, can_edit_clients: true, can_use_chat: true,
     can_view_all_leads: true, can_manage_settings: true,
+    can_assign_clients: true,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -72,6 +68,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_download_reports: true, can_view_selected_users_reports: true,
     can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
     can_view_all_leads: false, can_manage_settings: false,
+    can_assign_clients: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -85,6 +82,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_download_reports: false, can_view_selected_users_reports: false,
     can_view_todo_dashboard: true, can_edit_clients: false, can_use_chat: true,
     can_view_all_leads: false, can_manage_settings: false,
+    can_assign_clients: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -100,6 +98,7 @@ const EMPTY_PERMISSIONS = {
   can_download_reports: false, can_view_selected_users_reports: false,
   can_view_todo_dashboard: false, can_edit_clients: false, can_use_chat: false,
   can_view_all_leads: false, can_manage_settings: false,
+  can_assign_clients: false,
   assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
@@ -133,12 +132,7 @@ const DeptPill = ({ dept, size = 'sm' }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// STATUS BADGE — maps backend "status" field to visual chip
-// Statuses: active | pending_approval | rejected | inactive
-// ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ status, isActive }) => {
-  // Derive display from status field first, fall back to is_active flag
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
 
   const map = {
@@ -158,9 +152,6 @@ const StatusBadge = ({ status, isActive }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// PENDING APPROVAL CARD — compact card shown in "Pending" tab
-// ─────────────────────────────────────────────────────────────
 const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
   return (
     <motion.div
@@ -168,7 +159,6 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
       layout
       className="relative bg-white rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all duration-300"
     >
-      {/* Amber glow strip */}
       <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
 
       <div className="flex items-start gap-4 mb-4 pt-1">
@@ -194,7 +184,6 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
         </div>
       </div>
 
-      {/* Departments */}
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userData.departments.map(dept => <DeptPill key={dept} dept={dept} />)}
@@ -212,7 +201,6 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
         </p>
       </div>
 
-      {/* Approve / Reject actions */}
       <div className="flex gap-2 pt-3 border-t border-amber-100">
         <Button
           size="sm"
@@ -284,7 +272,6 @@ const UserCard = ({
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      {/* Pending top strip */}
       {isPending && (
         <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
       )}
@@ -378,7 +365,6 @@ const UserCard = ({
         </p>
       </div>
 
-      {/* Inline approve/reject for pending users shown in main grid (admin only) */}
       {isPending && isAdmin && (
         <div className="flex gap-2 mt-4 pt-3 border-t border-amber-100">
           <Button
@@ -424,10 +410,8 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
 
-  // ── NEW: approval state ─────────────────────────────────────
-  const [approvingId, setApprovingId] = useState(null); // tracks which user is mid-request
+  const [approvingId, setApprovingId] = useState(null);
 
-  // Form State
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -476,6 +460,7 @@ export default function Users() {
     can_use_chat: false,
     can_view_all_leads: false,
     can_manage_settings: false,
+    can_assign_clients: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -514,7 +499,6 @@ export default function Users() {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
-      // CS11: backend now returns { data: [...] }
       const raw = response.data;
       setUsers(Array.isArray(raw) ? raw : (raw?.data || []));
     } catch (error) {
@@ -525,7 +509,6 @@ export default function Users() {
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients');
-      // CS14: backend now returns { data: [...] }
       const raw = response.data;
       setClients(Array.isArray(raw) ? raw : (raw?.data || []));
     } catch (error) {
@@ -665,9 +648,6 @@ export default function Users() {
     }
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // APPROVE / REJECT — call CS10 endpoints
-  // ─────────────────────────────────────────────────────────────
   const handleApprove = async (userData) => {
     if (!isAdmin) { toast.error('Only admins can approve users'); return; }
     setApprovingId(userData.id);
@@ -697,9 +677,6 @@ export default function Users() {
     }
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Derived lists for tabs
-  // ─────────────────────────────────────────────────────────────
   const pendingUsers  = users.filter(u => u.status === 'pending_approval');
   const rejectedUsers = users.filter(u => u.status === 'rejected');
 
@@ -728,7 +705,6 @@ export default function Users() {
 
   return (
     <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
-      {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-outfit" style={{ color: COLORS.deepBlue }}>User Directory</h1>
@@ -766,7 +742,6 @@ export default function Users() {
             </DialogTrigger>
           )}
 
-          {/* ── User Edit / Create Dialog ── */}
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-outfit font-bold" style={{ color: COLORS.deepBlue }}>
@@ -775,7 +750,6 @@ export default function Users() {
               <DialogDescription>Input primary identity and shift schedule details below.</DialogDescription>
             </DialogHeader>
             <div className="space-y-6 py-4">
-              {/* Profile Image Upload */}
               <div className="flex justify-center">
                 <div className="relative group">
                   <div className="w-28 h-28 rounded-3xl overflow-hidden bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center transition-all group-hover:border-blue-400">
@@ -792,7 +766,6 @@ export default function Users() {
                 </div>
               </div>
 
-              {/* Identity Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Full Identity Name</Label>
@@ -823,7 +796,6 @@ export default function Users() {
                 )}
               </div>
 
-              {/* Shift Timing Details */}
               <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
                 <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
                   <Calendar className="h-4 w-4" /> Duty Shift Parameters
@@ -875,7 +847,6 @@ export default function Users() {
                 </div>
               </div>
 
-              {/* Department Multi-Select */}
               <div className="space-y-3">
                 <Label className="text-slate-700 font-semibold">Assigned Departments</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
@@ -913,7 +884,6 @@ export default function Users() {
         </Dialog>
       </div>
 
-      {/* ── Pending Approval Banner (admin only, only when there are pending users) ── */}
       <AnimatePresence>
         {isAdmin && pendingUsers.length > 0 && activeTab !== 'pending' && (
           <motion.div
@@ -942,7 +912,6 @@ export default function Users() {
         )}
       </AnimatePresence>
 
-      {/* Navigation & Search */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
@@ -984,41 +953,24 @@ export default function Users() {
         </Tabs>
       </div>
 
-      {/* ── Pending Tab: dedicated card layout ── */}
       {activeTab === 'pending' && isAdmin && (
         <div>
           {filteredUsers.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="py-24 text-center"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-24 text-center">
               <CheckCircle className="h-16 w-16 text-emerald-300 mx-auto mb-4" />
               <h3 className="text-xl font-bold text-slate-400">No pending approvals</h3>
               <p className="text-slate-400 text-sm mt-1">All registrations have been reviewed.</p>
             </motion.div>
           ) : (
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-            >
+            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredUsers.map(userData => (
-                <PendingUserCard
-                  key={userData.id}
-                  userData={userData}
-                  onApprove={handleApprove}
-                  onReject={handleReject}
-                  approving={approvingId}
-                />
+                <PendingUserCard key={userData.id} userData={userData} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
               ))}
             </motion.div>
           )}
         </div>
       )}
 
-      {/* ── All other tabs: standard UserCard grid ── */}
       {activeTab !== 'pending' && (
         <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredUsers.length === 0 ? (
@@ -1048,7 +1000,7 @@ export default function Users() {
         </motion.div>
       )}
 
-      {/* ── Permissions Dialog (unchanged) ── */}
+      {/* ── Permissions Dialog ── */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
@@ -1121,6 +1073,7 @@ export default function Users() {
                 <AccordionContent className="pb-4 space-y-2">
                   {[
                     { key: 'can_assign_tasks', label: 'Task Delegation', desc: 'Permission to assign tasks to other staff' },
+                    { key: 'can_assign_clients', label: 'Client Assignment', desc: 'Can assign and reassign staff to clients' },
                     { key: 'can_manage_users', label: 'User Governance', desc: 'Manage other team members and roles' },
                     { key: 'can_view_attendance', label: 'Attendance Management', desc: 'Review punch timings and late reports' },
                     { key: 'can_view_staff_activity', label: 'Staff Monitoring', desc: 'View app usage and screen activity logs' },
