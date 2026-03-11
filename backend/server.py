@@ -440,39 +440,66 @@ async def get_todos(
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
+    """
+    Query param ?user_id:
+      - omitted / "self"  → current user's own todos
+      - "all"             → all accessible todos (role-scoped)
+      - <uuid>            → specific user's todos (permission-checked)
+    """
     if current_user.role == "admin":
-        # user_id="all"  → explicit request to fetch every user's todos (TodoDashboard dropdown)
-        # user_id=<some id> → fetch that specific user's todos
-        # user_id not provided → fetch only the admin's own todos (Dashboard card)
+        # Admin: full flexibility
         if user_id == "all":
-            query = {}
-        elif user_id:
-            query = {"user_id": user_id}
+            query = {}                          # every todo in the system
+        elif user_id and user_id != "self":
+            query = {"user_id": user_id}        # specific user
         else:
-            query = {"user_id": current_user.id}
+            query = {"user_id": current_user.id}  # own todos (default / dashboard card)
 
     elif current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
-        if user_id:
-            if user_id not in team_ids and user_id != current_user.id:
-                raise HTTPException(status_code=403, detail="Not allowed")
+        if user_id == "all":
+            # Manager "everyone" → own + whole team
+            visible_ids = list(set(team_ids + [current_user.id]))
+            query = {"user_id": {"$in": visible_ids}}
+        elif user_id and user_id not in ("self", current_user.id):
+            if user_id not in team_ids:
+                raise HTTPException(status_code=403, detail="Not allowed to view this user's todos")
             query = {"user_id": user_id}
         else:
-            # Manager default: only own todos on Dashboard card
             query = {"user_id": current_user.id}
 
     else:
-        # Staff: own todos only; view_other_todos permission respected when user_id is passed
-        permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
-        allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
-        if user_id:
-            if user_id != current_user.id and user_id not in allowed_others:
-                raise HTTPException(status_code=403, detail="Not allowed")
+        # Staff: check view_other_todos permission list
+        permissions = (
+            current_user.permissions.model_dump()
+            if hasattr(current_user.permissions, "model_dump")
+            else (current_user.permissions or {})
+        )
+        allowed_others: list = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
+
+        if user_id == "all":
+            if "everyone" in allowed_others:
+                # Staff has been granted "everyone" — show all users they are
+                # explicitly permitted to see, PLUS themselves.
+                # We do NOT give them a global view; backend still scopes to
+                # the explicit list (minus the "everyone" token).
+                real_allowed = [uid for uid in allowed_others if uid != "everyone"]
+                if real_allowed:
+                    query = {"user_id": {"$in": real_allowed + [current_user.id]}}
+                else:
+                    # "everyone" token but no specific users — return own todos only
+                    query = {"user_id": current_user.id}
+            else:
+                # No "everyone" permission — fall back to own todos
+                query = {"user_id": current_user.id}
+        elif user_id and user_id not in ("self", current_user.id):
+            if user_id not in allowed_others:
+                raise HTTPException(status_code=403, detail="Not allowed to view this user's todos")
             query = {"user_id": user_id}
         else:
             query = {"user_id": current_user.id}
 
-    todos = await db.todos.find(query).to_list(1000)
+    todos = await db.todos.find(query).to_list(2000)
     for t in todos:
         t["id"] = str(t["_id"])
         del t["_id"]
