@@ -849,7 +849,13 @@ async def update_user(
         if key in user_data:
             val = user_data[key]
             update_payload[key] = val if val != "" else None
-    if "machine_employee_id" in update_payload:
+    if "machine_employee_id" in update_payload and update_payload["machine_employee_id"]:
+        conflict = await db.users.find_one({
+            "machine_employee_id": update_payload["machine_employee_id"],
+            "id": {"$ne": user_id}
+        })
+        if conflict:
+            raise HTTPException(status_code=409, detail=f"machine_employee_id already assigned to {conflict.get('full_name')}")
         update_payload["machine_synced"] = False
     new_password = user_data.get("password")
     if new_password and len(new_password.strip()) > 0:
