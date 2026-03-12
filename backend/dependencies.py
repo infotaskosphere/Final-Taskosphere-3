@@ -6,7 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from backend.models import User, AuditLog
+from backend.models import User
 
 # ==========================================================
 # ENVIRONMENT & DATABASE
