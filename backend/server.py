@@ -613,8 +613,14 @@ async def create_indexes():
 
 @app.on_event("startup")
 async def start_essl_sync():
-    asyncio.create_task(sync_engine.run())
-
+    try:
+        if sync_engine and hasattr(sync_engine, "run"):
+            asyncio.create_task(sync_engine.run())
+            print("✅ ESSL sync engine started")
+        else:
+            print("⚠️ Sync engine unavailable. Skipping.")
+    except Exception as e:
+        print(f"❌ Failed to start ESSL sync engine: {e}")
 # ROUTER
 api_router = APIRouter(prefix="/api")
 api_router.include_router(essl_router)
