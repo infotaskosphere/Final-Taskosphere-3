@@ -166,10 +166,12 @@ async def health():
     return {"status": "ok", "cors": "configured correctly"}
 
 # ====================== CACHES ======================
-rankings_cache: dict = {}
-rankings_cache_time: dict = {}
-_last_reminder_date_cache: Optional[str] = None
 
+if len(rankings_cache) > 50:
+    oldest_key = min(rankings_cache_time, key=rankings_cache_time.get)
+    rankings_cache.pop(oldest_key, None)
+    rankings_cache_time.pop(oldest_key, None)
+    
 # ─────────────────────────────────────────────────────
 # Inline Pydantic models used only in main.py
 # ─────────────────────────────────────────────────────
@@ -1718,7 +1720,7 @@ async def create_tasks_bulk(
 ):
     created_tasks = []
     for task_data in payload.tasks:
-        task_dict = task_data.dict()
+        task_dict = task_data.model_dump()
         task_dict["id"] = str(uuid.uuid4())
         task_dict["created_by"] = current_user.id
         task_dict["created_at"] = datetime.now(IST).isoformat()
@@ -3803,7 +3805,7 @@ async def auto_daily_reminder(request: Request, call_next):
         today_str = india_time.date().isoformat()
         if india_time.hour >= 10 and _last_reminder_date_cache != today_str:
             _last_reminder_date_cache = today_str
-            asyncio.ensure_future(_run_daily_reminder_job(today_str))
+            asyncio.create_task(_run_daily_reminder_job(today_str))
     except Exception as e:
         logger.error(f"Auto reminder middleware error: {e}")
     response = await call_next(request)
