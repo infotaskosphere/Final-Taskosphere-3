@@ -9,7 +9,7 @@ import calendar
 import requests
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from .essl_backend import essl_router, sync_engine
+from .essl_backend import essl_router, _sync_engine as sync_engine
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
