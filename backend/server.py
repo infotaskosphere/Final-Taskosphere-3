@@ -120,7 +120,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 IST = pytz.timezone('Asia/Kolkata')
 india_tz = ZoneInfo("Asia/Kolkata")
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 # ====================== SECURITY CONFIG ===========================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -139,11 +138,27 @@ app.add_middleware(
         "https://final-taskosphere-backend.onrender.com",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
 )
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Taskosphere backend starting...")
+
+    if not scheduler.running:
+        scheduler.start()
+
+    try:
+        if sync_engine and hasattr(sync_engine, "run"):
+            asyncio.create_task(sync_engine.run())
+            print("✅ ESSL sync engine started")
+        else:
+            print("⚠️ Sync engine unavailable. Skipping.")
+    except Exception as e:
+        print(f"❌ Failed to start ESSL sync engine: {e}")
 
 # ====================== HEALTH ======================
 @app.get("/health")
@@ -440,7 +455,7 @@ async def fetch_indian_holidays_task():
 # Initialize Scheduler
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 scheduler.add_job(lambda: asyncio.run(fetch_indian_holidays_task()), 'cron', day=1, hour=0, minute=5)
-scheduler.start()
+
 
 
 @app.on_event("startup")
@@ -462,30 +477,59 @@ async def create_indexes():
     await db.notifications.create_index("user_id")
     await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
     await db.notifications.create_index("created_at")
+    # Attendance
     await db.attendance.create_index(
         [("user_id", 1), ("date", 1)],
+        name="attendance_user_date_unique",
         unique=True
     )
+
+    await db.attendance.create_index("date", name="attendance_date_index")
+
+# Clients
     await db.clients.create_index(
         [("created_by", 1), ("company_name", 1)],
+        name="client_creator_company_unique",
         unique=True
     )
-    await db.holidays.create_index("date", unique=True)
-    await db.machine_config.create_index("key", unique=True)
-    await db.users.create_index("machine_employee_id", sparse=True)
 
+# Holidays
+    await db.holidays.create_index(
+        "date",
+        name="holiday_date_unique",
+        unique=True
+    )
 
-@app.on_event("startup")
-async def start_essl_sync():
-    try:
-        if sync_engine and hasattr(sync_engine, "run"):
-            asyncio.create_task(sync_engine.run())
-            print("✅ ESSL sync engine started")
-        else:
-            print("⚠️ Sync engine unavailable. Skipping.")
-    except Exception as e:
-        print(f"❌ Failed to start ESSL sync engine: {e}")
+# Machine config
+    await db.machine_config.create_index(
+        "key",
+        name="machine_config_key_unique",
+        unique=True
+    )
 
+# Users
+    await db.users.create_index(
+        "machine_employee_id",
+        name="machine_employee_id_index",
+        sparse=True
+    )
+
+# Tasks
+    await db.tasks.create_index(
+        [("status", 1), ("assigned_to", 1)],
+        name="task_status_assigned_index"
+    )
+
+    await db.tasks.create_index(
+        "completed_at",
+        name="task_completed_at_index"
+    )
+
+# Todos
+    await db.todos.create_index(
+        "is_completed",
+        name="todo_completed_index"
+    )
 
 # ROUTER
 api_router = APIRouter(prefix="/api")
@@ -866,40 +910,43 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "machine_synced": False,
     }
     await db.users.insert_one(new_user)
-    access_token = create_access_token({"sub": user_id})
+    access_token = create_access_token({"sub": str(user_id)})
     new_user["password"] = None
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
 
-# FIX: Removed duplicate @api_router.post("/auth/login") decorator that was
-# incorrectly placed INSIDE the login function body, causing a SyntaxError.
 @api_router.post("/auth/login", response_model=AuthResponse)
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email})
-    if not user or not verify_password(credentials.password, user["password"]):
+
+    if not user or not user.get("password") or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    user_status = user.get("status")
-    if user_status is not None and user_status != "active":
+
+    if user.get("status") != "active":
         raise HTTPException(
             status_code=403,
-            detail=f"Your account is {user_status}. Awaiting admin approval."
+            detail=f"Your account is {user.get('status')}. Awaiting admin approval."
         )
-    user["permissions"] = user.get("permissions", UserPermissions().model_dump())
 
-    if "created_at" in user and isinstance(user["created_at"], str):
-        user["created_at"] = datetime.fromisoformat(user["created_at"])
+    # ensure permissions
+    user["permissions"] = user.get("permissions") or UserPermissions().model_dump()
 
-# Prepare clean user data
+    # convert created_at safely
+    if isinstance(user.get("created_at"), str):
+        try:
+            user["created_at"] = datetime.fromisoformat(user["created_at"])
+        except Exception:
+            user["created_at"] = datetime.now(timezone.utc)
+
+    # prepare user data
     user_data = {k: v for k, v in user.items() if k not in ("password", "_id")}
 
-# Fix telegram_id type issue (int → string)
-    if "telegram_id" in user_data and user_data["telegram_id"] is not None:
+    # fix telegram id type
+    if user_data.get("telegram_id") is not None:
         user_data["telegram_id"] = str(user_data["telegram_id"])
 
-# Create User object safely
     user_obj = User(**user_data)
 
-# Generate token
     access_token = create_access_token({"sub": str(user_obj.id)})
 
     return AuthResponse(
@@ -3822,17 +3869,15 @@ async def delete_holiday(
 # EXCEPTION HANDLER
 # ==============================================================
 
-import traceback
-
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
-    logger.error(traceback.format_exc())
+    logger.error(f"Error on {request.url.path}: {str(exc)}", exc_info=True)
+
     return JSONResponse(
         status_code=500,
         content={
-            "error": "InternalServerError",
-            "message": "A database or logic error occurred.",
+            "error": "internal_server_error",
+            "message": "Unexpected server error",
             "path": request.url.path
         }
     )
@@ -3845,4 +3890,4 @@ async def universal_exception_handler(request: Request, exc: Exception):
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
-app.include_router(api_router)v
+app.include_router(api_router)
