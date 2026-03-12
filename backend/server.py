@@ -167,10 +167,11 @@ async def health():
 
 # ====================== CACHES ======================
 
-if len(rankings_cache) > 50:
-    oldest_key = min(rankings_cache_time, key=rankings_cache_time.get)
-    rankings_cache.pop(oldest_key, None)
-    rankings_cache_time.pop(oldest_key, None)
+rankings_cache: Dict[str, Any] = {}
+rankings_cache_time: Dict[str, datetime] = {}
+
+# Prevent duplicate daily reminders
+_last_reminder_date_cache: Optional[str] = None
     
 # ─────────────────────────────────────────────────────
 # Inline Pydantic models used only in main.py
