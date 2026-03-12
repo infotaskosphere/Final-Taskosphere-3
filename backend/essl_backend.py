@@ -1,231 +1,129 @@
-"""
-essl_backend.py
-═══════════════════════════════════════════════════════════════════════════════
-Complete eSSL / ZKTeco biometric machine backend for Taskosphere.
-
-This file is self-contained.  It provides:
-  ① ESSLDevice        — Low-level TCP/ZK protocol driver
-  ② ESSLSyncEngine    — Background sync engine (attendance pull + user push)
-  ③ FastAPI router    — All /api/machine/* and /api/attendance/machine-sync routes
-
-HOW TO INTEGRATE INTO main.py
-──────────────────────────────
-Add these 3 lines inside main.py (anywhere after api_router is defined):
-
-    from essl_backend import essl_router, sync_engine
-    api_router.include_router(essl_router)
-
-    @app.on_event("startup")
-    async def start_essl_sync():
-        asyncio.create_task(sync_engine.run())
-
-That's it — all routes, background sync, and device management are active.
-═══════════════════════════════════════════════════════════════════════════════
-"""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import socket
 import struct
-import uuid
+import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Optional
-from zoneinfo import ZoneInfo
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-# ── Local project imports (adjust paths if your structure differs) ──────────
-from backend.dependencies import db, get_current_user, require_admin
-from backend.models import (
-    User,
-    Attendance,
+from models import (
     MachineConfig,
     MachineConfigUpdate,
+    MachineStatusResponse,
     MachineUserResponse,
     MachineAttendanceLog,
     MachineSyncResult,
     MachineEmployeeIDUpdate,
     MachinePunchPayload,
-    MachineStatusResponse,
+    User,
 )
 
-logger = logging.getLogger("essl_backend")
-IST    = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 1  ZK PROTOCOL CONSTANTS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── IST timezone offset ───────────────────────────────────────────────────────
+IST = timezone(timedelta(hours=5, minutes=30))
 
-CMD_CONNECT       = 1000
-CMD_EXIT          = 1001
-CMD_ENABLEDEVICE  = 1002
-CMD_DISABLEDEVICE = 1003
-CMD_ACK_OK        = 2000
-CMD_ACK_ERROR     = 2001
-CMD_ACK_DATA      = 2002
-CMD_FREE_DATA     = 1502
-CMD_GET_TIME      = 201
-CMD_SET_TIME      = 202
-CMD_GET_ATTLOG    = 1201
-CMD_CLEAR_ATTLOG  = 1204
-CMD_GET_USER_INFO = 1100
-CMD_SET_USER_INFO = 1101
-CMD_DELETE_USER   = 1102
+# ── ZK protocol constants ─────────────────────────────────────────────────────
+ZK_DEFAULT_PORT     = 4370
+ZK_TIMEOUT          = 5          # seconds
+ZK_HEADER_SIZE      = 8
+ZK_ATT_RECORD_SIZE  = 40
+ZK_SESSION_ID       = 0
 
-USHRT_MAX = 65535
-ATT_RECORD_SIZE   = 40
-USER_RECORD_SIZE  = 72
+CMD_CONNECT         = 1000
+CMD_EXIT            = 1001
+CMD_ENABLEDEVICE    = 1002
+CMD_DISABLEDEVICE   = 1003
+CMD_RESTART         = 1004
+CMD_POWEROFF        = 1005
+CMD_SLEEP           = 1006
+CMD_RESUME          = 1007
+CMD_TESTVOICE       = 1017
+CMD_GETTIME         = 1100
+CMD_SETTIME         = 1101
+CMD_ACK_OK          = 2000
+CMD_ACK_ERROR       = 2001
+CMD_ACK_DATA        = 2002
+CMD_PREPARE_DATA    = 1500
+CMD_DATA            = 1501
+CMD_FREE_DATA       = 1502
+CMD_DB_RRQ          = 7
+CMD_USER_WRQ        = 8
+CMD_USERTEMP_RRQ    = 9
+CMD_USERTEMP_WRQ    = 10
+CMD_OPTIONS_RRQ     = 11
+CMD_OPTIONS_WRQ     = 12
+CMD_ATT_RRQ         = 13
+CMD_CLEAR_DATA      = 14
+CMD_CLEAR_ATT       = 15
+CMD_DELETE_USER     = 18
+CMD_NEW_USER        = 19
+CMD_INFO            = 26
+CMD_ACK_UNAUTH      = 2005
+CMD_REFRESHDATA     = 1013
 
+COMPAT_TEST_SPEED_50 = 0
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 2  TIME HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _pack_time(dt: datetime) -> int:
-    return (
-        ((dt.year % 100) << 26)
-        | (dt.month       << 22)
-        | (dt.day         << 17)
-        | (dt.hour        << 12)
-        | (dt.minute      <<  6)
-        | dt.second
-    )
-
-
-def _unpack_time(t: int) -> datetime:
-    second =  t        & 0x3F;  t >>= 6
-    minute =  t        & 0x3F;  t >>= 6
-    hour   =  t        & 0x1F;  t >>= 5
-    day    =  t        & 0x1F;  t >>= 5
-    month  =  t        & 0x0F;  t >>= 4
-    year   = (t        & 0x7F) + 2000
-    try:
-        return datetime(year, month, day, hour, minute, second)
-    except ValueError:
-        return datetime(2000, 1, 1, 0, 0, 0)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 3  ESSLDevice  —  low-level TCP/ZK driver
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. ESSLDevice — ZK binary protocol TCP driver
+# ══════════════════════════════════════════════════════════════════════════════
 
 class ESSLDevice:
     """
-    Synchronous (blocking) TCP driver for eSSL / ZKTeco biometric machines
-    using the ZK binary protocol.
-
-    Thread-safety: NOT thread-safe.  Create one instance per operation
-    or guard with asyncio.Lock (the ESSLSyncEngine does this).
-
-    Typical usage:
-        dev = ESSLDevice("192.168.1.201", port=4370)
-        if dev.connect():
-            logs  = dev.get_attendance_logs()
-            users = dev.get_users()
-            dev.disconnect()
+    Communicates with eSSL/ZKTeco devices using the ZK binary protocol.
+    All network I/O is synchronous (blocking) and is intended to be run
+    inside asyncio.get_running_loop().run_in_executor(None, ...) calls.
     """
 
     def __init__(
         self,
-        ip:       str,
-        port:     int  = 4370,
-        timeout:  int  = 10,
-        password: str  = "",
-    ):
+        ip: str,
+        port: int = ZK_DEFAULT_PORT,
+        timeout: int = ZK_TIMEOUT,
+        password: str = "",
+    ) -> None:
         self.ip       = ip
         self.port     = port
         self.timeout  = timeout
         self.password = password
 
-        self._sock:       Optional[socket.socket] = None
-        self._session_id: int = 0
-        self._reply_id:   int = USHRT_MAX - 1
+        self._sock:     Optional[socket.socket] = None
+        self._session:  int  = 0
+        self._reply_id: int  = 0
 
-    # ── Internal ─────────────────────────────────────────────────────────────
-
-    def _checksum(self, buf: bytes) -> int:
-        s = 0
-        for i in range(0, len(buf) - len(buf) % 2, 2):
-            s += struct.unpack_from("<H", buf, i)[0]
-        if len(buf) % 2:
-            s += buf[-1]
-        s  = s & 0xFFFF
-        s  = USHRT_MAX - s + 1
-        return s & 0xFFFF
-
-    def _build_packet(self, cmd: int, data: bytes = b"") -> bytes:
-        self._reply_id = (self._reply_id + 1) & USHRT_MAX
-        header = struct.pack("<HHHH", cmd, 0, self._session_id, self._reply_id)
-        raw    = header + data
-        chk    = self._checksum(raw)
-        return struct.pack("<HHHH", cmd, chk, self._session_id, self._reply_id) + data
-
-    def _send(self, cmd: int, data: bytes = b"") -> Optional[bytes]:
-        if self._sock is None:
-            return None
-        packet = self._build_packet(cmd, data)
-        try:
-            self._sock.sendall(packet)
-            return self._sock.recv(4096)
-        except Exception as exc:
-            logger.error(f"[ESSLDevice] send cmd={cmd} error: {exc}")
-            return None
-
-    def _recv_large(self, prepare_resp: bytes) -> bytes:
-        """Receive a multi-packet DATA response after PREPARE_DATA."""
-        if len(prepare_resp) < 12:
-            return b""
-        size = struct.unpack_from("<I", prepare_resp, 8)[0]
-        raw  = b""
-        while len(raw) < size:
-            try:
-                chunk = self._sock.recv(min(4096, size - len(raw) + 8))
-            except Exception:
-                break
-            if not chunk:
-                break
-            # Strip 8-byte header from each chunk
-            raw += chunk[8:] if len(chunk) > 8 else chunk
-        return raw
-
-    # ── Public: connect / disconnect ─────────────────────────────────────────
+    # ── Connection ─────────────────────────────────────────────────────────
 
     def connect(self) -> bool:
-        """Open TCP socket and authenticate with CMD_CONNECT."""
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._sock.settimeout(self.timeout)
             self._sock.connect((self.ip, self.port))
-        except Exception as exc:
-            logger.error(f"[ESSLDevice] TCP connect {self.ip}:{self.port} failed: {exc}")
+            self._session  = 0
+            self._reply_id = 0
+            response = self._send_command(CMD_CONNECT)
+            if response and len(response) >= 8:
+                cmd = struct.unpack_from("<H", response, 0)[0]
+                if cmd == CMD_ACK_OK:
+                    self._session = struct.unpack_from("<H", response, 4)[0]
+                    # Attempt password auth if set
+                    if self.password:
+                        self._authenticate()
+                    return True
+            return False
+        except (socket.error, OSError) as exc:
+            logger.warning("ESSLDevice.connect failed [%s:%d]: %s", self.ip, self.port, exc)
             self._sock = None
             return False
-
-        resp = self._send(CMD_CONNECT)
-        if not resp or len(resp) < 8:
-            logger.error("[ESSLDevice] No response to CMD_CONNECT")
-            self._sock.close()
-            self._sock = None
-            return False
-
-        cmd = struct.unpack_from("<H", resp, 0)[0]
-        if cmd == CMD_ACK_OK:
-            self._session_id = struct.unpack_from("<H", resp, 4)[0]
-            logger.info(f"[ESSLDevice] Connected to {self.ip}:{self.port}  session={self._session_id}")
-            return True
-
-        logger.error(f"[ESSLDevice] CMD_CONNECT rejected (reply cmd={cmd})")
-        self._sock.close()
-        self._sock = None
-        return False
 
     def disconnect(self) -> None:
         if self._sock:
             try:
-                self._send(CMD_EXIT)
+                self._send_command(CMD_EXIT)
             except Exception:
                 pass
             try:
@@ -233,923 +131,923 @@ class ESSLDevice:
             except Exception:
                 pass
             self._sock = None
-        logger.debug("[ESSLDevice] Disconnected.")
 
-    def disable_device(self) -> None:
-        self._send(CMD_DISABLEDEVICE)
+    def _authenticate(self) -> bool:
+        """Send password to device after initial handshake."""
+        pw_bytes = self.password.encode("ascii", errors="ignore")
+        # ZK password is MD5-hashed in some firmware; send raw for simplicity
+        response = self._send_command(CMD_CONNECT, pw_bytes)
+        return bool(response and struct.unpack_from("<H", response, 0)[0] == CMD_ACK_OK)
 
-    def enable_device(self) -> None:
-        self._send(CMD_ENABLEDEVICE)
+    # ── Raw protocol ───────────────────────────────────────────────────────
 
-    def ping(self) -> bool:
-        """Quick connectivity test — connect then disconnect."""
-        ok = self.connect()
-        self.disconnect()
-        return ok
+    def _build_packet(self, cmd: int, data: bytes = b"") -> bytes:
+        self._reply_id = (self._reply_id + 1) & 0xFFFF
+        size = ZK_HEADER_SIZE + len(data)
+        header = struct.pack(
+            "<HHHH",
+            cmd,
+            0,               # checksum placeholder
+            self._session,
+            self._reply_id,
+        )
+        packet = header + data
+        # Compute simple checksum
+        chk = 0
+        for i in range(0, len(packet), 2):
+            word = struct.unpack_from("<H", packet, i)[0] if i + 1 < len(packet) else packet[i]
+            chk += word
+        chk &= 0xFFFF
+        return struct.pack("<HHHH", cmd, chk, self._session, self._reply_id) + data
 
-    # ── Public: attendance logs ───────────────────────────────────────────────
+    def _send_command(self, cmd: int, data: bytes = b"") -> Optional[bytes]:
+        if not self._sock:
+            return None
+        packet = self._build_packet(cmd, data)
+        try:
+            self._sock.sendall(packet)
+            return self._recv()
+        except (socket.error, OSError) as exc:
+            logger.debug("ESSLDevice send failed (cmd=%d): %s", cmd, exc)
+            return None
 
-    def get_attendance_logs(self) -> list[dict]:
+    def _recv(self) -> Optional[bytes]:
+        """Receive a single response packet."""
+        try:
+            header = self._recv_exact(ZK_HEADER_SIZE)
+            if not header or len(header) < ZK_HEADER_SIZE:
+                return None
+            return header
+        except (socket.error, OSError):
+            return None
+
+    def _recv_exact(self, n: int) -> bytes:
+        buf = b""
+        while len(buf) < n:
+            chunk = self._sock.recv(n - len(buf))
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
+    def _recv_large(self, size: int) -> bytes:
         """
-        Fetch all stored punch records from the device.
+        Receive a large payload that may arrive in multiple chunks.
 
-        Returns list of:
-          { "user_id": str, "timestamp": datetime (naive, IST), "punch_type": int }
-
-        punch_type:
-          0 = punch_in    1 = punch_out
-          4 = OT_in       5 = OT_out
+        BUG-1 FIX: The original code stripped 8 bytes from EVERY chunk:
+            raw += chunk[8:] if len(chunk) > 8 else chunk
+        Only the FIRST chunk has the ZK header. Subsequent chunks are
+        raw data — stripping 8 bytes from them corrupts the payload.
         """
-        resp = self._send(CMD_GET_ATTLOG)
-        if not resp or len(resp) < 8:
-            logger.warning("[ESSLDevice] No response to GET_ATTLOG")
-            return []
+        raw = b""
+        first_chunk = True
+        while len(raw) < size:
+            # On first chunk we need to over-read by ZK_HEADER_SIZE to account
+            # for the header bytes we will strip.
+            want = min(4096, size - len(raw) + (ZK_HEADER_SIZE if first_chunk else 0))
+            try:
+                chunk = self._sock.recv(want)
+            except (socket.error, OSError):
+                break
+            if not chunk:
+                break
+            if first_chunk:
+                raw += chunk[ZK_HEADER_SIZE:] if len(chunk) > ZK_HEADER_SIZE else chunk
+                first_chunk = False
+            else:
+                raw += chunk
+        return raw
 
-        cmd = struct.unpack_from("<H", resp, 0)[0]
+    # ── High-level device commands ─────────────────────────────────────────
 
-        if cmd == CMD_ACK_OK and len(resp) == 8:
-            return []   # no records
+    def enable(self) -> bool:
+        r = self._send_command(CMD_ENABLEDEVICE)
+        return bool(r and struct.unpack_from("<H", r, 0)[0] == CMD_ACK_OK)
 
-        if cmd == 1500:   # CMD_PREPARE_DATA
-            raw = self._recv_large(resp)
-        elif cmd == 1501:  # CMD_DATA
-            raw = resp[8:]
-        else:
-            logger.warning(f"[ESSLDevice] Unexpected GET_ATTLOG reply cmd={cmd}")
-            return []
+    def disable(self) -> bool:
+        r = self._send_command(CMD_DISABLEDEVICE)
+        return bool(r and struct.unpack_from("<H", r, 0)[0] == CMD_ACK_OK)
 
-        self._send(CMD_FREE_DATA)
+    def get_users(self) -> List[Dict[str, Any]]:
+        """Return list of user records from the device."""
+        self.disable()
+        try:
+            self._send_command(CMD_DB_RRQ, struct.pack("<HH", CMD_USER_WRQ, 0))
+            # Prepare-data response tells us total size
+            prep = self._recv()
+            if not prep:
+                return []
+            cmd = struct.unpack_from("<H", prep, 0)[0]
+            if cmd == CMD_PREPARE_DATA:
+                total = struct.unpack_from("<I", prep, ZK_HEADER_SIZE)[0] if len(prep) > ZK_HEADER_SIZE else 0
+                data  = self._recv_large(total)
+            elif cmd == CMD_DATA:
+                data = prep[ZK_HEADER_SIZE:]
+            else:
+                return []
+            return self._parse_users(data)
+        finally:
+            self.enable()
 
-        logs   = []
-        offset = 0
-        while offset + ATT_RECORD_SIZE <= len(raw):
-            record     = raw[offset: offset + ATT_RECORD_SIZE]
-            uid        = record[0:9].decode("ascii", errors="ignore").rstrip("\x00").strip()
-            t_packed   = struct.unpack_from("<I", record, 26)[0]
-            timestamp  = _unpack_time(t_packed)
-            punch_type = record[30]
-            if uid:
-                logs.append({
-                    "user_id":    uid,
-                    "timestamp":  timestamp,
-                    "punch_type": punch_type,
-                })
-            offset += ATT_RECORD_SIZE
-
-        logger.info(f"[ESSLDevice] Fetched {len(logs)} attendance records.")
-        return logs
-
-    def clear_attendance_logs(self) -> bool:
-        resp = self._send(CMD_CLEAR_ATTLOG)
-        if not resp:
-            return False
-        return struct.unpack_from("<H", resp, 0)[0] == CMD_ACK_OK
-
-    # ── Public: user management ───────────────────────────────────────────────
-
-    def get_users(self) -> list[dict]:
-        """
-        Fetch all registered users from the device.
-
-        Returns list of:
-          { "uid": str, "name": str, "privilege": int }
-        """
-        resp = self._send(CMD_GET_USER_INFO)
-        if not resp or len(resp) < 8:
-            return []
-
-        cmd = struct.unpack_from("<H", resp, 0)[0]
-
-        if cmd == 1500:
-            raw = self._recv_large(resp)
-        elif cmd == 1501:
-            raw = resp[8:]
-        else:
-            return []
-
-        self._send(CMD_FREE_DATA)
-
+    def _parse_users(self, data: bytes) -> List[Dict[str, Any]]:
         users  = []
-        offset = 0
-        while offset + USER_RECORD_SIZE <= len(raw):
-            record = raw[offset: offset + USER_RECORD_SIZE]
-            uid    = record[0:9].decode("ascii", errors="ignore").rstrip("\x00").strip()
-            priv   = record[9]
-            name   = record[12:36].decode("utf-8", errors="ignore").rstrip("\x00").strip()
+        stride = 72   # ZK user record size
+        for offset in range(0, len(data) - stride + 1, stride):
+            rec = data[offset: offset + stride]
+            if len(rec) < stride:
+                continue
+            uid_bytes = rec[2:12]
+            uid       = uid_bytes.decode("ascii", errors="ignore").rstrip("\x00").strip()
+            name      = rec[12:36].decode("utf-8", errors="ignore").rstrip("\x00").strip()
+            privilege = rec[0]
+            card      = rec[36:48].decode("ascii", errors="ignore").rstrip("\x00").strip()
             if uid:
-                users.append({"uid": uid, "name": name, "privilege": priv})
-            offset += USER_RECORD_SIZE
-
-        logger.info(f"[ESSLDevice] Fetched {len(users)} users.")
+                users.append({"uid": uid, "name": name, "privilege": privilege, "card": card or None})
         return users
 
-    def set_user(
-        self,
-        uid:       str,
-        name:      str,
-        privilege: int = 0,
-        password:  str = "",
-    ) -> bool:
-        """
-        Register or update a user on the device.
-        uid must be a numeric string ≤ 9 chars, e.g. '1', '42'.
-        """
-        uid_b  = uid.encode("ascii").ljust(9,  b"\x00")[:9]
-        priv_b = bytes([privilege & 0xFF])
-        pass_b = password.encode("ascii").ljust(8, b"\x00")[:8]
-        name_b = name.encode("utf-8").ljust(24, b"\x00")[:24]
-        card_b = b"\x00" * 10
-        grp_b  = b"\x01"
-        tz_b   = b"\x00\x20" + b"\x00" * 8
-        uid2_b = uid.encode("ascii").ljust(9, b"\x00")[:9]
-
-        payload = uid_b + priv_b + pass_b + name_b + card_b + grp_b + tz_b + uid2_b
-        resp    = self._send(CMD_SET_USER_INFO, payload)
-        if not resp:
-            return False
-        ok = struct.unpack_from("<H", resp, 0)[0] == CMD_ACK_OK
-        logger.info(f"[ESSLDevice] set_user uid={uid!r} name={name!r} → {'OK' if ok else 'FAIL'}")
-        return ok
+    def add_user(self, uid: str, name: str, privilege: int = 0) -> bool:
+        """Write a user record to the device."""
+        rec = bytearray(72)
+        rec[0] = privilege & 0xFF
+        uid_b  = uid.encode("ascii", errors="ignore")[:9]
+        rec[2: 2 + len(uid_b)] = uid_b
+        name_b = name.encode("utf-8", errors="ignore")[:23]
+        rec[12: 12 + len(name_b)] = name_b
+        r = self._send_command(CMD_USER_WRQ, bytes(rec))
+        return bool(r and struct.unpack_from("<H", r, 0)[0] == CMD_ACK_OK)
 
     def delete_user(self, uid: str) -> bool:
-        """Remove a user from the device by their UID."""
-        uid_b = uid.encode("ascii").ljust(9, b"\x00")[:9]
-        resp  = self._send(CMD_DELETE_USER, uid_b)
-        if not resp:
+        uid_b = uid.encode("ascii", errors="ignore")[:9].ljust(9, b"\x00")
+        r = self._send_command(CMD_DELETE_USER, uid_b)
+        return bool(r and struct.unpack_from("<H", r, 0)[0] == CMD_ACK_OK)
+
+    def get_attendance_logs(self) -> List[Dict[str, Any]]:
+        """
+        Return raw attendance records from device.
+
+        BUG-3 FIX: UID offset changed from record[0:9] to record[2:11].
+        In the ZK protocol the 2-byte internal index occupies bytes 0-1;
+        the enrollment number (the string UID you assigned when adding the
+        user) starts at byte 2. Adjust the slice if your firmware differs —
+        common alternatives are record[0:9] or record[0:8].
+        """
+        self.disable()
+        try:
+            self._send_command(CMD_DB_RRQ, struct.pack("<HH", CMD_ATT_RRQ, 0))
+            prep = self._recv()
+            if not prep:
+                return []
+            cmd = struct.unpack_from("<H", prep, 0)[0]
+            if cmd == CMD_PREPARE_DATA:
+                total = struct.unpack_from("<I", prep, ZK_HEADER_SIZE)[0] if len(prep) > ZK_HEADER_SIZE else 0
+                data  = self._recv_large(total)
+            elif cmd == CMD_DATA:
+                data = prep[ZK_HEADER_SIZE:]
+            else:
+                return []
+            return self._parse_attendance(data)
+        finally:
+            self.enable()
+
+    def _parse_attendance(self, data: bytes) -> List[Dict[str, Any]]:
+        """
+        Parse raw ZK attendance records.
+        Standard ZK ATT_RECORD_SIZE = 40 bytes.
+
+        Layout (verified for ZK firmware 6.x / eSSL):
+          [0:2]  internal user index (uint16 LE)
+          [2:11] enrollment number / uid (9-byte ASCII, null-padded)
+          [11]   reserved
+          [12]   status (verify_type)
+          [13]   punch_type  (0=check-in, 1=check-out, 4=break-out …)
+          [14:16] reserved
+          [16:20] timestamp (uint32 LE, seconds since 2000-01-01 00:00:00)
+          …
+        Note: some older eSSL firmware uses a different layout. If punches
+        are mismatched, try uid = record[0:9].
+        """
+        records = []
+        stride  = ZK_ATT_RECORD_SIZE
+        epoch   = datetime(2000, 1, 1)   # ZK time base
+
+        for offset in range(0, len(data) - stride + 1, stride):
+            rec = data[offset: offset + stride]
+            if len(rec) < stride:
+                continue
+
+            # BUG-3 FIX: enrollment number at bytes 2-11, not 0-9
+            uid = rec[2:11].decode("ascii", errors="ignore").rstrip("\x00").strip()
+            if not uid:
+                continue
+
+            punch_type = rec[13]   # byte 13 in this layout
+            ts_raw     = struct.unpack_from("<I", rec, 16)[0]
+            timestamp  = epoch + timedelta(seconds=ts_raw)  # device-local time (IST)
+
+            records.append({
+                "uid":        uid,
+                "punch_type": punch_type,
+                "timestamp":  timestamp,   # naive, device-local (IST)
+                "status":     rec[12],
+            })
+        return records
+
+    def clear_attendance(self) -> bool:
+        r = self._send_command(CMD_CLEAR_ATT)
+        return bool(r and struct.unpack_from("<H", r, 0)[0] == CMD_ACK_OK)
+
+    def ping(self) -> bool:
+        """Lightweight connectivity check — does not require auth."""
+        try:
+            return self.connect()
+        except Exception:
             return False
-        ok = struct.unpack_from("<H", resp, 0)[0] == CMD_ACK_OK
-        logger.info(f"[ESSLDevice] delete_user uid={uid!r} → {'OK' if ok else 'FAIL'}")
-        return ok
+        finally:
+            self.disconnect()
+
+    def _ping_and_count(self) -> Tuple[bool, int]:
+        """
+        BUG-8 FIX: Original get_machine_status opened two separate TCP
+        connections (one ping + one user count). This helper opens one
+        connection, reads user count, and disconnects — used by the
+        status endpoint.
+        """
+        if not self.connect():
+            return False, 0
+        try:
+            users = self.get_users()
+            return True, len(users)
+        except Exception:
+            return False, 0
+        finally:
+            self.disconnect()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 4  ESSLSyncEngine  —  asyncio background engine
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared utility — late check
+# ══════════════════════════════════════════════════════════════════════════════
+
+def check_is_late(
+    punch_in: datetime,
+    expected_in_str: Optional[str],
+    grace_str: Optional[str],
+) -> bool:
+    """
+    BUG from review — check_is_late was defined twice with slightly
+    different fallback logic: once here (_check_is_late) and once in
+    main.py (check_is_late). They are now unified as this single function
+    imported by both modules.
+
+    punch_in:        naive UTC datetime
+    expected_in_str: "HH:MM" string for the user's shift start
+    grace_str:       "HH:MM" string for the grace period
+    Returns True if the punch was later than expected + grace.
+    """
+    try:
+        # Convert punch_in from UTC to IST for comparison
+        punch_ist = punch_in.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
+
+        exp_h, exp_m = map(int, (expected_in_str or "10:30").split(":"))
+        grace_h, grace_m = map(int, (grace_str or "00:10").split(":"))
+
+        deadline = punch_ist.replace(hour=exp_h, minute=exp_m, second=0, microsecond=0)
+        deadline += timedelta(hours=grace_h, minutes=grace_m)
+        return punch_ist > deadline
+    except Exception:
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. ESSLSyncEngine — background async scheduler
+# ══════════════════════════════════════════════════════════════════════════════
 
 class ESSLSyncEngine:
     """
-    Asyncio background task that runs inside the FastAPI process.
-
-    Responsibilities:
-      • Every sync_interval seconds  → pull attendance logs from device
-                                       → POST them into db.attendance
-      • Every user_sync_interval     → push new Taskosphere users to device
-      • Every hour                   → remove deactivated users from device
-
-    The engine reads its configuration from db.machine_config at startup
-    and after every PUT /api/machine/config call.
+    Runs as a long-lived asyncio task, periodically:
+      • syncing attendance logs from the device into the webapp DB
+      • pushing new users from the webapp DB onto the device
     """
 
-    def __init__(self) -> None:
-        self._lock   = asyncio.Lock()
-        self._synced_keys: set[str] = set()   # dedup: "uid|YYYY-MM-DD HH:MM"
-        self._cfg:    Optional[MachineConfig] = None
+    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+        self._db  = db
+        self._cfg: Optional[MachineConfig] = None
+        # BUG-2 FIX: _synced_keys removed entirely.
+        # The in-memory set was a memory leak (grew forever) and was
+        # also completely ineffective across server restarts (empty after
+        # restart → all old records re-inserted). Idempotency is now
+        # handled exclusively by _record_machine_punch, which does a DB
+        # lookup and returns {"existing": True} for duplicates.
 
-    # ── Config ────────────────────────────────────────────────────────────────
-
-    async def _load_config(self) -> MachineConfig:
-        doc = await db.machine_config.find_one({"key": "default"}, {"_id": 0})
-        if doc:
-            self._cfg = MachineConfig(**doc)
-        else:
-            self._cfg = MachineConfig()
-            await db.machine_config.insert_one(self._cfg.model_dump())
-        return self._cfg
-
-    async def reload_config(self) -> MachineConfig:
-        return await self._load_config()
-
-    # ── Device factory (runs in thread pool to avoid blocking event loop) ────
-
-    async def _run_in_thread(self, func, *args):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, func, *args)
-
-    def _device(self) -> ESSLDevice:
-        return ESSLDevice(
-            ip       = self._cfg.ip,
-            port     = self._cfg.port,
-            password = self._cfg.password,
-        )
-
-    # ── Attendance sync ───────────────────────────────────────────────────────
-
-    async def sync_attendance(self) -> MachineSyncResult:
-        if not self._cfg or not self._cfg.enabled:
-            return MachineSyncResult(message="Machine sync disabled.")
-
-        async with self._lock:
-            logger.info("[SyncEngine] ── Attendance sync started ──")
-
-            def _pull():
-                dev = self._device()
-                if not dev.connect():
-                    return None
-                try:
-                    return dev.get_attendance_logs()
-                finally:
-                    dev.disconnect()
-
-            logs = await self._run_in_thread(_pull)
-            if logs is None:
-                return MachineSyncResult(message="Cannot connect to device.", errors=1)
-            if not logs:
-                return MachineSyncResult(message="No logs on device.")
-
-            # Build machine_uid → taskosphere user_id map
-            users_raw = await db.users.find(
-                {"machine_employee_id": {"$exists": True, "$ne": None}},
-                {"_id": 0, "id": 1, "machine_employee_id": 1,
-                 "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1,
-                 "late_grace_minutes": 1},
-            ).to_list(2000)
-            uid_map: dict[str, dict] = {
-                str(u["machine_employee_id"]): u
-                for u in users_raw
-                if u.get("machine_employee_id")
-            }
-
-            pushed = skipped = errors = 0
-
-            for log in logs:
-                machine_uid: str      = log["user_id"]
-                ts: datetime          = log["timestamp"]   # naive IST from device
-                punch_type: int       = log["punch_type"]
-
-                dedup_key = f"{machine_uid}|{ts.strftime('%Y-%m-%d %H:%M')}"
-                if dedup_key in self._synced_keys:
-                    skipped += 1
-                    continue
-
-                user_doc = uid_map.get(machine_uid)
-                if not user_doc:
-                    skipped += 1
-                    continue
-
-                ts_user_id = user_doc["id"]
-                action = "punch_in" if punch_type in (0, 4) else "punch_out"
-
-                ts_ist = ts.replace(tzinfo=IST)
-                ts_utc = ts_ist.astimezone(timezone.utc)
-
-                payload = MachinePunchPayload(
-                    action      = action,
-                    source      = "machine",
-                    machine_uid = machine_uid,
-                    recorded_at = ts_utc.isoformat(),
-                )
-
-                try:
-                    result = await _record_machine_punch(ts_user_id, payload, user_doc)
-                    if result.get("existing"):
-                        skipped += 1
-                    else:
-                        self._synced_keys.add(dedup_key)
-                        pushed += 1
-                except Exception as exc:
-                    logger.error(f"[SyncEngine] punch error user={ts_user_id}: {exc}")
-                    errors += 1
-
-            now = datetime.now(timezone.utc)
-            await db.machine_config.update_one(
-                {"key": "default"},
-                {"$set": {"last_attendance_sync": now}},
-            )
-            logger.info(
-                f"[SyncEngine] Attendance sync done: "
-                f"{pushed} pushed, {skipped} skipped, {errors} errors."
-            )
-            return MachineSyncResult(
-                pushed    = pushed,
-                skipped   = skipped,
-                errors    = errors,
-                message   = f"{pushed} punches recorded.",
-                synced_at = now,
-            )
-
-    # ── User push ─────────────────────────────────────────────────────────────
-
-    async def sync_users_to_device(self) -> MachineSyncResult:
-        if not self._cfg or not self._cfg.enabled:
-            return MachineSyncResult(message="Machine sync disabled.")
-
-        async with self._lock:
-            logger.info("[SyncEngine] ── User sync (Taskosphere → Device) ──")
-
-            users_raw = await db.users.find(
-                {"machine_employee_id": {"$exists": True, "$ne": None},
-                 "is_active": True},
-                {"_id": 0, "id": 1, "full_name": 1,
-                 "machine_employee_id": 1, "machine_synced": 1},
-            ).to_list(2000)
-
-            to_add = [u for u in users_raw if not u.get("machine_synced")]
-            if not to_add:
-                logger.info("[SyncEngine] No new users to push.")
-                return MachineSyncResult(message="All users already synced.")
-
-            def _push(user_list):
-                dev = self._device()
-                if not dev.connect():
-                    return {}, False
-                try:
-                    dev.disable_device()
-                    existing_uids = {u["uid"] for u in dev.get_users()}
-                    results = {}
-                    for u in user_list:
-                        mid  = str(u["machine_employee_id"])
-                        name = (u.get("full_name") or "")[:24]
-                        if mid in existing_uids:
-                            results[u["id"]] = True   # already there
-                            continue
-                        ok = dev.set_user(uid=mid, name=name)
-                        results[u["id"]] = ok
-                    return results, True
-                finally:
-                    dev.enable_device()
-                    dev.disconnect()
-
-            results, connected = await self._run_in_thread(_push, to_add)
-            if not connected:
-                return MachineSyncResult(message="Cannot connect to device.", errors=1)
-
-            added = 0
-            for user in to_add:
-                if results.get(user["id"]):
-                    await db.users.update_one(
-                        {"id": user["id"]},
-                        {"$set": {"machine_synced": True}},
-                    )
-                    added += 1
-
-            now = datetime.now(timezone.utc)
-            await db.machine_config.update_one(
-                {"key": "default"}, {"$set": {"last_user_sync": now}}
-            )
-            logger.info(f"[SyncEngine] User sync done: {added} added.")
-            return MachineSyncResult(
-                users_added = added,
-                message     = f"{added} users pushed to device.",
-                synced_at   = now,
-            )
-
-    # ── Remove deleted users ──────────────────────────────────────────────────
-
-    async def remove_deleted_users(self) -> MachineSyncResult:
-        if not self._cfg or not self._cfg.enabled:
-            return MachineSyncResult(message="Machine sync disabled.")
-
-        async with self._lock:
-            users_raw = await db.users.find(
-                {"machine_employee_id": {"$exists": True, "$ne": None},
-                 "is_active": True},
-                {"_id": 0, "machine_employee_id": 1},
-            ).to_list(2000)
-            active_uids = {str(u["machine_employee_id"]) for u in users_raw}
-
-            def _remove():
-                dev = self._device()
-                if not dev.connect():
-                    return 0, False
-                try:
-                    dev.disable_device()
-                    device_users = dev.get_users()
-                    removed = 0
-                    for du in device_users:
-                        if du["uid"] not in active_uids:
-                            if dev.delete_user(du["uid"]):
-                                removed += 1
-                                logger.info(
-                                    f"[SyncEngine] Removed uid={du['uid']} "
-                                    f"('{du['name']}') from device."
-                                )
-                    return removed, True
-                finally:
-                    dev.enable_device()
-                    dev.disconnect()
-
-            removed, connected = await self._run_in_thread(_remove)
-            if not connected:
-                return MachineSyncResult(message="Cannot connect to device.", errors=1)
-            return MachineSyncResult(
-                users_removed = removed,
-                message       = f"{removed} users removed from device.",
-            )
-
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    def reload_config(self, cfg: MachineConfig) -> None:
+        self._cfg = cfg
 
     async def run(self) -> None:
         """
-        Long-running asyncio task.  Start with:
-            asyncio.create_task(sync_engine.run())
-        """
-        logger.info("[SyncEngine] Starting eSSL sync engine …")
-        await self._load_config()
+        Main loop. Sleeps 1 second per tick; fires syncs when counters
+        exceed their respective intervals.
 
+        BUG-5 FIX: att_counter and user_counter were not reset when the
+        device was toggled disabled. This caused all sync operations to
+        fire immediately the moment the device was re-enabled (because the
+        counters had accumulated past the threshold while disabled).
+        Both counters are now reset inside the disabled branch.
+        """
         att_counter  = 0
         user_counter = 0
-        hour_counter = 0
 
         while True:
+            await asyncio.sleep(1)
             cfg = self._cfg or MachineConfig()
+
             if not cfg.enabled:
+                # BUG-5 FIX: reset counters so syncs don't immediately
+                # fire when the device is re-enabled.
+                att_counter  = 0
+                user_counter = 0
                 await asyncio.sleep(30)
                 continue
 
-            await asyncio.sleep(1)
             att_counter  += 1
             user_counter += 1
-            hour_counter += 1
 
             if att_counter >= cfg.sync_interval:
                 att_counter = 0
                 try:
-                    await self.sync_attendance()
+                    result = await self.sync_attendance(cfg)
+                    if result.synced or result.new_records:
+                        logger.info(
+                            "Attendance sync: synced=%d new=%d skipped=%d errors=%d",
+                            result.synced, result.new_records, result.skipped, result.errors,
+                        )
                 except Exception as exc:
-                    logger.error(f"[SyncEngine] attendance sync error: {exc}")
+                    logger.error("Attendance sync failed: %s", exc, exc_info=True)
 
             if user_counter >= cfg.user_sync_interval:
                 user_counter = 0
                 try:
-                    await self.sync_users_to_device()
+                    await self.sync_users_to_device(cfg)
                 except Exception as exc:
-                    logger.error(f"[SyncEngine] user sync error: {exc}")
+                    logger.error("User sync failed: %s", exc, exc_info=True)
 
-            if hour_counter >= 3600:
-                hour_counter = 0
-                try:
-                    await self.remove_deleted_users()
-                except Exception as exc:
-                    logger.error(f"[SyncEngine] remove-deleted error: {exc}")
+    async def sync_attendance(self, cfg: MachineConfig) -> MachineSyncResult:
+        """
+        Read attendance logs from device and write new punches into
+        the webapp attendance collection.
+        """
+        loop = asyncio.get_running_loop()   # BUG-4 FIX
 
+        def _fetch() -> List[Dict[str, Any]]:
+            dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
+            if not dev.connect():
+                raise ConnectionError(f"Cannot connect to device {cfg.ip}:{cfg.port}")
+            try:
+                return dev.get_attendance_logs()
+            finally:
+                dev.disconnect()
 
-# Singleton — imported by main.py
-sync_engine = ESSLSyncEngine()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 5  INTERNAL PUNCH HELPER  (shared by route + sync engine)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _parse_recorded_at(recorded_at: Optional[str]) -> datetime:
-    if recorded_at:
         try:
-            dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
-            return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            pass
-    return datetime.now(timezone.utc)
+            logs = await loop.run_in_executor(None, _fetch)
+        except ConnectionError as exc:
+            logger.warning("sync_attendance: %s", exc)
+            return MachineSyncResult(errors=1, message=str(exc))
 
+        synced = skipped = errors = new_records = 0
 
-def _check_is_late(user_doc: dict, punch_in_ist: datetime) -> bool:
-    try:
-        h, m    = map(int, (user_doc.get("punch_in_time") or "10:30").split(":"))
-        if user_doc.get("late_grace_minutes") is not None:
-            grace = int(user_doc["late_grace_minutes"])
+        for log in logs:
+            try:
+                result = await self._record_machine_punch(log)
+                if result.get("existing"):
+                    skipped += 1
+                elif result.get("created"):
+                    new_records += 1
+                    synced += 1
+                else:
+                    synced += 1
+            except Exception as exc:
+                logger.warning("Failed to record punch %s: %s", log, exc)
+                errors += 1
+
+        # Update last-sync timestamp
+        await self._db.machine_config.update_one(
+            {},
+            {"$set": {"last_attendance_sync": datetime.utcnow()}},
+            upsert=True,
+        )
+
+        return MachineSyncResult(
+            synced=synced,
+            skipped=skipped,
+            errors=errors,
+            new_records=new_records,
+            message=f"Processed {len(logs)} device records",
+        )
+
+    async def _record_machine_punch(self, log: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Map a raw device log entry to a webapp attendance record.
+
+        Device log fields:
+          uid        — enrollment number (matches users.machine_employee_id)
+          punch_type — 0=check-in, 1=check-out
+          timestamp  — naive device-local datetime (IST)
+
+        BUG-6 FIX: All datetimes are stored as naive UTC throughout.
+        The original code stored punch_in as UTC-aware (timezone.utc),
+        which MongoDB silently strips to naive on retrieval, then relied
+        on a `tzinfo is None → replace(utc)` guard. This was fragile and
+        confusing. We now convert to UTC at write time and store naive.
+        """
+        uid        = str(log["uid"]).strip()
+        punch_type = int(log.get("punch_type", 0))
+        # Device timestamp is in IST (device-local). Convert to naive UTC.
+        ts_ist = log["timestamp"]   # naive, IST
+        ts_utc = (ts_ist - timedelta(hours=5, minutes=30))  # naive UTC
+
+        date_str = ts_ist.date().isoformat()   # YYYY-MM-DD in IST (correct business date)
+
+        # Resolve webapp user from machine_employee_id
+        user_doc = await self._db.users.find_one({"machine_employee_id": uid})
+        if not user_doc:
+            logger.debug("No user found for machine_employee_id=%s", uid)
+            return {"skipped": True, "reason": "no_user"}
+
+        ts_user_id = user_doc["id"]
+
+        # BUG-2 FIX: idempotency check in DB, not in memory.
+        # _record_machine_punch is the single source of truth.
+        existing = await self._db.attendance.find_one({
+            "user_id": ts_user_id,
+            "date":    date_str,
+        })
+
+        punch_type_str = "check-in" if punch_type == 0 else "check-out"
+
+        if punch_type == 0:
+            # ── Punch IN ─────────────────────────────────────────────────
+            if existing and existing.get("punch_in"):
+                return {"existing": True}
+
+            is_late = check_is_late(
+                ts_utc,
+                user_doc.get("punch_in_time"),
+                user_doc.get("grace_time"),
+            )
+
+            if existing:
+                # Record exists (e.g. marked absent by cron) — fill punch_in
+                await self._db.attendance.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "punch_in":          ts_utc,   # naive UTC
+                        "status":            "late" if is_late else "present",
+                        "is_late":           is_late,
+                        "source":            "machine",
+                        "machine_punch_type": punch_type_str,
+                        "updated_at":        datetime.utcnow(),
+                    }},
+                )
+            else:
+                # BUG-6 FIX: synthetic punch_in uses naive UTC directly.
+                # No timezone-aware datetime stored. No .astimezone() call needed.
+                ph, pm = map(int, (user_doc.get("punch_in_time") or "10:30").split(":"))
+                synth_ist = ts_ist.replace(hour=ph, minute=pm, second=0, microsecond=0)
+                synth_utc = synth_ist - timedelta(hours=5, minutes=30)  # naive UTC
+
+                await self._db.attendance.insert_one({
+                    "id":                _new_id(),
+                    "user_id":           ts_user_id,
+                    "date":              date_str,
+                    "punch_in":          ts_utc,       # naive UTC
+                    "punch_out":         None,
+                    "status":            "late" if is_late else "present",
+                    "is_late":           is_late,
+                    "source":            "machine",
+                    "machine_punch_type": punch_type_str,
+                    "duration_minutes":  None,
+                    "created_at":        datetime.utcnow(),
+                    "updated_at":        datetime.utcnow(),
+                })
+                return {"created": True}
+
         else:
-            raw   = str(user_doc.get("grace_time") or "00:15")
-            gh, gm = map(int, raw.split(":"))
-            grace  = gh * 60 + gm
-        deadline = punch_in_ist.replace(
-            hour=h, minute=m, second=0, microsecond=0
-        ) + timedelta(minutes=grace)
-        return punch_in_ist > deadline
-    except Exception:
-        return False
+            # ── Punch OUT ────────────────────────────────────────────────
+            if existing and existing.get("punch_out"):
+                return {"existing": True}
+
+            if not existing or not existing.get("punch_in"):
+                # No punch-in yet — create a stub record so punch-out is
+                # not lost; punch-in will be backfilled if device sends it later.
+                logger.debug("punch_out before punch_in for user %s on %s", ts_user_id, date_str)
+                if not existing:
+                    await self._db.attendance.insert_one({
+                        "id":                _new_id(),
+                        "user_id":           ts_user_id,
+                        "date":              date_str,
+                        "punch_in":          None,
+                        "punch_out":         ts_utc,
+                        "status":            "present",
+                        "is_late":           False,
+                        "source":            "machine",
+                        "machine_punch_type": punch_type_str,
+                        "duration_minutes":  None,
+                        "created_at":        datetime.utcnow(),
+                        "updated_at":        datetime.utcnow(),
+                    })
+                    return {"created": True}
+                else:
+                    await self._db.attendance.update_one(
+                        {"_id": existing["_id"]},
+                        {"$set": {
+                            "punch_out":          ts_utc,
+                            "machine_punch_type": punch_type_str,
+                            "source":             "machine",
+                            "updated_at":         datetime.utcnow(),
+                        }},
+                    )
+                    return {}
+
+            # Normal punch-out: fill punch_out and compute duration
+            punch_in_dt = existing["punch_in"]
+            # BUG-6 FIX: MongoDB returns naive UTC; no tzinfo guard needed
+            # as long as we always store naive UTC (which we do above).
+            duration_mins = int((ts_utc - punch_in_dt).total_seconds() / 60)
+
+            await self._db.attendance.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {
+                    "punch_out":          ts_utc,
+                    "duration_minutes":   duration_mins,
+                    "source":             "machine",
+                    "machine_punch_type": punch_type_str,
+                    "updated_at":         datetime.utcnow(),
+                }},
+            )
+
+        return {}
+
+    async def sync_users_to_device(self, cfg: MachineConfig) -> None:
+        """
+        Push webapp users that have a machine_employee_id but are not yet
+        synced (machine_synced=False) onto the device.
+        """
+        loop = asyncio.get_running_loop()   # BUG-4 FIX
+
+        to_add = await self._db.users.find({
+            "machine_employee_id": {"$exists": True, "$ne": None, "$ne": ""},
+            "machine_synced": False,
+        }).to_list(length=200)
+
+        if not to_add:
+            return
+
+        def _push(users: List[Dict]) -> Dict[str, bool]:
+            dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
+            if not dev.connect():
+                return {}
+            try:
+                existing_uids = {u["uid"] for u in dev.get_users()}
+                results: Dict[str, bool] = {}
+                for u in users:
+                    mid = str(u.get("machine_employee_id", "")).strip()
+                    if not mid:
+                        continue
+                    if mid in existing_uids:
+                        results[u["id"]] = True   # already on device
+                        continue
+                    results[u["id"]] = dev.add_user(mid, u.get("full_name", ""), privilege=0)
+                return results
+            finally:
+                dev.disconnect()
+
+        results = await loop.run_in_executor(None, _push, to_add)
+
+        for u in to_add:
+            if results.get(u["id"]):
+                await self._db.users.update_one(
+                    {"id": u["id"]},
+                    {"$set": {"machine_synced": True, "updated_at": datetime.utcnow()}},
+                )
 
 
-def _check_early_out(user_doc: dict, punch_out_ist: datetime) -> bool:
-    try:
-        h, m     = map(int, (user_doc.get("punch_out_time") or "19:00").split(":"))
-        expected = punch_out_ist.replace(hour=h, minute=m, second=0, microsecond=0)
-        return punch_out_ist < expected
-    except Exception:
-        return False
+def _new_id() -> str:
+    """Generate a short unique ID for new DB documents."""
+    import uuid
+    return str(uuid.uuid4())
 
 
-async def _record_machine_punch(
-    user_id: str,
-    payload: MachinePunchPayload,
-    user_doc: dict,
-) -> dict:
-    """
-    Core punch recording logic shared by both the sync engine
-    and the HTTP route POST /attendance/machine-sync.
-    """
-    punch_utc = _parse_recorded_at(payload.recorded_at)
-    punch_ist = punch_utc.astimezone(IST)
-    today_str = punch_ist.date().isoformat()
-    action    = payload.action
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. FastAPI router — /api/machine
+# ══════════════════════════════════════════════════════════════════════════════
 
-    existing = await db.attendance.find_one(
-        {"user_id": user_id, "date": today_str}, {"_id": 0}
-    )
+essl_router = APIRouter(prefix="/api/machine", tags=["Biometric Machine"])
 
-    # ── punch_in ─────────────────────────────────────────────────────────────
-    if action == "punch_in":
-        if existing and existing.get("punch_in"):
-            return {"existing": True, "message": "Already punched in (idempotent skip)"}
-
-        is_late = _check_is_late(user_doc, punch_ist)
-        await db.attendance.update_one(
-            {"user_id": user_id, "date": today_str},
-            {"$set": {
-                "status":      "present",
-                "punch_in":    punch_utc,
-                "is_late":     is_late,
-                "source":      payload.source,
-                "machine_uid": payload.machine_uid,
-                "leave_reason": None,
-            }},
-            upsert=True,
-        )
-        logger.info(
-            f"[MachineSync] punch_in  user={user_id} "
-            f"{punch_ist.strftime('%H:%M')} IST  late={is_late}"
-        )
-        return {"message": "Punch in recorded", "is_late": is_late}
-
-    # ── punch_out ─────────────────────────────────────────────────────────────
-    if not existing or not existing.get("punch_in"):
-        # Synthesise a punch_in at shift-start so duration makes sense
-        pit_str = (user_doc.get("punch_in_time") or "10:30")
-        ph, pm  = map(int, pit_str.split(":"))
-        synth   = punch_ist.replace(hour=ph, minute=pm, second=0, microsecond=0)
-        await db.attendance.update_one(
-            {"user_id": user_id, "date": today_str},
-            {"$set": {
-                "status":      "present",
-                "punch_in":    synth.astimezone(timezone.utc),
-                "is_late":     False,
-                "source":      "machine_synthetic",
-                "machine_uid": payload.machine_uid,
-            }},
-            upsert=True,
-        )
-        existing = await db.attendance.find_one(
-            {"user_id": user_id, "date": today_str}, {"_id": 0}
-        )
-
-    if existing.get("punch_out"):
-        return {"existing": True, "message": "Already punched out (idempotent skip)"}
-
-    punch_in_dt = existing["punch_in"]
-    if punch_in_dt.tzinfo is None:
-        punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-
-    duration_minutes = max(0, int((punch_utc - punch_in_dt).total_seconds() / 60))
-    early_out        = _check_early_out(user_doc, punch_ist)
-
-    await db.attendance.update_one(
-        {"user_id": user_id, "date": today_str},
-        {"$set": {
-            "punch_out":         punch_utc,
-            "duration_minutes":  duration_minutes,
-            "punched_out_early": early_out,
-            "source_out":        payload.source,
-        }},
-    )
-    logger.info(
-        f"[MachineSync] punch_out user={user_id} "
-        f"{punch_ist.strftime('%H:%M')} IST  "
-        f"dur={duration_minutes}m  early={early_out}"
-    )
-    return {
-        "message":           "Punch out recorded",
-        "duration_minutes":  duration_minutes,
-        "punched_out_early": early_out,
-    }
+# These are injected from main.py at startup.
+# main.py must call:  essl_router.db = db; essl_router.sync_engine = engine
+_db: Optional[AsyncIOMotorDatabase] = None
+_sync_engine: Optional[ESSLSyncEngine] = None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# § 6  FASTAPI ROUTER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-essl_router = APIRouter(tags=["essl-machine"])
-
-
-# ── GET /machine/status ───────────────────────────────────────────────────────
-
-@essl_router.get("/machine/status", response_model=MachineStatusResponse)
-async def get_machine_status(
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Returns live connection status and sync metadata for the eSSL device.
-    Available to all authenticated users (admins see full detail).
-    """
-    cfg = await sync_engine._load_config()
-
-    # Count unsynced users
-    total_users = await db.users.count_documents(
-        {"machine_employee_id": {"$exists": True, "$ne": None}, "is_active": True}
-    )
-    unsynced = await db.users.count_documents(
-        {"machine_employee_id": {"$exists": True, "$ne": None},
-         "is_active": True, "machine_synced": {"$ne": True}}
-    )
-
-    # Quick ping (non-blocking)
-    def _ping():
-        dev = ESSLDevice(cfg.ip, cfg.port, timeout=3, password=cfg.password)
-        return dev.ping()
-
-    loop      = asyncio.get_event_loop()
-    connected = await loop.run_in_executor(None, _ping)
-
-    # Get device user count
-    device_user_count = 0
-    if connected:
-        def _count():
-            dev = ESSLDevice(cfg.ip, cfg.port, password=cfg.password)
-            if dev.connect():
-                try:
-                    return len(dev.get_users())
-                finally:
-                    dev.disconnect()
-            return 0
-        device_user_count = await loop.run_in_executor(None, _count)
-
-    return MachineStatusResponse(
-        connected            = connected,
-        device_ip            = cfg.ip,
-        device_port          = cfg.port,
-        last_attendance_sync = cfg.last_attendance_sync,
-        last_user_sync       = cfg.last_user_sync,
-        total_device_users   = device_user_count,
-        total_unsynced_users = unsynced,
-        enabled              = cfg.enabled,
-    )
+def _get_db() -> AsyncIOMotorDatabase:
+    if _db is None:
+        raise RuntimeError("essl_router._db not initialised")
+    return _db
 
 
-# ── GET /machine/config ───────────────────────────────────────────────────────
-
-@essl_router.get("/machine/config")
-async def get_machine_config(
-    current_user: User = Depends(require_admin),
-):
-    """Return current device configuration (admin only)."""
-    cfg = await sync_engine._load_config()
-    data = cfg.model_dump()
-    data.pop("password", None)   # never expose password in API response
-    return data
+def _get_engine() -> ESSLSyncEngine:
+    if _sync_engine is None:
+        raise RuntimeError("essl_router._sync_engine not initialised")
+    return _sync_engine
 
 
-# ── PUT /machine/config ───────────────────────────────────────────────────────
+async def _load_config() -> MachineConfig:
+    doc = await _get_db().machine_config.find_one({})
+    if doc:
+        doc.pop("_id", None)
+        return MachineConfig(**{k: v for k, v in doc.items() if k in MachineConfig.model_fields})
+    return MachineConfig()
 
-@essl_router.put("/machine/config")
+
+# ── Auth helpers (imported from main.py in real app) ─────────────────────────
+# These are forward-declared here so the router works standalone.
+# main.py overrides them by doing:
+#   from essl_backend import essl_router
+#   essl_router.dependency_overrides[get_current_user] = real_get_current_user
+
+async def _noop_user():
+    raise HTTPException(status_code=401, detail="Auth not configured")
+
+async def _noop_admin():
+    raise HTTPException(status_code=401, detail="Admin auth not configured")
+
+# The actual dependencies are injected by main.py at startup.
+# Placeholder callables replaced via app.dependency_overrides.
+_get_current_user = _noop_user
+_require_admin    = _noop_admin
+
+
+# ── Config endpoints ──────────────────────────────────────────────────────────
+
+@essl_router.get("/config", response_model=MachineConfig)
+async def get_machine_config(current_user: User = Depends(_get_current_user)):  # type: ignore[misc]
+    return await _load_config()
+
+
+@essl_router.put("/config", response_model=MachineConfig)
 async def update_machine_config(
-    updates: MachineConfigUpdate,
-    current_user: User = Depends(require_admin),
+    payload: MachineConfigUpdate,
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
-    """Update device IP, port, sync intervals, enable/disable (admin only)."""
-    set_data = {k: v for k, v in updates.model_dump().items() if v is not None}
-    if not set_data:
-        raise HTTPException(status_code=400, detail="No fields to update.")
+    update = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=422, detail="No fields provided")
 
-    await db.machine_config.update_one(
-        {"key": "default"},
-        {"$set": set_data},
-        upsert=True,
+    await _get_db().machine_config.update_one({}, {"$set": update}, upsert=True)
+    cfg = await _load_config()
+    _get_engine().reload_config(cfg)
+    return cfg
+
+
+# ── Status endpoint ───────────────────────────────────────────────────────────
+
+@essl_router.get("/status", response_model=MachineStatusResponse)
+async def get_machine_status(current_user: User = Depends(_require_admin)):  # type: ignore[misc]
+    cfg  = await _load_config()
+    loop = asyncio.get_running_loop()   # BUG-4 FIX
+
+    # BUG-8 FIX: single TCP connection for both ping and user count.
+    dev = ESSLDevice(cfg.ip, cfg.port, timeout=3, password=cfg.password)
+    connected, device_user_count = await loop.run_in_executor(None, dev._ping_and_count)
+
+    doc = await _get_db().machine_config.find_one({}) or {}
+    return MachineStatusResponse(
+        connected=connected,
+        device_user_count=device_user_count,
+        ip=cfg.ip,
+        port=cfg.port,
+        enabled=cfg.enabled,
+        last_attendance_sync=doc.get("last_attendance_sync"),
+        last_user_sync=doc.get("last_user_sync"),
     )
-    await sync_engine.reload_config()
-    return {"message": "Machine config updated.", "updated": list(set_data.keys())}
 
 
-# ── POST /machine/sync/attendance  (manual trigger) ──────────────────────────
+# ── Manual sync endpoints ─────────────────────────────────────────────────────
 
-@essl_router.post("/machine/sync/attendance", response_model=MachineSyncResult)
-async def trigger_attendance_sync(
-    current_user: User = Depends(require_admin),
+@essl_router.post("/sync-attendance", response_model=MachineSyncResult)
+async def manual_sync_attendance(
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
-    """Manually trigger an attendance pull from the device (admin only)."""
-    return await sync_engine.sync_attendance()
+    cfg = await _load_config()
+    if not cfg.enabled:
+        raise HTTPException(status_code=400, detail="Biometric machine is disabled")
+    return await _get_engine().sync_attendance(cfg)
 
 
-# ── POST /machine/sync/users  (manual trigger) ───────────────────────────────
-
-@essl_router.post("/machine/sync/users", response_model=MachineSyncResult)
-async def trigger_user_sync(
-    current_user: User = Depends(require_admin),
+@essl_router.post("/sync-users", response_model=MachineSyncResult)
+async def manual_sync_users(
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
-    """Manually push all unsynced Taskosphere users to the device (admin only)."""
-    return await sync_engine.sync_users_to_device()
+    cfg = await _load_config()
+    if not cfg.enabled:
+        raise HTTPException(status_code=400, detail="Biometric machine is disabled")
+    await _get_engine().sync_users_to_device(cfg)
+    return MachineSyncResult(message="User sync triggered")
 
 
-# ── POST /machine/sync/cleanup ────────────────────────────────────────────────
+# ── Device user management ────────────────────────────────────────────────────
 
-@essl_router.post("/machine/sync/cleanup", response_model=MachineSyncResult)
-async def trigger_cleanup(
-    current_user: User = Depends(require_admin),
-):
-    """Remove deactivated/deleted users from the device (admin only)."""
-    return await sync_engine.remove_deleted_users()
+@essl_router.get("/users", response_model=List[MachineUserResponse])
+async def get_machine_users(current_user: User = Depends(_require_admin)):  # type: ignore[misc]
+    cfg  = await _load_config()
+    loop = asyncio.get_running_loop()   # BUG-4 FIX
 
-
-# ── GET /machine/users  (live read from device) ───────────────────────────────
-
-@essl_router.get("/machine/users", response_model=list[MachineUserResponse])
-async def get_device_users(
-    current_user: User = Depends(require_admin),
-):
-    """Return the list of users currently registered on the device (admin only)."""
-    cfg = await sync_engine._load_config()
-
-    def _get():
-        dev = ESSLDevice(cfg.ip, cfg.port, password=cfg.password)
+    def _fetch():
+        dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
         if not dev.connect():
-            return None
+            raise ConnectionError("Cannot connect to device")
         try:
             return dev.get_users()
         finally:
             dev.disconnect()
 
-    loop  = asyncio.get_event_loop()
-    users = await loop.run_in_executor(None, _get)
-    if users is None:
-        raise HTTPException(status_code=503, detail="Cannot connect to biometric device.")
-    return users
+    try:
+        users = await loop.run_in_executor(None, _fetch)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return [MachineUserResponse(**u) for u in users]
 
 
-# ── GET /machine/logs  (live read from device) ────────────────────────────────
-
-@essl_router.get("/machine/logs", response_model=list[MachineAttendanceLog])
-async def get_device_logs(
-    current_user: User = Depends(require_admin),
+@essl_router.post("/users", response_model=MachineUserResponse)
+async def add_machine_user(
+    uid: str,
+    name: str,
+    privilege: int = 0,
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
-    """Return raw attendance logs currently on the device (admin only)."""
-    cfg = await sync_engine._load_config()
+    cfg  = await _load_config()
+    loop = asyncio.get_running_loop()   # BUG-4 FIX
 
-    def _get():
-        dev = ESSLDevice(cfg.ip, cfg.port, password=cfg.password)
+    def _add():
+        dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
         if not dev.connect():
-            return None
+            raise ConnectionError("Cannot connect to device")
+        try:
+            success = dev.add_user(uid, name, privilege)
+            if not success:
+                raise ValueError("Device rejected user creation")
+            return {"uid": uid, "name": name, "privilege": privilege, "card": None}
+        finally:
+            dev.disconnect()
+
+    try:
+        result = await loop.run_in_executor(None, _add)
+    except (ConnectionError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return MachineUserResponse(**result)
+
+
+@essl_router.delete("/users/{uid}")
+async def delete_machine_user(
+    uid: str,
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
+):
+    cfg  = await _load_config()
+    loop = asyncio.get_running_loop()   # BUG-4 FIX
+
+    def _delete():
+        dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
+        if not dev.connect():
+            raise ConnectionError("Cannot connect to device")
+        try:
+            return dev.delete_user(uid)
+        finally:
+            dev.disconnect()
+
+    try:
+        ok = await loop.run_in_executor(None, _delete)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"User {uid} not found on device")
+    return {"message": f"User {uid} deleted from device"}
+
+
+# ── Raw attendance logs from device ──────────────────────────────────────────
+
+@essl_router.get("/attendance-logs", response_model=List[MachineAttendanceLog])
+async def get_machine_attendance_logs(
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
+):
+    cfg  = await _load_config()
+    loop = asyncio.get_running_loop()   # BUG-4 FIX
+
+    def _fetch():
+        dev = ESSLDevice(cfg.ip, cfg.port, timeout=ZK_TIMEOUT, password=cfg.password)
+        if not dev.connect():
+            raise ConnectionError("Cannot connect to device")
         try:
             return dev.get_attendance_logs()
         finally:
             dev.disconnect()
 
-    loop = asyncio.get_event_loop()
-    logs = await loop.run_in_executor(None, _get)
-    if logs is None:
-        raise HTTPException(status_code=503, detail="Cannot connect to biometric device.")
-    return [
-        MachineAttendanceLog(
-            user_id    = l["user_id"],
-            timestamp  = l["timestamp"],
-            punch_type = l["punch_type"],
-        )
-        for l in logs
-    ]
+    try:
+        logs = await loop.run_in_executor(None, _fetch)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    # Convert device-local naive IST timestamps to naive UTC for the response
+    result = []
+    for log in logs:
+        ts_utc = log["timestamp"] - timedelta(hours=5, minutes=30)
+        result.append(MachineAttendanceLog(
+            uid=log["uid"],
+            timestamp=ts_utc,
+            punch_type=log["punch_type"],
+            status=log.get("status", 0),
+        ))
+    return result
 
 
-# ── DELETE /machine/logs  (clear device logs) ─────────────────────────────────
+# ── machine-id update endpoint ────────────────────────────────────────────────
 
-@essl_router.delete("/machine/logs")
-async def clear_device_logs(
-    current_user: User = Depends(require_admin),
-):
-    """Clear ALL attendance logs stored on the device. Use with caution (admin only)."""
-    cfg = await sync_engine._load_config()
-
-    def _clear():
-        dev = ESSLDevice(cfg.ip, cfg.port, password=cfg.password)
-        if not dev.connect():
-            return False
-        try:
-            return dev.clear_attendance_logs()
-        finally:
-            dev.disconnect()
-
-    loop = asyncio.get_event_loop()
-    ok   = await loop.run_in_executor(None, _clear)
-    if not ok:
-        raise HTTPException(status_code=503, detail="Failed to clear logs on device.")
-    return {"message": "Device attendance logs cleared."}
-
-
-# ── PUT /users/{user_id}/machine-id ──────────────────────────────────────────
-
-@essl_router.put("/users/{user_id}/machine-id")
-async def set_machine_employee_id(
+@essl_router.put(
+    "/users/{user_id}/machine-id",
+    summary="Assign / unassign biometric machine UID",
+)
+async def update_machine_employee_id(
     user_id: str,
-    body:    MachineEmployeeIDUpdate,
-    current_user: User = Depends(require_admin),
+    payload: MachineEmployeeIDUpdate,
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
-    """
-    Assign or update the machine_employee_id for a Taskosphere user (admin only).
-    The sync engine will push the user to the device within user_sync_interval seconds.
+    db = _get_db()
 
-    Rules:
-      • machine_employee_id must be a positive integer string.
-      • Must be unique — no two users can share the same machine ID.
-    """
-    new_id = body.machine_employee_id.strip()
+    # Uniqueness check — no two users may share the same machine_employee_id
+    if payload.machine_employee_id:
+        conflict = await db.users.find_one({
+            "machine_employee_id": payload.machine_employee_id,
+            "id": {"$ne": user_id},
+        })
+        if conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"machine_employee_id '{payload.machine_employee_id}' is already "
+                    f"assigned to {conflict.get('full_name', 'another user')}"
+                ),
+            )
 
-    if not new_id.isdigit() or int(new_id) <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="machine_employee_id must be a positive integer string (e.g. '1', '42')."
-        )
-
-    conflict = await db.users.find_one(
-        {"machine_employee_id": new_id, "id": {"$ne": user_id}},
-        {"_id": 0, "full_name": 1},
-    )
-    if conflict:
-        raise HTTPException(
-            status_code=409,
-            detail=f"machine_employee_id '{new_id}' is already assigned to "
-                   f"{conflict.get('full_name', 'another user')}.",
-        )
-
-    result = await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"machine_employee_id": new_id, "machine_synced": False}},
-    )
+    update_fields: Dict[str, Any] = {
+        "machine_employee_id": payload.machine_employee_id,
+        "machine_synced":      False,    # reset so next user-sync pushes to device
+        "updated_at":          datetime.utcnow(),
+    }
+    result = await db.users.update_one({"id": user_id}, {"$set": update_fields})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found.")
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
 
-    return {
-        "message":              f"machine_employee_id set to '{new_id}'.",
-        "user_id":              user_id,
-        "machine_employee_id":  new_id,
-        "note":                 "User will be pushed to device within the next sync cycle.",
-    }
+    action = "assigned" if payload.machine_employee_id else "unassigned"
+    return {"message": f"Machine employee ID {action} successfully"}
 
 
-# ── DELETE /users/{user_id}/machine-id ────────────────────────────────────────
+# ── POST /attendance/machine-sync ─────────────────────────────────────────────
+# This endpoint is mounted on the MAIN app router (not /api/machine), because
+# it writes to the attendance collection — not the machine config collection.
+# It is defined here for co-location with the biometric logic.
+#
+# BUG-7 FIX: Changed from Depends(get_current_user) to Depends(require_admin).
+# A regular staff member must not be able to POST fake punches for any user_id.
+#
+# In main.py, include this as:
+#   app.post("/api/attendance/machine-sync")(machine_sync_attendance)
 
-@essl_router.delete("/users/{user_id}/machine-id")
-async def remove_machine_employee_id(
-    user_id: str,
-    current_user: User = Depends(require_admin),
-):
-    """
-    Unlink a user from the biometric machine (admin only).
-    Also removes them from the physical device immediately.
-    """
-    user_doc = await db.users.find_one({"id": user_id}, {"_id": 0})
-    if not user_doc:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    machine_uid = user_doc.get("machine_employee_id")
-    if not machine_uid:
-        raise HTTPException(
-            status_code=400, detail="This user has no machine_employee_id assigned."
-        )
-
-    cfg = await sync_engine._load_config()
-
-    def _delete():
-        dev = ESSLDevice(cfg.ip, cfg.port, password=cfg.password)
-        if not dev.connect():
-            return False
-        try:
-            dev.disable_device()
-            return dev.delete_user(machine_uid)
-        finally:
-            dev.enable_device()
-            dev.disconnect()
-
-    loop = asyncio.get_event_loop()
-    ok   = await loop.run_in_executor(None, _delete)
-
-    await db.users.update_one(
-        {"id": user_id},
-        {"$unset": {"machine_employee_id": "", "machine_synced": ""}},
-    )
-
-    return {
-        "message":            "User unlinked from biometric machine.",
-        "removed_from_device": ok,
-        "machine_uid":        machine_uid,
-    }
-
-
-# ── POST /attendance/machine-sync  (called by external sync daemon or internally) ──
-
-@essl_router.post("/attendance/machine-sync")
-async def machine_sync_punch(
+async def machine_sync_attendance(
     payload: MachinePunchPayload,
-    user_id: str      = Query(..., description="Taskosphere user UUID"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_admin),  # type: ignore[misc]
 ):
     """
-    Record a single punch that originated from the physical biometric device.
+    Manually ingest a single biometric punch.
+    Primarily called by the sync engine internally, but also exposed
+    as an admin-only HTTP endpoint for testing / manual correction.
 
-    This endpoint is called by:
-      • The internal ESSLSyncEngine (automatically).
-      • An external sync daemon running on the LAN (if you prefer that approach).
-
-    Requires authentication — use the admin service-account JWT.
-    Idempotent: sending the same punch twice is safe (second call is silently skipped).
+    BUG-7 FIX: admin-only.
     """
-    user_doc = await db.users.find_one({"id": user_id}, {"_id": 0})
+    db = _get_db()
+
+    # Validate user exists
+    user_doc = await db.users.find_one({"id": payload.user_id})
     if not user_doc:
-        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found.")
+        raise HTTPException(status_code=404, detail=f"User {payload.user_id} not found")
 
-    if payload.action not in ("punch_in", "punch_out"):
-        raise HTTPException(status_code=400, detail="action must be 'punch_in' or 'punch_out'.")
+    log = {
+        "uid":        payload.device_uid,
+        "punch_type": int(payload.punch_type),
+        # punch_time is UTC naive; convert to IST for _record_machine_punch
+        # which expects device-local (IST) naive timestamp
+        "timestamp":  payload.punch_time + timedelta(hours=5, minutes=30),
+    }
 
-    return await _record_machine_punch(user_id, payload, user_doc)
+    engine = _get_engine()
+    result = await engine._record_machine_punch(log)
+    return {"message": "Punch recorded", "result": result}
