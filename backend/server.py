@@ -1,55 +1,104 @@
+# ─────────────────────────────────────────────
+# Standard Library
+# ─────────────────────────────────────────────
 import os
 import re
 import csv
 import uuid
 import logging
-import pytz
 import asyncio
 import calendar
-import requests
-import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from .essl_backend import essl_router, _sync_engine as sync_engine
-from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
+
+# ─────────────────────────────────────────────
+# Third Party
+# ─────────────────────────────────────────────
+import pytz
+import requests
+import pandas as pd
+from zoneinfo import ZoneInfo
 from dateutil import parser
-logger = logging.getLogger(__name__)
+from dotenv import load_dotenv
+from bson import ObjectId
+
 # FastAPI
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
+from fastapi import (
+    FastAPI, APIRouter, Depends, HTTPException,
+    status, BackgroundTasks, UploadFile, File,
+    Query, Request
+)
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
+
+# Auth
 from passlib.context import CryptContext
+
 # Validation
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
-from bson import ObjectId
-from dotenv import load_dotenv
+from pydantic import (
+    BaseModel, EmailStr, Field,
+    ConfigDict, field_validator, ValidationError
+)
+
+# ─────────────────────────────────────────────
+# Environment
+# ─────────────────────────────────────────────
+load_dotenv()
+
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────
 # Backend Modules
+# ─────────────────────────────────────────────
 import backend.models as models
+
 from backend.models import (
-    Token, User, UserPermissions,
-    Todo, TodoCreate, Task, TaskCreate,
-    Client, ClientCreate,
-    DueDate, DueDateCreate,
+    Token,
+    User,
+    UserPermissions,
+    Todo,
+    TodoCreate,
+    Task,
+    TaskCreate,
+    Client,
+    ClientCreate,
+    DueDate,
+    DueDateCreate,
     DSCCreate,
-    Document, DocumentCreate,
+    Document,
+    DocumentCreate,
     DashboardStats,
     MachinePunchPayload,
-    MachineConfig, MachineConfigUpdate,
-    MachineStatusResponse, MachineUserResponse,
-    MachineAttendanceLog, MachineSyncResult,
+    MachineConfig,
+    MachineConfigUpdate,
+    MachineStatusResponse,
+    MachineUserResponse,
+    MachineAttendanceLog,
+    MachineSyncResult,
     MachineEmployeeIDUpdate,
 )
 
-# ── Compatibility shims ── names used in main.py route logic but not in models.py
+# ─────────────────────────────────────────────
+# eSSL biometric backend
+# ─────────────────────────────────────────────
+from .essl_backend import essl_router, _sync_engine as sync_engine
+
+
+# ─────────────────────────────────────────────
+# Compatibility Shim
+# Used in login route but not stored in models
+# ─────────────────────────────────────────────
 
 class UserLogin(BaseModel):
-    email: str
+    email: EmailStr
     password: str
-
 class UserCreate(BaseModel):
     email: str
     password: str
