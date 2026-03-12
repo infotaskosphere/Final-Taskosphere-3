@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from models import (
+from .models import (
     MachineConfig,
     MachineConfigUpdate,
     MachineStatusResponse,
