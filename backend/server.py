@@ -460,78 +460,55 @@ scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 scheduler.add_job(lambda: asyncio.run(fetch_indian_holidays_task()), 'cron', day=1, hour=0, minute=5)
 
 
-
 @app.on_event("startup")
 async def create_indexes():
+
+    # Tasks
     await db.tasks.create_index("assigned_to")
     await db.tasks.create_index("created_by")
     await db.tasks.create_index("due_date")
+    await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
+    await db.tasks.create_index("created_at")
+    await db.tasks.create_index("completed_at")
+
+    # Users
     await db.users.create_index("email")
+    await db.users.create_index("machine_employee_id", sparse=True)
+
+    # Staff activity
     await db.staff_activity.create_index("user_id")
     await db.staff_activity.create_index("timestamp")
     await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+
+    # Due dates
     await db.due_dates.create_index("department")
-    await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
-    await db.tasks.create_index("created_at")
+
+    # Clients
     await db.clients.create_index("assigned_to")
+    await db.clients.create_index([("created_by", 1), ("company_name", 1)], unique=True)
+
+    # DSC register
     await db.dsc_register.create_index("expiry_date")
+
+    # Todos
     await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+    await db.todos.create_index("is_completed")
+
+    # Attendance
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
+    await db.attendance.create_index([("user_id", 1), ("date", 1)], unique=True)
+    await db.attendance.create_index("date")
+
+    # Notifications
     await db.notifications.create_index("user_id")
     await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
     await db.notifications.create_index("created_at")
-    # Attendance
-    await db.attendance.create_index(
-        [("user_id", 1), ("date", 1)],
-        unique=True
-    )
 
-    await db.attendance.create_index("date", name="attendance_date_index")
+    # Holidays
+    await db.holidays.create_index("date", unique=True)
 
-# Clients
-    await db.clients.create_index(
-        [("created_by", 1), ("company_name", 1)],
-        name="client_creator_company_unique",
-        unique=True
-    )
-
-# Holidays
-    await db.holidays.create_index(
-        "date",
-        name="holiday_date_unique",
-        unique=True
-    )
-
-# Machine config
-    await db.machine_config.create_index(
-        "key",
-        name="machine_config_key_unique",
-        unique=True
-    )
-
-# Users
-    await db.users.create_index(
-        "machine_employee_id",
-        name="machine_employee_id_index",
-        sparse=True
-    )
-
-# Tasks
-    await db.tasks.create_index(
-        [("status", 1), ("assigned_to", 1)],
-        name="task_status_assigned_index"
-    )
-
-    await db.tasks.create_index(
-        "completed_at",
-        name="task_completed_at_index"
-    )
-
-# Todos
-    await db.todos.create_index(
-        "is_completed",
-        name="todo_completed_index"
-    )
+    # Machine config
+    await db.machine_config.create_index("key", unique=True)
 
 # ROUTER
 api_router = APIRouter(prefix="/api")
