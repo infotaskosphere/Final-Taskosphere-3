@@ -483,7 +483,6 @@ async def create_indexes():
     # Attendance
     await db.attendance.create_index(
         [("user_id", 1), ("date", 1)],
-        name="attendance_user_date_unique",
         unique=True
     )
 
