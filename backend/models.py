@@ -1,17 +1,3 @@
-"""
-models.py — Taskosphere Pydantic models
-All request/response schemas used across main.py and essl_backend.py.
-
-Fixes applied vs original:
-  - Removed entire duplicate machine-model block (was silently overriding first definitions)
-  - MachineConfig.enabled default set to False (safer; admin must explicitly enable)
-  - MachineConfig.sync_interval default corrected to 300 (seconds)
-  - All Optional fields use explicit `= None` default (Pydantic v2 compatible)
-  - Added MachinePunchSource Literal type used by AttendanceRecord.source
-  - MachineAttendanceLog timestamp is datetime (not str) for consistency
-  - MachineEmployeeIDUpdate allows null to support unassigning
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, date
