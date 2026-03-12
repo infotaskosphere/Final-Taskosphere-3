@@ -111,7 +111,7 @@ def safe_dt(value):
         return dt
     except Exception:
         return None
-   
+  
 def sanitize_user_data(users, current_user=None):
     is_single = False
     if not isinstance(users, list):
@@ -172,7 +172,7 @@ async def create_audit_log(current_user: User, action: str, module: str, record_
         timestamp=datetime.now(timezone.utc)
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
-  
+ 
 async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift_start: str = "10:30", shift_end: str = "19:00"):
     """
     Calculate target hours based on user's shift strings (HH:MM) and date range (YYYY-MM-DD).
@@ -261,8 +261,17 @@ async def create_indexes():
   unique=True
  )
  await db.holidays.create_index("date", unique=True)
+ # ── eSSL Biometric Machine indexes ──────────────────────────
+ await db.machine_config.create_index("key", unique=True)
+ await db.users.create_index("machine_employee_id", sparse=True)
+
+@app.on_event("startup")
+async def start_essl_sync():
+    asyncio.create_task(sync_engine.run())
+
 # ROUTER
 api_router = APIRouter(prefix="/api")
+api_router.include_router(essl_router)
 # HELPERS - Email Service Functions
 def send_birthday_email(recipient_email: str, client_name: str):
  """Send birthday wish email to client"""
@@ -481,7 +490,7 @@ async def get_todos(
         t["id"] = str(t["_id"])
         del t["_id"]
     return todos
-   
+  
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
  is_admin = current_user.role == "admin"
@@ -635,7 +644,9 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "approved_by": None,
         "approved_at": None,
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "machine_employee_id": user_data.machine_employee_id if hasattr(user_data, "machine_employee_id") else None,
+        "machine_synced": False,
     }
     await db.users.insert_one(new_user)
     access_token = create_access_token({"sub": user_id})
@@ -826,7 +837,7 @@ async def update_user(
             "full_name", "email", "role", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "permissions"
+            "status", "permissions", "machine_employee_id",
         ]
     else:
         allowed_fields = [
@@ -838,6 +849,8 @@ async def update_user(
         if key in user_data:
             val = user_data[key]
             update_payload[key] = val if val != "" else None
+    if "machine_employee_id" in update_payload:
+        update_payload["machine_synced"] = False
     new_password = user_data.get("password")
     if new_password and len(new_password.strip()) > 0:
         update_payload["password"] = get_password_hash(new_password)
@@ -2432,7 +2445,7 @@ async def get_leads_services_meta(current_user: User = Depends(get_current_user)
     services = await db.clients.distinct("services")
     services = [s for s in services if s and isinstance(s, str)]
     return {"services": list(set(services))}
-   
+  
 # REPORTS ROUTES
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
