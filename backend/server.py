@@ -885,11 +885,28 @@ async def login(credentials: UserLogin):
             detail=f"Your account is {user_status}. Awaiting admin approval."
         )
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
+
     if "created_at" in user and isinstance(user["created_at"], str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
-    user_obj = User(**{k: v for k, v in user.items() if k not in ("password", "_id")})
-    access_token = create_access_token({"sub": user_obj.id})
-    return AuthResponse(access_token=access_token, token_type="bearer", user=user_obj)
+
+# Prepare clean user data
+    user_data = {k: v for k, v in user.items() if k not in ("password", "_id")}
+
+# Fix telegram_id type issue (int → string)
+    if "telegram_id" in user_data and user_data["telegram_id"] is not None:
+        user_data["telegram_id"] = str(user_data["telegram_id"])
+
+# Create User object safely
+    user_obj = User(**user_data)
+
+# Generate token
+    access_token = create_access_token({"sub": str(user_obj.id)})
+
+    return AuthResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=user_obj
+    )
 
 
 @api_router.get("/auth/me", response_model=User)
@@ -3828,4 +3845,4 @@ async def universal_exception_handler(request: Request, exc: Exception):
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
-app.include_router(api_router)
+app.include_router(api_router)v
