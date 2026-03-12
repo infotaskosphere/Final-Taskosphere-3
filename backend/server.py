@@ -30,18 +30,288 @@ from dotenv import load_dotenv
 # Backend Modules
 import backend.models as models
 from backend.models import (
-    Token, User, UserCreate, UserLogin, UserPermissions,
-    Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
-    Client, ClientCreate, MasterClientForm,
-    Attendance, StaffActivityLog, StaffActivityCreate, PerformanceMetric,
+    Token, User, UserPermissions,
+    Todo, TodoCreate, Task, TaskCreate,
+    Client, ClientCreate,
     DueDate, DueDateCreate,
-    DSC, DSCCreate, DSCListResponse, DSCMovementRequest, MovementUpdateRequest,
-    Document, DocumentCreate, DocumentMovementRequest,
-    DashboardStats, AuditLog,
-    HolidayResponse, HolidayCreate,
-    DEFAULT_ROLE_PERMISSIONS,
-    Reminder, ReminderCreate
+    DSCCreate,
+    Document, DocumentCreate,
+    DashboardStats,
+    MachinePunchPayload,
+    MachineConfig, MachineConfigUpdate,
+    MachineStatusResponse, MachineUserResponse,
+    MachineAttendanceLog, MachineSyncResult,
+    MachineEmployeeIDUpdate,
 )
+
+# ── Compatibility shims ── names used in main.py route logic but not in models.py
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: str = "staff"
+    departments: List[str] = []
+    phone: Optional[str] = None
+    birthday: Optional[str] = None
+    profile_picture: Optional[str] = None
+    punch_in_time: Optional[str] = "10:30"
+    grace_time: Optional[str] = "00:15"
+    punch_out_time: Optional[str] = "19:00"
+    telegram_id: Optional[str] = None
+    permissions: Optional[dict] = None
+    machine_employee_id: Optional[str] = None
+
+class BulkTaskCreate(BaseModel):
+    tasks: List[TaskCreate]
+
+class StaffActivityCreate(BaseModel):
+    app_name: Optional[str] = None
+    website: Optional[str] = None
+    category: Optional[str] = "other"
+    duration_seconds: Optional[int] = 0
+    idle: Optional[bool] = False
+
+class StaffActivityLog(BaseModel):
+    user_id: str
+    app_name: Optional[str] = None
+    website: Optional[str] = None
+    category: Optional[str] = "other"
+    duration_seconds: Optional[int] = 0
+    idle: Optional[bool] = False
+    timestamp: Optional[datetime] = None
+
+class PerformanceMetric(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    attendance_percent: float = 0.0
+    total_hours: float = 0.0
+    task_completion_percent: float = 0.0
+    todo_ontime_percent: float = 0.0
+    timely_punchin_percent: float = 0.0
+    overall_score: float = 0.0
+    badge: Optional[str] = None
+    rank: Optional[int] = None
+
+class Attendance(BaseModel):
+    id: Optional[str] = None
+    user_id: str
+    date: str
+    punch_in: Optional[datetime] = None
+    punch_out: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    status: str = "absent"
+    is_late: bool = False
+    leave_reason: Optional[str] = None
+    employee_name: Optional[str] = None
+    punched_out_early: Optional[bool] = False
+
+class AuditLog(BaseModel):
+    user_id: str
+    user_name: str
+    action: str
+    module: str
+    record_id: str
+    old_data: Optional[dict] = None
+    new_data: Optional[dict] = None
+    timestamp: Optional[datetime] = None
+
+class HolidayResponse(BaseModel):
+    date: str
+    name: str
+    status: str = "confirmed"
+    type: Optional[str] = None
+    created_at: Optional[str] = None
+
+class HolidayCreate(BaseModel):
+    date: date
+    name: str
+    type: Optional[str] = "public"
+
+class Reminder(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    remind_at: str
+    is_dismissed: bool = False
+    created_at: Optional[str] = None
+
+class ReminderCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    remind_at: datetime
+
+class DSC(BaseModel):
+    id: str
+    holder_name: str
+    expiry_date: Optional[datetime] = None
+    issue_date: Optional[datetime] = None
+    certificate_number: Optional[str] = None
+    dsc_type: Optional[str] = None
+    associated_with: Optional[str] = None
+    current_status: str = "IN"
+    current_location: Optional[str] = None
+    movement_log: List[Any] = []
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+# Override DSCCreate with field names used by main.py
+class DSCCreate(BaseModel):
+    holder_name: str
+    dsc_type: Optional[str] = None
+    associated_with: Optional[str] = None
+    certificate_number: Optional[str] = None
+    issue_date: Optional[datetime] = None
+    expiry_date: Optional[datetime] = None
+    current_status: str = "IN"
+    notes: Optional[str] = None
+
+class DSCMovementRequest(BaseModel):
+    movement_type: str
+    person_name: str
+    notes: Optional[str] = None
+
+class MovementUpdateRequest(BaseModel):
+    movement_type: str
+    person_name: Optional[str] = None
+    notes: Optional[str] = None
+
+# Override Document with movement fields used by main.py
+class Document(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    tags: List[str] = []
+    is_active: bool = True
+    uploaded_by: Optional[str] = None
+    current_status: Optional[str] = "IN"
+    movement_log: List[Any] = []
+    issue_date: Optional[datetime] = None
+    valid_upto: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class DocumentCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    client_id: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    tags: List[str] = []
+    issue_date: Optional[datetime] = None
+    valid_upto: Optional[datetime] = None
+
+class DocumentMovementRequest(BaseModel):
+    movement_type: str
+    person_name: str
+    notes: Optional[str] = None
+
+class DSCListResponse(BaseModel):
+    data: List[Any]
+    total: int
+    page: int
+    limit: int
+
+class MasterClientForm(BaseModel):
+    company_name: str
+
+DEFAULT_ROLE_PERMISSIONS: dict = {
+    "admin": {},
+    "manager": {},
+    "staff": {},
+}
+
+# Override DueDate/DueDateCreate with full field set used by main.py
+class DueDate(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    due_date: datetime
+    days_remaining: Optional[int] = None
+    category: Optional[str] = None
+    department: Optional[str] = None
+    status: str = "pending"
+    recurrence: Optional[str] = None
+    is_global: bool = True
+    assigned_to: List[str] = []
+    client_id: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+class DueDateCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: datetime
+    category: Optional[str] = None
+    department: Optional[str] = None
+    status: str = "pending"
+    recurrence: Optional[str] = None
+    is_global: bool = True
+    assigned_to: List[str] = []
+    client_id: Optional[str] = None
+
+# Override DashboardStats with full field set used by main.py
+class DashboardStats(BaseModel):
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    pending_tasks: int = 0
+    overdue_tasks: int = 0
+    total_dsc: int = 0
+    expiring_dsc_count: int = 0
+    expiring_dsc_list: List[Any] = []
+    total_clients: int = 0
+    upcoming_birthdays: int = 0
+    upcoming_due_dates: int = 0
+    team_workload: List[Any] = []
+    compliance_status: Optional[dict] = None
+
+# Override ClientCreate with full field set used by main.py
+class ClientCreate(BaseModel):
+    company_name: str
+    client_type: Optional[str] = "other"
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    birthday: Optional[date] = None
+    services: List[str] = []
+    contact_persons: List[Any] = []
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = "active"
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+# Override Client with full field set used by main.py
+class Client(BaseModel):
+    id: str
+    company_name: str
+    client_type: Optional[str] = "other"
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    birthday: Optional[date] = None
+    services: List[str] = []
+    contact_persons: List[Any] = []
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = "active"
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 from backend.dependencies import (
     db,
     client,
