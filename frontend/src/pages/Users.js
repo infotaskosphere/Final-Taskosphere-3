@@ -134,16 +134,13 @@ const DeptPill = ({ dept, size = 'sm' }) => {
 
 const StatusBadge = ({ status, isActive }) => {
   const resolved = status || (isActive !== false ? 'active' : 'inactive');
-
   const map = {
-    active:           { label: 'Active',           cls: 'bg-emerald-100 text-emerald-700 border-emerald-200',  icon: <CheckCircle className="h-3 w-3" /> },
-    pending_approval: { label: 'Pending Approval',  cls: 'bg-amber-100 text-amber-700 border-amber-200',       icon: <Clock className="h-3 w-3" /> },
-    rejected:         { label: 'Rejected',           cls: 'bg-red-100 text-red-700 border-red-200',             icon: <XCircle className="h-3 w-3" /> },
-    inactive:         { label: 'Inactive',           cls: 'bg-slate-100 text-slate-600 border-slate-200',       icon: <AlertCircle className="h-3 w-3" /> },
+    active: { label: 'Active', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: <CheckCircle className="h-3 w-3" /> },
+    pending_approval: { label: 'Pending Approval', cls: 'bg-amber-100 text-amber-700 border-amber-200', icon: <Clock className="h-3 w-3" /> },
+    rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-700 border-red-200', icon: <XCircle className="h-3 w-3" /> },
+    inactive: { label: 'Inactive', cls: 'bg-slate-100 text-slate-600 border-slate-200', icon: <AlertCircle className="h-3 w-3" /> },
   };
-
   const cfg = map[resolved] || map.inactive;
-
   return (
     <Badge className={`${cfg.cls} border font-semibold text-[10px] sm:text-xs flex items-center gap-1`}>
       {cfg.icon}
@@ -160,7 +157,6 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
       className="relative bg-white rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all duration-300"
     >
       <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
-
       <div className="flex items-start gap-4 mb-4 pt-1">
         <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-100 flex-shrink-0 shadow">
           {userData.profile_picture ? (
@@ -183,13 +179,11 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
           </div>
         </div>
       </div>
-
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userData.departments.map(dept => <DeptPill key={dept} dept={dept} />)}
         </div>
       )}
-
       <div className="text-xs text-slate-500 mb-4 space-y-1">
         <p className="flex items-center gap-2">
           <Phone className="h-3.5 w-3.5 flex-shrink-0" />
@@ -200,7 +194,6 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => {
           Registered {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
         </p>
       </div>
-
       <div className="flex gap-2 pt-3 border-t border-amber-100">
         <Button
           size="sm"
@@ -242,7 +235,6 @@ const UserCard = ({
 }) => {
   const userDepts = userData.departments || [];
   const [showActions, setShowActions] = useState(false);
-
   const getRoleIcon = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return <Crown className="h-3 w-3" />;
@@ -250,7 +242,6 @@ const UserCard = ({
       default: return <UserIcon className="h-3 w-3" />;
     }
   };
-
   const getRoleStyle = (role) => {
     switch(role?.toLowerCase()) {
       case 'admin': return { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white' };
@@ -258,10 +249,8 @@ const UserCard = ({
       default: return { bg: 'bg-slate-100', text: 'text-slate-700' };
     }
   };
-
   const roleStyle = getRoleStyle(userData.role);
   const isPending = userData.status === 'pending_approval';
-
   return (
     <motion.div
       variants={itemVariants}
@@ -275,7 +264,6 @@ const UserCard = ({
       {isPending && (
         <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
       )}
-
       <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0'}`}>
         {canManagePermissions && userData.role !== 'admin' && !isPending && (
           <button
@@ -305,7 +293,6 @@ const UserCard = ({
           </button>
         )}
       </div>
-
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture ? (
@@ -335,13 +322,11 @@ const UserCard = ({
           </div>
         </div>
       </div>
-
       {userDepts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {userDepts.map(dept => <DeptPill key={dept} dept={dept} size="sm" />)}
         </div>
       )}
-
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -364,7 +349,6 @@ const UserCard = ({
           Joined {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
         </p>
       </div>
-
       {isPending && isAdmin && (
         <div className="flex gap-2 mt-4 pt-3 border-t border-amber-100">
           <Button
@@ -395,10 +379,9 @@ const UserCard = ({
 export default function Users() {
   const { user, hasPermission, refreshUser } = useAuth();
   const isAdmin = user?.role === "admin";
-
   const perms = user?.permissions || {};
-  const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
-  const canEditUsers         = isAdmin || !!perms.can_manage_users;
+  const canViewUserPage = isAdmin || !!perms.can_view_user_page;
+  const canEditUsers = isAdmin || !!perms.can_manage_users;
   const canManagePermissions = isAdmin;
 
   const [users, setUsers] = useState([]);
@@ -409,7 +392,6 @@ export default function Users() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState(null);
-
   const [approvingId, setApprovingId] = useState(null);
 
   const [formData, setFormData] = useState({
@@ -425,6 +407,7 @@ export default function Users() {
     grace_time: '',
     punch_out_time: '',
     telegram_id: null,
+    machine_employee_id: '',   // ← added for the new field
     is_active: true
   });
 
@@ -601,6 +584,8 @@ export default function Users() {
       punch_in_time: userData.punch_in_time || '',
       grace_time: userData.grace_time || '',
       punch_out_time: userData.punch_out_time || '',
+      telegram_id: userData.telegram_id || null,
+      machine_employee_id: userData.machine_employee_id || '',   // ← added
       is_active: userData.is_active !== false
     });
     setDialogOpen(true);
@@ -630,12 +615,12 @@ export default function Users() {
     try {
       const payload = {
         ...permissions,
-        assigned_clients:      Array.isArray(permissions.assigned_clients)      ? permissions.assigned_clients      : [],
-        view_other_tasks:      Array.isArray(permissions.view_other_tasks)      ? permissions.view_other_tasks      : [],
+        assigned_clients: Array.isArray(permissions.assigned_clients) ? permissions.assigned_clients : [],
+        view_other_tasks: Array.isArray(permissions.view_other_tasks) ? permissions.view_other_tasks : [],
         view_other_attendance: Array.isArray(permissions.view_other_attendance) ? permissions.view_other_attendance : [],
-        view_other_reports:    Array.isArray(permissions.view_other_reports)    ? permissions.view_other_reports    : [],
-        view_other_todos:      Array.isArray(permissions.view_other_todos)      ? permissions.view_other_todos      : [],
-        view_other_activity:   Array.isArray(permissions.view_other_activity)   ? permissions.view_other_activity   : [],
+        view_other_reports: Array.isArray(permissions.view_other_reports) ? permissions.view_other_reports : [],
+        view_other_todos: Array.isArray(permissions.view_other_todos) ? permissions.view_other_todos : [],
+        view_other_activity: Array.isArray(permissions.view_other_activity) ? permissions.view_other_activity : [],
       };
       await api.put(`/users/${selectedUserForPermissions.id}/permissions`, payload);
       if (selectedUserForPermissions.id === user.id) await refreshUser();
@@ -677,17 +662,16 @@ export default function Users() {
     }
   };
 
-  const pendingUsers  = users.filter(u => u.status === 'pending_approval');
+  const pendingUsers = users.filter(u => u.status === 'pending_approval');
   const rejectedUsers = users.filter(u => u.status === 'rejected');
 
   const filteredUsers = users.filter(u => {
     const matchesSearch =
       (u.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-
-    if (activeTab === 'pending')  return matchesSearch && u.status === 'pending_approval';
+    if (activeTab === 'pending') return matchesSearch && u.status === 'pending_approval';
     if (activeTab === 'rejected') return matchesSearch && u.status === 'rejected';
-    if (activeTab === 'all')      return matchesSearch;
+    if (activeTab === 'all') return matchesSearch;
     return matchesSearch && u.role?.toLowerCase() === activeTab;
   });
 
@@ -732,7 +716,9 @@ export default function Users() {
                     full_name: '', email: '', password: '', role: 'staff',
                     departments: [], phone: '', birthday: '', profile_picture: '',
                     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
-                    telegram_id: null, is_active: true
+                    telegram_id: null,
+                    machine_employee_id: '',   // ← added
+                    is_active: true
                   });
                 }}
               >
@@ -749,7 +735,9 @@ export default function Users() {
               </DialogTitle>
               <DialogDescription>Input primary identity and shift schedule details below.</DialogDescription>
             </DialogHeader>
+
             <div className="space-y-6 py-4">
+              {/* Profile Picture */}
               <div className="flex justify-center">
                 <div className="relative group">
                   <div className="w-28 h-28 rounded-3xl overflow-hidden bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center transition-all group-hover:border-blue-400">
@@ -766,6 +754,7 @@ export default function Users() {
                 </div>
               </div>
 
+              {/* Name + Email */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Full Identity Name</Label>
@@ -777,6 +766,7 @@ export default function Users() {
                 </div>
               </div>
 
+              {/* Phone, Password (new only), Machine Employee ID (edit + admin only) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Contact Number</Label>
@@ -788,14 +778,36 @@ export default function Users() {
                     <Input type="password" name="password" value={formData.password} onChange={handleInputChange} className="rounded-xl" />
                   </div>
                 )}
-                {selectedUser && (
-                  <div className="space-y-2 flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                    <Label className="text-slate-700 font-semibold">Account Status</Label>
-                    <Switch checked={formData.is_active} onCheckedChange={(val) => setFormData({...formData, is_active: val})} />
+
+                {/* Machine Employee ID — only visible in edit mode for admins */}
+                {isAdmin && selectedUser && (
+                  <div className="space-y-2">
+                    <Label className="text-slate-700 font-semibold flex items-center gap-2">
+                      🖐 Machine Employee ID
+                    </Label>
+                    <Input
+                      placeholder="e.g. 1, 42"
+                      name="machine_employee_id"
+                      value={formData.machine_employee_id || ''}
+                      onChange={handleInputChange}
+                      className="rounded-xl"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      Numeric ID on the biometric device. Leave blank if not assigned.
+                    </p>
                   </div>
                 )}
               </div>
 
+              {/* Account Status Switch (edit only) */}
+              {selectedUser && (
+                <div className="space-y-2 flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                  <Label className="text-slate-700 font-semibold">Account Status</Label>
+                  <Switch checked={formData.is_active} onCheckedChange={(val) => setFormData({...formData, is_active: val})} />
+                </div>
+              )}
+
+              {/* Duty Shift Parameters */}
               <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
                 <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
                   <Calendar className="h-4 w-4" /> Duty Shift Parameters
@@ -816,6 +828,7 @@ export default function Users() {
                 </div>
               </div>
 
+              {/* Birthday + Role */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Birthdate</Label>
@@ -847,6 +860,7 @@ export default function Users() {
                 </div>
               </div>
 
+              {/* Departments */}
               <div className="space-y-3">
                 <Label className="text-slate-700 font-semibold">Assigned Departments</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
@@ -884,6 +898,7 @@ export default function Users() {
         </Dialog>
       </div>
 
+      {/* Pending banner */}
       <AnimatePresence>
         {isAdmin && pendingUsers.length > 0 && activeTab !== 'pending' && (
           <motion.div
@@ -912,6 +927,7 @@ export default function Users() {
         )}
       </AnimatePresence>
 
+      {/* Search + Tabs */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
@@ -953,6 +969,7 @@ export default function Users() {
         </Tabs>
       </div>
 
+      {/* Pending tab content */}
       {activeTab === 'pending' && isAdmin && (
         <div>
           {filteredUsers.length === 0 ? (
@@ -971,6 +988,7 @@ export default function Users() {
         </div>
       )}
 
+      {/* Main user grid */}
       {activeTab !== 'pending' && (
         <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredUsers.length === 0 ? (
@@ -1000,7 +1018,7 @@ export default function Users() {
         </motion.div>
       )}
 
-      {/* ── Permissions Dialog ── */}
+      {/* Permissions Dialog */}
       <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
@@ -1017,6 +1035,7 @@ export default function Users() {
           </div>
 
           <div className="p-6 space-y-6">
+            {/* Reset banner */}
             <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
               <span className="text-sm text-amber-800 font-semibold flex-1">
                 Role: <b className="capitalize">{selectedUserForPermissions?.role}</b> — reset all toggles to that role's defaults?
