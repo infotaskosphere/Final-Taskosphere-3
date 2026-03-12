@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
@@ -79,6 +81,8 @@ def _get_perm(user: Any, key: str, default: Any = False) -> Any:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
+    from backend.models import User
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
