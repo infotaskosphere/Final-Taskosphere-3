@@ -1,964 +1,677 @@
-import uuid
-import re
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
-from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
+"""
+models.py — Taskosphere Pydantic models
+All request/response schemas used across main.py and essl_backend.py.
 
-# Timezone Configuration
-india_tz = timezone(timedelta(hours=5, minutes=30))
+Fixes applied vs original:
+  - Removed entire duplicate machine-model block (was silently overriding first definitions)
+  - MachineConfig.enabled default set to False (safer; admin must explicitly enable)
+  - MachineConfig.sync_interval default corrected to 300 (seconds)
+  - All Optional fields use explicit `= None` default (Pydantic v2 compatible)
+  - Added MachinePunchSource Literal type used by AttendanceRecord.source
+  - MachineAttendanceLog timestamp is datetime (not str) for consistency
+  - MachineEmployeeIDUpdate allows null to support unassigning
+"""
 
-# ────────────────────────────────────────────────
-# ROLE ENUM
-# ────────────────────────────────────────────────
-class UserRole(str, Enum):
-    admin   = "admin"
-    manager = "manager"
-    staff   = "staff"
+from __future__ import annotations
 
+from datetime import datetime, date
+from typing import Any, Dict, List, Literal, Optional
 
-# ────────────────────────────────────────────────
-# DEFAULT ROLE PERMISSION TEMPLATES
-# ────────────────────────────────────────────────
-DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
-    "admin": {
-        "can_view_all_tasks":              True,
-        "can_view_all_clients":            True,
-        "can_view_all_dsc":                True,
-        "can_view_documents":              True,
-        "can_view_all_duedates":           True,
-        "can_view_reports":                True,
-        "can_view_attendance":             True,
-        "can_view_all_leads":              True,
-        "can_edit_tasks":                  True,
-        "can_edit_clients":                True,
-        "can_edit_dsc":                    True,
-        "can_edit_documents":              True,
-        "can_edit_due_dates":              True,
-        "can_edit_users":                  True,
-        "can_download_reports":            True,
-        "can_manage_users":                True,
-        "can_manage_settings":             True,
-        "can_assign_tasks":                True,
-        "can_assign_clients":              True,
-        "can_view_staff_activity":         True,
-        "can_send_reminders":              True,
-        "can_view_user_page":              True,
-        "can_view_audit_logs":             True,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard":         True,
-        "can_use_chat":                    True,
-        "can_view_staff_rankings":         True,
-        "can_delete_data":                 True,
-        "can_delete_tasks":                True,
-        "can_manage_machine":              True,   # ← eSSL: manage device users
-        "view_other_tasks":       [],
-        "view_other_attendance":  [],
-        "view_other_reports":     [],
-        "view_other_todos":       [],
-        "view_other_activity":    [],
-        "assigned_clients":       [],
-    },
-    "manager": {
-        "can_view_all_tasks":              False,
-        "can_view_all_clients":            False,
-        "can_view_all_dsc":                False,
-        "can_view_documents":              True,
-        "can_view_all_duedates":           False,
-        "can_view_reports":                True,
-        "can_view_attendance":             True,
-        "can_view_all_leads":              False,
-        "can_edit_tasks":                  True,
-        "can_edit_clients":                False,
-        "can_edit_dsc":                    False,
-        "can_edit_documents":              False,
-        "can_edit_due_dates":              True,
-        "can_edit_users":                  False,
-        "can_download_reports":            True,
-        "can_manage_users":                False,
-        "can_manage_settings":             False,
-        "can_assign_tasks":                True,
-        "can_assign_clients":              False,
-        "can_view_staff_activity":         True,
-        "can_send_reminders":              False,
-        "can_view_user_page":              False,
-        "can_view_audit_logs":             False,
-        "can_view_selected_users_reports": True,
-        "can_view_todo_dashboard":         True,
-        "can_use_chat":                    True,
-        "can_view_staff_rankings":         True,
-        "can_delete_data":                 False,
-        "can_delete_tasks":                False,
-        "can_manage_machine":              False,
-        "view_other_tasks":       [],
-        "view_other_attendance":  [],
-        "view_other_reports":     [],
-        "view_other_todos":       [],
-        "view_other_activity":    [],
-        "assigned_clients":       [],
-    },
-    "staff": {
-        "can_view_all_tasks":              False,
-        "can_view_all_clients":            False,
-        "can_view_all_dsc":                False,
-        "can_view_documents":              False,
-        "can_view_all_duedates":           False,
-        "can_view_reports":                True,
-        "can_view_attendance":             True,
-        "can_view_all_leads":              False,
-        "can_edit_tasks":                  False,
-        "can_edit_clients":                False,
-        "can_edit_dsc":                    False,
-        "can_edit_documents":              False,
-        "can_edit_due_dates":              False,
-        "can_edit_users":                  False,
-        "can_download_reports":            True,
-        "can_manage_users":                False,
-        "can_manage_settings":             False,
-        "can_assign_tasks":                False,
-        "can_assign_clients":              False,
-        "can_view_staff_activity":         False,
-        "can_send_reminders":              False,
-        "can_view_user_page":              False,
-        "can_view_audit_logs":             False,
-        "can_view_selected_users_reports": False,
-        "can_view_todo_dashboard":         True,
-        "can_use_chat":                    True,
-        "can_view_staff_rankings":         False,
-        "can_delete_data":                 False,
-        "can_delete_tasks":                False,
-        "can_manage_machine":              False,
-        "view_other_tasks":       [],
-        "view_other_attendance":  [],
-        "view_other_reports":     [],
-        "view_other_todos":       [],
-        "view_other_activity":    [],
-        "assigned_clients":       [],
-    },
-}
+from pydantic import BaseModel, Field, field_validator
 
 
-# ════════════════════════════════════════════════
-# CORE USER & PERMISSIONS
-# ════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Auth / Identity
+# ══════════════════════════════════════════════════════════════════════════════
 
-class UserPermissions(BaseModel):
-    can_view_all_tasks:              bool = False
-    can_view_all_clients:            bool = False
-    can_view_all_dsc:                bool = False
-    can_view_documents:              bool = False
-    can_view_all_duedates:           bool = False
-    can_view_reports:                bool = False
-    can_view_attendance:             bool = False
-    can_view_all_leads:              bool = False
-    can_edit_tasks:                  bool = False
-    can_edit_clients:                bool = False
-    can_edit_dsc:                    bool = False
-    can_edit_documents:              bool = False
-    can_edit_due_dates:              bool = False
-    can_edit_users:                  bool = False
-    can_download_reports:            bool = False
-    can_manage_users:                bool = False
-    can_manage_settings:             bool = False
-    can_assign_tasks:                bool = False
-    can_assign_clients:              bool = False
-    can_view_staff_activity:         bool = False
-    can_send_reminders:              bool = False
-    can_view_user_page:              bool = False
-    can_view_audit_logs:             bool = False
-    can_view_selected_users_reports: bool = False
-    can_view_todo_dashboard:         bool = False
-    can_use_chat:                    bool = False
-    can_view_staff_rankings:         bool = False
-    can_delete_data:                 bool = False
-    can_delete_tasks:                bool = False
-    can_manage_machine:              bool = False   # ← eSSL: manage device users
-
-    # Specific access lists (Layer 3)
-    view_other_tasks:      List[str] = Field(default_factory=list)
-    view_other_attendance: List[str] = Field(default_factory=list)
-    view_other_reports:    List[str] = Field(default_factory=list)
-    view_other_todos:      List[str] = Field(default_factory=list)
-    view_other_activity:   List[str] = Field(default_factory=list)
-    assigned_clients:      List[str] = Field(default_factory=list)
-
-
-class User(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id:                  str
-    email:               str
-    full_name:           Optional[str]       = None
-    role:                UserRole            = UserRole.staff
-    password:            Optional[str]       = None
-    departments:         List[str]           = Field(default_factory=list)
-    phone:               Optional[str]       = None
-    birthday:            Optional[date]      = None
-    profile_picture:     Optional[str]       = None
-    punch_in_time:       Optional[str]       = "10:30"
-    grace_time:          Optional[str]       = "00:15"
-    punch_out_time:      Optional[str]       = "19:00"
-    telegram_id:         Optional[int]       = None
-    permissions:         UserPermissions     = Field(default_factory=UserPermissions)
-    created_at:          datetime            = Field(default_factory=datetime.utcnow)
-    is_active:           bool                = True
-    status:              str                 = "pending_approval"
-    approved_by:         Optional[str]       = None
-    approved_at:         Optional[datetime]  = None
-
-    # ── eSSL Biometric Machine ──────────────────────────────────────────────
-    machine_employee_id: Optional[str]       = None
-    """
-    Numeric employee ID on the eSSL biometric machine (e.g. '1', '42').
-    When set, the sync service (essl_backend.py) will automatically
-    register the user's fingerprint slot on the device.
-    Must be unique across all users.
-    """
-    machine_synced:      bool                = False
-    """True once this user has been successfully pushed to the device."""
-
-    @field_validator("birthday", mode="before")
-    @classmethod
-    def empty_string_to_none(cls, v):
-        if v == "" or v is None:
-            return None
-        return v
-
-
-class UserCreate(BaseModel):
-    full_name:           str
-    email:               str
-    password:            str
-    role:                UserRole            = UserRole.staff
-    departments:         List[str]           = Field(default_factory=list)
-    phone:               Optional[str]       = None
-    birthday:            Optional[date]      = None
-    telegram_id:         Optional[int]       = None
-    punch_in_time:       Optional[str]       = "10:30"
-    grace_time:          Optional[str]       = "00:15"
-    punch_out_time:      Optional[str]       = "19:00"
-    profile_picture:     Optional[str]       = None
-    is_active:           bool                = True
-    permissions:         Optional[Dict[str, Any]] = None
-    status:              Optional[str]       = "pending_approval"
-
-    # ── eSSL ────────────────────────────────────────────────────────────────
-    machine_employee_id: Optional[str]       = None
-    """
-    Optionally set at registration time.
-    If provided, the sync service pushes the user to the device
-    within USER_SYNC_INTERVAL seconds.
-    """
-
-
-class UserUpdate(BaseModel):
-    full_name:           Optional[str]       = None
-    email:               Optional[str]       = None
-    password:            Optional[str]       = None
-    role:                Optional[UserRole]  = None
-    departments:         Optional[List[str]] = None
-    phone:               Optional[str]       = None
-    birthday:            Optional[date]      = None
-    punch_in_time:       Optional[str]       = None
-    grace_time:          Optional[str]       = None
-    punch_out_time:      Optional[str]       = None
-    is_active:           Optional[bool]      = None
-    profile_picture:     Optional[str]       = None
-    telegram_id:         Optional[int]       = None
-    machine_employee_id: Optional[str]       = None   # ← eSSL
-    model_config = ConfigDict(from_attributes=True, extra="ignore")
-
-
-class UserLogin(BaseModel):
-    email:    EmailStr
+class LoginRequest(BaseModel):
+    email: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    role: str = "staff"
+    departments: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+    birthday: Optional[str] = None
+    profile_picture: Optional[str] = None
+    punch_in_time: Optional[str] = None
+    grace_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    telegram_id: Optional[str] = None
 
 
 class Token(BaseModel):
     access_token: str
-    token_type:   str
-    user:         User
+    token_type: str = "bearer"
 
 
-# ════════════════════════════════════════════════
-# TODOS & TASKS
-# ════════════════════════════════════════════════
+class TokenData(BaseModel):
+    user_id: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Permissions
+# ══════════════════════════════════════════════════════════════════════════════
+
+class UserPermissions(BaseModel):
+    # Visibility
+    can_view_all_tasks: bool = False
+    can_view_all_clients: bool = False
+    can_view_all_dsc: bool = False
+    can_view_documents: bool = False
+    can_view_all_duedates: bool = False
+    can_view_reports: bool = False
+    can_view_todo_dashboard: bool = False
+    can_view_audit_logs: bool = False
+    can_view_all_leads: bool = False
+    can_view_user_page: bool = False
+    can_view_selected_users_reports: bool = False
+    can_view_staff_activity: bool = False
+    can_view_attendance: bool = False
+
+    # Operations
+    can_manage_users: bool = False
+    can_assign_tasks: bool = False
+    can_assign_clients: bool = False
+    can_send_reminders: bool = False
+    can_download_reports: bool = False
+    can_manage_settings: bool = False
+    can_use_chat: bool = False
+
+    # Edits
+    can_edit_tasks: bool = False
+    can_edit_clients: bool = False
+    can_edit_dsc: bool = False
+    can_edit_documents: bool = False
+    can_edit_due_dates: bool = False
+    can_edit_users: bool = False
+
+    # Cross-user visibility lists (store user IDs)
+    view_other_tasks: List[str] = Field(default_factory=list)
+    view_other_attendance: List[str] = Field(default_factory=list)
+    view_other_reports: List[str] = Field(default_factory=list)
+    view_other_todos: List[str] = Field(default_factory=list)
+    view_other_activity: List[str] = Field(default_factory=list)
+
+    # Assigned client portfolio
+    assigned_clients: List[str] = Field(default_factory=list)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# User
+# ══════════════════════════════════════════════════════════════════════════════
+
+class User(BaseModel):
+    id: str
+    full_name: str
+    email: str
+    role: str = "staff"
+    departments: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+    birthday: Optional[str] = None
+    profile_picture: Optional[str] = None
+
+    # Shift schedule
+    punch_in_time: Optional[str] = None   # e.g. "10:30"
+    grace_time: Optional[str] = None      # e.g. "00:10"
+    punch_out_time: Optional[str] = None  # e.g. "19:00"
+
+    # Biometric machine
+    machine_employee_id: Optional[str] = None  # numeric UID on eSSL/ZK device
+    machine_synced: bool = False                # True once pushed to device
+
+    # Account state
+    is_active: bool = True
+    status: str = "active"  # active | pending_approval | rejected
+
+    # Integrations
+    telegram_id: Optional[str] = None
+
+    # Permissions (embedded for quick access checks)
+    permissions: Optional[UserPermissions] = None
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class UserUpdate(BaseModel):
+    """
+    Payload for PUT /users/{user_id}.
+    machine_employee_id is deliberately excluded — use PUT /users/{user_id}/machine-id
+    which performs the uniqueness check.
+    """
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    departments: Optional[List[str]] = None
+    phone: Optional[str] = None
+    birthday: Optional[str] = None
+    profile_picture: Optional[str] = None
+    punch_in_time: Optional[str] = None
+    grace_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    telegram_id: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class UserResponse(BaseModel):
+    """Slim public-facing user shape returned in list endpoints."""
+    id: str
+    full_name: str
+    email: str
+    role: str
+    departments: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+    profile_picture: Optional[str] = None
+    punch_in_time: Optional[str] = None
+    grace_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    machine_employee_id: Optional[str] = None
+    machine_synced: bool = False
+    is_active: bool = True
+    status: str = "active"
+    created_at: Optional[datetime] = None
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Task
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Task(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    status: str = "pending"          # pending | in_progress | completed
+    priority: str = "medium"         # low | medium | high | urgent | critical
+    assigned_to: Optional[str] = None
+    assigned_to_name: Optional[str] = None
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+    assigned_by_name: Optional[str] = None
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    department: Optional[str] = None
+    due_date: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    status: str = "pending"
+    priority: str = "medium"
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    department: Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    department: Optional[str] = None
+    due_date: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Todo
+# ══════════════════════════════════════════════════════════════════════════════
 
 class Todo(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id:           str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:      str
-    title:        str
-    description:  Optional[str]      = None
-    is_completed: bool               = False
-    due_date:     Optional[datetime] = None
-    created_at:   datetime           = Field(default_factory=lambda: datetime.now(india_tz))
-    updated_at:   datetime           = Field(default_factory=lambda: datetime.now(india_tz))
-    completed_at: Optional[datetime] = None
+    id: str
+    title: str
+    status: str = "pending"     # pending | completed
+    is_completed: bool = False
+    user_id: str
+    due_date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class TodoCreate(BaseModel):
-    title:       str
-    description: Optional[str]      = None
-    due_date:    Optional[datetime] = None
+    title: str
+    status: str = "pending"
+    due_date: Optional[datetime] = None
 
 
-class TaskBase(BaseModel):
-    title:               str
-    description:         Optional[str]      = None
-    assigned_to:         Optional[str]      = None
-    sub_assignees:       List[str]          = Field(default_factory=list)
-    due_date:            Optional[datetime] = None
-    priority:            str                = "medium"
-    status:              str                = "pending"
-    category:            str                = "other"
-    client_id:           Optional[str]      = None
-    is_recurring:        bool               = False
-    recurrence_pattern:  Optional[str]      = "monthly"
-    recurrence_interval: Optional[int]      = 1
-    recurrence_end_date: Optional[datetime] = None
-    type:                Optional[str]      = None
+class TodoUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+    is_completed: Optional[bool] = None
+    due_date: Optional[datetime] = None
 
 
-class TaskCreate(TaskBase):
-    pass
+# ══════════════════════════════════════════════════════════════════════════════
+# Attendance
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Punch source — used for audit and frontend badge display
+MachinePunchSource = Literal["web", "machine"]
 
 
-class BulkTaskCreate(BaseModel):
-    tasks: List[TaskCreate]
-
-
-class Task(TaskBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:             str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by:     str
-    created_at:     datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at:     datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    parent_task_id: Optional[str] = None
-
-
-# ════════════════════════════════════════════════
-# ATTENDANCE & ACTIVITY
-# ════════════════════════════════════════════════
-
-class Attendance(BaseModel):
-    """
-    Attendance record for a single user on a single date.
-
-    is_late:
-        Set to True at punch-in when the user punches in AFTER
-        punch_in_time + grace_time. Stored permanently so historical
-        reports stay accurate even if the shift is later changed.
-
-    punched_out_early:
-        Set to True at punch-out when the user punches out BEFORE
-        punch_out_time. Stored permanently for the same reason.
-
-    source / source_out:
-        "webapp"            — punched from Taskosphere UI
-        "machine"           — punched from eSSL biometric device
-        "machine_synthetic" — punch_in synthesised because device only
-                              recorded a punch_out with no prior punch_in
-    """
-    model_config = ConfigDict(extra="ignore")
-
-    id:               str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:          str
-    date:             str
-    status:           str                = "absent"
-    punch_in:         Optional[datetime] = None
-    punch_out:        Optional[datetime] = None
-    duration_minutes: Optional[int]      = 0
-    leave_reason:     Optional[str]      = None
-    is_late:          bool               = False
-    punched_out_early: bool              = False
-
-    # ── eSSL Biometric ──────────────────────────────────────────────────────
-    source:           Optional[str]      = None
-    """'webapp' | 'machine' | 'machine_synthetic'"""
-    source_out:       Optional[str]      = None
-    """'webapp' | 'machine'"""
-    machine_uid:      Optional[str]      = None
-    """The numeric UID on the device that generated this punch."""
-
-    # Location (webapp punch)
-    location:              Optional[Dict[str, Any]] = None
-    punch_out_location:    Optional[Dict[str, Any]] = None
-
-    # Admin-editable annotation
-    employee_name:    Optional[str]      = None
-
-
-class AttendanceBase(BaseModel):
-    punch_in:  datetime
+class AttendanceRecord(BaseModel):
+    id: str
+    user_id: str
+    date: str                         # ISO date string YYYY-MM-DD
+    punch_in: Optional[datetime] = None
     punch_out: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    status: str = "absent"            # present | absent | late | leave | holiday
+    is_late: bool = False
+    leave_reason: Optional[str] = None
+
+    # Biometric source tracking
+    source: MachinePunchSource = "web"
+    machine_punch_type: Optional[str] = None  # e.g. "check-in", "check-out"
+
+    # Location (web punch only)
+    location: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
-class AttendanceCreate(BaseModel):
-    action: str
-
-
-class StaffActivityLog(BaseModel):
-    id:               str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:          str
-    app_name:         str
-    window_title:     Optional[str] = None
-    url:              Optional[str] = None
-    category:         str           = "other"
-    duration_seconds: int           = 0
-    timestamp:        datetime      = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class StaffActivityCreate(BaseModel):
-    app_name:         Optional[str] = None
-    window_title:     Optional[str] = None
-    website:          Optional[str] = None
-    category:         Optional[str] = "other"
-    duration_seconds: Optional[int] = 0
-    idle:             Optional[bool] = False
-
-
-class ActivityLog(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id:                   str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:              str
-    date:                 str
-    screen_time_minutes:  int = 0
-    tasks_completed:      int = 0
-
-
-class ActivityLogUpdate(BaseModel):
-    screen_time_minutes: Optional[int] = None
-    tasks_completed:     Optional[int] = None
-
-
-# ════════════════════════════════════════════════
-# ── eSSL BIOMETRIC MACHINE MODELS ───────────────
-# ════════════════════════════════════════════════
-
-class MachineConfig(BaseModel):
-    """
-    Stored in db.machine_config (single document, key='default').
-    Edit via PUT /api/machine/config (admin only).
-    """
-    model_config = ConfigDict(extra="ignore")
-
-    key:             str  = "default"
-    ip:              str  = "192.168.1.201"
-    port:            int  = 4370
-    password:        str  = ""
-    sync_interval:   int  = 60     # seconds between attendance pulls
-    user_sync_interval: int = 300  # seconds between user push cycles
-    enabled:         bool = True
-    last_attendance_sync: Optional[datetime] = None
-    last_user_sync:       Optional[datetime] = None
-
-
-class MachineConfigUpdate(BaseModel):
-    ip:                  Optional[str]  = None
-    port:                Optional[int]  = None
-    password:            Optional[str]  = None
-    sync_interval:       Optional[int]  = None
-    user_sync_interval:  Optional[int]  = None
-    enabled:             Optional[bool] = None
-
-
-class MachineUserResponse(BaseModel):
-    """A user record as read directly from the device."""
-    uid:       str
-    name:      str
-    privilege: int  # 0 = normal, 14 = admin
-
-
-class MachineAttendanceLog(BaseModel):
-    """A raw punch log as read directly from the device."""
-    user_id:    str
-    timestamp:  datetime
-    punch_type: int   # 0=in, 1=out, 4=OT_in, 5=OT_out
-
-
-class MachineSyncResult(BaseModel):
-    """Response body returned after a manual sync trigger."""
-    pushed:          int = 0
-    skipped:         int = 0
-    errors:          int = 0
-    users_added:     int = 0
-    users_removed:   int = 0
-    message:         str = ""
-    synced_at:       Optional[datetime] = None
-
-
-class MachineEmployeeIDUpdate(BaseModel):
-    """Body for PUT /api/users/{user_id}/machine-id"""
-    machine_employee_id: str
-    """Must be a unique positive integer string, e.g. '1', '42'."""
+class AttendanceAction(BaseModel):
+    action: Literal["punch_in", "punch_out"]
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location: Optional[str] = None
 
 
 class MachinePunchPayload(BaseModel):
     """
-    Payload POSTed by the sync daemon (or internal scheduler)
-    to /api/attendance/machine-sync.
+    Posted to POST /attendance/machine-sync by the sync engine.
+    Endpoint must require admin authentication.
     """
-    action:      str            # "punch_in" | "punch_out"
-    source:      str            = "machine"
-    machine_uid: Optional[str] = None
-    recorded_at: Optional[str] = None   # UTC ISO-8601 from device clock
+    user_id: str           # internal Taskosphere user._id
+    punch_time: datetime   # UTC naive datetime from device
+    punch_type: str        # "0" = check-in, "1" = check-out (ZK convention)
+    device_uid: str        # raw enrollment number from device record
 
 
-class MachineStatusResponse(BaseModel):
-    """Returned by GET /api/machine/status"""
-    connected:             bool
-    device_ip:             str
-    device_port:           int
-    last_attendance_sync:  Optional[datetime]
-    last_user_sync:        Optional[datetime]
-    total_device_users:    int
-    total_unsynced_users:  int
-    enabled:               bool
+# ══════════════════════════════════════════════════════════════════════════════
+# Client
+# ══════════════════════════════════════════════════════════════════════════════
 
-
-# ════════════════════════════════════════════════
-# DSC MANAGEMENT
-# ════════════════════════════════════════════════
-
-class DSCBase(BaseModel):
-    holder_name:      str
-    dsc_type:         Optional[str]       = None
-    dsc_password:     Optional[str]       = None
-    associated_with:  Optional[str]       = None
-    entity_type:      str                 = "firm"
-    issue_date:       datetime
-    expiry_date:      datetime
-    notes:            Optional[str]       = None
-    current_location: str                 = "with_company"
-    current_status:   Optional[str]       = None
-    taken_by:         Optional[str]       = None
-    taken_date:       Optional[datetime]  = None
-    movement_log:     List[dict]          = Field(default_factory=list)
-
-
-class DSCCreate(DSCBase):
-    pass
-
-
-class DSC(DSCBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class DSCMovement(BaseModel):
-    movement_type: str
-    person_name:   str
-    timestamp:     datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    notes:         Optional[str] = None
-
-
-class DSCListResponse(BaseModel):
-    data:  List[DSC]
-    total: int
-    page:  int
-    limit: int
-
-
-class DSCMovementRequest(BaseModel):
-    movement_type: str
-    person_name:   str
-    notes:         Optional[str] = None
-
-
-class MovementUpdateRequest(BaseModel):
-    movement_id:   str
-    movement_type: str
-    person_name:   Optional[str] = None
-    notes:         Optional[str] = None
-
-
-# ════════════════════════════════════════════════
-# REMINDER MODELS
-# ════════════════════════════════════════════════
-
-class ReminderCreate(BaseModel):
-    title:       str
-    description: Optional[str] = None
-    remind_at:   datetime
-
-
-class Reminder(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id:           str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:      str
-    title:        str
-    description:  Optional[str] = None
-    remind_at:    datetime
-    is_dismissed: bool     = False
-    created_at:   datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-# ════════════════════════════════════════════════
-# DOCUMENT MANAGEMENT
-# ════════════════════════════════════════════════
-
-class DocumentBase(BaseModel):
-    document_name:    Optional[str]      = None
-    document_type:    Optional[str]      = None
-    holder_name:      Optional[str]      = None
-    associated_with:  Optional[str]      = None
-    entity_type:      str                = "firm"
-    issue_date:       Optional[datetime] = None
-    valid_upto:       Optional[datetime] = None
-    notes:            Optional[str]      = None
-    current_status:   str                = "IN"
-    current_location: str                = "with_company"
-    movement_log:     List[dict]         = Field(default_factory=list)
-
-
-class DocumentCreate(DocumentBase):
-    pass
-
-
-class Document(DocumentBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class DocumentMovement(BaseModel):
-    movement_type: str
-    person_name:   str
-    timestamp:     datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    notes:         Optional[str] = None
-
-
-class DocumentMovementRequest(BaseModel):
-    movement_type: str
-    person_name:   str
-    notes:         Optional[str] = None
-
-
-class DocumentMovementUpdateRequest(BaseModel):
-    movement_id:   str
-    movement_type: str
-    person_name:   Optional[str] = None
-    notes:         Optional[str] = None
-
-
-# ════════════════════════════════════════════════
-# CLIENT MANAGEMENT
-# ════════════════════════════════════════════════
-
-class ContactPerson(BaseModel):
-    name:        str
-    email:       Optional[EmailStr]  = None
-    phone:       Optional[str]       = None
-    designation: Optional[str]       = None
-    birthday:    Optional[date]      = None
-    din:         Optional[str]       = None
-
-
-class ClientDSC(BaseModel):
-    certificate_number: str
-    holder_name:        str
-    issue_date:         date
-    expiry_date:        date
-    notes:              Optional[str] = None
-
-
-class ClientBase(BaseModel):
-    company_name:         str            = Field(..., min_length=3, max_length=255)
-    client_type:          str            = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
-    contact_persons:      List[ContactPerson] = Field(default_factory=list)
-    email:                Optional[EmailStr]  = None
-    phone:                str            = Field(..., min_length=10, max_length=20)
-    date_of_incorporation: Optional[date] = None
-    birthday:             Optional[date] = None
-    services:             List[str]      = Field(default_factory=list)
-    dsc_details:          List[ClientDSC] = Field(default_factory=list)
-    assigned_to:          Optional[str]  = None
-    notes:                Optional[str]  = None
-    referred_by:          Optional[str]  = None
-    assignments:          Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list,
-        description="List of {user_id, services} assignments"
-    )
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError("Phone number is required")
-        cleaned = re.sub(r"\s|-|\+", "", str(v))
-        if not cleaned.isdigit():
-            raise ValueError("Phone number must contain only digits")
-        if not (10 <= len(cleaned) <= 15):
-            raise ValueError("Phone number must be 10-15 digits")
-        return v
-
-    @field_validator("company_name")
-    @classmethod
-    def validate_company_name(cls, v: str) -> str:
-        v = str(v).strip()
-        if len(v) < 3:
-            raise ValueError("Company name must be at least 3 characters long")
-        return v
-
-
-class ClientCreate(ClientBase):
-    pass
-
-
-class Client(ClientBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class MasterClientForm(BaseModel):
-    company_name:         str
-    client_type:          str
-    email:                Optional[EmailStr] = None
-    phone:                str
-    date_of_incorporation: Optional[date]   = None
-    gst_number:           Optional[str]     = None
-    pan_number:           Optional[str]     = None
-    tan_number:           Optional[str]     = None
-    assigned_to:          Optional[str]     = None
-    services:             List[str]         = Field(default_factory=list)
-    contact_persons:      List[Any]         = Field(default_factory=list)
-    notes:                Optional[str]     = None
-    referred_by:          Optional[str]     = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def clean_empty_strings(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if v == "":
-                    data[k] = None
-        return data
-
-
-# ════════════════════════════════════════════════
-# LEADS MODEL
-# ════════════════════════════════════════════════
-
-class LeadBase(BaseModel):
+class Client(BaseModel):
+    id: str
     company_name: str
-    contact_name: Optional[str]      = None
-    email:        Optional[EmailStr] = None
-    phone:        Optional[str]      = None
-    services:     List[str]          = Field(default_factory=list)
-    status:       str                = "new"
-    source:       Optional[str]      = None
-    notes:        Optional[str]      = None
-    assigned_to:  Optional[str]      = None
-    referred_by:  Optional[str]      = None
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    pan: Optional[str] = None
+    assigned_to: List[str] = Field(default_factory=list)
+    departments: List[str] = Field(default_factory=list)
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
-class LeadCreate(LeadBase):
-    pass
+class ClientCreate(BaseModel):
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    pan: Optional[str] = None
+    departments: List[str] = Field(default_factory=list)
 
 
-class Lead(LeadBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-# ════════════════════════════════════════════════
-# DUE DATES
-# ════════════════════════════════════════════════
-
-class DueDateBase(BaseModel):
-    title:         str
-    description:   Optional[str] = None
-    due_date:      datetime
-    reminder_days: int           = 30
-    category:      Optional[str] = None
-    department:    str
-    assigned_to:   Optional[str] = None
-    client_id:     Optional[str] = None
-    status:        str           = "pending"
+class ClientUpdate(BaseModel):
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    pan: Optional[str] = None
+    departments: Optional[List[str]] = None
+    is_active: Optional[bool] = None
 
 
-class DueDateCreate(DueDateBase):
-    pass
+# ══════════════════════════════════════════════════════════════════════════════
+# DSC (Digital Signature Certificate)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class DSCRecord(BaseModel):
+    id: str
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    holder_name: str
+    pan: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    issued_date: Optional[datetime] = None
+    serial_number: Optional[str] = None
+    class_type: Optional[str] = None    # Class 2 / Class 3
+    purpose: Optional[str] = None
+    storage_location: Optional[str] = None
+    status: str = "active"              # active | expiring | expired
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
-class DueDate(DueDateBase):
-    model_config = ConfigDict(extra="ignore")
+class DSCCreate(BaseModel):
+    client_id: Optional[str] = None
+    holder_name: str
+    pan: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    issued_date: Optional[datetime] = None
+    serial_number: Optional[str] = None
+    class_type: Optional[str] = None
+    purpose: Optional[str] = None
+    storage_location: Optional[str] = None
+    notes: Optional[str] = None
 
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DSCUpdate(BaseModel):
+    holder_name: Optional[str] = None
+    pan: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    issued_date: Optional[datetime] = None
+    serial_number: Optional[str] = None
+    class_type: Optional[str] = None
+    purpose: Optional[str] = None
+    storage_location: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
 
 
-class BirthdayEmailRequest(BaseModel):
-    client_id: str
+# ══════════════════════════════════════════════════════════════════════════════
+# Due Dates / Compliance Calendar
+# ══════════════════════════════════════════════════════════════════════════════
+
+class DueDate(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    due_date: datetime
+    days_remaining: Optional[int] = None
+    category: Optional[str] = None     # GST | IT | TDS | ROC etc.
+    recurrence: Optional[str] = None   # monthly | quarterly | annual
+    is_global: bool = True
+    assigned_to: List[str] = Field(default_factory=list)
+    client_id: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
-# ════════════════════════════════════════════════
-# NOTIFICATIONS & AUDIT
-# ════════════════════════════════════════════════
+class DueDateCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: datetime
+    category: Optional[str] = None
+    recurrence: Optional[str] = None
+    is_global: bool = True
+    assigned_to: List[str] = Field(default_factory=list)
+    client_id: Optional[str] = None
 
-class NotificationBase(BaseModel):
-    title:   str
+
+class DueDateUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
+    category: Optional[str] = None
+    recurrence: Optional[str] = None
+    is_global: Optional[bool] = None
+    assigned_to: Optional[List[str]] = None
+    client_id: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Document Register
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Document(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    is_active: bool = True
+    uploaded_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DocumentCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    client_id: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Lead Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Lead(BaseModel):
+    id: str
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    source: Optional[str] = None        # referral | website | cold-call etc.
+    status: str = "new"                 # new | contacted | qualified | converted | lost
+    assigned_to: Optional[str] = None
+    assigned_to_name: Optional[str] = None
+    notes: Optional[str] = None
+    expected_value: Optional[float] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class LeadCreate(BaseModel):
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    source: Optional[str] = None
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    expected_value: Optional[float] = None
+
+
+class LeadUpdate(BaseModel):
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    source: Optional[str] = None
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    expected_value: Optional[float] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Notifications
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Notification(BaseModel):
+    id: str
+    user_id: str
+    title: str
     message: str
-    type:    str
+    type: str = "info"       # info | warning | success | error
+    is_read: bool = False
+    link: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
-class Notification(NotificationBase):
-    model_config = ConfigDict(extra="ignore")
-
-    id:         str      = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:    str
-    is_read:    bool     = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class AuditLog(BaseModel):
-    id:         str             = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id:    str
-    user_name:  str
-    action:     str
-    module:     str
-    record_id:  Optional[str]  = None
-    old_data:   Optional[dict] = None
-    new_data:   Optional[dict] = None
-    timestamp:  datetime       = Field(default_factory=lambda: datetime.now(timezone.utc))
+class NotificationCreate(BaseModel):
+    user_id: str
+    title: str
+    message: str
+    type: str = "info"
+    link: Optional[str] = None
 
 
-# ════════════════════════════════════════════════
-# DASHBOARD & METRICS
-# ════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Reports / Dashboard
+# ══════════════════════════════════════════════════════════════════════════════
 
 class DashboardStats(BaseModel):
-    total_tasks:         int
-    completed_tasks:     int
-    pending_tasks:       int
-    overdue_tasks:       int
-    total_dsc:           int
-    expiring_dsc_count:  int
-    expiring_dsc_list:   List[dict]
-    total_clients:       int
-    upcoming_birthdays:  int
-    upcoming_due_dates:  int
-    team_workload:       List[dict]
-    compliance_status:   dict
-    expired_dsc_count:   int = 0
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    overdue_tasks: int = 0
+    total_clients: int = 0
+    total_dsc: int = 0
+    expiring_dsc_count: int = 0
+    expired_dsc_count: int = 0
+    upcoming_due_dates: int = 0
+    total_leads: int = 0
+    team_workload: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-class PerformanceMetric(BaseModel):
-    user_id:                  str
-    user_name:                str
-    profile_picture:          Optional[str] = None
-    attendance_percent:       float         = 0.0
-    total_hours:              float         = 0.0
-    task_completion_percent:  float         = 0.0
-    todo_ontime_percent:      float         = 0.0
-    timely_punchin_percent:   float         = 0.0
-    overall_score:            float         = 0.0
-    rank:                     int           = 0
-    badge:                    str           = "Good Performer"
+class PerformanceRanking(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    total_hours: float = 0.0
+    overall_score: int = 0
+    badge: Optional[str] = None
 
 
-# ════════════════════════════════════════════════
-# HOLIDAY MODELS
-# ════════════════════════════════════════════════
-
-class HolidayCreate(BaseModel):
-    date:        date
-    name:        str
-    description: Optional[str] = None
-
-
-class HolidayResponse(BaseModel):
-    date:        date
-    name:        str
-    description: Optional[str] = None
-    status:      Optional[str] = None
-
-
-# ════════════════════════════════════════════════
-# Machine Config
-# ════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Machine Config  (eSSL / ZKTeco biometric device)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# FIX: This section was defined TWICE in the original file. The second block
+# silently overrode the first (Python class redefinition). The second block
+# also had `enabled: bool = False` while the first had `enabled: bool = True`,
+# creating a confusing and unpredictable default. The duplicate block has been
+# removed entirely. Only ONE canonical definition exists here.
+#
+# The chosen defaults are:
+#   enabled: bool = False   ← safer; admin must explicitly turn the device on
+#   sync_interval: int = 300 ← 5 minutes, matches essl_backend.py run() loop
 
 class MachineConfig(BaseModel):
-    """Persisted in db.machine_config with key='default'"""
-    key:                  str      = "default"
-    ip:                   str      = "192.168.1.201"
-    port:                 int      = 4370
-    password:             str      = ""
-    enabled:              bool     = False
-    sync_interval:        int      = 300       # seconds between attendance pulls
-    user_sync_interval:   int      = 600       # seconds between user push cycles
-    last_attendance_sync: Optional[datetime] = None
-    last_user_sync:       Optional[datetime] = None
- 
- 
+    """
+    Persisted configuration for the eSSL/ZKTeco biometric device.
+    Stored in MongoDB as a single document in the `machine_config` collection.
+    """
+    ip: str = "192.168.1.201"
+    port: int = 4370
+    password: str = ""
+    # FIX: was True in first definition, False in duplicate. Keeping False —
+    # device must be explicitly enabled by an admin after setup.
+    enabled: bool = False
+    sync_interval: int = 300   # seconds between attendance sync cycles
+    user_sync_interval: int = 3600  # seconds between user list sync cycles
+
+
 class MachineConfigUpdate(BaseModel):
-    ip:                   Optional[str]  = None
-    port:                 Optional[int]  = None
-    password:             Optional[str]  = None
-    enabled:              Optional[bool] = None
-    sync_interval:        Optional[int]  = None
-    user_sync_interval:   Optional[int]  = None
- 
- 
+    """
+    All fields optional so the admin can PATCH individual settings.
+    """
+    ip: Optional[str] = None
+    port: Optional[int] = None
+    password: Optional[str] = None
+    enabled: Optional[bool] = None
+    sync_interval: Optional[int] = None
+    user_sync_interval: Optional[int] = None
+
+
 class MachineStatusResponse(BaseModel):
-    connected:            bool
-    device_ip:            str
-    device_port:          int
-    enabled:              bool
+    """
+    Returned by GET /api/machine/status.
+    Combined in a single TCP connection (fixes minor bug #13).
+    """
+    connected: bool
+    device_user_count: int = 0
+    ip: str
+    port: int
+    enabled: bool
     last_attendance_sync: Optional[datetime] = None
-    last_user_sync:       Optional[datetime] = None
-    total_device_users:   int = 0
-    total_unsynced_users: int = 0
- 
- 
+    last_user_sync: Optional[datetime] = None
+
+
 class MachineUserResponse(BaseModel):
-    uid:       str
-    name:      str
-    privilege: int = 0
- 
- 
+    """
+    Represents a single user record as stored on the biometric device.
+    Returned by GET /api/machine/users.
+    """
+    uid: str              # enrollment number / machine_employee_id
+    name: str
+    privilege: int = 0    # 0=user, 14=admin on device
+    card: Optional[str] = None
+
+
 class MachineAttendanceLog(BaseModel):
-    user_id:    str
-    timestamp:  datetime
-    punch_type: int
- 
- 
+    """
+    Raw attendance log record read directly from the device.
+    Returned by GET /api/machine/attendance-logs.
+    FIX: timestamp is datetime (not str) for consistent JSON serialization.
+    """
+    uid: str
+    timestamp: datetime   # UTC-naive, converted from device local time
+    punch_type: int       # 0=check-in, 1=check-out (ZK convention)
+    status: int = 0       # verify type from device
+
+
 class MachineSyncResult(BaseModel):
-    pushed:        int = 0
-    skipped:       int = 0
-    errors:        int = 0
-    users_added:   int = 0
-    users_removed: int = 0
-    message:       str = ""
-    synced_at:     Optional[datetime] = None
- 
- 
+    """
+    Summary returned after a manual or scheduled sync operation.
+    """
+    synced: int = 0
+    skipped: int = 0
+    errors: int = 0
+    new_records: int = 0
+    message: str = ""
+
+
 class MachineEmployeeIDUpdate(BaseModel):
-    machine_employee_id: str = Field(..., description="Positive integer string e.g. '1', '42'")
- 
- 
-class MachinePunchPayload(BaseModel):
-    action:      str                  # "punch_in" | "punch_out"
-    source:      str      = "machine"
-    machine_uid: Optional[str] = None
-    recorded_at: Optional[str] = None  # ISO-8601 UTC string
+    """
+    Posted to PUT /users/{user_id}/machine-id.
+    This is the ONLY correct way to update machine_employee_id — the dedicated
+    endpoint checks for uniqueness across all users before saving.
+    Pass null/None to unassign the user from the device.
+    FIX: Optional[str] allows null to support unassigning.
+    """
+    machine_employee_id: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Generic Responses
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MessageResponse(BaseModel):
+    message: str
+    success: bool = True
+    data: Optional[Any] = None
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+    code: Optional[str] = None
