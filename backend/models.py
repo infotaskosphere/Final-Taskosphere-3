@@ -118,7 +118,7 @@ class User(BaseModel):
     telegram_id: Optional[str] = None
 
     # Permissions (embedded for quick access checks)
-    permissions: Optional[UserPermissions] = None
+    permissions: Optional[UserPermissions] = Field(default_factory=UserPermissions)
 
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
