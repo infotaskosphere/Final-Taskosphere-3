@@ -6,7 +6,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from backend.models import User, AuditLog
 
 # ==========================================================
 # ENVIRONMENT & DATABASE
@@ -60,7 +59,7 @@ def safe_dt(value: Any) -> Optional[datetime]:
 # Safely extract a permission value from a User's permissions
 # field regardless of whether it's a Pydantic model or dict.
 # ==========================================================
-def _get_perm(user: User, key: str, default: Any = False) -> Any:
+def _get_perm(user: Any, key: str, default: Any = False) -> Any:
     """
     Returns the value of a permission key from current_user.permissions.
     Works for both Pydantic model and dict representations.
@@ -79,7 +78,7 @@ def _get_perm(user: User, key: str, default: Any = False) -> Any:
 # ==========================================================
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> User:
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
