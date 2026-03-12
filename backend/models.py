@@ -4,6 +4,9 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
 from enum import Enum
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
 
 # Timezone Configuration
 india_tz = timezone(timedelta(hours=5, minutes=30))
@@ -889,3 +892,73 @@ class HolidayResponse(BaseModel):
     name:        str
     description: Optional[str] = None
     status:      Optional[str] = None
+
+
+# ════════════════════════════════════════════════
+# Machine Config
+# ════════════════════════════════════════════════
+
+class MachineConfig(BaseModel):
+    """Persisted in db.machine_config with key='default'"""
+    key:                  str      = "default"
+    ip:                   str      = "192.168.1.201"
+    port:                 int      = 4370
+    password:             str      = ""
+    enabled:              bool     = False
+    sync_interval:        int      = 300       # seconds between attendance pulls
+    user_sync_interval:   int      = 600       # seconds between user push cycles
+    last_attendance_sync: Optional[datetime] = None
+    last_user_sync:       Optional[datetime] = None
+ 
+ 
+class MachineConfigUpdate(BaseModel):
+    ip:                   Optional[str]  = None
+    port:                 Optional[int]  = None
+    password:             Optional[str]  = None
+    enabled:              Optional[bool] = None
+    sync_interval:        Optional[int]  = None
+    user_sync_interval:   Optional[int]  = None
+ 
+ 
+class MachineStatusResponse(BaseModel):
+    connected:            bool
+    device_ip:            str
+    device_port:          int
+    enabled:              bool
+    last_attendance_sync: Optional[datetime] = None
+    last_user_sync:       Optional[datetime] = None
+    total_device_users:   int = 0
+    total_unsynced_users: int = 0
+ 
+ 
+class MachineUserResponse(BaseModel):
+    uid:       str
+    name:      str
+    privilege: int = 0
+ 
+ 
+class MachineAttendanceLog(BaseModel):
+    user_id:    str
+    timestamp:  datetime
+    punch_type: int
+ 
+ 
+class MachineSyncResult(BaseModel):
+    pushed:        int = 0
+    skipped:       int = 0
+    errors:        int = 0
+    users_added:   int = 0
+    users_removed: int = 0
+    message:       str = ""
+    synced_at:     Optional[datetime] = None
+ 
+ 
+class MachineEmployeeIDUpdate(BaseModel):
+    machine_employee_id: str = Field(..., description="Positive integer string e.g. '1', '42'")
+ 
+ 
+class MachinePunchPayload(BaseModel):
+    action:      str                  # "punch_in" | "punch_out"
+    source:      str      = "machine"
+    machine_uid: Optional[str] = None
+    recorded_at: Optional[str] = None  # ISO-8601 UTC string
