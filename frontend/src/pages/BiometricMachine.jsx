@@ -1,18 +1,3 @@
-/**
- * BiometricMachine.jsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Admin-only page for managing the eSSL / ZKTeco biometric attendance machine.
- *
- * Features:
- *  • Live connection status with auto-refresh
- *  • Device config (IP, port, sync intervals, enable/disable)
- *  • Manual sync triggers (attendance pull, user push, cleanup)
- *  • Live device user list
- *  • Raw attendance log viewer
- *  • Assign / remove machine_employee_id per user
- * ─────────────────────────────────────────────────────────────────────────────
- */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
@@ -30,6 +15,7 @@ import {
   Wifi, WifiOff, RefreshCw, Users, Clock, Settings, Trash2,
   CheckCircle2, AlertTriangle, Activity, Server, UserCheck,
   Download, Upload, Shield, Fingerprint, LogIn, LogOut, Zap,
+  Plus, Database,
 } from 'lucide-react';
 
 // ── Brand colours (matches Attendance.jsx) ────────────────────────────────
@@ -59,7 +45,15 @@ const fmtDt = (iso) => {
   try { return format(parseISO(iso), 'dd MMM yyyy, hh:mm a'); } catch { return iso; }
 };
 
-const PUNCH_LABEL = { 0: 'Punch In', 1: 'Punch Out', 4: 'OT In', 5: 'OT Out' };
+const fmtTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    const s = iso.endsWith('Z') ? iso : iso + 'Z';
+    return format(new Date(s), 'HH:mm:ss');
+  } catch { return iso; }
+};
+
+const PUNCH_LABEL = { 0: 'Check In', 1: 'Check Out', 4: 'OT In', 5: 'OT Out' };
 
 // ══════════════════════════════════════════════════════════════════════════════
 // STAT CARD
@@ -97,26 +91,31 @@ export default function BiometricMachine() {
   const [deviceUsers,   setDeviceUsers]   = useState([]);
   const [deviceLogs,    setDeviceLogs]    = useState([]);
   const [allUsers,      setAllUsers]      = useState([]);
+  const [webRecords,    setWebRecords]    = useState([]);   // FIX-12
   const [syncResult,    setSyncResult]    = useState(null);
-  const [loading,       setLoading]       = useState({});  // keyed by action name
+  const [loading,       setLoading]       = useState({});   // keyed by action name
   const [tab,           setTab]           = useState('status');
 
   // Config form state
   const [cfgForm, setCfgForm] = useState({
     ip: '', port: '4370', password: '', enabled: false,
-    sync_interval: '300', user_sync_interval: '600',
+    sync_interval: '300', user_sync_interval: '3600',
   });
 
   // machine_employee_id assignment form
   const [midForm,    setMidForm]    = useState({});  // { [userId]: inputValue }
   const [midLoading, setMidLoading] = useState({});
 
+  // FIX-10: add-user-to-device form
+  const [newDeviceUid,  setNewDeviceUid]  = useState('');
+  const [newDeviceName, setNewDeviceName] = useState('');
+
   // ── Helpers ────────────────────────────────────────────────────────────
   const setL = (key, val) => setLoading(p => ({ ...p, [key]: val }));
 
   const showResult = (res) => {
     setSyncResult(res);
-    const { pushed = 0, skipped = 0, errors = 0, users_added = 0, users_removed = 0, message } = res;
+    const { errors = 0, message } = res;
     if (errors > 0) toast.error(`${errors} errors — ${message}`);
     else toast.success(message || 'Done');
   };
@@ -124,14 +123,14 @@ export default function BiometricMachine() {
   // ── Fetch functions ────────────────────────────────────────────────────
   const fetchStatus = useCallback(async () => {
     try {
-      const r = await api.get('/machine/status');
+      const r = await api.get('/api/machine/status');   // FIX-1: was /machine/status
       setStatus(r.data);
     } catch { /* silently skip — device might be unreachable */ }
   }, []);
 
   const fetchConfig = useCallback(async () => {
     try {
-      const r = await api.get('/machine/config');
+      const r = await api.get('/api/machine/config');   // FIX-1: was /machine/config
       setConfig(r.data);
       setCfgForm({
         ip:                 r.data.ip            || '192.168.1.201',
@@ -139,9 +138,9 @@ export default function BiometricMachine() {
         password:           '',
         enabled:            !!r.data.enabled,
         sync_interval:      String(r.data.sync_interval      || 300),
-        user_sync_interval: String(r.data.user_sync_interval || 600),
+        user_sync_interval: String(r.data.user_sync_interval || 3600),
       });
-    } catch (e) {
+    } catch {
       toast.error('Could not load machine config');
     }
   }, []);
@@ -156,7 +155,7 @@ export default function BiometricMachine() {
   const fetchDeviceUsers = useCallback(async () => {
     setL('deviceUsers', true);
     try {
-      const r = await api.get('/machine/users');
+      const r = await api.get('/api/machine/users');    // FIX-1: was /machine/users
       setDeviceUsers(r.data || []);
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Cannot connect to device');
@@ -168,7 +167,7 @@ export default function BiometricMachine() {
   const fetchDeviceLogs = useCallback(async () => {
     setL('deviceLogs', true);
     try {
-      const r = await api.get('/machine/logs');
+      const r = await api.get('/api/machine/attendance-logs');  // FIX-4: was /machine/logs
       setDeviceLogs(r.data || []);
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Cannot connect to device');
@@ -177,23 +176,35 @@ export default function BiometricMachine() {
     }
   }, []);
 
+  // FIX-12: webapp records that originated from the biometric device
+  const fetchWebRecords = useCallback(async () => {
+    try {
+      const r = await api.get('/api/attendance/history', {
+        params: { source: 'machine', limit: 100 },
+      });
+      setWebRecords(r.data || []);
+    } catch {}
+  }, []);
+
   // ── Init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
     fetchStatus();
     fetchConfig();
     fetchAllUsers();
+    fetchWebRecords();
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
-  }, [isAdmin, fetchStatus, fetchConfig, fetchAllUsers]);
+  }, [isAdmin, fetchStatus, fetchConfig, fetchAllUsers, fetchWebRecords]);
 
   // ── Sync actions ───────────────────────────────────────────────────────
   const syncAttendance = async () => {
     setL('att', true);
     try {
-      const r = await api.post('/machine/sync/attendance');
+      const r = await api.post('/api/machine/sync-attendance');  // FIX-2: was /machine/sync/attendance
       showResult(r.data);
       fetchStatus();
+      fetchWebRecords();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Sync failed');
     } finally {
@@ -204,7 +215,7 @@ export default function BiometricMachine() {
   const syncUsers = async () => {
     setL('usr', true);
     try {
-      const r = await api.post('/machine/sync/users');
+      const r = await api.post('/api/machine/sync-users');  // FIX-3: was /machine/sync/users
       showResult(r.data);
       fetchStatus();
     } catch (e) {
@@ -214,32 +225,7 @@ export default function BiometricMachine() {
     }
   };
 
-  const syncCleanup = async () => {
-    if (!window.confirm('Remove all deactivated users from the physical device?')) return;
-    setL('cleanup', true);
-    try {
-      const r = await api.post('/machine/sync/cleanup');
-      showResult(r.data);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Cleanup failed');
-    } finally {
-      setL('cleanup', false);
-    }
-  };
-
-  const clearDeviceLogs = async () => {
-    if (!window.confirm('⚠️ This will permanently delete ALL punch logs stored on the device. Continue?')) return;
-    setL('clearLogs', true);
-    try {
-      await api.delete('/machine/logs');
-      toast.success('Device logs cleared');
-      setDeviceLogs([]);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Failed to clear logs');
-    } finally {
-      setL('clearLogs', false);
-    }
-  };
+  // FIX-5: syncCleanup removed — POST /machine/sync/cleanup does not exist in backend
 
   // ── Config save ────────────────────────────────────────────────────────
   const saveConfig = async () => {
@@ -250,11 +236,10 @@ export default function BiometricMachine() {
         port:               parseInt(cfgForm.port, 10) || 4370,
         enabled:            cfgForm.enabled,
         sync_interval:      parseInt(cfgForm.sync_interval, 10) || 300,
-        user_sync_interval: parseInt(cfgForm.user_sync_interval, 10) || 600,
+        user_sync_interval: parseInt(cfgForm.user_sync_interval, 10) || 3600,
       };
       if (cfgForm.password.trim()) payload.password = cfgForm.password.trim();
-
-      await api.put('/machine/config', payload);
+      await api.put('/api/machine/config', payload);  // FIX-1: was /machine/config
       toast.success('Machine config saved — sync engine reloaded');
       fetchConfig();
       fetchStatus();
@@ -262,6 +247,43 @@ export default function BiometricMachine() {
       toast.error(e.response?.data?.detail || 'Failed to save config');
     } finally {
       setL('cfg', false);
+    }
+  };
+
+  // FIX-10: add user directly to the physical device
+  const addDeviceUser = async () => {
+    if (!newDeviceUid.trim() || !newDeviceName.trim()) {
+      toast.error('Both UID and Name are required');
+      return;
+    }
+    setL('addDeviceUser', true);
+    try {
+      await api.post('/api/machine/users', null, {
+        params: { uid: newDeviceUid.trim(), name: newDeviceName.trim() },
+      });
+      toast.success(`User "${newDeviceName}" added to device`);
+      setNewDeviceUid('');
+      setNewDeviceName('');
+      fetchDeviceUsers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to add user to device');
+    } finally {
+      setL('addDeviceUser', false);
+    }
+  };
+
+  // FIX-11: remove user from the physical device
+  const deleteDeviceUser = async (uid, name) => {
+    if (!window.confirm(`Remove "${name}" (UID: ${uid}) from the physical device?`)) return;
+    setL(`del_${uid}`, true);
+    try {
+      await api.delete(`/api/machine/users/${uid}`);
+      toast.success(`${name} removed from device`);
+      setDeviceUsers(prev => prev.filter(u => u.uid !== uid));
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to remove user');
+    } finally {
+      setL(`del_${uid}`, false);
     }
   };
 
@@ -286,13 +308,13 @@ export default function BiometricMachine() {
   };
 
   const removeMachineId = async (userId, name) => {
-    if (!window.confirm(`Unlink ${name} from the biometric device? This also removes them from the physical machine.`)) return;
+    if (!window.confirm(`Unlink ${name} from the biometric device?`)) return;
     setMidLoading(p => ({ ...p, [userId]: true }));
     try {
-      const r = await api.delete(`/users/${userId}/machine-id`);
-      toast.success(r.data.removed_from_device
-        ? 'User unlinked and removed from device'
-        : 'User unlinked (device unreachable — remove manually)');
+      // FIX-7: was DELETE /users/{id}/machine-id — that endpoint does not exist.
+      // Backend only has PUT /users/{id}/machine-id. Pass null to unassign.
+      await api.put(`/users/${userId}/machine-id`, { machine_employee_id: null });
+      toast.success(`${name} unlinked from biometric device`);
       fetchAllUsers();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to unlink');
@@ -300,6 +322,8 @@ export default function BiometricMachine() {
       setMidLoading(p => ({ ...p, [userId]: false }));
     }
   };
+
+  // FIX-6: clearDeviceLogs removed — DELETE /machine/logs does not exist in backend
 
   // ── Guard ─────────────────────────────────────────────────────────────
   if (!isAdmin) {
@@ -315,6 +339,8 @@ export default function BiometricMachine() {
   }
 
   const online = status?.connected;
+  // FIX-8: status doesn't have total_unsynced_users — compute from allUsers
+  const unsyncedCount = allUsers.filter(u => u.machine_employee_id && !u.machine_synced).length;
 
   // ══════════════════════════════════════════════════════════════════════
   // RENDER
@@ -339,13 +365,12 @@ export default function BiometricMachine() {
               Biometric Machine
             </h1>
             <p className="text-slate-500 text-sm font-medium mt-0.5">
-              eSSL / ZKTeco · Serial: CGKK212461298
+              eSSL / ZKTeco · Attendance Integration
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Live status pill */}
           <motion.div
             className="flex items-center gap-2 px-4 py-2 rounded-full border-2 font-bold text-sm"
             style={{
@@ -361,18 +386,25 @@ export default function BiometricMachine() {
           </motion.div>
 
           <Button variant="outline" size="sm" className="rounded-xl border-2" onClick={() => { fetchStatus(); fetchConfig(); }}>
-            <RefreshCw className="w-4 h-4 mr-1.5" />
-            Refresh
+            <RefreshCw className="w-4 h-4 mr-1.5" />Refresh
           </Button>
         </div>
       </motion.div>
 
       {/* ═══ STAT CARDS ═══ */}
       <motion.div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard icon={Server}     label="Status"           value={online ? 'Online' : 'Offline'} color={online ? C.emeraldGreen : C.red} sub={`${status?.device_ip || '—'}:${status?.device_port || '—'}`} />
-        <StatCard icon={Users}      label="Device Users"     value={status?.total_device_users ?? '—'} color={C.deepBlue}   sub="registered on machine" />
-        <StatCard icon={AlertTriangle} label="Unsynced"      value={status?.total_unsynced_users ?? '—'} color={C.amber}    sub="pending push to device" />
-        <StatCard icon={Activity}   label="Last Att. Sync"   value={status?.last_attendance_sync ? '✓' : '—'} color={C.purple} sub={fmtDt(status?.last_attendance_sync)} />
+        {/* FIX-8: status?.ip and status?.port (not device_ip / device_port) */}
+        <StatCard icon={Server}        label="Status"         value={online ? 'Online' : 'Offline'}
+                  color={online ? C.emeraldGreen : C.red}
+                  sub={`${status?.ip || config?.ip || '—'}:${status?.port || config?.port || '—'}`} />
+        {/* FIX-8: status?.device_user_count (not total_device_users) */}
+        <StatCard icon={Users}         label="Device Users"   value={status?.device_user_count ?? '—'}
+                  color={C.deepBlue}   sub="registered on machine" />
+        {/* FIX-8: computed from allUsers (status has no total_unsynced_users field) */}
+        <StatCard icon={AlertTriangle} label="Unsynced"       value={unsyncedCount}
+                  color={C.amber}      sub="pending push to device" />
+        <StatCard icon={Activity}      label="Last Att. Sync" value={status?.last_attendance_sync ? '✓' : '—'}
+                  color={C.purple}     sub={fmtDt(status?.last_attendance_sync)} />
       </motion.div>
 
       {/* ═══ TABS ═══ */}
@@ -380,11 +412,12 @@ export default function BiometricMachine() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="mb-6 bg-white border shadow-sm rounded-2xl p-1 flex-wrap h-auto gap-1">
             {[
-              { val: 'status',  label: 'Status & Sync',   icon: Activity  },
-              { val: 'config',  label: 'Configuration',   icon: Settings  },
-              { val: 'users',   label: 'Device Users',    icon: Users     },
-              { val: 'logs',    label: 'Device Logs',     icon: Clock     },
-              { val: 'assign',  label: 'Assign IDs',      icon: UserCheck },
+              { val: 'status',  label: 'Status & Sync',  icon: Activity  },
+              { val: 'config',  label: 'Configuration',  icon: Settings  },
+              { val: 'users',   label: 'Device Users',   icon: Users     },
+              { val: 'logs',    label: 'Device Logs',    icon: Clock     },
+              { val: 'webapp',  label: 'Webapp Records', icon: Database  }, // FIX-12
+              { val: 'assign',  label: 'Assign IDs',     icon: UserCheck },
             ].map(t => (
               <TabsTrigger key={t.val} value={t.val} className="rounded-xl font-bold flex items-center gap-1.5 px-4 py-2">
                 <t.icon className="w-4 h-4" />
@@ -396,7 +429,6 @@ export default function BiometricMachine() {
           {/* ─── STATUS & SYNC ─── */}
           <TabsContent value="status">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Sync actions */}
               <Card className="border-0 shadow-md">
                 <CardHeader className="border-b pb-4">
                   <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
@@ -405,6 +437,7 @@ export default function BiometricMachine() {
                   <CardDescription>Trigger sync cycles immediately without waiting for the automatic interval.</CardDescription>
                 </CardHeader>
                 <CardContent className="p-6 space-y-4">
+                  {/* FIX-5: "Remove Deactivated Users" (syncCleanup) row removed */}
                   {[
                     {
                       key: 'att', icon: Download, label: 'Pull Attendance Logs',
@@ -415,11 +448,6 @@ export default function BiometricMachine() {
                       key: 'usr', icon: Upload, label: 'Push Users to Device',
                       desc: 'Register all unsynced Taskosphere users on the physical machine',
                       color: C.emeraldGreen, action: syncUsers,
-                    },
-                    {
-                      key: 'cleanup', icon: Trash2, label: 'Remove Deactivated Users',
-                      desc: 'Delete users from device who are no longer active in Taskosphere',
-                      color: C.amber, action: syncCleanup,
                     },
                   ].map(({ key, icon: Icon, label, desc, color, action }) => (
                     <div key={key} className="flex items-center justify-between p-4 rounded-xl border-2"
@@ -434,21 +462,23 @@ export default function BiometricMachine() {
                           <p className="text-xs text-slate-500">{desc}</p>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        disabled={loading[key]}
-                        onClick={action}
-                        className="ml-4 rounded-xl font-bold text-white flex-shrink-0"
-                        style={{ backgroundColor: color }}
-                      >
+                      <Button size="sm" disabled={loading[key] || !online} onClick={action}
+                              className="ml-4 rounded-xl font-bold text-white flex-shrink-0"
+                              style={{ backgroundColor: color }}>
                         {loading[key] ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Run'}
                       </Button>
                     </div>
                   ))}
+
+                  {!online && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 font-medium">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      Device is offline. Check IP, port, and network before running sync.
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
-              {/* Sync result + device info */}
               <div className="space-y-6">
                 <Card className="border-0 shadow-md">
                   <CardHeader className="border-b pb-4">
@@ -456,15 +486,16 @@ export default function BiometricMachine() {
                       <Server className="w-5 h-5" /> Device Information
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="p-6 space-y-3 text-sm">
+                  <CardContent className="p-6 space-y-1 text-sm">
+                    {/* FIX-8: all field names corrected to match MachineStatusResponse */}
                     {[
-                      ['IP Address',        status?.device_ip || config?.ip || '—'],
-                      ['Port',              status?.device_port || config?.port || '—'],
-                      ['Sync Enabled',      status?.enabled ? '✓ Yes' : '✗ No'],
-                      ['Last Att. Sync',    fmtDt(status?.last_attendance_sync)],
-                      ['Last User Sync',    fmtDt(status?.last_user_sync)],
-                      ['Users on Device',   status?.total_device_users ?? '—'],
-                      ['Unsynced Users',    status?.total_unsynced_users ?? '—'],
+                      ['IP Address',      status?.ip             || config?.ip   || '—'],
+                      ['Port',            status?.port           || config?.port || '—'],
+                      ['Sync Enabled',    (status?.enabled ?? config?.enabled) ? '✓ Yes' : '✗ No'],
+                      ['Last Att. Sync',  fmtDt(status?.last_attendance_sync)],
+                      ['Last User Sync',  fmtDt(status?.last_user_sync)],
+                      ['Users on Device', status?.device_user_count ?? '—'],
+                      ['Unsynced Users',  unsyncedCount],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
                         <span className="text-slate-500 font-medium">{k}</span>
@@ -476,12 +507,9 @@ export default function BiometricMachine() {
 
                 <AnimatePresence>
                   {syncResult && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      <Card className="border-2 shadow-md" style={{ borderColor: syncResult.errors > 0 ? C.red : C.emeraldGreen }}>
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                      <Card className="border-2 shadow-md"
+                            style={{ borderColor: syncResult.errors > 0 ? C.red : C.emeraldGreen }}>
                         <CardContent className="p-5">
                           <div className="flex items-center gap-2 mb-3">
                             {syncResult.errors > 0
@@ -492,11 +520,13 @@ export default function BiometricMachine() {
                                     onClick={() => setSyncResult(null)}>×</button>
                           </div>
                           <p className="text-sm font-medium text-slate-700 mb-3">{syncResult.message}</p>
-                          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          {/* FIX-13: fields match MachineSyncResult (new_records, synced, skipped, errors) */}
+                          <div className="grid grid-cols-4 gap-2 text-center text-xs">
                             {[
-                              ['Pushed', syncResult.pushed, C.emeraldGreen],
-                              ['Skipped', syncResult.skipped, C.amber],
-                              ['Errors', syncResult.errors, C.red],
+                              ['New',     syncResult.new_records ?? 0, C.emeraldGreen],
+                              ['Synced',  syncResult.synced      ?? 0, C.mediumBlue],
+                              ['Skipped', syncResult.skipped     ?? 0, C.amber],
+                              ['Errors',  syncResult.errors      ?? 0, C.red],
                             ].map(([lbl, val, clr]) => (
                               <div key={lbl} className="p-2 rounded-lg" style={{ backgroundColor: `${clr}12` }}>
                                 <p className="text-lg font-black" style={{ color: clr }}>{val}</p>
@@ -523,82 +553,56 @@ export default function BiometricMachine() {
                 <CardDescription>Changes take effect immediately — the sync engine reloads automatically.</CardDescription>
               </CardHeader>
               <CardContent className="p-6 space-y-6">
-                {/* Enable / disable toggle */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border-2"
                      style={{ borderColor: cfgForm.enabled ? `${C.emeraldGreen}40` : C.slate50 }}>
                   <div>
                     <p className="font-bold text-slate-800">Enable Biometric Sync</p>
                     <p className="text-xs text-slate-500 mt-0.5">Master switch — turns on/off all automatic sync cycles</p>
                   </div>
-                  <Switch
-                    checked={cfgForm.enabled}
-                    onCheckedChange={v => setCfgForm(p => ({ ...p, enabled: v }))}
-                  />
+                  <Switch checked={cfgForm.enabled}
+                          onCheckedChange={v => setCfgForm(p => ({ ...p, enabled: v }))} />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div className="space-y-2">
                     <Label className="font-bold text-slate-700">Device IP Address</Label>
-                    <Input
-                      value={cfgForm.ip}
-                      onChange={e => setCfgForm(p => ({ ...p, ip: e.target.value }))}
-                      placeholder="192.168.1.201"
-                      className="rounded-xl font-mono"
-                    />
+                    <Input value={cfgForm.ip} onChange={e => setCfgForm(p => ({ ...p, ip: e.target.value }))}
+                           placeholder="192.168.1.201" className="rounded-xl font-mono" />
                     <p className="text-[11px] text-slate-400">Must be reachable on your LAN</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="font-bold text-slate-700">TCP Port</Label>
-                    <Input
-                      type="number"
-                      value={cfgForm.port}
-                      onChange={e => setCfgForm(p => ({ ...p, port: e.target.value }))}
-                      placeholder="4370"
-                      className="rounded-xl font-mono"
-                    />
+                    <Input type="number" value={cfgForm.port}
+                           onChange={e => setCfgForm(p => ({ ...p, port: e.target.value }))}
+                           placeholder="4370" className="rounded-xl font-mono" />
                     <p className="text-[11px] text-slate-400">Default: 4370 (ZKTeco standard)</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="font-bold text-slate-700">Device Password</Label>
-                    <Input
-                      type="password"
-                      value={cfgForm.password}
-                      onChange={e => setCfgForm(p => ({ ...p, password: e.target.value }))}
-                      placeholder="Leave blank to keep current"
-                      className="rounded-xl"
-                    />
+                    <Input type="password" value={cfgForm.password}
+                           onChange={e => setCfgForm(p => ({ ...p, password: e.target.value }))}
+                           placeholder="Leave blank to keep current" className="rounded-xl" />
                     <p className="text-[11px] text-slate-400">Usually blank unless you set one on the machine</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="font-bold text-slate-700">Attendance Sync Interval (sec)</Label>
-                    <Input
-                      type="number"
-                      value={cfgForm.sync_interval}
-                      onChange={e => setCfgForm(p => ({ ...p, sync_interval: e.target.value }))}
-                      placeholder="300"
-                      className="rounded-xl font-mono"
-                    />
-                    <p className="text-[11px] text-slate-400">How often to pull punch logs (300 = 5 min)</p>
+                    <Input type="number" value={cfgForm.sync_interval}
+                           onChange={e => setCfgForm(p => ({ ...p, sync_interval: e.target.value }))}
+                           placeholder="300" className="rounded-xl font-mono" />
+                    <p className="text-[11px] text-slate-400">300 = 5 min · min 60</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="font-bold text-slate-700">User Sync Interval (sec)</Label>
-                    <Input
-                      type="number"
-                      value={cfgForm.user_sync_interval}
-                      onChange={e => setCfgForm(p => ({ ...p, user_sync_interval: e.target.value }))}
-                      placeholder="600"
-                      className="rounded-xl font-mono"
-                    />
-                    <p className="text-[11px] text-slate-400">How often to push new users to device (600 = 10 min)</p>
+                    <Input type="number" value={cfgForm.user_sync_interval}
+                           onChange={e => setCfgForm(p => ({ ...p, user_sync_interval: e.target.value }))}
+                           placeholder="3600" className="rounded-xl font-mono" />
+                    <p className="text-[11px] text-slate-400">3600 = 1 hr · min 300</p>
                   </div>
                 </div>
 
-                <Button
-                  onClick={saveConfig}
-                  disabled={loading.cfg}
-                  className="w-full h-12 rounded-xl font-bold text-white text-base shadow-lg"
-                  style={{ backgroundColor: C.deepBlue }}
-                >
+                <Button onClick={saveConfig} disabled={loading.cfg}
+                        className="w-full h-12 rounded-xl font-bold text-white text-base shadow-lg"
+                        style={{ backgroundColor: C.deepBlue }}>
                   {loading.cfg ? <RefreshCw className="w-5 h-5 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
                   {loading.cfg ? 'Saving…' : 'Save Configuration'}
                 </Button>
@@ -609,20 +613,41 @@ export default function BiometricMachine() {
           {/* ─── DEVICE USERS ─── */}
           <TabsContent value="users">
             <Card className="border-0 shadow-md">
-              <CardHeader className="border-b pb-4 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
-                    <Users className="w-5 h-5" /> Users on Device
-                  </CardTitle>
-                  <CardDescription>Live read from the physical biometric machine.</CardDescription>
+              <CardHeader className="border-b pb-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
+                      <Users className="w-5 h-5" /> Users on Device
+                    </CardTitle>
+                    <CardDescription>Live read from the physical biometric machine.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" className="rounded-xl border-2"
+                          onClick={fetchDeviceUsers} disabled={loading.deviceUsers}>
+                    {loading.deviceUsers ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><RefreshCw className="w-4 h-4 mr-1.5" />Load</>}
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm" className="rounded-xl border-2"
-                        onClick={fetchDeviceUsers} disabled={loading.deviceUsers}>
-                  {loading.deviceUsers
-                    ? <RefreshCw className="w-4 h-4 animate-spin" />
-                    : <><RefreshCw className="w-4 h-4 mr-1.5" />Load</>}
-                </Button>
               </CardHeader>
+
+              {/* FIX-10: add user to device form */}
+              <div className="px-6 py-4 bg-violet-50 border-b border-violet-100">
+                <p className="text-xs font-bold text-violet-700 uppercase tracking-wider mb-3">Add User to Device</p>
+                <div className="flex gap-3">
+                  <Input placeholder="Machine UID (e.g. 42)" value={newDeviceUid}
+                         onChange={e => setNewDeviceUid(e.target.value)}
+                         className="w-44 rounded-xl font-mono text-sm h-9" />
+                  <Input placeholder="Employee Name" value={newDeviceName}
+                         onChange={e => setNewDeviceName(e.target.value)}
+                         onKeyDown={e => e.key === 'Enter' && addDeviceUser()}
+                         className="flex-1 rounded-xl text-sm h-9" />
+                  <Button size="sm" onClick={addDeviceUser}
+                          disabled={loading.addDeviceUser || !online || !newDeviceUid || !newDeviceName}
+                          className="rounded-xl h-9 font-bold text-white px-4"
+                          style={{ backgroundColor: C.purple }}>
+                    {loading.addDeviceUser ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 mr-1" />Add</>}
+                  </Button>
+                </div>
+              </div>
+
               <CardContent className="p-0">
                 {deviceUsers.length === 0 ? (
                   <div className="py-16 text-center text-slate-400">
@@ -638,14 +663,15 @@ export default function BiometricMachine() {
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs tracking-wider">Name on Device</th>
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs tracking-wider">Privilege</th>
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs tracking-wider">Linked To</th>
+                          <th className="px-5 py-3" />
                         </tr>
                       </thead>
                       <tbody>
                         {deviceUsers.map((du, i) => {
                           const linked = allUsers.find(u => String(u.machine_employee_id) === String(du.uid));
                           return (
-                            <tr key={du.uid} className={`border-b last:border-0 ${i % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
-                              <td className="px-5 py-3 font-mono font-bold text-slate-700">{du.uid}</td>
+                            <tr key={du.uid} className={`border-b last:border-0 group ${i % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
+                              <td className="px-5 py-3 font-mono font-bold text-violet-700">{du.uid}</td>
                               <td className="px-5 py-3 font-medium text-slate-800">{du.name || '—'}</td>
                               <td className="px-5 py-3">
                                 <Badge className={du.privilege === 0 ? 'bg-slate-100 text-slate-600' : 'bg-purple-100 text-purple-700'}>
@@ -657,11 +683,24 @@ export default function BiometricMachine() {
                                   ? <span className="text-emerald-700 font-bold text-xs">{linked.full_name}</span>
                                   : <span className="text-red-400 text-xs font-medium">Not linked</span>}
                               </td>
+                              {/* FIX-11: delete from device */}
+                              <td className="px-5 py-3">
+                                <button onClick={() => deleteDeviceUser(du.uid, du.name || du.uid)}
+                                        disabled={loading[`del_${du.uid}`]}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 disabled:opacity-50">
+                                  {loading[`del_${du.uid}`]
+                                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    : <Trash2 className="w-3.5 h-3.5" />}
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
+                    <p className="text-[11px] text-slate-400 px-5 py-3">
+                      {deviceUsers.length} user{deviceUsers.length !== 1 ? 's' : ''} on device
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -671,28 +710,19 @@ export default function BiometricMachine() {
           {/* ─── DEVICE LOGS ─── */}
           <TabsContent value="logs">
             <Card className="border-0 shadow-md">
-              <CardHeader className="border-b pb-4 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
-                    <Clock className="w-5 h-5" /> Raw Attendance Logs on Device
-                  </CardTitle>
-                  <CardDescription>Unsynced punch records stored in device memory.</CardDescription>
-                </div>
-                <div className="flex gap-2">
+              <CardHeader className="border-b pb-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
+                      <Clock className="w-5 h-5" /> Raw Attendance Logs on Device
+                    </CardTitle>
+                    {/* FIX-6: "Clear All" button removed — DELETE /machine/logs does not exist */}
+                    <CardDescription>Punch records read directly from device memory.</CardDescription>
+                  </div>
                   <Button variant="outline" size="sm" className="rounded-xl border-2"
                           onClick={fetchDeviceLogs} disabled={loading.deviceLogs}>
-                    {loading.deviceLogs
-                      ? <RefreshCw className="w-4 h-4 animate-spin" />
-                      : <><RefreshCw className="w-4 h-4 mr-1.5" />Load</>}
+                    {loading.deviceLogs ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><RefreshCw className="w-4 h-4 mr-1.5" />Load</>}
                   </Button>
-                  {deviceLogs.length > 0 && (
-                    <Button variant="outline" size="sm"
-                            className="rounded-xl border-2 border-red-200 text-red-600 hover:bg-red-50"
-                            onClick={clearDeviceLogs} disabled={loading.clearLogs}>
-                      <Trash2 className="w-4 h-4 mr-1.5" />
-                      Clear All
-                    </Button>
-                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -707,20 +737,23 @@ export default function BiometricMachine() {
                       <thead className="sticky top-0 z-10 bg-slate-50 border-b">
                         <tr>
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Machine UID</th>
-                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Timestamp (IST)</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Timestamp (UTC)</th>
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Punch Type</th>
                           <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Linked User</th>
                         </tr>
                       </thead>
                       <tbody>
                         {deviceLogs.map((log, i) => {
-                          const linked = allUsers.find(u => String(u.machine_employee_id) === String(log.user_id));
+                          // FIX-9: was log.user_id — MachineAttendanceLog field is log.uid
+                          const linked = allUsers.find(u => String(u.machine_employee_id) === String(log.uid));
                           const isIn   = log.punch_type === 0 || log.punch_type === 4;
                           return (
                             <tr key={i} className={`border-b last:border-0 ${i % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
-                              <td className="px-5 py-3 font-mono font-bold">{log.user_id}</td>
-                              <td className="px-5 py-3 font-mono text-slate-700">
-                                {fmtDt(typeof log.timestamp === 'string' ? log.timestamp : new Date(log.timestamp).toISOString())}
+                              <td className="px-5 py-3 font-mono font-bold text-violet-700">{log.uid}</td>
+                              <td className="px-5 py-3 font-mono text-slate-700 text-xs">
+                                {log.timestamp
+                                  ? fmtDt(typeof log.timestamp === 'string' ? log.timestamp : new Date(log.timestamp).toISOString())
+                                  : '—'}
                               </td>
                               <td className="px-5 py-3">
                                 <Badge className={`font-bold text-xs flex items-center gap-1 w-fit ${isIn ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
@@ -738,6 +771,82 @@ export default function BiometricMachine() {
                         })}
                       </tbody>
                     </table>
+                    <p className="text-[11px] text-slate-400 px-5 py-3">
+                      {deviceLogs.length} record{deviceLogs.length !== 1 ? 's' : ''} on device
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ─── WEBAPP RECORDS — FIX-12: new tab ─── */}
+          <TabsContent value="webapp">
+            <Card className="border-0 shadow-md">
+              <CardHeader className="border-b pb-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle style={{ color: C.deepBlue }} className="flex items-center gap-2">
+                      <Database className="w-5 h-5" /> Webapp Biometric Records
+                    </CardTitle>
+                    <CardDescription>
+                      Attendance records in your database that came from the biometric device (source = machine).
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" className="rounded-xl border-2" onClick={fetchWebRecords}>
+                    <RefreshCw className="w-4 h-4 mr-1.5" />Refresh
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {webRecords.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <Database className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">No biometric records yet</p>
+                    <p className="text-xs mt-1">Run an attendance sync to pull records from the device</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-50 border-b">
+                        <tr>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Employee</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Date</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Punch In</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Punch Out</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Duration</th>
+                          <th className="px-5 py-3 text-left font-bold text-slate-500 uppercase text-xs">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {webRecords.map((rec, i) => (
+                          <tr key={rec.id || i} className={`border-b last:border-0 ${i % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
+                            <td className="px-5 py-3 font-semibold text-slate-800 text-xs">{rec.user_name || rec.user_id}</td>
+                            <td className="px-5 py-3 font-mono text-xs text-slate-600">{rec.date}</td>
+                            <td className="px-5 py-3 font-mono text-xs font-bold text-emerald-700">{fmtTime(rec.punch_in)}</td>
+                            <td className="px-5 py-3 font-mono text-xs font-bold text-red-500">{fmtTime(rec.punch_out)}</td>
+                            <td className="px-5 py-3 text-xs text-slate-500">
+                              {rec.duration_minutes != null
+                                ? `${Math.floor(rec.duration_minutes / 60)}h ${rec.duration_minutes % 60}m`
+                                : '—'}
+                            </td>
+                            <td className="px-5 py-3">
+                              <Badge className={
+                                rec.is_late              ? 'bg-amber-100 text-amber-700'
+                                : rec.status === 'present' ? 'bg-emerald-100 text-emerald-700'
+                                : rec.status === 'absent'  ? 'bg-red-100 text-red-600'
+                                : 'bg-slate-100 text-slate-600'
+                              }>
+                                {rec.is_late ? 'Late' : rec.status}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[11px] text-slate-400 px-5 py-3">
+                      {webRecords.length} biometric record{webRecords.length !== 1 ? 's' : ''}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -761,13 +870,10 @@ export default function BiometricMachine() {
                   {allUsers.filter(u => u.role !== 'admin' || u.machine_employee_id).map(u => {
                     const hasMid = !!u.machine_employee_id;
                     return (
-                      <motion.div
-                        key={u.id}
-                        variants={itemV}
+                      <motion.div key={u.id} variants={itemV}
                         className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border-2 transition-colors"
                         style={{ borderColor: hasMid ? `${C.emeraldGreen}35` : '#E2E8F0', backgroundColor: hasMid ? `${C.emeraldGreen}05` : 'white' }}
                       >
-                        {/* Avatar + name */}
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden bg-slate-200">
                             {u.profile_picture
@@ -796,37 +902,26 @@ export default function BiometricMachine() {
                           </div>
                         </div>
 
-                        {/* Input / remove */}
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {hasMid ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs"
-                              disabled={midLoading[u.id]}
-                              onClick={() => removeMachineId(u.id, u.full_name)}
-                            >
+                            <Button size="sm" variant="outline"
+                                    className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs"
+                                    disabled={midLoading[u.id]}
+                                    onClick={() => removeMachineId(u.id, u.full_name)}>
                               <Trash2 className="w-3.5 h-3.5 mr-1" />
-                              Unlink
+                              {midLoading[u.id] ? 'Unlinking…' : 'Unlink'}
                             </Button>
                           ) : (
                             <>
-                              <Input
-                                type="number"
-                                min="1"
-                                placeholder="e.g. 42"
-                                value={midForm[u.id] || ''}
-                                onChange={e => setMidForm(p => ({ ...p, [u.id]: e.target.value }))}
-                                className="w-24 rounded-xl font-mono text-center text-sm h-9"
-                                onKeyDown={e => e.key === 'Enter' && setMachineId(u.id)}
-                              />
-                              <Button
-                                size="sm"
-                                className="rounded-xl font-bold text-white h-9"
-                                style={{ backgroundColor: C.deepBlue }}
-                                disabled={midLoading[u.id] || !midForm[u.id]}
-                                onClick={() => setMachineId(u.id)}
-                              >
+                              <Input type="number" min="1" placeholder="e.g. 42"
+                                     value={midForm[u.id] || ''}
+                                     onChange={e => setMidForm(p => ({ ...p, [u.id]: e.target.value }))}
+                                     className="w-24 rounded-xl font-mono text-center text-sm h-9"
+                                     onKeyDown={e => e.key === 'Enter' && setMachineId(u.id)} />
+                              <Button size="sm" className="rounded-xl font-bold text-white h-9"
+                                      style={{ backgroundColor: C.deepBlue }}
+                                      disabled={midLoading[u.id] || !midForm[u.id]}
+                                      onClick={() => setMachineId(u.id)}>
                                 {midLoading[u.id] ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Assign'}
                               </Button>
                             </>
@@ -846,6 +941,7 @@ export default function BiometricMachine() {
               </CardContent>
             </Card>
           </TabsContent>
+
         </Tabs>
       </motion.div>
     </motion.div>
