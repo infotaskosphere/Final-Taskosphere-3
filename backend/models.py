@@ -30,10 +30,10 @@ class RegisterRequest(BaseModel):
     telegram_id: Optional[str] = None
 
 
-class Token(BaseModel):
+class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-
+    user: User
 
 class TokenData(BaseModel):
     user_id: Optional[str] = None
