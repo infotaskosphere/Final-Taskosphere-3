@@ -19,6 +19,8 @@ const Users = lazy(() => import("@/pages/Users"));
 const DueDates = lazy(() => import("@/pages/DueDates"));
 const StaffActivity = lazy(() => import("@/pages/StaffActivity"));
 const LeadsPage = lazy(() => import("@/pages/Leads"));
+const BiometricMachine = lazy(() => import("@/pages/BiometricMachine"));
+
 
 
 /* Route Guards */
@@ -46,6 +48,16 @@ const Permission = ({ permission, children }) => {
   }
   return <DashboardLayout>{children}</DashboardLayout>;
 };
+
+// ✅ PASTE HERE ↓
+const AdminOnly = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
+  return <DashboardLayout>{children}</DashboardLayout>;
+};
+
 
 /* Main Routes */
 
@@ -209,6 +221,16 @@ function AppRoutes() {
             <Permission permission="can_view_audit_logs">
               <TaskAudit />
             </Permission>
+          }
+        />
+
+        {/* Biometric Machine — admin only */}
+        <Route
+          path="/machine"
+          element={
+            <AdminOnly>
+              <BiometricMachine />
+            </AdminOnly>
           }
         />
 
