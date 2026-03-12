@@ -19,6 +19,7 @@ from typing import List, Optional, Dict, Any
 import pytz
 import requests
 import pandas as pd
+from pymongo.errors import OperationFailure
 from zoneinfo import ZoneInfo
 from dateutil import parser
 from dotenv import load_dotenv
@@ -485,7 +486,10 @@ async def create_indexes():
 
     # Clients
     await db.clients.create_index("assigned_to")
-    await db.clients.create_index([("created_by", 1), ("company_name", 1)], unique=True)
+    try:
+        await db.clients.create_index([("created_by", 1), ("company_name", 1)], unique=True)
+    except OperationFailure as e:
+        logger.warning(f"⚠️ Skipped clients index creation due to conflict: {e}")
 
     # DSC register
     await db.dsc_register.create_index("expiry_date")
@@ -496,8 +500,11 @@ async def create_indexes():
 
     # Attendance
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
-    await db.attendance.create_index([("user_id", 1), ("date", 1)], unique=True)
     await db.attendance.create_index("date")
+    try:
+        await db.attendance.create_index([("user_id", 1), ("date", 1)], unique=True)
+    except OperationFailure as e:
+        logger.warning(f"⚠️ Skipped attendance index creation due to conflict: {e}")
 
     # Notifications
     await db.notifications.create_index("user_id")
@@ -505,11 +512,16 @@ async def create_indexes():
     await db.notifications.create_index("created_at")
 
     # Holidays
-    await db.holidays.create_index("date", unique=True)
+    try:
+        await db.holidays.create_index("date", unique=True)
+    except OperationFailure as e:
+        logger.warning(f"⚠️ Skipped holidays index creation due to conflict: {e}")
 
     # Machine config
-    await db.machine_config.create_index("key", unique=True)
-
+    try:
+        await db.machine_config.create_index("key", unique=True)
+    except OperationFailure as e:
+        logger.warning(f"⚠️ Skipped machine_config index creation due to conflict: {e}")
 # ROUTER
 api_router = APIRouter(prefix="/api")
 api_router.include_router(essl_router)
