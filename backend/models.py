@@ -30,13 +30,14 @@ class RegisterRequest(BaseModel):
     telegram_id: Optional[str] = None
 
 
-class AuthResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: User
-
 class TokenData(BaseModel):
     user_id: Optional[str] = None
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Optional[Any] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -107,8 +108,8 @@ class User(BaseModel):
     punch_out_time: Optional[str] = None  # e.g. "19:00"
 
     # Biometric machine
-    machine_employee_id: Optional[str] = None  # numeric UID on eSSL/ZK device
-    machine_synced: bool = False                # True once pushed to device
+    machine_employee_id: Optional[str] = None
+    machine_synced: bool = False
 
     # Account state
     is_active: bool = True
@@ -124,12 +125,14 @@ class User(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+# FIX: AuthResponse defined AFTER User to avoid forward reference error
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: User
+
+
 class UserUpdate(BaseModel):
-    """
-    Payload for PUT /users/{user_id}.
-    machine_employee_id is deliberately excluded — use PUT /users/{user_id}/machine-id
-    which performs the uniqueness check.
-    """
     full_name: Optional[str] = None
     role: Optional[str] = None
     departments: Optional[List[str]] = None
@@ -144,7 +147,6 @@ class UserUpdate(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Slim public-facing user shape returned in list endpoints."""
     id: str
     full_name: str
     email: str
@@ -175,8 +177,8 @@ class Task(BaseModel):
     id: str
     title: str
     description: Optional[str] = None
-    status: str = "pending"          # pending | in_progress | completed
-    priority: str = "medium"         # low | medium | high | urgent | critical
+    status: str = "pending"
+    priority: str = "medium"
     assigned_to: Optional[str] = None
     assigned_to_name: Optional[str] = None
     created_by: Optional[str] = None
@@ -189,6 +191,15 @@ class Task(BaseModel):
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Extended fields used in main.py
+    sub_assignees: List[str] = Field(default_factory=list)
+    comments: List[Any] = Field(default_factory=list)
+    category: Optional[str] = "other"
+    type: Optional[str] = "task"
+    is_recurring: bool = False
+    recurrence_pattern: Optional[str] = "monthly"
+    recurrence_interval: int = 1
+    recurrence_end_date: Optional[datetime] = None
 
 
 class TaskCreate(BaseModel):
@@ -197,9 +208,16 @@ class TaskCreate(BaseModel):
     status: str = "pending"
     priority: str = "medium"
     assigned_to: Optional[str] = None
+    sub_assignees: List[str] = Field(default_factory=list)
     client_id: Optional[str] = None
     department: Optional[str] = None
     due_date: Optional[datetime] = None
+    category: Optional[str] = "other"
+    type: Optional[str] = "task"
+    is_recurring: bool = False
+    recurrence_pattern: Optional[str] = "monthly"
+    recurrence_interval: int = 1
+    recurrence_end_date: Optional[datetime] = None
 
 
 class TaskUpdate(BaseModel):
@@ -219,19 +237,22 @@ class TaskUpdate(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class Todo(BaseModel):
-    id: str
+    id: str = Field(default="")
     title: str
-    status: str = "pending"     # pending | completed
+    status: str = "pending"
     is_completed: bool = False
     user_id: str
     due_date: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    description: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
 
 
 class TodoCreate(BaseModel):
     title: str
     status: str = "pending"
+    description: Optional[str] = None
     due_date: Optional[datetime] = None
 
 
@@ -246,30 +267,24 @@ class TodoUpdate(BaseModel):
 # Attendance
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Punch source — used for audit and frontend badge display
 MachinePunchSource = Literal["web", "machine"]
 
 
 class AttendanceRecord(BaseModel):
     id: str
     user_id: str
-    date: str                         # ISO date string YYYY-MM-DD
+    date: str
     punch_in: Optional[datetime] = None
     punch_out: Optional[datetime] = None
     duration_minutes: Optional[int] = None
-    status: str = "absent"            # present | absent | late | leave | holiday
+    status: str = "absent"
     is_late: bool = False
     leave_reason: Optional[str] = None
-
-    # Biometric source tracking
     source: MachinePunchSource = "web"
-    machine_punch_type: Optional[str] = None  # e.g. "check-in", "check-out"
-
-    # Location (web punch only)
+    machine_punch_type: Optional[str] = None
     location: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -282,14 +297,10 @@ class AttendanceAction(BaseModel):
 
 
 class MachinePunchPayload(BaseModel):
-    """
-    Posted to POST /attendance/machine-sync by the sync engine.
-    Endpoint must require admin authentication.
-    """
-    user_id: str           # internal Taskosphere user._id
-    punch_time: datetime   # UTC naive datetime from device
-    punch_type: str        # "0" = check-in, "1" = check-out (ZK convention)
-    device_uid: str        # raw enrollment number from device record
+    user_id: str
+    punch_time: datetime
+    punch_type: str
+    device_uid: str
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -299,39 +310,53 @@ class MachinePunchPayload(BaseModel):
 class Client(BaseModel):
     id: str
     company_name: str
-    contact_name: Optional[str] = None
+    client_type: Optional[str] = "other"
     email: Optional[str] = None
     phone: Optional[str] = None
+    birthday: Optional[date] = None
+    services: List[str] = Field(default_factory=list)
+    contact_persons: List[Any] = Field(default_factory=list)
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = "active"
     address: Optional[str] = None
-    gstin: Optional[str] = None
-    pan: Optional[str] = None
-    assigned_to: List[str] = Field(default_factory=list)
-    departments: List[str] = Field(default_factory=list)
-    is_active: bool = True
+    city: Optional[str] = None
+    state: Optional[str] = None
+    created_by: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
 
 class ClientCreate(BaseModel):
     company_name: str
-    contact_name: Optional[str] = None
+    client_type: Optional[str] = "other"
     email: Optional[str] = None
     phone: Optional[str] = None
+    birthday: Optional[date] = None
+    services: List[str] = Field(default_factory=list)
+    contact_persons: List[Any] = Field(default_factory=list)
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = "active"
     address: Optional[str] = None
-    gstin: Optional[str] = None
-    pan: Optional[str] = None
-    departments: List[str] = Field(default_factory=list)
+    city: Optional[str] = None
+    state: Optional[str] = None
 
 
 class ClientUpdate(BaseModel):
     company_name: Optional[str] = None
-    contact_name: Optional[str] = None
+    client_type: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    birthday: Optional[date] = None
+    services: Optional[List[str]] = None
+    contact_persons: Optional[List[Any]] = None
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
     address: Optional[str] = None
-    gstin: Optional[str] = None
-    pan: Optional[str] = None
-    departments: Optional[List[str]] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -339,49 +364,49 @@ class ClientUpdate(BaseModel):
 # DSC (Digital Signature Certificate)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class DSCRecord(BaseModel):
-    id: str
-    client_id: Optional[str] = None
-    client_name: Optional[str] = None
+class DSC(BaseModel):
+    id: str = Field(default="")
     holder_name: str
-    pan: Optional[str] = None
     expiry_date: Optional[datetime] = None
-    issued_date: Optional[datetime] = None
-    serial_number: Optional[str] = None
-    class_type: Optional[str] = None    # Class 2 / Class 3
-    purpose: Optional[str] = None
-    storage_location: Optional[str] = None
-    status: str = "active"              # active | expiring | expired
+    issue_date: Optional[datetime] = None
+    certificate_number: Optional[str] = None
+    dsc_type: Optional[str] = None
+    associated_with: Optional[str] = None
+    current_status: str = "IN"
+    current_location: Optional[str] = None
+    movement_log: List[Any] = Field(default_factory=list)
     notes: Optional[str] = None
     created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
 
 
 class DSCCreate(BaseModel):
-    client_id: Optional[str] = None
     holder_name: str
-    pan: Optional[str] = None
+    dsc_type: Optional[str] = None
+    associated_with: Optional[str] = None
+    certificate_number: Optional[str] = None
+    issue_date: Optional[datetime] = None
     expiry_date: Optional[datetime] = None
-    issued_date: Optional[datetime] = None
-    serial_number: Optional[str] = None
-    class_type: Optional[str] = None
-    purpose: Optional[str] = None
-    storage_location: Optional[str] = None
+    current_status: str = "IN"
     notes: Optional[str] = None
 
 
 class DSCUpdate(BaseModel):
     holder_name: Optional[str] = None
-    pan: Optional[str] = None
     expiry_date: Optional[datetime] = None
-    issued_date: Optional[datetime] = None
-    serial_number: Optional[str] = None
-    class_type: Optional[str] = None
-    purpose: Optional[str] = None
-    storage_location: Optional[str] = None
-    status: Optional[str] = None
+    issue_date: Optional[datetime] = None
+    certificate_number: Optional[str] = None
+    dsc_type: Optional[str] = None
+    associated_with: Optional[str] = None
+    current_status: Optional[str] = None
     notes: Optional[str] = None
+
+
+class DSCListResponse(BaseModel):
+    data: List[Any]
+    total: int
+    page: int
+    limit: int
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -389,18 +414,20 @@ class DSCUpdate(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class DueDate(BaseModel):
-    id: str
+    id: str = Field(default="")
     title: str
     description: Optional[str] = None
     due_date: datetime
     days_remaining: Optional[int] = None
-    category: Optional[str] = None     # GST | IT | TDS | ROC etc.
-    recurrence: Optional[str] = None   # monthly | quarterly | annual
+    category: Optional[str] = None
+    department: Optional[str] = None
+    status: str = "pending"
+    recurrence: Optional[str] = None
     is_global: bool = True
     assigned_to: List[str] = Field(default_factory=list)
     client_id: Optional[str] = None
     created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
 
 
 class DueDateCreate(BaseModel):
@@ -408,6 +435,8 @@ class DueDateCreate(BaseModel):
     description: Optional[str] = None
     due_date: datetime
     category: Optional[str] = None
+    department: Optional[str] = None
+    status: str = "pending"
     recurrence: Optional[str] = None
     is_global: bool = True
     assigned_to: List[str] = Field(default_factory=list)
@@ -419,6 +448,8 @@ class DueDateUpdate(BaseModel):
     description: Optional[str] = None
     due_date: Optional[datetime] = None
     category: Optional[str] = None
+    department: Optional[str] = None
+    status: Optional[str] = None
     recurrence: Optional[str] = None
     is_global: Optional[bool] = None
     assigned_to: Optional[List[str]] = None
@@ -430,7 +461,7 @@ class DueDateUpdate(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class Document(BaseModel):
-    id: str
+    id: str = Field(default="")
     title: str
     description: Optional[str] = None
     document_type: Optional[str] = None
@@ -441,7 +472,11 @@ class Document(BaseModel):
     tags: List[str] = Field(default_factory=list)
     is_active: bool = True
     uploaded_by: Optional[str] = None
-    created_at: Optional[datetime] = None
+    current_status: Optional[str] = "IN"
+    movement_log: List[Any] = Field(default_factory=list)
+    issue_date: Optional[datetime] = None
+    valid_upto: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
     updated_at: Optional[datetime] = None
 
 
@@ -453,6 +488,8 @@ class DocumentCreate(BaseModel):
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
+    issue_date: Optional[datetime] = None
+    valid_upto: Optional[datetime] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -465,8 +502,8 @@ class Lead(BaseModel):
     contact_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    source: Optional[str] = None        # referral | website | cold-call etc.
-    status: str = "new"                 # new | contacted | qualified | converted | lost
+    source: Optional[str] = None
+    status: str = "new"
     assigned_to: Optional[str] = None
     assigned_to_name: Optional[str] = None
     notes: Optional[str] = None
@@ -508,7 +545,7 @@ class Notification(BaseModel):
     user_id: str
     title: str
     message: str
-    type: str = "info"       # info | warning | success | error
+    type: str = "info"
     is_read: bool = False
     link: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -529,14 +566,32 @@ class NotificationCreate(BaseModel):
 class DashboardStats(BaseModel):
     total_tasks: int = 0
     completed_tasks: int = 0
+    pending_tasks: int = 0
     overdue_tasks: int = 0
-    total_clients: int = 0
     total_dsc: int = 0
     expiring_dsc_count: int = 0
-    expired_dsc_count: int = 0
+    expiring_dsc_list: List[Any] = Field(default_factory=list)
+    total_clients: int = 0
+    upcoming_birthdays: int = 0
     upcoming_due_dates: int = 0
+    team_workload: List[Any] = Field(default_factory=list)
+    compliance_status: Optional[dict] = None
     total_leads: int = 0
-    team_workload: List[Dict[str, Any]] = Field(default_factory=list)
+    expired_dsc_count: int = 0
+
+
+class PerformanceMetric(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    attendance_percent: float = 0.0
+    total_hours: float = 0.0
+    task_completion_percent: float = 0.0
+    todo_ontime_percent: float = 0.0
+    timely_punchin_percent: float = 0.0
+    overall_score: float = 0.0
+    badge: Optional[str] = None
+    rank: Optional[int] = None
 
 
 class PerformanceRanking(BaseModel):
@@ -551,36 +606,18 @@ class PerformanceRanking(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 # Machine Config  (eSSL / ZKTeco biometric device)
 # ══════════════════════════════════════════════════════════════════════════════
-#
-# FIX: This section was defined TWICE in the original file. The second block
-# silently overrode the first (Python class redefinition). The second block
-# also had `enabled: bool = False` while the first had `enabled: bool = True`,
-# creating a confusing and unpredictable default. The duplicate block has been
-# removed entirely. Only ONE canonical definition exists here.
-#
-# The chosen defaults are:
-#   enabled: bool = False   ← safer; admin must explicitly turn the device on
-#   sync_interval: int = 300 ← 5 minutes, matches essl_backend.py run() loop
 
 class MachineConfig(BaseModel):
-    """
-    Persisted configuration for the eSSL/ZKTeco biometric device.
-    Stored in MongoDB as a single document in the `machine_config` collection.
-    """
     ip: str = "192.168.1.201"
     port: int = 4370
     password: str = ""
-    # FIX: was True in first definition, False in duplicate. Keeping False —
-    # device must be explicitly enabled by an admin after setup.
+    # FIX: False is safer default — admin must explicitly enable
     enabled: bool = False
-    sync_interval: int = 300   # seconds between attendance sync cycles
-    user_sync_interval: int = 3600  # seconds between user list sync cycles
+    sync_interval: int = 300
+    user_sync_interval: int = 3600
 
 
 class MachineConfigUpdate(BaseModel):
-    """
-    All fields optional so the admin can PATCH individual settings.
-    """
     ip: Optional[str] = None
     port: Optional[int] = None
     password: Optional[str] = None
@@ -590,10 +627,6 @@ class MachineConfigUpdate(BaseModel):
 
 
 class MachineStatusResponse(BaseModel):
-    """
-    Returned by GET /api/machine/status.
-    Combined in a single TCP connection (fixes minor bug #13).
-    """
     connected: bool
     device_user_count: int = 0
     ip: str
@@ -604,32 +637,20 @@ class MachineStatusResponse(BaseModel):
 
 
 class MachineUserResponse(BaseModel):
-    """
-    Represents a single user record as stored on the biometric device.
-    Returned by GET /api/machine/users.
-    """
-    uid: str              # enrollment number / machine_employee_id
+    uid: str
     name: str
-    privilege: int = 0    # 0=user, 14=admin on device
+    privilege: int = 0
     card: Optional[str] = None
 
 
 class MachineAttendanceLog(BaseModel):
-    """
-    Raw attendance log record read directly from the device.
-    Returned by GET /api/machine/attendance-logs.
-    FIX: timestamp is datetime (not str) for consistent JSON serialization.
-    """
     uid: str
-    timestamp: datetime   # UTC-naive, converted from device local time
-    punch_type: int       # 0=check-in, 1=check-out (ZK convention)
-    status: int = 0       # verify type from device
+    timestamp: datetime
+    punch_type: int
+    status: int = 0
 
 
 class MachineSyncResult(BaseModel):
-    """
-    Summary returned after a manual or scheduled sync operation.
-    """
     synced: int = 0
     skipped: int = 0
     errors: int = 0
@@ -638,13 +659,6 @@ class MachineSyncResult(BaseModel):
 
 
 class MachineEmployeeIDUpdate(BaseModel):
-    """
-    Posted to PUT /users/{user_id}/machine-id.
-    This is the ONLY correct way to update machine_employee_id — the dedicated
-    endpoint checks for uniqueness across all users before saving.
-    Pass null/None to unassign the user from the device.
-    FIX: Optional[str] allows null to support unassigning.
-    """
     machine_employee_id: Optional[str] = None
 
 
