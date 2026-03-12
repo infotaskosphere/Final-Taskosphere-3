@@ -45,6 +45,7 @@ import {
   ChevronRight,
   Target,
   Activity,
+  Fingerprint,
 } from 'lucide-react';
 
 // ── Brand Colors ─────────────────────────────────────────────────────────────
@@ -57,35 +58,28 @@ const COLORS = {
   amber: '#F59E0B',
 };
 
-// ── Spring Physics (for Framer Motion) ──────────────────────────────────────
+// ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
-  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
-  lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
+  card:   { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
   button: { type: "spring", stiffness: 400, damping: 28 },
-  icon: { type: "spring", stiffness: 450, damping: 25 },
-  tap: { type: "spring", stiffness: 500, damping: 30 }
+  icon:   { type: "spring", stiffness: 450, damping: 25 },
+  tap:    { type: "spring", stiffness: 500, damping: 30 },
 };
 
-// ── Animation Variants ──────────────────────────────────────────────────────
+// ── Animation Variants ────────────────────────────────────────────────────────
 const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06, delayChildren: 0.1 }
-  }
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 24 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] }
-  },
-  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } }
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
-// ── Priority Stripe Helper ──────────────────────────────────────────────────
+// ── Priority Stripe ───────────────────────────────────────────────────────────
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
   if (p === 'critical') return 'border-l-[3px] border-l-red-500';
@@ -95,10 +89,10 @@ const getPriorityStripeClass = (priority) => {
   return 'border-l-[3px] border-l-slate-200';
 };
 
-// ── Task Strip Component ────────────────────────────────────────────────────
+// ── Task Strip ────────────────────────────────────────────────────────────────
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status = task.status || 'pending';
-  const isCompleted = status === 'completed';
+  const isCompleted  = status === 'completed';
   const isInProgress = status === 'in_progress';
 
   return (
@@ -173,7 +167,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   );
 }
 
-// ── Shared Card Shell ───────────────────────────────────────────────────────
+// ── Shared Card Shell ─────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
@@ -182,7 +176,7 @@ function SectionCard({ children, className = '' }) {
   );
 }
 
-// ── Card Header Row ─────────────────────────────────────────────────────────
+// ── Card Header Row ───────────────────────────────────────────────────────────
 function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
@@ -198,7 +192,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
   );
 }
 
-// ── Main Dashboard Component ────────────────────────────────────────────────
+// ── Main Dashboard Component ──────────────────────────────────────────────────
 export default function Dashboard() {
   const { user, hasPermission } = useAuth();
   const navigate = useNavigate();
@@ -211,7 +205,6 @@ export default function Dashboard() {
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
   const [mustPunchIn, setMustPunchIn] = useState(false);
 
-  // Observe dark mode class so cards re-render when theme switches
   const [isDark, setIsDark] = useState(() =>
     typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
   );
@@ -223,16 +216,13 @@ export default function Dashboard() {
     return () => observer.disconnect();
   }, []);
 
-  const { data: tasks = [] } = useTasks();
-  const { data: stats } = useDashboardStats();
-  const { data: upcomingDueDates = [] } = useUpcomingDueDates();
-  const { data: todayAttendance } = useTodayAttendance();
-  const updateTaskMutation = useUpdateTask();
+  const { data: tasks = [] }              = useTasks();
+  const { data: stats }                   = useDashboardStats();
+  const { data: upcomingDueDates = [] }   = useUpcomingDueDates();
+  const { data: todayAttendance }         = useTodayAttendance();
+  const updateTaskMutation                = useUpdateTask();
 
-  // ── DASHBOARD TODOS — always scoped to the current user only.
-  // We explicitly pass user_id so that even admins only see their own
-  // todos on the dashboard "My To-Do" card. The full Todo Dashboard page
-  // handles cross-user visibility separately via its own dropdown.
+  // ── Todos — always scoped to current user only ────────────────────────────
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos", "dashboard-card", user?.id],
     queryFn: async () => {
@@ -245,7 +235,6 @@ export default function Dashboard() {
     refetchOnWindowFocus: true,
   });
 
-  // ── Normalise completed flag across both field conventions ─────────────────
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
@@ -254,29 +243,12 @@ export default function Dashboard() {
     [todosRaw]
   );
 
-  // Only show pending todos on the dashboard card
-  const pendingTodos = useMemo(() =>
-    todos.filter(todo => !todo.completed),
-    [todos]
-  );
+  const pendingTodos       = useMemo(() => todos.filter(t => !t.completed), [todos]);
+  const tasksAssignedToMe  = useMemo(() => tasks.filter(t => t.assigned_to === user?.id && t.status !== "completed").slice(0, 6), [tasks, user?.id]);
+  const tasksAssignedByMe  = useMemo(() => tasks.filter(t => t.created_by === user?.id && t.assigned_to !== user?.id).slice(0, 6), [tasks, user?.id]);
+  const recentTasks        = useMemo(() => tasks.slice(0, 5), [tasks]);
 
-  const tasksAssignedToMe = useMemo(() =>
-    tasks
-      .filter(t => t.assigned_to === user?.id && t.status !== "completed")
-      .slice(0, 6),
-    [tasks, user?.id]
-  );
-
-  const tasksAssignedByMe = useMemo(() =>
-    tasks
-      .filter(t => t.created_by === user?.id && t.assigned_to !== user?.id)
-      .slice(0, 6),
-    [tasks, user?.id]
-  );
-
-  const recentTasks = useMemo(() => tasks.slice(0, 5), [tasks]);
-
-  // Rankings (star performers)
+  // Rankings
   useEffect(() => {
     async function fetchRankings() {
       try {
@@ -291,13 +263,11 @@ export default function Dashboard() {
     fetchRankings();
   }, [rankingPeriod]);
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const createTodo = useMutation({
     mutationFn: data => api.post("/todos", data),
     onSuccess: () => {
-      // Invalidate only the dashboard-card cache key
       queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-      // Also invalidate the full todos page cache so it stays in sync
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo added");
     },
@@ -305,19 +275,14 @@ export default function Dashboard() {
   });
 
   const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => {
-      const isCompleting = status === "completed";
-      return api.patch(`/todos/${id}`, { is_completed: isCompleting });
-    },
+    mutationFn: ({ id, status }) =>
+      api.patch(`/todos/${id}`, { is_completed: status === "completed" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo updated");
     },
-    onError: (error) => {
-      toast.error("Failed to update todo");
-      console.error("Update error:", error);
-    },
+    onError: () => toast.error("Failed to update todo"),
   });
 
   const deleteTodo = useMutation({
@@ -330,12 +295,12 @@ export default function Dashboard() {
     onError: () => toast.error("Failed to delete todo"),
   });
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
     createTodo.mutate({
-      title: newTodo.trim(),
-      status: "pending",
+      title:    newTodo.trim(),
+      status:   "pending",
       due_date: selectedDueDate ? selectedDueDate.toISOString() : null,
     });
     setNewTodo("");
@@ -343,16 +308,13 @@ export default function Dashboard() {
   };
 
   const handleToggleTodo = (id) => {
-    const todo = todosRaw.find(t => (t.id === id || t._id === id));
+    const todo = todosRaw.find(t => t.id === id || t._id === id);
     if (!todo) return;
     const currentCompleted = todo.is_completed === true || todo.status === "completed";
-    const newStatus = currentCompleted ? "pending" : "completed";
-    updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
+    updateTodo.mutate({ id: todo.id || todo._id, status: currentCompleted ? "pending" : "completed" });
   };
 
-  const handleDeleteTodo = (id) => {
-    deleteTodo.mutate(id);
-  };
+  const handleDeleteTodo = (id) => deleteTodo.mutate(id);
 
   const updateAssignedTaskStatus = (taskId, newStatus) => {
     updateTaskMutation.mutate(
@@ -364,7 +326,6 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
         },
         onError: (err) => {
-          console.error("Update Error:", err);
           toast.error(err.response?.data?.detail || 'Failed to update task');
         },
       }
@@ -384,16 +345,16 @@ export default function Dashboard() {
     }
   };
 
-  // ── Utility Helpers ─────────────────────────────────────────────────────────
+  // ── Utility Helpers ───────────────────────────────────────────────────────
   const getTodayDuration = () => {
     if (!todayAttendance?.punch_in) return "0h 0m";
     if (todayAttendance.punch_out) {
       const mins = todayAttendance.duration_minutes || 0;
       return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     }
-    const punchInStr = todayAttendance.punch_in;
+    const punchInStr  = todayAttendance.punch_in;
     const punchInDate = new Date(punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z');
-    const diffMs = Date.now() - punchInDate.getTime();
+    const diffMs      = Date.now() - punchInDate.getTime();
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     return `${h}h ${m}m`;
@@ -409,9 +370,14 @@ export default function Dashboard() {
       )
     : null;
 
-  const isAdmin = user?.role === 'admin';
-  const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-  const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
+  const isAdmin          = user?.role === 'admin';
+  const showTaskSection  = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
+  const isOverdue        = (dueDate) => dueDate && new Date(dueDate) < new Date();
+
+  // FIX: Detect if this user has a biometric machine ID assigned.
+  // If they do, the punch-in gate becomes advisory instead of blocking —
+  // they may have already punched via the device and sync is pending (up to 5 min).
+  const userHasMachineId = !!user?.machine_employee_id;
 
   const getStatusStyle = (status) => {
     const styles = {
@@ -444,14 +410,14 @@ export default function Dashboard() {
     return format(date, 'hh:mm a');
   };
 
-  // ── Ranking Item (Memoized) ─────────────────────────────────────────────────
+  // ── Ranking Item ──────────────────────────────────────────────────────────
   const RankingItem = React.memo(({ member, index, period }) => {
-    const rank = index + 1;
+    const rank     = index + 1;
     const isGold   = index === 0;
     const isSilver = index === 1;
     const isBronze = index === 2;
     const isPodium = isGold || isSilver || isBronze;
-    const medal = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
+    const medal    = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
 
     const rowStyle = isGold
       ? { background: 'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)', border: '1px solid #E2AA00' }
@@ -532,33 +498,51 @@ export default function Dashboard() {
     return "Working Late? 🌙";
   };
 
+  // FIX: Punch-in gate logic.
+  // Original bug: gate fired even for users who punched on the biometric device,
+  // because the machine sync can take up to 5 minutes to arrive in the DB.
+  //
+  // New behaviour:
+  //   - If user has no machine_employee_id → block as before (they must use web punch).
+  //   - If user HAS machine_employee_id    → show a soft advisory banner instead of
+  //     blocking the page. This prevents the confusing "punch in now" modal from
+  //     appearing for someone who already punched on the physical device.
   useEffect(() => {
     if (!todayAttendance) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
-    if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
+    if (
+      todayAttendance.status === "leave" ||
+      todayAttendance.status === "holiday"
+    ) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
     if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
-      setMustPunchIn(true);
-      document.body.style.overflow = "hidden";
+      if (userHasMachineId) {
+        // Soft advisory only — do NOT block page scroll
+        setMustPunchIn(false);
+        document.body.style.overflow = "auto";
+      } else {
+        setMustPunchIn(true);
+        document.body.style.overflow = "hidden";
+      }
     } else {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
     }
     return () => { document.body.style.overflow = "auto"; };
-  }, [todayAttendance]);
+  }, [todayAttendance, userHasMachineId]);
 
-  const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
+  const metricCardCls     = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
   const metricCardDefault = isDark
     ? "bg-slate-800 border-slate-700 hover:border-slate-600"
     : "bg-white border-slate-200/80 hover:border-slate-300";
 
-  // ── JSX Render ──────────────────────────────────────────────────────────────
+  // ── JSX Render ────────────────────────────────────────────────────────────
   return (
     <motion.div
       className="space-y-4"
@@ -566,13 +550,13 @@ export default function Dashboard() {
       initial="hidden"
       animate="visible"
     >
-      {/* ── Welcome Banner ──────────────────────────────────────────────── */}
+      {/* ── Welcome Banner ─────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
           className="relative overflow-hidden rounded-2xl px-6 py-5"
           style={{
-            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-            boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+            background:   `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+            boxShadow:    `0 8px 32px rgba(13,59,102,0.28)`,
           }}
         >
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
@@ -596,9 +580,9 @@ export default function Dashboard() {
                 whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
                 style={{
-                  background: 'rgba(255,255,255,0.12)',
-                  border: '1px solid rgba(255,255,255,0.18)',
-                  backdropFilter: 'blur(8px)',
+                  background:       'rgba(255,255,255,0.12)',
+                  border:           '1px solid rgba(255,255,255,0.18)',
+                  backdropFilter:   'blur(8px)',
                 }}
                 onClick={() => navigate('/duedates')}
               >
@@ -618,16 +602,36 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
+      {/* FIX: Soft advisory banner for biometric users who haven't synced yet */}
+      {userHasMachineId &&
+       todayAttendance &&
+       todayAttendance.status === "absent" &&
+       !todayAttendance.punch_in && (
+        <motion.div
+          variants={itemVariants}
+          className="flex items-center gap-3 px-5 py-3 rounded-xl border-2 border-violet-200 bg-violet-50"
+        >
+          <Fingerprint className="w-5 h-5 text-violet-600 flex-shrink-0" />
+          <p className="text-sm font-semibold text-violet-900 flex-1">
+            No punch-in recorded yet today. If you've already used the biometric device, your attendance will sync within a few minutes.
+          </p>
+          <Button
+            size="sm"
+            onClick={() => handlePunchAction('punch_in')}
+            disabled={loading}
+            className="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs whitespace-nowrap"
+          >
+            Punch In Manually
+          </Button>
+        </motion.div>
+      )}
+
       {/* ── Key Metrics ─────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
 
         {/* Total Tasks */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          onClick={() => navigate('/tasks')}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          onClick={() => navigate('/tasks')} className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -649,16 +653,13 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Overdue Tasks */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           onClick={() => navigate('/tasks?filter=overdue')}
           className={`${metricCardCls} ${
             stats?.overdue_tasks > 0
               ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300'
               : metricCardDefault
-          }`}
-        >
+          }`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -680,12 +681,8 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Completion Rate */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          onClick={() => navigate('/tasks')}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          onClick={() => navigate('/tasks')} className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -700,25 +697,20 @@ export default function Dashboard() {
               </div>
             </div>
             <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-              <div
-                className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${completionRate}%`, background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}
-              />
+              <div className="h-full rounded-full transition-all duration-700"
+                style={{ width: `${completionRate}%`, background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }} />
             </div>
           </CardContent>
         </motion.div>
 
         {/* DSC Alerts */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           onClick={() => navigate('/dsc?tab=expired')}
           className={`${metricCardCls} ${
             stats?.expiring_dsc_count > 0
               ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/50 border-red-200'
               : metricCardDefault
-          }`}
-        >
+          }`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -738,12 +730,8 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Today's Attendance */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          onClick={() => navigate('/attendance')}
-          className={`${metricCardCls} ${metricCardDefault}`}
-        >
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          onClick={() => navigate('/attendance')} className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -777,7 +765,8 @@ export default function Dashboard() {
             title="Recent Tasks"
             subtitle="Latest assignments"
             action={
-              <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`}
+              <Button variant="ghost" size="sm"
+                className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`}
                 onClick={() => navigate('/tasks')}>
                 View All
               </Button>
@@ -790,7 +779,7 @@ export default function Dashboard() {
               <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                 <AnimatePresence>
                   {recentTasks.map(task => {
-                    const statusStyle = getStatusStyle(task.status);
+                    const statusStyle   = getStatusStyle(task.status);
                     const priorityStyle = getPriorityStyle(task.priority);
                     return (
                       <motion.div
@@ -829,7 +818,8 @@ export default function Dashboard() {
             title="Upcoming Deadlines"
             subtitle="Next 30 days"
             action={
-              <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`}
+              <Button variant="ghost" size="sm"
+                className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`}
                 onClick={() => navigate('/duedates')}>
                 View All
               </Button>
@@ -844,13 +834,9 @@ export default function Dashboard() {
                   {upcomingDueDates.map(due => {
                     const color = getDeadlineColor(due.days_remaining || 0);
                     return (
-                      <motion.div
-                        key={due.id}
-                        variants={itemVariants}
-                        whileHover={{ y: -1 }}
+                      <motion.div key={due.id} variants={itemVariants} whileHover={{ y: -1 }}
                         className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${color.bg}`}
-                        onClick={() => navigate('/duedates')}
-                      >
+                        onClick={() => navigate('/duedates')}>
                         <div className="flex items-center justify-between mb-1">
                           <p className={`font-medium text-sm truncate flex-1 mr-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                             {due.title || 'Untitled Deadline'}
@@ -880,7 +866,8 @@ export default function Dashboard() {
             title="Attendance"
             subtitle="Daily work hours"
             action={
-              <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-500'}`}
+              <Button variant="ghost" size="sm"
+                className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-500'}`}
                 onClick={() => navigate('/attendance')}>
                 View Log
               </Button>
@@ -894,16 +881,31 @@ export default function Dashboard() {
                     <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       <LogIn className="h-4 w-4 text-green-500" />
                       <span className="font-medium">Punch In</span>
+                      {/* FIX: show biometric badge when punch came from device */}
+                      {todayAttendance.source === 'machine' && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full">
+                          🖐 Biometric
+                        </span>
+                      )}
                     </div>
-                    <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
+                    <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                      {formatToLocalTime(todayAttendance.punch_in)}
+                    </span>
                   </div>
                   {todayAttendance.punch_out ? (
                     <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
                       <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                         <LogOut className="h-4 w-4 text-red-500" />
                         <span className="font-medium">Punch Out</span>
+                        {todayAttendance.source === 'machine' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full">
+                            🖐 Biometric
+                          </span>
+                        )}
                       </div>
-                      <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_out)}</span>
+                      <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                        {formatToLocalTime(todayAttendance.punch_out)}
+                      </span>
                     </div>
                   ) : (
                     <Button
@@ -930,34 +932,41 @@ export default function Dashboard() {
                   </div>
                 </>
               ) : (
-                <Button
-                  onClick={() => handlePunchAction('punch_in')}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold"
-                  disabled={loading}
-                >
-                  Punch In
-                </Button>
+                <>
+                  <Button
+                    onClick={() => handlePunchAction('punch_in')}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold"
+                    disabled={loading}
+                  >
+                    Punch In
+                  </Button>
+                  {/* FIX: Hint for biometric users */}
+                  {userHasMachineId && (
+                    <p className="text-[11px] text-center text-violet-500 font-medium pt-1 flex items-center justify-center gap-1">
+                      <Fingerprint className="h-3 w-3" />
+                      Biometric sync pending if you punched on device
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>
         </SectionCard>
       </motion.div>
 
-      {/* ── Assigned Tasks – Two Columns ────────────────────────────────── */}
+      {/* ── Assigned Tasks ───────────────────────────────────────────────── */}
       {showTaskSection && (
         <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-
-          {/* Tasks Assigned to Me */}
           <SectionCard className="cursor-pointer hover:shadow-md transition group"
-            onClick={() => navigate('/tasks?filter=assigned-to-me')}
-          >
+            onClick={() => navigate('/tasks?filter=assigned-to-me')}>
             <CardHeaderRow
               iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
               icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
               title="Tasks Assigned to Me"
               subtitle="Tasks others gave you"
               action={
-                <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
+                <Button variant="ghost" size="sm"
+                  className={`text-xs h-7 px-3 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
                   onClick={e => { e.stopPropagation(); navigate('/tasks?filter=assigned-to-me'); }}>
                   View All →
                 </Button>
@@ -972,11 +981,9 @@ export default function Dashboard() {
                 <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                   <AnimatePresence>
                     {tasksAssignedToMe.map(task => (
-                      <TaskStrip
-                        key={task.id} task={task} isToMe={true}
+                      <TaskStrip key={task.id} task={task} isToMe={true}
                         assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
-                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                      />
+                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate} />
                     ))}
                   </AnimatePresence>
                 </div>
@@ -984,17 +991,16 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Tasks Assigned by Me */}
           <SectionCard className="cursor-pointer hover:shadow-md transition group"
-            onClick={() => navigate('/tasks?filter=assigned-by-me')}
-          >
+            onClick={() => navigate('/tasks?filter=assigned-by-me')}>
             <CardHeaderRow
               iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
               icon={<Briefcase className="h-4 w-4 text-blue-600" />}
               title="Tasks Assigned by Me"
               subtitle="Tasks you delegated"
               action={
-                <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
+                <Button variant="ghost" size="sm"
+                  className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
                   onClick={e => { e.stopPropagation(); navigate('/tasks?filter=assigned-by-me'); }}>
                   View All →
                 </Button>
@@ -1009,11 +1015,9 @@ export default function Dashboard() {
                 <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                   <AnimatePresence>
                     {tasksAssignedByMe.map(task => (
-                      <TaskStrip
-                        key={task.id} task={task} isToMe={false}
+                      <TaskStrip key={task.id} task={task} isToMe={false}
                         assignedName={task.assigned_to_name || 'Unknown'}
-                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                      />
+                        onUpdateStatus={updateAssignedTaskStatus} navigate={navigate} />
                     ))}
                   </AnimatePresence>
                 </div>
@@ -1023,9 +1027,8 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* ── Star Performers + To-Do List ────────────────────────────────── */}
+      {/* ── Star Performers + To-Do ──────────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
         {/* Star Performers */}
         <SectionCard>
           <CardHeaderRow
@@ -1037,15 +1040,12 @@ export default function Dashboard() {
               isAdmin ? (
                 <div className={`flex gap-0.5 rounded-lg p-0.5 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
                   {["all", "monthly", "weekly"].map(p => (
-                    <button
-                      key={p}
-                      onClick={() => setRankingPeriod(p)}
+                    <button key={p} onClick={() => setRankingPeriod(p)}
                       className={`px-2 py-1 text-[10px] font-semibold rounded-md transition-all ${
                         rankingPeriod === p
                           ? isDark ? 'bg-slate-600 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
                           : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
+                      }`}>
                       {p.charAt(0).toUpperCase() + p.slice(1)}
                     </button>
                   ))}
@@ -1068,7 +1068,7 @@ export default function Dashboard() {
           </div>
         </SectionCard>
 
-        {/* My To-Do List — scoped to logged-in user only regardless of role */}
+        {/* My To-Do */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -1076,14 +1076,14 @@ export default function Dashboard() {
             title="My To-Do List"
             subtitle="Your personal tasks"
             action={
-              <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
+              <Button variant="ghost" size="sm"
+                className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`}
                 onClick={() => navigate('/todos')}>
                 View All
               </Button>
             }
           />
           <div className="p-3">
-            {/* Input Row */}
             <div className="flex gap-2 mb-3">
               <input
                 type="text"
@@ -1105,12 +1105,9 @@ export default function Dashboard() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <CalendarComponent
-                    mode="single"
-                    selected={selectedDueDate}
+                  <CalendarComponent mode="single" selected={selectedDueDate}
                     onSelect={date => { setSelectedDueDate(date); setShowDueDatePicker(false); }}
-                    initialFocus
-                  />
+                    initialFocus />
                 </PopoverContent>
               </Popover>
               <Button onClick={addTodo} disabled={!newTodo.trim()}
@@ -1124,7 +1121,6 @@ export default function Dashboard() {
                 📅 Due: {format(selectedDueDate, 'MMM d, yyyy')}
               </p>
             )}
-
             {pendingTodos.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
             ) : (
@@ -1143,12 +1139,9 @@ export default function Dashboard() {
                       }`}
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <input
-                          type="checkbox"
-                          checked={todo.completed}
+                        <input type="checkbox" checked={todo.completed}
                           onChange={() => handleToggleTodo(todo._id || todo.id)}
-                          className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded cursor-pointer"
-                        />
+                          className="h-4 w-4 accent-emerald-600 flex-shrink-0 rounded cursor-pointer" />
                         <div className="flex-1 min-w-0">
                           <span className={`block text-sm truncate ${
                             todo.completed
@@ -1169,10 +1162,8 @@ export default function Dashboard() {
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleDeleteTodo(todo._id || todo.id)}
-                        className={`text-xs font-medium transition-colors px-2 py-1 rounded-lg flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}
-                      >
+                      <button onClick={() => handleDeleteTodo(todo._id || todo.id)}
+                        className={`text-xs font-medium transition-colors px-2 py-1 rounded-lg flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
                         ✕
                       </button>
                     </motion.div>
@@ -1187,42 +1178,13 @@ export default function Dashboard() {
       {/* ── Quick Access Tiles ───────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
         {[
-          {
-            path: '/leads',
-            icon: <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />,
-            iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,
-            label: String(stats?.total_leads || 0),
-            sub: 'Leads',
-          },
-          {
-            path: '/clients',
-            icon: <Building2 className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />,
-            iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`,
-            label: String(stats?.total_clients || 0),
-            sub: 'Clients',
-          },
-          {
-            path: '/dsc',
-            icon: <Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
-            iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
-            label: String(stats?.total_dsc || 0),
-            sub: 'DSC Certs',
-          },
-          {
-            path: '/duedates',
-            icon: <CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
-            iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
-            label: String(stats?.upcoming_due_dates || 0),
-            sub: 'Compliance',
-          },
+          { path: '/leads',    icon: <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />,   iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`, label: String(stats?.total_leads || 0),   sub: 'Leads' },
+          { path: '/clients',  icon: <Building2 className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />, iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`, label: String(stats?.total_clients || 0), sub: 'Clients' },
+          { path: '/dsc',      icon: <Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label: String(stats?.total_dsc || 0), sub: 'DSC Certs' },
+          { path: '/duedates', icon: <CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label: String(stats?.upcoming_due_dates || 0), sub: 'Compliance' },
         ].map(tile => (
-          <motion.div
-            key={tile.path}
-            whileHover={{ y: -3, transition: springPhysics.card }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => navigate(tile.path)}
-            className={`${metricCardCls} ${metricCardDefault}`}
-          >
+          <motion.div key={tile.path} whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.97 }}
+            onClick={() => navigate(tile.path)} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-3.5 flex items-center gap-3">
               <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: tile.iconBg }}>
@@ -1237,12 +1199,8 @@ export default function Dashboard() {
         ))}
 
         {isAdmin && (
-          <motion.div
-            whileHover={{ y: -3, transition: springPhysics.card }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => navigate('/users')}
-            className={`${metricCardCls} ${metricCardDefault}`}
-          >
+          <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.97 }}
+            onClick={() => navigate('/users')} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-3.5 flex items-center gap-3">
               <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
                 style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}>
@@ -1259,9 +1217,11 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* ── Punch-In Gate Overlay ────────────────────────────────────────── */}
+      {/* ── Punch-In Gate (web-only users) ──────────────────────────────── */}
+      {/* FIX: This gate is now only shown for users WITHOUT a biometric machine ID.
+          Users with machine_employee_id see a soft advisory banner above instead. */}
       <AnimatePresence>
-        {mustPunchIn && (
+        {mustPunchIn && !userHasMachineId && (
           <motion.div
             className="fixed inset-0 z-[9999] flex items-center justify-center"
             style={{ background: 'rgba(7,15,30,0.75)', backdropFilter: 'blur(10px)' }}
@@ -1284,12 +1244,9 @@ export default function Dashboard() {
                 <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3">
                   <Clock className="h-7 w-7 text-white" />
                 </div>
-                <motion.h2
-                  className="text-2xl font-bold text-white"
-                  initial={{ scale: 0.95 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: "spring", stiffness: 220, damping: 14 }}
-                >
+                <motion.h2 className="text-2xl font-bold text-white"
+                  initial={{ scale: 0.95 }} animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 220, damping: 14 }}>
                   {getGreeting()}
                 </motion.h2>
                 <p className="text-white/70 text-sm mt-1.5">
@@ -1300,12 +1257,8 @@ export default function Dashboard() {
                 <p className={`text-center text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   Please punch in to begin your workday.
                 </p>
-                <motion.div
-                  initial={{ y: 0 }}
-                  animate={{ y: [0, -2, 0] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                  whileHover={{ y: 0 }}
-                >
+                <motion.div initial={{ y: 0 }} animate={{ y: [0, -2, 0] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }} whileHover={{ y: 0 }}>
                   <Button
                     onClick={async () => {
                       await handlePunchAction('punch_in');
@@ -1313,7 +1266,7 @@ export default function Dashboard() {
                       document.body.style.overflow = "auto";
                     }}
                     disabled={loading}
-                    className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-200 transition-all"
+                    className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg"
                   >
                     {loading ? "Punching In..." : "Punch In Now"}
                   </Button>
