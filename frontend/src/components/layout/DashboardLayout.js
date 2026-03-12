@@ -19,6 +19,7 @@ import {
   Target,
   Sun,
   Moon,
+  Fingerprint,   // ✅ Biometric icon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -95,20 +96,30 @@ const DashboardLayout = ({ children }) => {
     navigate("/login", { replace: true });
   };
 
+  const isAdmin = user?.role === 'admin';
+
   const navItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
-    { path: '/todos', icon: CheckSquare, label: 'To Do' },
-    { path: '/attendance', icon: Clock, label: 'Attendance' },
-    { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-    { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
-    { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
-    { path: '/clients', icon: Users, label: 'Clients', permission: 'can_view_all_clients' },
-    { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
-    { path: '/reports', icon: BarChart3, label: 'Reports' },
-    { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
-    { path: '/leads', icon: Target, label: 'Lead Management', permission: 'can_view_all_leads' },
-    { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
+    { path: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/tasks',          icon: CheckSquare,     label: 'Tasks' },
+    { path: '/todos',          icon: CheckSquare,     label: 'To Do' },
+    { path: '/attendance',     icon: Clock,           label: 'Attendance' },
+    { path: '/duedates',       icon: Calendar,        label: 'Compliance Calendar' },
+    { path: '/dsc',            icon: FileText,        label: 'DSC Register',      permission: 'can_view_all_dsc' },
+    { path: '/documents',      icon: FileText,        label: 'Document Register', permission: 'can_view_documents' },
+    { path: '/clients',        icon: Users,           label: 'Clients',           permission: 'can_view_all_clients' },
+    { path: '/staff-activity', icon: Activity,        label: 'Staff Activity',    permission: 'can_view_staff_activity' },
+    { path: '/reports',        icon: BarChart3,       label: 'Reports' },
+    { path: '/task-audit',     icon: Activity,        label: 'Task Audit Log',    permission: 'can_view_audit_logs' },
+    { path: '/leads',          icon: Target,          label: 'Lead Management',   permission: 'can_view_all_leads' },
+    { path: '/users',          icon: Users,           label: 'Users',             permission: 'can_view_user_page' },
+
+    // ✅ Biometric Machine — admin only, shown only if user is admin
+    ...(isAdmin ? [{
+      path: '/machine',
+      icon: Fingerprint,
+      label: 'Biometric Machine',
+      adminOnly: true,
+    }] : []),
   ];
 
   const visibleNavItems = navItems.filter(
@@ -149,7 +160,6 @@ const DashboardLayout = ({ children }) => {
           className="flex items-center justify-between px-4 py-4 flex-shrink-0"
           style={{ borderBottom: '1px solid #f1f5f9' }}
         >
-          {/* Logo only — no text, centred when collapsed, left-aligned when expanded */}
           <div className={`flex items-center overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
             <img
               src="/logo.png"
@@ -194,7 +204,13 @@ const DashboardLayout = ({ children }) => {
 
             return (
               <React.Fragment key={item.path}>
+                {/* Divider before Staff Activity */}
                 {item.path === '/staff-activity' && (
+                  <div className="my-3 mx-1" style={{ borderTop: '1px solid #e2e8f0' }} />
+                )}
+
+                {/* ✅ Divider before Biometric Machine */}
+                {item.path === '/machine' && (
                   <div className="my-3 mx-1" style={{ borderTop: '1px solid #e2e8f0' }} />
                 )}
 
@@ -215,18 +231,27 @@ const DashboardLayout = ({ children }) => {
                       rounded-xl transition-all duration-200
                       ${isActive
                         ? 'text-white'
-                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                        : item.adminOnly
+                          ? 'text-violet-500 hover:text-violet-700 hover:bg-violet-50'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                       }
                     `}
                     style={isActive ? {
-                      background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
-                      boxShadow: `0 4px 12px rgba(13,59,102,0.25)`,
+                      background: item.adminOnly
+                        ? 'linear-gradient(135deg, #7c3aed, #6d28d9)'
+                        : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+                      boxShadow: item.adminOnly
+                        ? '0 4px 12px rgba(124,58,237,0.25)'
+                        : `0 4px 12px rgba(13,59,102,0.25)`,
                     } : {}}
                   >
                     {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full" style={{ background: COLORS.mediumBlue }} />
+                      <span
+                        className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
+                        style={{ background: item.adminOnly ? '#7c3aed' : COLORS.mediumBlue }}
+                      />
                     )}
-                    <Icon className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <Icon className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${isActive ? 'text-white' : item.adminOnly ? 'text-violet-500' : 'text-slate-400'}`} />
                     {!collapsed && (
                       <span className="font-medium text-sm whitespace-nowrap tracking-tight">
                         {item.label}
@@ -243,7 +268,7 @@ const DashboardLayout = ({ children }) => {
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className={`${contentMargin} transition-all duration-300 ease-in-out min-h-screen flex flex-col`}>
 
-        {/* Header — always white background for full logo visibility & branding */}
+        {/* Header */}
         <header
           className="sticky top-0 z-40 flex-shrink-0 bg-white"
           style={{
@@ -253,7 +278,6 @@ const DashboardLayout = ({ children }) => {
         >
           <div className="flex items-center justify-between px-5 md:px-7 h-14">
 
-            {/* Mobile Menu Button */}
             <motion.div whileTap={{ scale: 0.9 }}>
               <Button
                 variant="ghost"
@@ -265,7 +289,6 @@ const DashboardLayout = ({ children }) => {
               </Button>
             </motion.div>
 
-            {/* Page Title (desktop) */}
             <div className="hidden lg:block">
               <span className="text-sm font-semibold text-slate-500 uppercase tracking-widest">
                 {visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard'}
