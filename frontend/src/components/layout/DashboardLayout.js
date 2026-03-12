@@ -19,7 +19,7 @@ import {
   Target,
   Sun,
   Moon,
-  Fingerprint,   // ✅ Biometric icon
+  Fingerprint,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -112,8 +112,9 @@ const DashboardLayout = ({ children }) => {
     { path: '/task-audit',     icon: Activity,        label: 'Task Audit Log',    permission: 'can_view_audit_logs' },
     { path: '/leads',          icon: Target,          label: 'Lead Management',   permission: 'can_view_all_leads' },
     { path: '/users',          icon: Users,           label: 'Users',             permission: 'can_view_user_page' },
-
-    // ✅ Biometric Machine — admin only, shown only if user is admin
+    // FIX: Biometric Machine — admin-only, gated by role (not permission)
+    // Uses adminOnly flag so it gets purple styling and a divider above it.
+    // No duplicate permission check needed; the isAdmin spread already gates it.
     ...(isAdmin ? [{
       path: '/machine',
       icon: Fingerprint,
@@ -122,6 +123,9 @@ const DashboardLayout = ({ children }) => {
     }] : []),
   ];
 
+  // Only show items the user has permission for.
+  // adminOnly items have no `permission` key so they always pass this filter —
+  // they are already gated by the isAdmin spread above.
   const visibleNavItems = navItems.filter(
     item => !item.permission || hasPermission(item.permission)
   );
@@ -209,7 +213,7 @@ const DashboardLayout = ({ children }) => {
                   <div className="my-3 mx-1" style={{ borderTop: '1px solid #e2e8f0' }} />
                 )}
 
-                {/* ✅ Divider before Biometric Machine */}
+                {/* Divider before Biometric Machine */}
                 {item.path === '/machine' && (
                   <div className="my-3 mx-1" style={{ borderTop: '1px solid #e2e8f0' }} />
                 )}
@@ -251,7 +255,11 @@ const DashboardLayout = ({ children }) => {
                         style={{ background: item.adminOnly ? '#7c3aed' : COLORS.mediumBlue }}
                       />
                     )}
-                    <Icon className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${isActive ? 'text-white' : item.adminOnly ? 'text-violet-500' : 'text-slate-400'}`} />
+                    <Icon
+                      className={`flex-shrink-0 ${collapsed ? 'h-5 w-5' : 'h-4 w-4'} ${
+                        isActive ? 'text-white' : item.adminOnly ? 'text-violet-500' : 'text-slate-400'
+                      }`}
+                    />
                     {!collapsed && (
                       <span className="font-medium text-sm whitespace-nowrap tracking-tight">
                         {item.label}
