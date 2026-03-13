@@ -24,7 +24,7 @@ import {
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import Papa from 'papaparse';
+const Papa = (await import("papaparse")).default;
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
