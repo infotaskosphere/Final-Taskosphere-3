@@ -70,7 +70,7 @@
   },
   "scripts": {
     "start": "craco start",
-    "build": "NODE_OPTIONS=--max-old-space-size=4096 craco build",
+    "build": "GENERATE_SOURCEMAP=false NODE_OPTIONS=--max-old-space-size=4096 craco build",
     "test": "craco test"
   },
   "browserslist": {
