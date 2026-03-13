@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
-import Papa from "papaparse";
+import Papa from "papaparse/papaparse.js";
 import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Search, Calendar, Building2, User,
