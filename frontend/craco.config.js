@@ -45,13 +45,8 @@ const webpackConfig = {
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
-      // Force Webpack to use the unminified version to prevent memory crashes
-      'papaparse': path.resolve(__dirname, 'node_modules/papaparse/papaparse.js')
     },
     configure: (webpackConfig) => {
-      
-      // ADDED THIS LINE: Stop Webpack from crashing on the minified PapaParse file
-      webpackConfig.module = { ...webpackConfig.module, noParse: /papaparse\.min\.js/ };
 
       // Add ignored patterns to reduce watched directories
       webpackConfig.watchOptions = {
