@@ -2,13 +2,16 @@
 const path = require("path");
 require("dotenv").config();
 
+// Detect dev server
 const isDevServer = process.env.NODE_ENV !== "production";
 
+// Feature flags
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
   enableVisualEdits: isDevServer,
 };
 
+// Optional modules
 let setupDevServer;
 let babelMetadataPlugin;
 
@@ -27,7 +30,7 @@ if (config.enableHealthCheck) {
   healthPluginInstance = new WebpackHealthPlugin();
 }
 
-const webpackConfig = {
+module.exports = {
   eslint: {
     configure: {
       extends: ["plugin:react-hooks/recommended"],
@@ -41,16 +44,17 @@ const webpackConfig = {
   webpack: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-
-      // 🔥 FIX FOR PAPAPARSE BUILD ERROR
-      papaparse: path.resolve(
-        __dirname,
-        "node_modules/papaparse/papaparse.js"
-      ),
     },
 
     configure: (webpackConfig) => {
 
+      // 🔧 Fix PapaParse stack overflow in Render builds
+      webpackConfig.resolve.alias = {
+        ...webpackConfig.resolve.alias,
+        "papaparse$": require.resolve("papaparse"),
+      };
+
+      // Reduce watched files
       webpackConfig.watchOptions = {
         ...webpackConfig.watchOptions,
         ignored: [
@@ -63,6 +67,7 @@ const webpackConfig = {
         ],
       };
 
+      // Add health check plugin
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
@@ -70,34 +75,35 @@ const webpackConfig = {
       return webpackConfig;
     },
   },
-};
 
-if (config.enableVisualEdits && babelMetadataPlugin) {
-  webpackConfig.babel = {
-    plugins: [babelMetadataPlugin],
-  };
-}
-
-webpackConfig.devServer = (devServerConfig) => {
-  if (config.enableVisualEdits && setupDevServer) {
-    devServerConfig = setupDevServer(devServerConfig);
-  }
-
-  if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
-    const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
-
-    devServerConfig.setupMiddlewares = (middlewares, devServer) => {
-      if (originalSetupMiddlewares) {
-        middlewares = originalSetupMiddlewares(middlewares, devServer);
+  babel: config.enableVisualEdits
+    ? {
+        plugins: [babelMetadataPlugin],
       }
+    : {},
 
-      setupHealthEndpoints(devServer, healthPluginInstance);
+  devServer: (devServerConfig) => {
 
-      return middlewares;
-    };
-  }
+    if (config.enableVisualEdits && setupDevServer) {
+      devServerConfig = setupDevServer(devServerConfig);
+    }
 
-  return devServerConfig;
+    if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
+
+      const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
+
+      devServerConfig.setupMiddlewares = (middlewares, devServer) => {
+
+        if (originalSetupMiddlewares) {
+          middlewares = originalSetupMiddlewares(middlewares, devServer);
+        }
+
+        setupHealthEndpoints(devServer, healthPluginInstance);
+
+        return middlewares;
+      };
+    }
+
+    return devServerConfig;
+  },
 };
-
-module.exports = webpackConfig;
