@@ -50,16 +50,16 @@ import {
 // BRAND COLORS & CONSTANTS
 // ═════════════════════════════════════════════════════════════════════════════
 const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
-  amber: '#F59E0B',
-  orange: '#F97316',
-  red: '#EF4444',
-  slate50: '#F8FAFC',
-  slate200: '#E2E8F0',
-  purple: '#8B5CF6',
+  lightGreen:   '#5CCB5F',
+  amber:        '#F59E0B',
+  orange:       '#F97316',
+  red:          '#EF4444',
+  slate50:      '#F8FAFC',
+  slate200:     '#E2E8F0',
+  purple:       '#8B5CF6',
 };
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -68,12 +68,12 @@ const IST_TIMEZONE = 'Asia/Kolkata';
 // ANIMATION VARIANTS
 // ═════════════════════════════════════════════════════════════════════════════
 const containerVariants = {
-  hidden: { opacity: 0 },
+  hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
+  hidden:  { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } }
 };
 
@@ -97,10 +97,10 @@ function DigitalClock() {
   }, []);
 
   const timeString = time.toLocaleTimeString('en-IN', {
-    hour12: true,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    hour12:  true,
+    hour:    '2-digit',
+    minute:  '2-digit',
+    second:  '2-digit',
   });
 
   return (
@@ -108,7 +108,7 @@ function DigitalClock() {
       className="flex flex-col items-center justify-center px-8 py-5 rounded-2xl text-white font-mono"
       style={{
         background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-        boxShadow: '0 20px 40px rgba(13, 59, 102, 0.3)',
+        boxShadow:  '0 20px 40px rgba(13, 59, 102, 0.3)',
       }}
       animate={{
         boxShadow: [
@@ -244,8 +244,8 @@ const formatReminderTime = (isoStr) => {
 const buildGCalURL = (reminder) => {
   try {
     const start = new Date(reminder.remind_at);
-    const end = addMinutes(start, 30);
-    const fmt = (d) => format(d, "yyyyMMdd'T'HHmmss");
+    const end   = addMinutes(start, 30);
+    const fmt   = (d) => format(d, "yyyyMMdd'T'HHmmss");
     return (
       'https://calendar.google.com/calendar/render?action=TEMPLATE' +
       `&text=${encodeURIComponent(reminder.title)}` +
@@ -258,7 +258,7 @@ const buildGCalURL = (reminder) => {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// REVERSE GEOCODE — converts lat/lng to a human-readable address
+// REVERSE GEOCODE
 // ═════════════════════════════════════════════════════════════════════════════
 const reverseGeocode = async (lat, lng) => {
   try {
@@ -268,7 +268,6 @@ const reverseGeocode = async (lat, lng) => {
     );
     const data = await res.json();
     if (data?.display_name) {
-      // Return a short version: first 2 parts
       const parts = data.display_name.split(',');
       return parts.slice(0, 3).join(',').trim();
     }
@@ -280,29 +279,29 @@ const reverseGeocode = async (lat, lng) => {
 // CUSTOM CALENDAR DAY
 // ═════════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
-  const dateStr = format(date, 'yyyy-MM-dd');
+  const dateStr   = format(date, 'yyyy-MM-dd');
   const dayRecord = attendance[dateStr];
-  const holiday = holidays.find(h => h.date === dateStr);
+  const holiday   = holidays.find(h => h.date === dateStr);
 
   let ringColor = null;
-  let bgColor = null;
+  let bgColor   = null;
   let isSpecial = false;
 
   if (holiday) {
     ringColor = COLORS.amber;
-    bgColor = '#FEF3C720';
+    bgColor   = '#FEF3C720';
     isSpecial = true;
   } else if (dayRecord?.status === 'leave') {
     ringColor = COLORS.orange;
-    bgColor = '#FFF7ED20';
+    bgColor   = '#FFF7ED20';
     isSpecial = true;
   } else if (dayRecord?.punch_in && dayRecord?.is_late) {
     ringColor = COLORS.red;
-    bgColor = '#FEE2E220';
+    bgColor   = '#FEE2E220';
     isSpecial = true;
   } else if (dayRecord?.punch_in) {
     ringColor = COLORS.emeraldGreen;
-    bgColor = '#D1FAE520';
+    bgColor   = '#D1FAE520';
   }
 
   const isTodayDate = dateFnsIsToday(date);
@@ -315,36 +314,36 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
             <motion.span
               className="absolute flex items-center justify-center rounded-full border-2"
               style={{
-                width: 30,
-                height: 30,
-                borderColor: ringColor,
+                width:           30,
+                height:          30,
+                borderColor:     ringColor,
                 backgroundColor: bgColor,
               }}
               animate={isSpecial ? { scale: [1, 1.08, 1] } : { scale: 1 }}
               transition={{
                 duration: 2.2,
-                repeat: isSpecial ? Infinity : 0,
-                ease: 'easeInOut',
+                repeat:   isSpecial ? Infinity : 0,
+                ease:     'easeInOut',
               }}
             />
           ) : isTodayDate ? (
             <motion.span
               className="absolute rounded-full border-2"
               style={{
-                width: 30,
-                height: 30,
-                borderColor: COLORS.red,
-                borderStyle: 'dashed',
+                width:           30,
+                height:          30,
+                borderColor:     COLORS.red,
+                borderStyle:     'dashed',
                 backgroundColor: `${COLORS.red}12`,
               }}
               animate={{
-                scale: [1, 1.1, 1],
+                scale:  [1, 1.1, 1],
                 opacity:[1, 0.7, 1],
               }}
               transition={{
                 duration: 1.8,
-                repeat: Infinity,
-                ease: 'easeInOut',
+                repeat:   Infinity,
+                ease:     'easeInOut',
               }}
             />
           ) : null}
@@ -357,8 +356,8 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
               isTodayDate && ringColor
                 ? { color: COLORS.deepBlue }
                 : isTodayDate && !ringColor
-                ? { color: COLORS.red }
-                : undefined
+                  ? { color: COLORS.red }
+                  : undefined
             }
           >
             {date.getDate()}
@@ -375,7 +374,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           </p>
         ) : dayRecord?.punch_in ? (
           <>
-            <p>In: {formatAttendanceTime(dayRecord.punch_in)}</p>
+            <p>In:  {formatAttendanceTime(dayRecord.punch_in)}</p>
             {dayRecord.punch_out && (
               <p>Out: {formatAttendanceTime(dayRecord.punch_out)}</p>
             )}
@@ -407,8 +406,8 @@ function ReminderPopup({ reminder, onDismiss }) {
     <motion.div
       className="fixed top-6 right-6 z-[99999] w-96 max-w-[calc(100vw-2rem)]"
       initial={{ opacity: 0, x: 80, scale: 0.9 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 80, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0,  scale: 1  }}
+      exit={{   opacity: 0, x: 80,  scale: 0.9 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
     >
       <div
@@ -478,32 +477,30 @@ function ReminderPopup({ reminder, onDismiss }) {
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
 
-  const [loading, setLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  // FIX 1 & 3: "everyone" is a valid special value for admin "everyone" view
-  // null = own data, "everyone" = all users, <uuid> = specific user
+  const [loading, setLoading]               = useState(false);
+  const [selectedDate, setSelectedDate]     = useState(new Date());
+  // null = own data, "everyone" = all users aggregate, <uuid> = specific other user
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [attendanceHistory, setAttendanceHistory] = useState([]);
-  const [todayAttendance, setTodayAttendance] = useState(null);
-  const [mySummary, setMySummary] = useState(null);
-  const [holidays, setHolidays] = useState([]);
-  const [pendingHolidays, setPendingHolidays] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
-  const [tasksCompleted, setTasksCompleted] = useState(0);
-  const [myRank, setMyRank] = useState('—');
-  // FIX 4: location strings resolved from lat/lng
-  const [locationCache, setLocationCache] = useState({});
+  const [todayAttendance, setTodayAttendance]     = useState(null);
+  const [mySummary, setMySummary]                 = useState(null);
+  const [holidays, setHolidays]                   = useState([]);
+  const [pendingHolidays, setPendingHolidays]     = useState([]);
+  const [allUsers, setAllUsers]                   = useState([]);
+  const [tasksCompleted, setTasksCompleted]       = useState(0);
+  const [myRank, setMyRank]                       = useState('—');
+  const [locationCache, setLocationCache]         = useState({});
 
-  const [showPunchInModal, setShowPunchInModal] = useState(false);
-  const [showLeaveForm, setShowLeaveForm] = useState(false);
-  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [showPunchInModal, setShowPunchInModal]   = useState(false);
+  const [showLeaveForm, setShowLeaveForm]         = useState(false);
+  const [showHolidayModal, setShowHolidayModal]   = useState(false);
 
-  const [leaveFrom, setLeaveFrom] = useState(null);
-  const [leaveTo, setLeaveTo] = useState(null);
+  const [leaveFrom, setLeaveFrom]     = useState(null);
+  const [leaveTo, setLeaveTo]         = useState(null);
   const [leaveReason, setLeaveReason] = useState('');
 
   const [holidayRows, setHolidayRows] = useState([
@@ -512,17 +509,16 @@ export default function Attendance() {
 
   const [liveDuration, setLiveDuration] = useState('0h 0m');
 
-  const [reminders, setReminders] = useState([]);
-  const [firedReminder, setFiredReminder] = useState(null);
+  const [reminders, setReminders]               = useState([]);
+  const [firedReminder, setFiredReminder]       = useState(null);
   const [showReminderForm, setShowReminderForm] = useState(false);
-  const [reminderTitle, setReminderTitle] = useState('');
-  const [reminderDesc, setReminderDesc] = useState('');
+  const [reminderTitle, setReminderTitle]       = useState('');
+  const [reminderDesc, setReminderDesc]         = useState('');
   const [reminderDatetime, setReminderDatetime] = useState('');
   const firedIdsRef = useRef(new Set());
 
-  // FIX 3: "everyone" view — aggregate of all users' attendance
-  const isEveryoneView = isAdmin && selectedUserId === 'everyone';
-  const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
+  const isEveryoneView  = isAdmin && selectedUserId === 'everyone';
+  const isViewingOther  = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
 
   // ── Derived: display today attendance ───────────────────────────────────
   const displayTodayAttendance = useMemo(() => {
@@ -567,7 +563,7 @@ export default function Attendance() {
       const now = new Date();
       for (const r of reminders) {
         if (r.is_dismissed || firedIdsRef.current.has(r.id)) continue;
-        const due = new Date(r.remind_at);
+        const due  = new Date(r.remind_at);
         if (isNaN(due.getTime())) continue;
         const diff = differenceInMinutes(due, now);
         if (diff <= 0 && diff >= -2) {
@@ -582,7 +578,7 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [reminders]);
 
-  // FIX 4: resolve location labels for attendance records
+  // Resolve location labels for attendance records
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
@@ -614,28 +610,43 @@ export default function Attendance() {
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
 
-    const targetUserId = isAdmin
+    // Determine which user's data to fetch
+    const rawTargetId = isAdmin
       ? (overrideUserId !== undefined ? overrideUserId : selectedUserId)
       : null;
 
-    // Normalize: if admin selects their own ID, treat as "view own data" (no user_id filter)
-    const normalizedTargetId = (isAdmin && targetUserId === user?.id) ? null : targetUserId;
-    const viewingEveryone = isAdmin && normalizedTargetId === 'everyone';
-    const viewingOther    = isAdmin && !!normalizedTargetId && normalizedTargetId !== 'everyone';
+    // ─────────────────────────────────────────────────────────────────────
+    // KEY FIX: When admin is viewing their OWN data (rawTargetId is null OR
+    // equals their own user ID), we must pass user?.id explicitly to the API
+    // so the backend filters to just their records — not ALL records.
+    // Without this, /attendance/history with no filter returns every user's
+    // records when called by an admin, causing inflated stats & duplicate rows.
+    // ─────────────────────────────────────────────────────────────────────
+    const isEveryoneReq = isAdmin && rawTargetId === 'everyone';
+    const isOtherReq    = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
+    // For admin's own view: use their own user ID so backend filters correctly
+    const resolvedUserId = isEveryoneReq
+      ? null
+      : isOtherReq
+        ? rawTargetId
+        : (isAdmin ? user?.id : null); // <-- THE FIX: admin always sends own id
 
     try {
       let historyUrl;
-      if (viewingEveryone) {
-        historyUrl = '/attendance/history'; // no user_id = all records (admin only)
-      } else if (viewingOther) {
-        historyUrl = `/attendance/history?user_id=${normalizedTargetId}`;
+      if (isEveryoneReq) {
+        // No user_id param = all records (admin aggregate view)
+        historyUrl = '/attendance/history';
+      } else if (resolvedUserId) {
+        // Filtered to specific user (either admin's own id or another user's id)
+        historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
       } else {
+        // Non-admin: backend infers from auth token
         historyUrl = '/attendance/history';
       }
 
       const requests = [
         api.get(historyUrl),
-        (viewingOther || viewingEveryone) ? Promise.resolve(null) : api.get('/attendance/my-summary'),
+        (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
         api.get('/tasks'),
         api.get('/holidays'),
@@ -664,7 +675,8 @@ export default function Attendance() {
       setAttendanceHistory(history);
       setTodayAttendance(todayRes.data);
 
-      if (viewingOther) {
+      if (isOtherReq) {
+        // Build summary from history for the viewed user
         const monthlySummary = {};
         history.forEach(a => {
           const m = a.date?.slice(0, 7);
@@ -673,38 +685,39 @@ export default function Attendance() {
             monthlySummary[m] = { total_minutes: 0, days_present: 0 };
           if (a.punch_in) {
             monthlySummary[m].total_minutes += a.duration_minutes || 0;
-            monthlySummary[m].days_present += 1;
+            monthlySummary[m].days_present  += 1;
           }
         });
         setMySummary({
           total_minutes: history.reduce((s, a) => s + (a.duration_minutes || 0), 0),
-          total_days: history.filter(a => a.punch_in).length,
+          total_days:    history.filter(a => a.punch_in).length,
           monthly_summary: Object.entries(monthlySummary).map(([month, d]) => {
             const h = Math.floor(d.total_minutes / 60);
             const m = d.total_minutes % 60;
             return { month, ...d, total_hours: `${h}h ${m}m` };
           }),
         });
-      } else if (viewingEveryone) {
+      } else if (isEveryoneReq) {
         // Aggregate summary across all users
         const total_minutes = history.reduce((s, a) => s + (a.duration_minutes || 0), 0);
-        const total_days = history.filter(a => a.punch_in).length;
+        const total_days    = history.filter(a => a.punch_in).length;
         setMySummary({ total_minutes, total_days, monthly_summary: [] });
       } else {
+        // Own data — use the dedicated summary endpoint response
         setMySummary(summaryRes?.data ?? null);
       }
 
-      const allTasksData = tasksRes.data || [];
-      const relevantTasks = viewingOther
-        ? allTasksData.filter(t => t.assigned_to === normalizedTargetId)
+      const allTasksData  = tasksRes.data || [];
+      const relevantTasks = isOtherReq
+        ? allTasksData.filter(t => t.assigned_to === rawTargetId)
         : allTasksData;
       setTasksCompleted(relevantTasks.filter(t => t.status === 'completed').length);
 
       const rankingList = Array.isArray(rankingRes.data)
         ? rankingRes.data
         : (rankingRes.data?.rankings || rankingRes.data?.data || []);
-      const rankUserId = viewingOther ? normalizedTargetId : user?.id;
-      const myEntry = rankingList.find(r => r.user_id === rankUserId);
+      const rankUserId = isOtherReq ? rawTargetId : user?.id;
+      const myEntry    = rankingList.find(r => r.user_id === rankUserId);
       setMyRank(myEntry ? `#${myEntry.rank}` : '—');
 
     } catch (error) {
@@ -720,7 +733,6 @@ export default function Attendance() {
       const uid = overrideUserId !== undefined
         ? overrideUserId
         : (isViewingOther ? selectedUserId : null);
-      // Don't fetch reminders for "everyone" view
       if (uid === 'everyone') return;
       const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
       const res = await api.get(url);
@@ -741,7 +753,7 @@ export default function Attendance() {
             navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
           );
           locationData = {
-            latitude: position.coords.latitude,
+            latitude:  position.coords.latitude,
             longitude: position.coords.longitude,
           };
         } catch {
@@ -774,8 +786,8 @@ export default function Attendance() {
     try {
       await api.post('/attendance/apply-leave', {
         from_date: format(leaveFrom, 'yyyy-MM-dd'),
-        to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
-        reason: leaveReason || 'Personal Leave',
+        to_date:   leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
+        reason:    leaveReason || 'Personal Leave',
       });
       toast.success('✓ Leave request submitted');
       setShowLeaveForm(false);
@@ -802,7 +814,7 @@ export default function Attendance() {
       }
     }
 
-    if (added > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} added`);
+    if (added  > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} added`);
     if (failed > 0) toast.error(`${failed} failed (may already exist)`);
 
     setShowHolidayModal(false);
@@ -827,9 +839,9 @@ export default function Attendance() {
     }
     try {
       await api.post('/reminders', {
-        title: reminderTitle.trim(),
+        title:       reminderTitle.trim(),
         description: reminderDesc.trim() || null,
-        remind_at: new Date(reminderDatetime).toISOString(),
+        remind_at:   new Date(reminderDatetime).toISOString(),
       });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false);
@@ -901,8 +913,8 @@ export default function Attendance() {
 
     doc.setFontSize(11);
     doc.text(`Total Monthly Hours : ${monthlyHours}`, 10, 56);
-    doc.text(`Days Present : ${attendanceHistory.filter(a => a.punch_in).length}`, 10, 64);
-    doc.text(`Late Arrivals : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 72);
+    doc.text(`Days Present        : ${attendanceHistory.filter(a => a.punch_in).length}`, 10, 64);
+    doc.text(`Late Arrivals       : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 72);
     doc.line(10, 80, 200, 80);
 
     doc.setFont(undefined, 'bold');
@@ -936,7 +948,6 @@ export default function Attendance() {
         95, y
       );
       doc.text(formatDuration(record.duration_minutes), 140, y);
-      // Location in PDF
       const locKey = record.location?.latitude
         ? `${record.location.latitude},${record.location.longitude}`
         : null;
@@ -949,7 +960,7 @@ export default function Attendance() {
 
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
-    doc.text('Taskosphere HR Management System | Confidential', 10, 288);
+    doc.text('Taskosphere HR Management System  |  Confidential', 10, 288);
 
     doc.save(
       `Attendance_${employeeName.replace(/\s+/g, '_')}_${format(selectedDate, 'MMM_yyyy')}.pdf`
@@ -959,8 +970,8 @@ export default function Attendance() {
   // ── Computed values ───────────────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate);
-    const end = endOfMonth(selectedDate);
-    let atts = attendanceHistory.filter(a => {
+    const end   = endOfMonth(selectedDate);
+    let atts    = attendanceHistory.filter(a => {
       const d = parseISO(a.date);
       return d >= start && d <= end;
     });
@@ -978,8 +989,8 @@ export default function Attendance() {
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
 
-  const monthTotalMinutes = useMemo(() => monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
-  const monthDaysPresent = useMemo(() => monthAttendance.filter(a => a.punch_in).length, [monthAttendance]);
+  const monthTotalMinutes      = useMemo(() => monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
+  const monthDaysPresent       = useMemo(() => monthAttendance.filter(a => a.punch_in).length, [monthAttendance]);
   const totalDaysLateThisMonth = useMemo(() => monthAttendance.filter(a => a.punch_in && a.is_late).length, [monthAttendance]);
 
   const isTodaySelected = dateFnsIsToday(selectedDate);
@@ -999,9 +1010,8 @@ export default function Attendance() {
     return map;
   }, [attendanceHistory, displayTodayAttendance]);
 
-  // FIX 1: viewed user name — never shows "My Attendance" duplicated
   const viewedUserName = useMemo(() => {
-    if (isEveryoneView) return 'All Employees';
+    if (isEveryoneView)  return 'All Employees';
     if (!isViewingOther) return null;
     return allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isEveryoneView, isViewingOther, selectedUserId, allUsers]);
@@ -1018,25 +1028,17 @@ export default function Attendance() {
     [reminders]
   );
 
-  // FIX 2: recent attendance — show only selected user's records
-  // For "everyone" view: show all, but with user name column
   const recentAttendance = useMemo(() => {
-    if (isEveryoneView) {
-      // Show all records sorted by date desc, last 25
-      return attendanceHistory.slice(0, 25);
-    }
-    // Otherwise already filtered by API to the correct user
+    if (isEveryoneView) return attendanceHistory.slice(0, 25);
     return attendanceHistory.slice(0, 15);
   }, [attendanceHistory, isEveryoneView]);
 
-  // Build user map for "everyone" view to show names
   const userMap = useMemo(() => {
     const map = {};
     allUsers.forEach(u => { map[u.id] = u.full_name; });
     return map;
   }, [allUsers]);
 
-  // ── Location helper ───────────────────────────────────────────────────────
   const getLocationLabel = useCallback((record, type = 'in') => {
     const loc = type === 'in' ? record.location : record.punch_out_location;
     if (!loc?.latitude || !loc?.longitude) return null;
@@ -1089,9 +1091,6 @@ export default function Attendance() {
           </div>
 
           <div className="flex gap-3 flex-wrap items-center">
-            {/* FIX 1: Admin dropdown — show only employee names.
-            No "My Attendance" duplicate — the first option is the admin's own name.
-            FIX 3: Added "Everyone" option for aggregate view. */}
             {isAdmin && (
               <motion.select
                 variants={itemVariants}
@@ -1105,7 +1104,7 @@ export default function Attendance() {
                 }}
                 disabled={allUsers.length === 0}
               >
-                {/* FIX 1: Show admin's own name as default, not "My Attendance" */}
+                {/* Admin's own data — show name with (Admin) tag */}
                 <option value="">
                   {allUsers.length === 0
                     ? 'Loading users…'
@@ -1113,9 +1112,9 @@ export default function Attendance() {
                       ? `${user.full_name} (Admin)`
                       : 'My Attendance'}
                 </option>
-                {/* FIX 3: "Everyone" option for admin aggregate view */}
+                {/* Aggregate view */}
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {/* FIX 1: Show all other users except the admin themselves to avoid duplication */}
+                {/* All other users — admins get "(Admin)" label, others get their role */}
                 {allUsers
                   .filter(u => u.id !== user?.id)
                   .map(u => (
@@ -1379,8 +1378,8 @@ export default function Attendance() {
               isEveryoneView
                 ? 'Total (All Staff)'
                 : isViewingOther
-                ? `${viewedUserName?.split(' ')[0]}'s Month`
-                : 'This Month'
+                  ? `${viewedUserName?.split(' ')[0]}'s Month`
+                  : 'This Month'
             }
             value={formatDuration(monthTotalMinutes).split('h')[0]}
             unit="hours"
@@ -1435,8 +1434,8 @@ export default function Attendance() {
                     </p>
                     <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider">
                       {!isViewingOther &&
-                      displayTodayAttendance?.punch_in &&
-                      !displayTodayAttendance?.punch_out
+                       displayTodayAttendance?.punch_in &&
+                       !displayTodayAttendance?.punch_out
                         ? '● Live • updating every minute'
                         : 'Total for today'}
                     </p>
@@ -1487,7 +1486,7 @@ export default function Attendance() {
                   <div
                     className="px-6 py-4 flex items-center gap-3"
                     style={{
-                      background: `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`,
+                      background:   `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`,
                       borderBottom: `2px solid ${COLORS.amber}30`,
                     }}
                   >
@@ -1545,9 +1544,9 @@ export default function Attendance() {
                             <span
                               className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full flex-shrink-0"
                               style={{
-                                color: COLORS.amber,
+                                color:           COLORS.amber,
                                 backgroundColor: `${COLORS.amber}20`,
-                                border: `1px solid ${COLORS.amber}40`,
+                                border:          `1px solid ${COLORS.amber}40`,
                               }}
                             >
                               Holiday
@@ -1566,7 +1565,7 @@ export default function Attendance() {
               <div
                 className="px-6 py-4 flex items-center justify-between"
                 style={{
-                  background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`,
+                  background:   `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`,
                   borderBottom: `2px solid ${COLORS.purple}25`,
                 }}
               >
@@ -1621,8 +1620,8 @@ export default function Attendance() {
                           variants={itemVariants}
                           className="relative flex items-start gap-4 p-4 rounded-xl border-2 transition-all"
                           style={{
-                            borderColor: isDue ? `${COLORS.red}40` : `${COLORS.purple}30`,
-                            backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}06`,
+                            borderColor:     isDue ? `${COLORS.red}40`    : `${COLORS.purple}30`,
+                            backgroundColor: isDue ? `${COLORS.red}06`    : `${COLORS.purple}06`,
                           }}
                         >
                           <div
@@ -1719,14 +1718,14 @@ export default function Attendance() {
                     disabled={date => isAfter(date, new Date())}
                     className="rounded-xl border-0 shadow-sm"
                     classNames={{
-                      months: 'w-full',
-                      month: 'w-full space-y-3',
-                      table: 'w-full border-collapse',
-                      head_row: 'flex w-full justify-between mb-2',
+                      months:    'w-full',
+                      month:     'w-full space-y-3',
+                      table:     'w-full border-collapse',
+                      head_row:  'flex w-full justify-between mb-2',
                       head_cell: 'text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center',
-                      row: 'flex w-full mt-2 justify-between',
-                      cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100',
+                      row:       'flex w-full mt-2 justify-between',
+                      cell:      'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
+                      day:       'h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100',
                       day_today: 'font-black',
                     }}
                     components={{
@@ -1744,17 +1743,17 @@ export default function Attendance() {
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
-                      { color: COLORS.red, label: 'Late', style: 'solid' },
-                      { color: COLORS.red, label: 'Not in yet', style: 'dashed' },
-                      { color: COLORS.amber, label: 'Holiday', style: 'solid' },
-                      { color: COLORS.orange, label: 'Leave', style: 'solid' },
+                      { color: COLORS.red,          label: 'Late',    style: 'solid' },
+                      { color: COLORS.red,          label: 'Not in yet', style: 'dashed' },
+                      { color: COLORS.amber,        label: 'Holiday', style: 'solid' },
+                      { color: COLORS.orange,       label: 'Leave',   style: 'solid' },
                     ].map(({ color, label, style }) => (
                       <div key={label} className="flex items-center gap-1.5">
                         <span
                           className="w-4 h-4 rounded-full border-2 flex-shrink-0"
                           style={{
-                            borderColor: color,
-                            borderStyle: style,
+                            borderColor:     color,
+                            borderStyle:     style,
                             backgroundColor: `${color}25`,
                           }}
                         />
@@ -1799,7 +1798,6 @@ export default function Attendance() {
                             </span>
                           </div>
                         )}
-                        {/* Location in day details */}
                         {getLocationLabel(selectedAttendance, 'in') && (
                           <div className="flex justify-between items-start gap-2">
                             <span className="text-slate-600 font-medium text-xs">In Location</span>
@@ -1832,7 +1830,7 @@ export default function Attendance() {
                       className="p-6 border-l-4"
                       style={{
                         borderColor: COLORS.orange,
-                        background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)',
+                        background:  'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)',
                       }}
                     >
                       <p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>
@@ -1868,7 +1866,7 @@ export default function Attendance() {
             </motion.div>
           )}
 
-          {/* ─── FIX 2 & 4: Recent Attendance Table ────────────────── */}
+          {/* Recent Attendance Table */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2'}>
             <Card className="border-0 shadow-md h-fit">
               <CardHeader className="border-b border-slate-100">
@@ -1876,8 +1874,8 @@ export default function Attendance() {
                   {isEveryoneView
                     ? 'All Employees — Recent Attendance'
                     : isViewingOther
-                    ? `${viewedUserName}'s Recent Attendance`
-                    : 'Recent Attendance'}
+                      ? `${viewedUserName}'s Recent Attendance`
+                      : 'Recent Attendance'}
                 </CardTitle>
                 <CardDescription>
                   {isEveryoneView ? 'Latest 25 records across all staff' : 'Last 15 records'}
@@ -1891,7 +1889,7 @@ export default function Attendance() {
                 ) : (
                   <div className="space-y-2 max-h-[700px] overflow-y-auto">
                     {recentAttendance.map((record, idx) => {
-                      const inLocLabel = getLocationLabel(record, 'in');
+                      const inLocLabel  = getLocationLabel(record, 'in');
                       const outLocLabel = getLocationLabel(record, 'out');
                       const recordUserName = isEveryoneView ? (userMap[record.user_id] || record.user_id) : null;
 
@@ -1903,7 +1901,6 @@ export default function Attendance() {
                         >
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
-                              {/* FIX 2 "everyone" view: show employee name */}
                               {recordUserName && (
                                 <p className="text-xs font-bold text-blue-700 mb-1 flex items-center gap-1">
                                   <Users className="w-3 h-3" />
@@ -1913,19 +1910,17 @@ export default function Attendance() {
                               <p className="font-bold text-slate-800 text-sm">
                                 {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
                               </p>
-                              {/* FIX 4: punch times with location */}
                               <p className="text-xs text-slate-500 mt-1 font-mono">
                                 {record.status === 'leave'
                                   ? `🟠 On Leave${record.leave_reason ? ` — ${record.leave_reason}` : ''}`
                                   : record.punch_in
-                                  ? `${formatAttendanceTime(record.punch_in)} → ${
-                                      record.punch_out
-                                        ? formatAttendanceTime(record.punch_out)
-                                        : 'Ongoing'
-                                    }`
-                                  : '—'}
+                                    ? `${formatAttendanceTime(record.punch_in)} → ${
+                                        record.punch_out
+                                          ? formatAttendanceTime(record.punch_out)
+                                          : 'Ongoing'
+                                      }`
+                                    : '—'}
                               </p>
-                              {/* FIX 4: Location rows */}
                               {inLocLabel && (
                                 <p className="text-[11px] text-slate-500 mt-1.5 flex items-start gap-1">
                                   <MapPin
@@ -1957,7 +1952,7 @@ export default function Attendance() {
                                 <span
                                   className="text-[10px] font-bold uppercase px-2 py-1 rounded"
                                   style={{
-                                    color: COLORS.orange,
+                                    color:           COLORS.orange,
                                     backgroundColor: `${COLORS.orange}20`,
                                   }}
                                 >
@@ -2016,8 +2011,8 @@ export default function Attendance() {
                 className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl"
                 onClick={e => e.stopPropagation()}
                 initial={{ scale: 0.9, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1,   y: 0  }}
+                exit={{   scale: 0.9, y: 20 }}
               >
                 <div className="mb-6">
                   <motion.div
@@ -2068,8 +2063,8 @@ export default function Attendance() {
               <motion.div
                 className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
                 initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1,    y: 0  }}
+                exit={{   scale: 0.95, y: 20 }}
               >
                 <div className="flex justify-between items-start mb-8">
                   <div>
@@ -2100,7 +2095,7 @@ export default function Attendance() {
                         size="sm"
                         onClick={() => {
                           const from = new Date();
-                          const to = new Date();
+                          const to   = new Date();
                           to.setDate(from.getDate() + days - 1);
                           setLeaveFrom(from);
                           setLeaveTo(to);
@@ -2141,10 +2136,10 @@ export default function Attendance() {
                     className="p-5 rounded-2xl mb-8"
                     style={{
                       backgroundColor: `${COLORS.deepBlue}10`,
-                      borderLeft: `4px solid ${COLORS.deepBlue}`,
+                      borderLeft:      `4px solid ${COLORS.deepBlue}`,
                     }}
                     initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    animate={{ opacity: 1, y: 0  }}
                   >
                     <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
                     <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>
@@ -2209,8 +2204,8 @@ export default function Attendance() {
               <motion.div
                 className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden"
                 initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1,    y: 0  }}
+                exit={{   scale: 0.95, y: 20 }}
               >
                 <div
                   className="px-8 py-6 text-white"
@@ -2322,8 +2317,8 @@ export default function Attendance() {
               <motion.div
                 className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
                 initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1,    y: 0  }}
+                exit={{   scale: 0.95, y: 20 }}
               >
                 <div
                   className="px-8 py-6 text-white"
@@ -2381,7 +2376,7 @@ export default function Attendance() {
                       className="p-4 rounded-xl flex items-start gap-3"
                       style={{
                         backgroundColor: `${COLORS.deepBlue}08`,
-                        border: `1.5px solid ${COLORS.deepBlue}20`,
+                        border:          `1.5px solid ${COLORS.deepBlue}20`,
                       }}
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
