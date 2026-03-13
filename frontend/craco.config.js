@@ -1,3 +1,4 @@
+// craco.config.js
 const path = require("path");
 require("dotenv").config();
 
@@ -44,6 +45,9 @@ module.exports = {
 
     configure: (webpackConfig) => {
 
+      // ⭐ Prevent webpack from parsing papaparse
+      webpackConfig.module.noParse = /papaparse/;
+
       webpackConfig.watchOptions = {
         ...webpackConfig.watchOptions,
         ignored: [
@@ -75,6 +79,7 @@ module.exports = {
     }
 
     if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
+
       const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
 
       devServerConfig.setupMiddlewares = (middlewares, devServer) => {
