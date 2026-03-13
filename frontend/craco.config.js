@@ -45,6 +45,8 @@ const webpackConfig = {
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      // Force Webpack to use the unminified version to prevent memory crashes
+      'papaparse': path.resolve(__dirname, 'node_modules/papaparse/papaparse.js')
     },
     configure: (webpackConfig) => {
       
