@@ -21,10 +21,19 @@ import {
   Send, Copy, ExternalLink, CheckSquare, Square, MinusSquare,
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
-import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
+
+const Papa = (await import("papaparse")).default;
+
+Papa.parse(file, {
+  header: true,
+  skipEmptyLines: true,
+  complete: (results) => {
+    console.log(results.data);
+  }
+});
 
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
