@@ -17,40 +17,38 @@ import {
   RefreshCw, Target, TrendingUp, AlertCircle,
   Calendar as CalendarIcon, History, Users, Search, X,
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
+  ChevronRight, Briefcase,
 } from 'lucide-react';
 
-// ── DESIGN TOKENS ─────────────────────────────────────────────────────────────
-const T = {
-  navy:    '#0B2545',
-  blue:    '#1366B0',
-  sky:     '#2A9D8F',
-  emerald: '#0D9E6A',
-  amber:   '#E9A62A',
-  coral:   '#E05A4E',
-  slate:   '#475569',
-  muted:   '#94A3B8',
-  bg:      '#F0F4F9',
-  card:    '#FFFFFF',
-  border:  '#E2E8F0',
-  text:    '#0F172A',
+// ── Brand Colors (matching Dashboard.jsx) ────────────────────────────────────
+const COLORS = {
+  deepBlue:    '#0D3B66',
+  mediumBlue:  '#1F6FB2',
+  emeraldGreen:'#1FAF5A',
+  lightGreen:  '#5CCB5F',
+  coral:       '#FF6B6B',
+  amber:       '#F59E0B',
 };
 
-// ── SPRING CONFIGS ────────────────────────────────────────────────────────────
-const spring = {
-  snappy: { type: 'spring', stiffness: 420, damping: 28 },
-  smooth: { type: 'spring', stiffness: 280, damping: 24 },
+// ── Spring Physics (matching Dashboard.jsx) ──────────────────────────────────
+const springPhysics = {
+  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9  },
+  button: { type: 'spring', stiffness: 400, damping: 28 },
+  icon:   { type: 'spring', stiffness: 450, damping: 25 },
+  tap:    { type: 'spring', stiffness: 500, damping: 30 },
 };
 
-// ── ANIMATION VARIANTS ────────────────────────────────────────────────────────
-const fadeUp = {
-  hidden:  { opacity: 0, y: 18, scale: 0.985 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.38, ease: [0.22, 1, 0.36, 1] } },
-  exit:    { opacity: 0, y: -8, scale: 0.99, transition: { duration: 0.22 } },
-};
-
-const stagger = {
+// ── Animation Variants (matching Dashboard.jsx) ──────────────────────────────
+const containerVariants = {
   hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+};
+
+const itemVariants = {
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
 const rowVariant = {
@@ -64,46 +62,72 @@ const getDueLabel = (due_date) => {
   if (!due_date) return null;
   try {
     const d = parseISO(due_date);
-    if (isToday(d))    return { label: 'Today',    color: T.amber  };
-    if (isTomorrow(d)) return { label: 'Tomorrow', color: T.sky    };
-    if (isPast(d))     return { label: 'Overdue',  color: T.coral  };
-    return { label: format(d, 'MMM d'), color: T.muted };
+    if (isToday(d))    return { label: 'Today',    color: COLORS.amber  };
+    if (isTomorrow(d)) return { label: 'Tomorrow', color: '#1F6FB2'     };
+    if (isPast(d))     return { label: 'Overdue',  color: COLORS.coral  };
+    return { label: format(d, 'MMM d'), color: '#94A3B8' };
   } catch { return null; }
 };
 
-// ── STAT CARD ─────────────────────────────────────────────────────────────────
-function StatCard({ icon: Icon, label, value, sub, accent, progress }) {
+// ── SHARED CARD SHELL (matching Dashboard SectionCard) ───────────────────────
+function SectionCard({ children, className = '' }) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+// ── CARD HEADER ROW (matching Dashboard CardHeaderRow) ───────────────────────
+function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+      <div className="flex items-center gap-2.5">
+        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+        <div>
+          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// ── METRIC CARD (matching Dashboard key metric cards) ────────────────────────
+function MetricCard({ icon: Icon, label, value, sub, accent, progress, onClick }) {
   return (
     <motion.div
-      variants={fadeUp}
-      className="relative bg-white rounded-2xl border overflow-hidden"
-      style={{ borderColor: T.border }}
-      whileHover={{ y: -2, boxShadow: '0 8px 32px rgba(11,37,69,0.08)' }}
-      transition={spring.snappy}
+      whileHover={{ y: -3, transition: springPhysics.card }}
+      whileTap={{ scale: 0.985 }}
+      onClick={onClick}
+      className="rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
     >
-      <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: `linear-gradient(90deg, ${accent}, ${accent}88)` }} />
-      <div className="p-5">
-        <div className="flex items-start justify-between mb-4">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${accent}14` }}>
-            <Icon size={18} style={{ color: accent }} />
+      <div className="p-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-400">{label}</p>
+            <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: accent }}>
+              {value}
+            </p>
+            {sub && <p className="text-[10px] mt-0.5 text-slate-400 dark:text-slate-500">{sub}</p>}
           </div>
-          <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: T.muted }}>{label}</span>
+          <div
+            className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+            style={{ backgroundColor: `${accent}18` }}
+          >
+            <Icon className="h-4 w-4" style={{ color: accent }} />
+          </div>
         </div>
-        <div className="text-3xl font-black tracking-tight mb-0.5" style={{ color: T.navy, fontVariantNumeric: 'tabular-nums' }}>
-          {value}
-        </div>
-        {sub && <div className="text-[11px] font-medium" style={{ color: T.muted }}>{sub}</div>}
         {progress !== undefined && (
-          <div className="mt-3">
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: `${accent}18` }}>
-              <motion.div
-                className="h-full rounded-full"
-                style={{ background: accent }}
-                initial={{ width: 0 }}
-                animate={{ width: `${Math.min(progress, 100)}%` }}
-                transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
-              />
-            </div>
+          <div className="mt-2.5 h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700">
+            <motion.div
+              className="h-full rounded-full transition-all duration-700"
+              style={{ background: `linear-gradient(90deg, ${accent}, ${accent}bb)` }}
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.min(progress, 100)}%` }}
+              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+            />
           </div>
         )}
       </div>
@@ -111,7 +135,7 @@ function StatCard({ icon: Icon, label, value, sub, accent, progress }) {
   );
 }
 
-// ── TODO ITEM ─────────────────────────────────────────────────────────────────
+// ── TODO ITEM (matching Dashboard TaskStrip) ─────────────────────────────────
 function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName }) {
   const isCompleted = todo.is_completed === true || todo.status === 'completed';
   const due         = getDueLabel(todo.due_date);
@@ -124,32 +148,34 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName })
       initial="hidden"
       animate="visible"
       exit="exit"
-      className="group relative flex items-center gap-3 px-5 py-3.5 border-b last:border-b-0 transition-colors"
-      style={{
-        borderColor: T.border,
-        background:  isOverdue && !isCompleted ? '#FFF5F4' : 'transparent',
-      }}
-      whileHover={{ backgroundColor: isOverdue && !isCompleted ? '#FFF0EF' : '#F8FAFF' }}
+      whileHover={{ y: -1 }}
+      className={`relative flex items-center gap-3 px-4 py-3 border-b last:border-b-0 transition-all group
+        ${isOverdue && !isCompleted
+          ? 'bg-red-50/70 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+          : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'
+        }
+      `}
+      style={{ borderColor: undefined }}
     >
-      {/* Overdue accent bar */}
+      {/* Overdue left accent bar */}
       {isOverdue && !isCompleted && (
-        <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r" style={{ background: T.coral }} />
+        <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r bg-red-400" />
       )}
 
       {/* Checkbox */}
       <motion.button
         whileHover={{ scale: 1.12 }}
         whileTap={{ scale: 0.88 }}
-        transition={spring.snappy}
+        transition={springPhysics.button}
         onClick={() => onToggle(todo.id || todo._id)}
         className="w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all"
         style={{
-          background:  isCompleted ? T.emerald : 'transparent',
-          borderColor: isCompleted ? T.emerald : T.border,
+          background:  isCompleted ? COLORS.emeraldGreen : 'transparent',
+          borderColor: isCompleted ? COLORS.emeraldGreen : '#CBD5E1',
         }}
       >
         {isCompleted && (
-          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={spring.snappy}>
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={springPhysics.button}>
             <CheckCircle2 size={11} color="#fff" />
           </motion.div>
         )}
@@ -159,32 +185,35 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName })
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span
-            className="text-sm font-semibold truncate max-w-[260px]"
-            style={{
-              color:          isCompleted ? T.muted : T.text,
-              textDecoration: isCompleted ? 'line-through' : 'none',
-            }}
+            className={`text-sm font-medium truncate max-w-[260px] ${
+              isCompleted
+                ? 'line-through text-slate-400 dark:text-slate-500'
+                : 'text-slate-800 dark:text-slate-100'
+            }`}
           >
             {todo.title || 'Untitled'}
           </span>
           {showOwner && ownerName && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `${T.blue}12`, color: T.blue }}>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
               <UserIcon size={9} />{ownerName}
             </span>
           )}
           {due && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${due.color}14`, color: due.color }}>
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: `${due.color}18`, color: due.color }}
+            >
               <CalendarIcon size={9} />{due.label}
             </span>
           )}
           {isCompleted && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${T.emerald}12`, color: T.emerald }}>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
               ✓ Done
             </span>
           )}
         </div>
         {todo.description && (
-          <p className="text-xs mt-0.5 line-clamp-1" style={{ color: T.muted }}>{todo.description}</p>
+          <p className="text-xs mt-0.5 line-clamp-1 text-slate-400 dark:text-slate-500">{todo.description}</p>
         )}
       </div>
 
@@ -194,21 +223,18 @@ function TodoItem({ todo, onToggle, onPromote, onDelete, showOwner, ownerName })
           whileTap={{ scale: 0.88 }}
           onClick={(e) => { e.stopPropagation(); onPromote(todo.id || todo._id); }}
           disabled={isCompleted}
-          className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all"
-          style={isCompleted
-            ? { background: T.bg, color: T.muted, borderColor: T.border, cursor: 'not-allowed' }
-            : { background: `${T.amber}12`, color: '#92400E', borderColor: `${T.amber}40` }
-          }
+          className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-all ${
+            isCompleted
+              ? 'bg-slate-100 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600 cursor-not-allowed'
+              : 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+          }`}
         >
           <Zap size={11} /> Promote
         </motion.button>
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={(e) => { e.stopPropagation(); onDelete(todo.id || todo._id); }}
-          className="w-7 h-7 flex items-center justify-center rounded-lg border transition-all"
-          style={{ borderColor: T.border, color: T.muted }}
-          onMouseEnter={e => { e.currentTarget.style.background = `${T.coral}12`; e.currentTarget.style.color = T.coral; e.currentTarget.style.borderColor = `${T.coral}40`; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = T.muted; e.currentTarget.style.borderColor = T.border; }}
+          className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-700 transition-all"
         >
           <Trash2 size={13} />
         </motion.button>
@@ -222,21 +248,21 @@ function EventBadge({ entry }) {
   const safeFormat = (dt) => { try { return format(new Date(dt), 'MMM d, h:mm a'); } catch { return '—'; } };
   if (entry.event === 'deleted' || entry.deleted_at) {
     return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.coral}12`, color: T.coral }}>
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 whitespace-nowrap">
         <X size={10} /> Deleted · {safeFormat(entry.deleted_at || Date.now())}
       </span>
     );
   }
   if (entry.event === 'uncompleted') {
     return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.amber}12`, color: '#92400E' }}>
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 whitespace-nowrap">
         ↩ Reopened
       </span>
     );
   }
   if (entry.completed_at) {
     return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap" style={{ background: `${T.emerald}12`, color: T.emerald }}>
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
         <CheckCircle2 size={10} /> Completed · {safeFormat(entry.completed_at)}
       </span>
     );
@@ -248,19 +274,16 @@ function EventBadge({ entry }) {
 function SearchInput({ value, onChange, placeholder }) {
   return (
     <div className="relative">
-      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.muted }} />
+      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
       <input
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full h-9 pl-8 pr-8 text-sm rounded-xl border outline-none transition-all"
-        style={{ background: T.bg, borderColor: T.border, color: T.text }}
-        onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
-        onBlur={e => { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+        className="w-full h-9 pl-8 pr-8 text-sm rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
       />
       {value && (
-        <button onClick={() => onChange('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded" style={{ color: T.muted }}>
+        <button onClick={() => onChange('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400">
           <X size={12} />
         </button>
       )}
@@ -268,28 +291,26 @@ function SearchInput({ value, onChange, placeholder }) {
   );
 }
 
-// ── TAB PILL ──────────────────────────────────────────────────────────────────
+// ── TAB PILL (matching Dashboard period selector style) ───────────────────────
 function TabPill({ id, label, icon: Icon, count, activeTab, setActiveTab }) {
   const active = activeTab === id;
   return (
     <button
       onClick={() => setActiveTab(id)}
-      className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all"
-      style={active
-        ? { background: T.navy, color: '#fff', boxShadow: `0 2px 12px ${T.navy}30` }
-        : { background: 'transparent', color: T.slate }
-      }
+      className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all ${
+        active
+          ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-sm'
+          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+      }`}
     >
       <Icon size={13} />
       {label}
       {count > 0 && (
-        <span
-          className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
-          style={active
-            ? { background: 'rgba(255,255,255,0.2)', color: '#fff' }
-            : { background: `${T.navy}12`, color: T.navy }
-          }
-        >
+        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+          active
+            ? 'bg-white/20 dark:bg-slate-900/20 text-white dark:text-slate-900'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+        }`}>
           {count}
         </span>
       )}
@@ -303,11 +324,11 @@ function FilterChip({ id, label, count, todoFilter, setTodoFilter }) {
   return (
     <button
       onClick={() => setTodoFilter(id)}
-      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-all"
-      style={active
-        ? { background: T.blue, color: '#fff', borderColor: T.blue }
-        : { background: 'transparent', color: T.slate, borderColor: T.border }
-      }
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg border transition-all ${
+        active
+          ? 'bg-blue-600 text-white border-blue-600'
+          : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-500'
+      }`}
     >
       {label}
       {count !== undefined && <span className="text-[9px] font-black opacity-75">{count}</span>}
@@ -322,15 +343,27 @@ export default function TodoDashboard() {
   const isAdmin        = user?.role === 'admin';
   const isManager      = user?.role === 'manager';
 
+  // Observe dark mode
+  const [isDark, setIsDark] = useState(() =>
+    typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
   // ── Form state ───────────────────────────────────────────────────────────
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
   const [dueDate,     setDueDate]     = useState('');
 
   // ── UI state ─────────────────────────────────────────────────────────────
-  const [activeTab,    setActiveTab]    = useState('todos');   // 'todos' | 'log'
-  const [selectedUser, setSelectedUser] = useState('self');   // 'self' | 'everyone' | <userId>
-  const [todoFilter,   setTodoFilter]   = useState('all');    // 'all' | 'pending' | 'completed' | 'overdue'
+  const [activeTab,    setActiveTab]    = useState('todos');
+  const [selectedUser, setSelectedUser] = useState('self');
+  const [todoFilter,   setTodoFilter]   = useState('all');
   const [search,       setSearch]       = useState('');
   const [logSearch,    setLogSearch]    = useState('');
 
@@ -357,7 +390,6 @@ export default function TodoDashboard() {
   }, [isAdmin, user]);
 
   // ── Build permitted-user list for dropdown ────────────────────────────────
-  // FIX: Always exclude self — self is already represented by the "My Todos" option
   const permittedUsers = useMemo(() => {
     const selfId = user?.id;
     if (isAdmin) return allUsers.filter(u => (u.id || u._id) !== selfId);
@@ -604,11 +636,11 @@ export default function TodoDashboard() {
   const handlePromote = (id) => promoteMutation.mutate(id);
   const handleDelete  = (id) => deleteMutation.mutate(id);
 
-  // ── User selector (shared between both tabs) ──────────────────────────────
-  const UserSelector = ({ label = 'Filter by user' }) => (
+  // ── User selector ─────────────────────────────────────────────────────────
+  const UserSelector = () => (
     showDropdown ? (
       <Select value={selectedUser} onValueChange={setSelectedUser}>
-        <SelectTrigger className="h-9 rounded-xl border text-sm font-semibold" style={{ borderColor: T.border, minWidth: 200 }}>
+        <SelectTrigger className="h-9 rounded-xl border border-slate-200 dark:border-slate-600 text-sm font-medium" style={{ minWidth: 200 }}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -616,7 +648,7 @@ export default function TodoDashboard() {
           {canSeeEveryone && (
             <SelectItem value="everyone">
               <span className="flex items-center gap-2">
-                <Users size={12} style={{ color: T.blue }} />
+                <Users size={12} className="text-blue-500" />
                 Everyone — All Users
               </span>
             </SelectItem>
@@ -636,314 +668,337 @@ export default function TodoDashboard() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <motion.div
-      variants={stagger}
+      className="space-y-4"
+      variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="min-h-screen pb-12"
-      style={{ background: T.bg, fontFamily: "'DM Sans', 'Outfit', system-ui, sans-serif" }}
     >
 
-      {/* ── Page Header ────────────────────────────────────────────────── */}
-      <motion.div
-        variants={fadeUp}
-        className="px-6 pt-6 pb-5 border-b"
-        style={{ background: T.card, borderColor: T.border }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div
-              className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm"
-              style={{ background: `linear-gradient(135deg, ${T.navy}, ${T.blue})` }}
-            >
-              <CheckSquare size={20} color="#fff" />
-            </div>
+      {/* ── Page Header Banner (matching Dashboard welcome banner) ──────── */}
+      <motion.div variants={itemVariants}>
+        <div
+          className="relative overflow-hidden rounded-2xl px-6 py-5"
+          style={{
+            background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
+            boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+          }}
+        >
+          <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+            style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+          <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5"
+            style={{ background: 'white' }} />
+
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <h1 className="text-xl font-black tracking-tight" style={{ color: T.navy }}>
-                Todo Management
-              </h1>
-              <p className="text-xs font-medium mt-0.5" style={{ color: T.muted }}>
+              <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
                 {format(new Date(), 'EEEE, MMMM d, yyyy')}
-                {selectedUser === 'everyone' && ' · All users view'}
                 {selectedUser !== 'self' && selectedUser !== 'everyone' && (() => {
                   const u = allUsers.find(u => (u.id || u._id) === selectedUser);
                   return u ? ` · ${u.full_name || u.user_name}'s list` : '';
                 })()}
+                {selectedUser === 'everyone' && ' · All users view'}
+              </p>
+              <h1 className="text-2xl font-bold text-white tracking-tight">
+                Todo Management
+              </h1>
+              <p className="text-white/60 text-sm mt-1">
+                {stats.total === 0
+                  ? 'No todos yet — add some to get started'
+                  : stats.overdue > 0
+                    ? `${stats.overdue} overdue item${stats.overdue === 1 ? '' : 's'} need attention`
+                    : stats.completionRate === 100
+                      ? 'All todos completed — great work!'
+                      : `${stats.pending} remaining · ${stats.completionRate}% complete`
+                }
               </p>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold" style={{ background: `${T.emerald}0F`, borderColor: `${T.emerald}30`, color: T.emerald }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.emerald }} />
-              {stats.completed} done
-            </div>
-            {stats.overdue > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold" style={{ background: `${T.coral}0F`, borderColor: `${T.coral}30`, color: T.coral }}>
-                <AlertCircle size={11} />{stats.overdue} overdue
-              </div>
-            )}
-            {/* Tab switcher */}
-            <div className="flex items-center gap-1 p-1 rounded-xl border" style={{ background: T.bg, borderColor: T.border }}>
-              <TabPill id="todos" label="Todos"    icon={CheckSquare} count={stats.pending}       activeTab={activeTab} setActiveTab={setActiveTab} />
-              <TabPill id="log"   label="Activity" icon={History}     count={filteredLog.length}  activeTab={activeTab} setActiveTab={setActiveTab} />
+            {/* Tab switcher in header */}
+            <div className="flex items-center gap-1 p-1 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}>
+              <TabPill id="todos" label="Todos"    icon={CheckSquare} count={stats.pending}      activeTab={activeTab} setActiveTab={setActiveTab} />
+              <TabPill id="log"   label="Activity" icon={History}     count={filteredLog.length} activeTab={activeTab} setActiveTab={setActiveTab} />
             </div>
           </div>
         </div>
       </motion.div>
 
-      <div className="px-6 pt-6 space-y-6">
-        <AnimatePresence mode="wait">
+      {/* ── Key Metrics (matching Dashboard metric card row) ─────────────── */}
+      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
+        <MetricCard
+          icon={Layers}
+          label="Total"
+          value={stats.total}
+          sub="todos tracked"
+          accent={COLORS.deepBlue}
+        />
+        <MetricCard
+          icon={AlertCircle}
+          label="Overdue"
+          value={stats.overdue}
+          sub="need attention"
+          accent={stats.overdue > 0 ? COLORS.coral : '#94A3B8'}
+        />
+        <MetricCard
+          icon={TrendingUp}
+          label="Completion"
+          value={`${stats.completionRate}%`}
+          sub={`${stats.completed} of ${stats.total}`}
+          accent={COLORS.emeraldGreen}
+          progress={stats.completionRate}
+        />
+        <MetricCard
+          icon={Sparkles}
+          label="Health Score"
+          value={`${stats.healthScore}%`}
+          sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'}
+          accent={stats.healthScore >= 80 ? '#1F6FB2' : COLORS.amber}
+          progress={stats.healthScore}
+        />
+      </motion.div>
 
-          {/* ─────────────────── TODOS TAB ─────────────────────────────── */}
-          {activeTab === 'todos' && (
-            <motion.div key="todos" variants={stagger} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-6">
+      <AnimatePresence mode="wait">
 
-              {/* KPI Strip */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard icon={Layers}      label="Total"      value={stats.total}             sub="todos tracked"                             accent={T.navy}    />
-                <StatCard icon={AlertCircle} label="Overdue"    value={stats.overdue}           sub="need attention"                            accent={stats.overdue > 0 ? T.coral : T.muted} />
-                <StatCard icon={TrendingUp}  label="Completion" value={`${stats.completionRate}%`} sub={`${stats.completed} of ${stats.total}`} accent={T.emerald} progress={stats.completionRate} />
-                <StatCard icon={Sparkles}    label="Health"     value={`${stats.healthScore}%`} sub={stats.healthScore >= 80 ? 'On track' : 'Needs focus'} accent={stats.healthScore >= 80 ? T.sky : T.amber} progress={stats.healthScore} />
-              </div>
+        {/* ─────────────────── TODOS TAB ─────────────────────────────────── */}
+        {activeTab === 'todos' && (
+          <motion.div key="todos" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
 
-              {/* Two-column layout */}
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+            {/* Two-column layout */}
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
-                {/* LEFT — Create form */}
-                <div className="xl:col-span-4 space-y-4">
+              {/* LEFT — Create form + stats */}
+              <div className="xl:col-span-4 space-y-4">
 
-                  {/* Create card */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
-                    <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.navy}, ${T.sky})` }} />
-                    <div className="px-5 py-4 border-b flex items-center gap-3" style={{ borderColor: T.border }}>
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: `${T.emerald}12` }}>
-                        <Plus size={15} style={{ color: T.emerald }} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-black" style={{ color: T.navy }}>New Todo</div>
-                        <div className="text-[11px] font-medium" style={{ color: T.muted }}>Add to your list</div>
-                      </div>
-                    </div>
-                    <div className="p-5 space-y-4">
+                {/* Create card */}
+                <motion.div variants={itemVariants}>
+                  <SectionCard>
+                    <CardHeaderRow
+                      iconBg="bg-emerald-50 dark:bg-emerald-900/40"
+                      icon={<Plus className="h-4 w-4 text-emerald-600" />}
+                      title="New Todo"
+                      subtitle="Add to your list"
+                    />
+                    <div className="p-4 space-y-4">
 
                       {/* Title */}
                       <div>
-                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Title *</label>
+                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Title *</label>
                         <input
                           type="text" value={title} onChange={e => setTitle(e.target.value)}
                           onKeyDown={e => e.key === 'Enter' && handleAdd()}
                           placeholder="What needs to get done?"
-                          className="w-full h-10 rounded-xl border px-3 text-sm font-semibold placeholder:font-normal outline-none transition-all"
-                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
-                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
-                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                          className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm font-medium placeholder:font-normal bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
                         />
                       </div>
 
                       {/* Notes */}
                       <div>
-                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Notes</label>
+                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Notes</label>
                         <textarea
                           value={description} onChange={e => setDescription(e.target.value)}
                           placeholder="Additional context…" rows={3}
-                          className="w-full rounded-xl border px-3 py-2.5 text-sm resize-none outline-none transition-all placeholder:text-slate-400"
-                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
-                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
-                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-600 px-3 py-2.5 text-sm resize-none bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
                         />
                       </div>
 
                       {/* Due Date */}
                       <div>
-                        <label className="block text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Due Date</label>
+                        <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1.5 text-slate-400">Due Date</label>
                         <input
                           type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                          className="w-full h-10 rounded-xl border px-3 text-sm outline-none transition-all"
-                          style={{ background: T.bg, borderColor: T.border, color: T.text }}
-                          onFocus={e => { e.target.style.borderColor = T.blue; e.target.style.boxShadow = `0 0 0 3px ${T.blue}18`; }}
-                          onBlur={e =>  { e.target.style.borderColor = T.border; e.target.style.boxShadow = 'none'; }}
+                          className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-sm bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
                         />
                       </div>
 
                       {/* Submit */}
-                      <motion.button
-                        whileTap={{ scale: 0.96 }}
-                        transition={spring.snappy}
+                      <Button
                         onClick={handleAdd}
                         disabled={!title.trim() || addMutation.isPending}
-                        className="w-full h-10 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: `linear-gradient(135deg, ${T.navy}, ${T.blue})`, color: '#fff', boxShadow: `0 4px 16px ${T.navy}28` }}
+                        className="w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+                        style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                       >
                         {addMutation.isPending
                           ? <><RefreshCw size={14} className="animate-spin" /> Creating…</>
                           : <><Plus size={14} /> Create Todo</>
                         }
-                      </motion.button>
+                      </Button>
                     </div>
-                  </motion.div>
+                  </SectionCard>
+                </motion.div>
 
-                  {/* Quick stats strip */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
-                    <div className="grid grid-cols-3 divide-x" style={{ divideColor: T.border }}>
+                {/* Quick stats strip */}
+                <motion.div variants={itemVariants}>
+                  <SectionCard>
+                    <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-700">
                       {[
-                        { label: 'Done',  value: `${stats.completionRate}%`, color: T.emerald },
-                        { label: 'Alert', value: stats.overdue,              color: T.amber   },
-                        { label: 'Left',  value: stats.pending,              color: T.navy    },
+                        { label: 'Done',  value: `${stats.completionRate}%`, color: COLORS.emeraldGreen },
+                        { label: 'Alert', value: stats.overdue,              color: COLORS.amber         },
+                        { label: 'Left',  value: stats.pending,              color: COLORS.deepBlue      },
                       ].map(({ label, value, color }) => (
-                        <div key={label} className="px-3 py-4 text-center border-r last:border-r-0" style={{ borderColor: T.border }}>
-                          <div className="text-xl font-black tabular-nums" style={{ color }}>{value}</div>
-                          <div className="text-[9px] font-black uppercase tracking-widest mt-0.5" style={{ color: T.muted }}>{label}</div>
+                        <div key={label} className="px-3 py-4 text-center">
+                          <div className="text-xl font-bold tabular-nums" style={{ color }}>{value}</div>
+                          <div className="text-[9px] font-semibold uppercase tracking-widest mt-0.5 text-slate-400">{label}</div>
                         </div>
                       ))}
                     </div>
-                  </motion.div>
+                  </SectionCard>
+                </motion.div>
 
-                  {/* ── FIX: Progress Visualisation Bar ───────────────────── */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Overall Progress</span>
-                      <span className="text-xs font-black tabular-nums" style={{ color: T.navy }}>{stats.completionRate}%</span>
-                    </div>
-                    {/* Segmented bar: completed / overdue / pending */}
-                    <div className="h-2.5 rounded-full overflow-hidden flex gap-0.5" style={{ background: T.bg }}>
-                      {stats.total > 0 ? (
-                        <>
-                          {/* Completed segment */}
-                          {stats.completed > 0 && (
-                            <motion.div
-                              className="h-full rounded-l-full"
-                              style={{ background: T.emerald, width: `${(stats.completed / stats.total) * 100}%`, minWidth: 4 }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(stats.completed / stats.total) * 100}%` }}
-                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }}
-                            />
-                          )}
-                          {/* Overdue segment */}
-                          {stats.overdue > 0 && (
-                            <motion.div
-                              className="h-full"
-                              style={{ background: T.coral, width: `${(stats.overdue / stats.total) * 100}%`, minWidth: 4 }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(stats.overdue / stats.total) * 100}%` }}
-                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }}
-                            />
-                          )}
-                          {/* Pending (non-overdue) segment */}
-                          {(stats.pending - stats.overdue) > 0 && (
-                            <motion.div
-                              className="h-full rounded-r-full flex-1"
-                              style={{ background: `${T.navy}22`, minWidth: 4 }}
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              transition={{ duration: 0.5, delay: 0.4 }}
-                            />
-                          )}
-                        </>
-                      ) : (
-                        <div className="h-full w-full rounded-full" style={{ background: T.border }} />
-                      )}
-                    </div>
-                    {/* Legend */}
-                    <div className="flex items-center gap-4 mt-2.5 flex-wrap">
-                      {[
-                        { color: T.emerald,       label: 'Completed', count: stats.completed,                  hide: false },
-                        { color: T.coral,         label: 'Overdue',   count: stats.overdue,                    hide: stats.overdue === 0 },
-                        { color: `${T.navy}44`,   label: 'Pending',   count: stats.pending - stats.overdue,    hide: false },
-                      ].filter(i => !i.hide).map(({ color, label, count }) => (
-                        <div key={label} className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                          <span className="text-[10px] font-semibold" style={{ color: T.muted }}>
-                            {label} <span className="font-black" style={{ color: T.slate }}>{count}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-
-                  {/* ── FIX: AI Audit — now reactive with real stats ───────── */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#EDE9FE' }}>
-                        <Sparkles size={16} style={{ color: '#7C3AED' }} />
+                {/* Progress bar card */}
+                <motion.div variants={itemVariants}>
+                  <SectionCard>
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Overall Progress</span>
+                        <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">{stats.completionRate}%</span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold" style={{ color: T.text }}>AI Audit</div>
-                        <div className="text-xs font-medium" style={{ color: T.muted }}>
-                          {stats.total === 0
-                            ? 'No todos yet — add some to get started'
-                            : stats.overdue > 0
-                              ? `⚠️ ${stats.overdue} overdue ${stats.overdue === 1 ? 'todo' : 'todos'} need attention`
-                              : stats.completionRate === 100
-                                ? '🎉 All todos completed — great work!'
-                                : stats.completionRate >= 75
-                                  ? `✅ ${stats.completionRate}% done — almost there!`
-                                  : `📋 ${stats.pending} remaining · ${stats.completionRate}% on track`
-                          }
-                        </div>
-                      </div>
-                      {/* Live health indicator dot */}
-                      <div
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                        style={{
-                          background: stats.overdue > 0 ? T.coral : stats.completionRate >= 75 ? T.emerald : T.amber,
-                          boxShadow:  `0 0 0 3px ${(stats.overdue > 0 ? T.coral : stats.completionRate >= 75 ? T.emerald : T.amber)}28`,
-                        }}
-                      />
-                    </div>
-                    {/* Actionable tip */}
-                    {stats.total > 0 && (
-                      <div className="mt-3 pt-3 border-t flex items-start gap-2" style={{ borderColor: T.border }}>
-                        <AlertCircle size={12} style={{ color: stats.overdue > 0 ? T.coral : T.sky, marginTop: 1, flexShrink: 0 }} />
-                        <p className="text-[11px] font-medium leading-relaxed" style={{ color: T.muted }}>
-                          {stats.overdue > 0
-                            ? `Address your ${stats.overdue} overdue ${stats.overdue === 1 ? 'item' : 'items'} first to improve your health score from ${stats.healthScore}%.`
-                            : stats.pending > 0
-                              ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
-                              : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
-                          }
-                        </p>
-                      </div>
-                    )}
-                  </motion.div>
-
-                </div>
-
-                {/* RIGHT — User filter + Todo list */}
-                <div className="xl:col-span-8 space-y-4">
-
-                  {/* User filter card */}
-                  {showDropdown && (
-                    <motion.div variants={fadeUp} className="bg-white rounded-2xl border p-4" style={{ borderColor: T.border }}>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <Users size={14} style={{ color: T.blue }} />
-                          <span className="text-sm font-black" style={{ color: T.navy }}>
-                            {isAdmin ? 'Filter by Team Member' : 'View Todo List'}
-                          </span>
-                        </div>
-                        {isAdmin && (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-widest" style={{ background: `${T.navy}0F`, color: T.navy }}>
-                            Admin
-                          </span>
+                      {/* Segmented bar */}
+                      <div className="h-2 rounded-full overflow-hidden flex gap-0.5 bg-slate-100 dark:bg-slate-700">
+                        {stats.total > 0 ? (
+                          <>
+                            {stats.completed > 0 && (
+                              <motion.div
+                                className="h-full rounded-l-full"
+                                style={{ background: COLORS.emeraldGreen, width: `${(stats.completed / stats.total) * 100}%`, minWidth: 4 }}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(stats.completed / stats.total) * 100}%` }}
+                                transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }}
+                              />
+                            )}
+                            {stats.overdue > 0 && (
+                              <motion.div
+                                className="h-full"
+                                style={{ background: COLORS.coral, width: `${(stats.overdue / stats.total) * 100}%`, minWidth: 4 }}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(stats.overdue / stats.total) * 100}%` }}
+                                transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }}
+                              />
+                            )}
+                            {(stats.pending - stats.overdue) > 0 && (
+                              <motion.div
+                                className="h-full rounded-r-full flex-1 bg-slate-200 dark:bg-slate-600"
+                                style={{ minWidth: 4 }}
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 0.5, delay: 0.4 }}
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <div className="h-full w-full rounded-full bg-slate-200 dark:bg-slate-600" />
                         )}
                       </div>
-                      <UserSelector />
-                    </motion.div>
-                  )}
+                      {/* Legend */}
+                      <div className="flex items-center gap-4 mt-2.5 flex-wrap">
+                        {[
+                          { color: COLORS.emeraldGreen, label: 'Completed', count: stats.completed,               hide: false },
+                          { color: COLORS.coral,        label: 'Overdue',   count: stats.overdue,                 hide: stats.overdue === 0 },
+                          { color: '#CBD5E1',            label: 'Pending',   count: stats.pending - stats.overdue, hide: false },
+                        ].filter(i => !i.hide).map(({ color, label, count }) => (
+                          <div key={label} className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                            <span className="text-[10px] font-medium text-slate-400">
+                              {label} <span className="font-bold text-slate-600 dark:text-slate-300">{count}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </SectionCard>
+                </motion.div>
 
-                  {/* Todo list card */}
-                  <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
-                    <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.navy}, ${T.sky})` }} />
+                {/* AI Audit card */}
+                <motion.div variants={itemVariants}>
+                  <SectionCard>
+                    <div className="p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+                          <Sparkles className="h-4 w-4 text-purple-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">AI Audit</h3>
+                          <p className="text-xs text-slate-400 dark:text-slate-500">
+                            {stats.total === 0
+                              ? 'No todos yet — add some to get started'
+                              : stats.overdue > 0
+                                ? `⚠️ ${stats.overdue} overdue ${stats.overdue === 1 ? 'todo' : 'todos'} need attention`
+                                : stats.completionRate === 100
+                                  ? '🎉 All todos completed — great work!'
+                                  : stats.completionRate >= 75
+                                    ? `✅ ${stats.completionRate}% done — almost there!`
+                                    : `📋 ${stats.pending} remaining · ${stats.completionRate}% on track`
+                            }
+                          </p>
+                        </div>
+                        {/* Live health indicator dot */}
+                        <div
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{
+                            background: stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber,
+                            boxShadow:  `0 0 0 3px ${(stats.overdue > 0 ? COLORS.coral : stats.completionRate >= 75 ? COLORS.emeraldGreen : COLORS.amber)}28`,
+                          }}
+                        />
+                      </div>
+                      {stats.total > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
+                          <AlertCircle size={12} style={{ color: stats.overdue > 0 ? COLORS.coral : COLORS.mediumBlue, marginTop: 1, flexShrink: 0 }} />
+                          <p className="text-[11px] font-medium leading-relaxed text-slate-400 dark:text-slate-500">
+                            {stats.overdue > 0
+                              ? `Address your ${stats.overdue} overdue ${stats.overdue === 1 ? 'item' : 'items'} first to improve your health score from ${stats.healthScore}%.`
+                              : stats.pending > 0
+                                ? `${stats.pending} ${stats.pending === 1 ? 'todo' : 'todos'} left. Health score: ${stats.healthScore}% — keep the momentum!`
+                                : `Perfect score! Health at ${stats.healthScore}%. Consider adding new goals.`
+                            }
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </SectionCard>
+                </motion.div>
 
+              </div>
+
+              {/* RIGHT — User filter + Todo list */}
+              <div className="xl:col-span-8 space-y-4">
+
+                {/* User filter card */}
+                {showDropdown && (
+                  <motion.div variants={itemVariants}>
+                    <SectionCard>
+                      <CardHeaderRow
+                        iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                        icon={<Users className="h-4 w-4 text-blue-500" />}
+                        title={isAdmin ? 'Filter by Team Member' : 'View Todo List'}
+                        subtitle="Switch between user views"
+                        action={
+                          isAdmin && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-widest bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                              Admin
+                            </span>
+                          )
+                        }
+                      />
+                      <div className="p-4">
+                        <UserSelector />
+                      </div>
+                    </SectionCard>
+                  </motion.div>
+                )}
+
+                {/* Todo list card */}
+                <motion.div variants={itemVariants}>
+                  <SectionCard>
                     {/* List header */}
-                    <div className="px-5 py-3.5 border-b" style={{ borderColor: T.border }}>
+                    <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
                       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                         <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                          <CheckCircle2 size={15} style={{ color: T.emerald }} />
-                          <span className="text-sm font-black truncate" style={{ color: T.navy }}>{selectedUserLabel}</span>
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: T.bg, color: T.slate }}>
-                            {filteredTodos.length}
-                          </span>
+                          <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/40">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{selectedUserLabel}</h3>
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{filteredTodos.length} items</p>
+                          </div>
                         </div>
                         <div className="flex-shrink-0 w-full sm:w-52">
                           <SearchInput value={search} onChange={setSearch} placeholder="Search todos…" />
@@ -952,38 +1007,38 @@ export default function TodoDashboard() {
 
                       {/* Filter chips */}
                       <div className="flex items-center gap-2 mt-3 flex-wrap">
-                        <FilterChip id="all"       label="All"       count={todos.length}      todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        <FilterChip id="pending"   label="Pending"   count={stats.pending}     todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
-                        <FilterChip id="completed" label="Completed" count={stats.completed}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        <FilterChip id="all"       label="All"       count={todos.length}    todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        <FilterChip id="pending"   label="Pending"   count={stats.pending}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                        <FilterChip id="completed" label="Completed" count={stats.completed} todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
                         {stats.overdue > 0 && (
-                          <FilterChip id="overdue" label="Overdue"   count={stats.overdue}     todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
+                          <FilterChip id="overdue" label="Overdue"   count={stats.overdue}   todoFilter={todoFilter} setTodoFilter={setTodoFilter} />
                         )}
                       </div>
                     </div>
 
-                    {/* Column headers */}
-                    <div className="px-5 py-2 border-b grid grid-cols-[20px_1fr_auto] gap-4 items-center" style={{ background: `${T.bg}88`, borderColor: T.border }}>
+                    {/* Column header row */}
+                    <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid grid-cols-[20px_1fr_auto] gap-4 items-center bg-slate-50/80 dark:bg-slate-700/30">
                       <div />
-                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Task</span>
-                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Actions</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Task</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Actions</span>
                     </div>
 
                     {/* Body */}
                     <div style={{ maxHeight: 560, overflowY: 'auto' }}>
                       {isLoading ? (
                         <div className="py-16 flex flex-col items-center gap-3">
-                          <RefreshCw size={22} className="animate-spin" style={{ color: T.muted }} />
-                          <p className="text-xs font-medium" style={{ color: T.muted }}>Loading todos…</p>
+                          <RefreshCw size={22} className="animate-spin text-slate-400" />
+                          <p className="text-xs font-medium text-slate-400">Loading todos…</p>
                         </div>
                       ) : filteredTodos.length === 0 ? (
                         <div className="py-16 flex flex-col items-center gap-3">
-                          <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: T.bg }}>
-                            <CheckSquare size={24} style={{ color: T.border }} />
+                          <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
+                            <CheckSquare size={24} className="text-slate-300 dark:text-slate-500" />
                           </div>
-                          <p className="text-sm font-bold" style={{ color: T.slate }}>
+                          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
                             {search || todoFilter !== 'all' ? 'No matching todos' : 'No todos yet'}
                           </p>
-                          <p className="text-xs font-medium" style={{ color: T.muted }}>
+                          <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
                             {search || todoFilter !== 'all' ? 'Try adjusting your filters' : 'Create one using the form on the left'}
                           </p>
                         </div>
@@ -1003,74 +1058,73 @@ export default function TodoDashboard() {
                         </AnimatePresence>
                       )}
                     </div>
-                  </motion.div>
+                  </SectionCard>
+                </motion.div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ─────────────────── LOG TAB ────────────────────────────────────── */}
+        {activeTab === 'log' && (
+          <motion.div key="log" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+
+            {/* Log controls */}
+            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div className="flex-1 min-w-0 max-w-sm">
+                <SearchInput value={logSearch} onChange={setLogSearch} placeholder="Search activity log…" />
+              </div>
+              {showDropdown && (
+                <div className="flex-shrink-0 w-64">
+                  <UserSelector />
                 </div>
+              )}
+              <div className="flex-shrink-0">
+                <span className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                  {filteredLog.length} entries
+                </span>
               </div>
             </motion.div>
-          )}
 
-          {/* ─────────────────── LOG TAB ────────────────────────────────── */}
-          {activeTab === 'log' && (
-            <motion.div key="log" variants={stagger} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-5">
-
-              {/* Log controls */}
-              <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="flex-1 min-w-0 max-w-sm">
-                  <SearchInput value={logSearch} onChange={setLogSearch} placeholder="Search activity log…" />
-                </div>
-                {showDropdown && (
-                  <div className="flex-shrink-0 w-64">
-                    <UserSelector />
-                  </div>
-                )}
-                <div className="flex-shrink-0">
-                  <span className="text-xs font-bold px-3 py-2 rounded-xl" style={{ background: `${T.navy}0A`, color: T.slate }}>
-                    {filteredLog.length} entries
-                  </span>
-                </div>
-              </motion.div>
-
-              {/* Log card */}
-              <motion.div variants={fadeUp} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: T.border }}>
-                <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${T.blue}, ${T.navy})` }} />
-
-                {/* Header */}
-                <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: T.border }}>
-                  <div className="flex items-center gap-2.5">
-                    <Activity size={14} style={{ color: T.blue }} />
-                    <span className="text-sm font-black" style={{ color: T.navy }}>Todo Activity Log</span>
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: T.bg, color: T.slate }}>
-                      {filteredLog.length}
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-medium" style={{ color: T.muted }}>
-                    {selectedUser === 'everyone'
+            {/* Log card */}
+            <motion.div variants={itemVariants}>
+              <SectionCard>
+                <CardHeaderRow
+                  iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                  icon={<Activity className="h-4 w-4 text-blue-500" />}
+                  title="Todo Activity Log"
+                  subtitle={
+                    selectedUser === 'everyone'
                       ? 'All users'
                       : selectedUser === 'self'
                         ? 'My activity'
                         : (() => { const u = allUsers.find(u => (u.id||u._id) === selectedUser); return u ? `${u.full_name || u.user_name}'s activity` : 'Selected user'; })()
-                    }
-                  </span>
-                </div>
+                  }
+                  action={
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                      {filteredLog.length}
+                    </span>
+                  }
+                />
 
                 {/* Column headers */}
-                <div className="px-5 py-2.5 border-b" style={{ background: `${T.bg}88`, borderColor: T.border }}>
+                <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-700/30">
                   <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Todo Title</span>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Owner</span>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Created On</span>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.muted }}>Event</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Todo Title</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Owner</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created On</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Event</span>
                   </div>
                 </div>
 
                 {/* Body */}
                 {filteredLog.length === 0 ? (
                   <div className="py-16 flex flex-col items-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: T.bg }}>
-                      <History size={24} style={{ color: T.border }} />
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-700">
+                      <History size={24} className="text-slate-300 dark:text-slate-500" />
                     </div>
-                    <p className="text-sm font-bold" style={{ color: T.slate }}>No activity yet</p>
-                    <p className="text-xs font-medium" style={{ color: T.muted }}>Complete or delete a todo and it will appear here</p>
+                    <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">No activity yet</p>
+                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500">Complete or delete a todo and it will appear here</p>
                   </div>
                 ) : (
                   <div style={{ maxHeight: 600, overflowY: 'auto' }}>
@@ -1087,21 +1141,19 @@ export default function TodoDashboard() {
                             initial="hidden"
                             animate="visible"
                             exit="exit"
-                            className="px-5 py-3 border-b last:border-b-0 transition-colors"
-                            style={{ borderColor: T.border }}
-                            whileHover={{ backgroundColor: '#F8FAFF' }}
+                            className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
                           >
                             <div className="grid gap-4 items-center" style={{ gridTemplateColumns: '1fr 150px 150px 190px' }}>
-                              <p className="text-sm font-semibold truncate" style={{ color: T.text }} title={entry.title}>
+                              <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate" title={entry.title}>
                                 {entry.title}
                               </p>
                               <div className="flex items-center gap-1.5">
-                                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${T.blue}12` }}>
-                                  <UserIcon size={10} style={{ color: T.blue }} />
+                                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 bg-blue-50 dark:bg-blue-900/30">
+                                  <UserIcon size={10} className="text-blue-500" />
                                 </div>
-                                <span className="text-xs font-medium truncate" style={{ color: T.slate }}>{ownerName}</span>
+                                <span className="text-xs font-medium truncate text-slate-600 dark:text-slate-300">{ownerName}</span>
                               </div>
-                              <span className="text-xs font-medium" style={{ color: T.muted }}>{createdDate}</span>
+                              <span className="text-xs font-medium text-slate-400 dark:text-slate-500">{createdDate}</span>
                               <div className="flex justify-start">
                                 <EventBadge entry={entry} />
                               </div>
@@ -1112,12 +1164,12 @@ export default function TodoDashboard() {
                     </AnimatePresence>
                   </div>
                 )}
-              </motion.div>
+              </SectionCard>
             </motion.div>
-          )}
+          </motion.div>
+        )}
 
-        </AnimatePresence>
-      </div>
+      </AnimatePresence>
     </motion.div>
   );
 }
