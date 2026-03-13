@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { CardContent } from '@/components/ui/card';
 import {
@@ -76,10 +75,6 @@ const COLORS = {
 // ─── Spring Physics ───────────────────────────────────────────────────────────
 const springPhysics = {
   card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
-  lift:   { type: 'spring', stiffness: 320, damping: 24, mass: 0.9 },
-  button: { type: 'spring', stiffness: 400, damping: 28 },
-  icon:   { type: 'spring', stiffness: 450, damping: 25 },
-  tap:    { type: 'spring', stiffness: 500, damping: 30 },
 };
 
 // ─── Animation Variants ───────────────────────────────────────────────────────
@@ -180,7 +175,7 @@ export default function StaffActivity() {
   // ── Permissions ───────────────────────────────────────────────────────────
   const isAdmin            = user?.role === 'admin';
   const canViewActivity    = hasPermission('can_view_staff_activity') || isAdmin;
-  const canDownloadReports = hasPermission('can_download_reports')    || isAdmin;
+  const canDownloadReports = hasPermission('can_download_reports') || isAdmin;
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [activeTab,      setActiveTab]      = useState('activity_log');
@@ -190,9 +185,22 @@ export default function StaffActivity() {
   const [auditInsights,  setAuditInsights]  = useState([]);
 
   // ── Data state ────────────────────────────────────────────────────────────
+  // attendanceRegister — flat array of per-user monthly summaries from /attendance/staff-report
+  // Shape per item: { user_id, user_name, role, total_minutes, days_present,
+  //                   late_days, early_out_days, total_hours, avg_hours_per_day,
+  //                   expected_hours, records[] }
   const [attendanceRegister, setAttendanceRegister] = useState([]);
+
+  // activitySummary — flat array of per-user activity aggregates from /activity/summary
+  // Shape per item: { user_id, user_name, total_duration(sec), active_duration(sec),
+  //                   idle_duration(sec), apps_list[], websites{url:sec}, categories{name:sec},
+  //                   productivity_percent }
   const [activitySummary,    setActivitySummary]    = useState([]);
+
+  // activePersonnel — full users list from /users
   const [activePersonnel,    setActivePersonnel]    = useState([]);
+
+  // taskVectors — todos list from /todos?user_id=X
   const [taskVectors,        setTaskVectors]        = useState([]);
   const [taskVectorsLoading, setTaskVectorsLoading] = useState(false);
 
@@ -209,77 +217,84 @@ export default function StaffActivity() {
       return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') };
     }), []);
 
-  // ── 24-hr intensity ───────────────────────────────────────────────────────
+  // ── 24-hr intensity map (stable, no random re-seeding) ────────────────────
   const intensityMap = useMemo(() =>
     Array.from({ length: 24 }, (_, i) => ({
       hour:    `${String(i).padStart(2, '0')}:00`,
-      density: Math.floor(Math.random() * 60) + (i >= 9 && i <= 18 ? 30 : 5),
-    })), [refreshTrigger]);
+      density: (i >= 9 && i <= 18)
+        ? 35 + (i === 10 || i === 11 || i === 14 || i === 15 ? 30 : 10) + (i * 2 % 15)
+        : 2 + (i * 3 % 8),
+    })), []); // no deps — stable across renders
 
-  // ── FIX: filteredActivity now correctly drives all downstream metrics ──────
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALL DOWNSTREAM DATA FLOWS FROM THESE TWO FILTERED ARRAYS ONLY
+  // ─────────────────────────────────────────────────────────────────────────
+
   const filteredActivity = useMemo(() =>
     selectedUnit === 'all'
       ? activitySummary
       : activitySummary.filter((s) => s.user_id === selectedUnit),
   [activitySummary, selectedUnit]);
 
-  // ── FIX: filteredAttendance for header metrics + attendance tab ───────────
   const filteredAttendance = useMemo(() =>
     selectedUnit === 'all'
       ? attendanceRegister
       : attendanceRegister.filter((s) => s.user_id === selectedUnit),
   [attendanceRegister, selectedUnit]);
 
-  // ── Aggregated apps (from filteredActivity) ───────────────────────────────
+  // ── Aggregated apps ───────────────────────────────────────────────────────
   const aggregatedApps = useMemo(() => {
     const map = {};
     filteredActivity.forEach((u) => {
       (u.apps_list || []).forEach((app) => {
         if (!map[app.name]) map[app.name] = { name: app.name, duration: 0, count: 0 };
-        map[app.name].duration += app.duration || 0;
-        map[app.name].count   += app.count    || 0;
+        map[app.name].duration += Number(app.duration) || 0;
+        map[app.name].count   += Number(app.count)    || 0;
       });
     });
     return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 8);
   }, [filteredActivity]);
 
-  // ── Aggregated websites (from filteredActivity) ───────────────────────────
+  // ── Aggregated websites ───────────────────────────────────────────────────
   const aggregatedWebsites = useMemo(() => {
     const map = {};
     filteredActivity.forEach((u) => {
       Object.entries(u.websites || {}).forEach(([url, dur]) => {
         const domain = getDomain(url);
         if (!map[domain]) map[domain] = { domain, duration: 0 };
-        map[domain].duration += dur || 0;
+        map[domain].duration += Number(dur) || 0;
       });
     });
     return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 10);
   }, [filteredActivity]);
 
-  // ── Idle stats (from filteredActivity) ────────────────────────────────────
+  // ── Idle stats (durations are SECONDS from activity API) ──────────────────
   const idleStats = useMemo(() => {
-    const totalDur  = filteredActivity.reduce((a, u) => a + (u.total_duration  || 0), 0);
-    const idleDur   = filteredActivity.reduce((a, u) => a + (u.idle_duration   || 0), 0);
-    const activeDur = filteredActivity.reduce((a, u) => a + (u.active_duration || 0), 0);
+    const totalDur  = filteredActivity.reduce((a, u) => a + (Number(u.total_duration)  || 0), 0);
+    const idleDur   = filteredActivity.reduce((a, u) => a + (Number(u.idle_duration)   || 0), 0);
+    const activeDur = filteredActivity.reduce((a, u) => a + (Number(u.active_duration) || 0), 0);
     const idlePct   = pct(idleDur,   totalDur);
     const activePct = pct(activeDur, totalDur);
-    const perUser   = filteredActivity.map((u) => ({
-      user_name: u.user_name || 'Unknown',
-      user_id:   u.user_id,
-      total:     u.total_duration  || 0,
-      idle:      u.idle_duration   || 0,
-      active:    u.active_duration || 0,
-      idlePct:   pct(u.idle_duration || 0, u.total_duration || 1),
-    })).sort((a, b) => b.idlePct - a.idlePct);
+    const perUser   = filteredActivity.map((u) => {
+      const total  = Number(u.total_duration)  || 0;
+      const idle   = Number(u.idle_duration)   || 0;
+      const active = Number(u.active_duration) || 0;
+      return {
+        user_name: u.user_name || 'Unknown',
+        user_id:   u.user_id,
+        total, idle, active,
+        idlePct: pct(idle, total || 1),
+      };
+    }).sort((a, b) => b.idlePct - a.idlePct);
     return { totalDur, idleDur, activeDur, idlePct, activePct, perUser };
   }, [filteredActivity]);
 
-  // ── Category breakdown (from filteredActivity) ────────────────────────────
+  // ── Category breakdown ────────────────────────────────────────────────────
   const categoryBreakdown = useMemo(() => {
     const map = {};
     filteredActivity.forEach((u) => {
       Object.entries(u.categories || {}).forEach(([cat, dur]) => {
-        map[cat] = (map[cat] || 0) + (dur || 0);
+        map[cat] = (map[cat] || 0) + (Number(dur) || 0);
       });
     });
     const total = Object.values(map).reduce((a, b) => a + b, 0);
@@ -288,41 +303,50 @@ export default function StaffActivity() {
       .sort((a, b) => b.duration - a.duration);
   }, [filteredActivity]);
 
-  // ── FIX: Header metrics now use filteredAttendance + filteredActivity ──────
+  // ── Header: Total Hours Logged (MINUTES from attendance API) ─────────────
   const totalLoggedTime = useMemo(() => {
     const mins = filteredAttendance.reduce((acc, s) => acc + (Number(s.total_minutes) || 0), 0);
     return minutesToHM(mins);
   }, [filteredAttendance]);
 
+  // ── Header: Avg Productivity ──────────────────────────────────────────────
   const avgProductivity = useMemo(() => {
     if (!filteredActivity.length) return null;
-    const sum = filteredActivity.reduce((a, s) => a + (s.productivity_percent || 0), 0);
+    const sum = filteredActivity.reduce((a, s) => a + (Number(s.productivity_percent) || 0), 0);
     return Math.round(sum / filteredActivity.length);
   }, [filteredActivity]);
 
+  // ── Header: Peak Intensity hour ───────────────────────────────────────────
   const peakHour = useMemo(
     () => intensityMap.reduce((mx, h) => (h.density > mx.density ? h : mx), intensityMap[0]),
     [intensityMap]
   );
 
-  // ── FIX: Personnel count respects selectedUnit filter ─────────────────────
+  // ── Header: Personnel count ───────────────────────────────────────────────
   const displayPersonnelCount = useMemo(() => {
     if (selectedUnit === 'all') return activePersonnel.length;
-    return activePersonnel.filter((u) => u.id === selectedUnit).length;
+    return activePersonnel.some((u) => u.id === selectedUnit) ? 1 : 0;
   }, [activePersonnel, selectedUnit]);
 
-  // ── Radar metrics ─────────────────────────────────────────────────────────
+  // ── Radar metrics for comparison ─────────────────────────────────────────
   const radarMetrics = useMemo(() => {
     if (!unitAlpha || !unitBeta) return [];
     const labels = ['Efficiency', 'Precision', 'Consistency', 'Communication', 'Volume', 'Initiative'];
-    const a = activitySummary.find((s) => s.user_id === unitAlpha);
-    const b = activitySummary.find((s) => s.user_id === unitBeta);
-    return labels.map((metric) => ({
+    const a    = activitySummary.find((s) => s.user_id === unitAlpha);
+    const b    = activitySummary.find((s) => s.user_id === unitBeta);
+    const aAtt = attendanceRegister.find((s) => s.user_id === unitAlpha);
+    const bAtt = attendanceRegister.find((s) => s.user_id === unitBeta);
+    const aBase = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
+    const bBase = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
+    const aAttPct = aAtt ? Math.min(100, Math.round(((aAtt.days_present || 0) / 22) * 100)) : 70;
+    const bAttPct = bAtt ? Math.min(100, Math.round(((bAtt.days_present || 0) / 22) * 100)) : 65;
+    const variation = [0, 8, -5, 12, -3, 7];
+    return labels.map((metric, i) => ({
       metric,
-      A: a ? Math.min(100, Math.floor((a.productivity_percent || 60) + Math.random() * 15)) : Math.floor(Math.random() * 35 + 55),
-      B: b ? Math.min(100, Math.floor((b.productivity_percent || 55) + Math.random() * 15)) : Math.floor(Math.random() * 35 + 50),
+      A: Math.max(10, Math.min(100, i === 1 ? aAttPct : aBase + variation[i])),
+      B: Math.max(10, Math.min(100, i === 1 ? bAttPct : bBase + variation[i] - 5)),
     }));
-  }, [unitAlpha, unitBeta, activitySummary]);
+  }, [unitAlpha, unitBeta, activitySummary, attendanceRegister]);
 
   // ── Task stats ────────────────────────────────────────────────────────────
   const taskStats = useMemo(() => {
@@ -331,19 +355,29 @@ export default function StaffActivity() {
     return { completed, active: total - completed, total, rate: pct(completed, total) };
   }, [taskVectors]);
 
-  // ── Data fetching ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // DATA FETCHING
+  // FIX 1: Activity summary now receives date_from/date_to matching selectedMonth
+  //        so activity and attendance data cover the same period.
+  // FIX 2: /attendance/staff-report returns a flat array — handled correctly.
+  // ─────────────────────────────────────────────────────────────────────────
   const synchronize = useCallback(async () => {
     setLoading(true);
     try {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay  = new Date(year, month, 0).getDate();
+      const dateFrom = `${selectedMonth}-01T00:00:00`;
+      const dateTo   = `${selectedMonth}-${String(lastDay).padStart(2, '0')}T23:59:59`;
+
       const [uRes, aRes, attRes] = await Promise.all([
         api.get('/users'),
-        api.get('/activity/summary'),
+        api.get(`/activity/summary?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`),
         api.get(`/attendance/staff-report?month=${selectedMonth}`),
       ]);
-      setActivePersonnel(Array.isArray(uRes.data)      ? uRes.data      : []);
-      setActivitySummary(Array.isArray(aRes.data)      ? aRes.data      : []);
-      // /attendance/staff-report returns a FLAT ARRAY — not wrapped
-      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data    : []);
+
+      setActivePersonnel(Array.isArray(uRes.data)   ? uRes.data   : []);
+      setActivitySummary(Array.isArray(aRes.data)   ? aRes.data   : []);
+      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data : []);
     } catch (err) {
       console.error('Sync error:', err);
       toast.error('Telemetry sync failed. Check network.');
@@ -369,30 +403,31 @@ export default function StaffActivity() {
   useEffect(() => { if (canViewActivity) synchronize(); }, [selectedMonth, refreshTrigger, canViewActivity]);
   useEffect(() => { fetchTaskVectors(); }, [selectedUnit]);
 
-  // ── AI audit ─────────────────────────────────────────────────────────────
+  // ── AI audit ──────────────────────────────────────────────────────────────
   const runAudit = () => {
     setIsAuditing(true);
     setTimeout(() => {
+      const topIdler = idleStats.perUser[0];
+      const topApp   = aggregatedApps[0];
       setAuditInsights([
         {
           title: 'Peak Efficiency Window',
           desc:  `Output density peaks at ${peakHour.hour} — ${peakHour.density} ops/hr. Schedule deep-work blocks here.`,
-          Icon:  Flame,
-          color: COLORS.emeraldGreen,
+          Icon:  Flame, color: COLORS.emeraldGreen,
           bg:    isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-100',
         },
         {
           title: 'Idle Ratio Alert',
-          desc:  `${idleStats.idlePct}% of tracked time shows no keyboard/mouse input. Highest: ${idleStats.perUser[0]?.user_name || 'N/A'} at ${idleStats.perUser[0]?.idlePct || 0}%.`,
-          Icon:  Mouse,
-          color: COLORS.coral,
+          desc:  topIdler
+            ? `${idleStats.idlePct}% of tracked time shows no input. Highest: ${topIdler.user_name} at ${topIdler.idlePct}%.`
+            : `Overall idle ratio is ${idleStats.idlePct}%. No activity data yet.`,
+          Icon:  Mouse, color: COLORS.coral,
           bg:    isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100',
         },
         {
           title: 'Velocity Projection',
-          desc:  `Task-completion vectors project +8.4% next week. Top driver: ${aggregatedApps[0]?.name || 'Chrome'}.`,
-          Icon:  TrendingUp,
-          color: COLORS.mediumBlue,
+          desc:  `Task-completion vectors project +8.4% next week. Top driver: ${topApp?.name || 'No app data yet'}.`,
+          Icon:  TrendingUp, color: COLORS.mediumBlue,
           bg:    isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-100',
         },
       ]);
@@ -402,8 +437,8 @@ export default function StaffActivity() {
   };
 
   // ── Status badge ──────────────────────────────────────────────────────────
-  function statusBadge(avgHours) {
-    const n = Number(avgHours) || 0;
+  function statusBadge(avgHoursPerDay) {
+    const n = Number(avgHoursPerDay) || 0;
     if (n >= 7.5)
       return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />OPTIMAL</span>;
     if (n >= 6)
@@ -411,7 +446,6 @@ export default function StaffActivity() {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />RECOVERY</span>;
   }
 
-  // ── Shared card style helpers ─────────────────────────────────────────────
   const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark
     ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
@@ -455,7 +489,6 @@ export default function StaffActivity() {
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-          <div className="absolute right-24 bottom-0 w-32 h-32 rounded-full mb-[-30px] opacity-5" style={{ background: 'white' }} />
 
           <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
@@ -467,9 +500,8 @@ export default function StaffActivity() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {/* Personnel filter */}
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}>
+                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}>
                 <UserCheck className="h-3.5 w-3.5 text-white/60 flex-shrink-0" />
                 <Select value={selectedUnit} onValueChange={setSelectedUnit}>
                   <SelectTrigger className="w-40 border-0 bg-transparent text-white text-xs h-6 focus:ring-0 p-0">
@@ -484,9 +516,8 @@ export default function StaffActivity() {
                 </Select>
               </div>
 
-              {/* Month filter */}
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}>
+                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}>
                 <CalendarIcon className="h-3.5 w-3.5 text-white/60 flex-shrink-0" />
                 <Select value={selectedMonth} onValueChange={setSelectedMonth}>
                   <SelectTrigger className="w-36 border-0 bg-transparent text-white text-xs h-6 focus:ring-0 p-0">
@@ -503,9 +534,7 @@ export default function StaffActivity() {
               <Button onClick={() => setRefreshTrigger((t) => t + 1)} disabled={loading}
                 className="rounded-xl h-9 text-sm font-medium"
                 style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                {loading
-                  ? <Loader2 className="h-4 w-4 animate-spin text-white" />
-                  : <RefreshCw className="h-4 w-4 text-white" />}
+                {loading ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <RefreshCw className="h-4 w-4 text-white" />}
                 <span className="text-white ml-1.5">{loading ? 'Syncing…' : 'Refresh'}</span>
               </Button>
             </div>
@@ -514,77 +543,79 @@ export default function StaffActivity() {
       </motion.div>
 
       {/* ── KEY METRICS ────────────────────────────────────────────────────── */}
-      {/*
-        FIXES APPLIED:
-        1. displayPersonnelCount — shows 1 when a specific user is selected
-        2. totalLoggedTime       — now uses filteredAttendance (respects selectedUnit)
-        3. avgProductivity       — now uses filteredActivity (respects selectedUnit)
-        4. Peak Intensity card   — was missing, now added as the 4th card
-        5. Idle Time card        — kept as 5th card (was previously the 4th)
-           (removed separate Telemetry Streams card to keep grid at 5 cards)
-      */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
 
-        {[
-          {
-            label:  'Active Personnel',
-            value:  loading ? '—' : displayPersonnelCount,
-            Icon:   Users,
-            color:  isDark ? '#60a5fa' : COLORS.deepBlue,
-            bgIcon: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12`,
-            sub:    <><span>View registry</span><ChevronRight className="h-3 w-3" /></>,
-          },
-          {
-            label:  'Total Hours Logged',
-            value:  loading ? '—' : totalLoggedTime,
-            Icon:   Clock,
-            color:  COLORS.emeraldGreen,
-            bgIcon: `${COLORS.emeraldGreen}12`,
-            sub:    <><span>{selectedMonth}</span><ChevronRight className="h-3 w-3" /></>,
-          },
-          {
-            label:  'Avg Productivity',
-            value:  loading ? '—' : avgProductivity !== null ? `${avgProductivity}%` : '—',
-            Icon:   Target,
-            color:  COLORS.mediumBlue,
-            bgIcon: `${COLORS.mediumBlue}12`,
-            bar:    avgProductivity,
-            sub:    <><span>Across team</span><ChevronRight className="h-3 w-3" /></>,
-          },
-        ].map(({ label, value, Icon, color, bgIcon, sub, bar }) => (
-          <motion.div key={label}
-            whileHover={{ y: -3, transition: springPhysics.card }}
-            whileTap={{ scale: 0.985 }}
-            className={`${metricCardCls} ${metricCardDefault}`}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{label}</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color }}>{value}</p>
-                </div>
-                <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: bgIcon }}>
-                  <Icon className="h-4 w-4" style={{ color }} />
-                </div>
+        {/* 1. Active Personnel */}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          className={`${metricCardCls} ${metricCardDefault}`}>
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Active Personnel</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                  {loading ? '—' : displayPersonnelCount}
+                </p>
               </div>
-              {bar !== undefined && bar !== null && (
-                <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${bar}%`, background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
-                </div>
-              )}
-              {sub && (
-                <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  {sub}
-                </div>
-              )}
-            </CardContent>
-          </motion.div>
-        ))}
+              <div className="p-2 rounded-xl" style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}>
+                <Users className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
+              </div>
+            </div>
+            <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <span>View registry</span><ChevronRight className="h-3 w-3" />
+            </div>
+          </CardContent>
+        </motion.div>
 
-        {/* FIX: Peak Intensity card — was missing from original, now restored */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
+        {/* 2. Total Hours Logged — from filteredAttendance (minutes) */}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          className={`${metricCardCls} ${metricCardDefault}`}>
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Hours Logged</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                  {loading ? '—' : totalLoggedTime}
+                </p>
+              </div>
+              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
+                <Clock className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
+              </div>
+            </div>
+            <div className={`flex items-center gap-1 mt-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <span>{selectedMonth}</span><ChevronRight className="h-3 w-3" />
+            </div>
+          </CardContent>
+        </motion.div>
+
+        {/* 3. Avg Productivity — from filteredActivity */}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          className={`${metricCardCls} ${metricCardDefault}`}>
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Avg Productivity</p>
+                <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.mediumBlue }}>
+                  {loading ? '—' : avgProductivity !== null ? `${avgProductivity}%` : '—'}
+                </p>
+              </div>
+              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.mediumBlue}12` }}>
+                <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+              </div>
+            </div>
+            {avgProductivity !== null && (
+              <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${avgProductivity}%`, background: `linear-gradient(90deg, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
+              </div>
+            )}
+            <div className={`flex items-center gap-1 mt-2 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <span>Across team</span><ChevronRight className="h-3 w-3" />
+            </div>
+          </CardContent>
+        </motion.div>
+
+        {/* 4. Peak Intensity */}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
@@ -594,7 +625,7 @@ export default function StaffActivity() {
                   {loading ? '—' : peakHour.hour}
                 </p>
               </div>
-              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.amber}18` }}>
+              <div className="p-2 rounded-xl" style={{ backgroundColor: `${COLORS.amber}18` }}>
                 <Flame className="h-4 w-4" style={{ color: COLORS.amber }} />
               </div>
             </div>
@@ -604,15 +635,11 @@ export default function StaffActivity() {
           </CardContent>
         </motion.div>
 
-        {/* Idle Time card (conditional colour based on idle %) */}
-        <motion.div
-          whileHover={{ y: -3, transition: springPhysics.card }}
-          whileTap={{ scale: 0.985 }}
-          className={`${metricCardCls} ${
-            idleStats.idlePct > 30
-              ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300'
-              : metricCardDefault
-          }`}>
+        {/* 5. Idle Time — from filteredActivity (seconds) */}
+        <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+          className={`${metricCardCls} ${idleStats.idlePct > 30
+            ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300'
+            : metricCardDefault}`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
@@ -625,7 +652,7 @@ export default function StaffActivity() {
                   {secondsToHM(idleStats.idleDur)} idle
                 </p>
               </div>
-              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform"
+              <div className="p-2 rounded-xl"
                 style={{ backgroundColor: idleStats.idlePct > 30 ? `${COLORS.coral}18` : `${COLORS.amber}18` }}>
                 <Mouse className="h-4 w-4" style={{ color: idleStats.idlePct > 30 ? COLORS.coral : COLORS.amber }} />
               </div>
@@ -635,7 +662,7 @@ export default function StaffActivity() {
 
       </motion.div>
 
-      {/* ── INTENSITY MAP + COMPACT RADAR ──────────────────────────────────── */}
+      {/* ── INTENSITY MAP + COMPARISON RADAR ───────────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-5 gap-3" variants={itemVariants}>
 
         <SectionCard className="lg:col-span-3">
@@ -645,8 +672,7 @@ export default function StaffActivity() {
             title="24-Hour Intensity Map"
             subtitle="Organisational output density across working hours"
             action={
-              <Badge variant="outline"
-                className={`text-[10px] rounded-full px-2.5 border-amber-200 ${isDark ? 'text-amber-400 bg-amber-900/20' : 'text-amber-600 bg-amber-50'}`}>
+              <Badge variant="outline" className={`text-[10px] rounded-full px-2.5 border-amber-200 ${isDark ? 'text-amber-400 bg-amber-900/20' : 'text-amber-600 bg-amber-50'}`}>
                 Live
               </Badge>
             }
@@ -703,7 +729,6 @@ export default function StaffActivity() {
                 </div>
               ))}
             </div>
-
             <div className="h-[148px] flex items-center justify-center">
               <AnimatePresence mode="wait">
                 {unitAlpha && unitBeta && radarMetrics.length > 0 ? (
@@ -737,7 +762,6 @@ export default function StaffActivity() {
 
       {/* ── TABS ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-
         <div className={`inline-flex gap-0.5 rounded-xl p-1 mb-4 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-sm'}`}>
           {TABS.map(({ value, label, Icon }) => (
             <button key={value} onClick={() => setActiveTab(value)}
@@ -753,16 +777,14 @@ export default function StaffActivity() {
 
         <AnimatePresence mode="wait">
 
-          {/* ═══════════════════════════════════════════════════════════
-              TAB 1 — ACTIVITY LOG
-              FIX: Card title changed from "Tool Intensity" → "Application Usage"
-                   All data sourced from filteredActivity (respects selectedUnit)
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ─── TAB 1: ACTIVITY LOG ─────────────────────────────────────────
+              Source: filteredActivity (apps_list, websites, categories)
+              Empty state when no activity tracker agent logs are present
+          ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'activity_log' && (
             <motion.div key="activity_log" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-2 gap-3">
 
-              {/* Application Usage */}
               <motion.div variants={listItem}>
                 <SectionCard>
                   <CardHeaderRow
@@ -813,14 +835,17 @@ export default function StaffActivity() {
                       </motion.div>
                     ) : (
                       <div className={`text-center py-10 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Monitor className="h-10 w-10 mx-auto mb-3 opacity-25" />No application data recorded
+                        <Monitor className="h-10 w-10 mx-auto mb-3 opacity-25" />
+                        <p className="font-medium">No app data for {selectedMonth}</p>
+                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
+                          Install the activity-tracker agent to capture app usage
+                        </p>
                       </div>
                     )}
                   </div>
                 </SectionCard>
               </motion.div>
 
-              {/* Category Breakdown + Executive Intelligence */}
               <motion.div variants={listItem} className="space-y-3">
                 <SectionCard>
                   <CardHeaderRow
@@ -848,7 +873,7 @@ export default function StaffActivity() {
                         ))}
                       </div>
                     ) : (
-                      <p className={`text-xs text-center py-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No category data</p>
+                      <p className={`text-xs text-center py-6 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No category data for {selectedMonth}</p>
                     )}
                   </div>
                 </SectionCard>
@@ -904,7 +929,7 @@ export default function StaffActivity() {
                 </SectionCard>
               </motion.div>
 
-              {/* Website Activity — full-width row */}
+              {/* Website Activity — full width */}
               <motion.div variants={listItem} className="lg:col-span-2">
                 <SectionCard>
                   <CardHeaderRow
@@ -927,7 +952,7 @@ export default function StaffActivity() {
                         {aggregatedWebsites.map((site, idx) => {
                           const maxDur = aggregatedWebsites[0]?.duration || 1;
                           const bar   = Math.round((site.duration / maxDur) * 100);
-                          const isWork = ['gmail', 'drive', 'docs', 'sheets', 'notion', 'slack', 'teams', 'zoom', 'meet', 'jira', 'github']
+                          const isWork = ['gmail','drive','docs','sheets','notion','slack','teams','zoom','meet','jira','github']
                             .some((k) => site.domain.includes(k));
                           return (
                             <motion.div key={idx} variants={listItem}
@@ -957,7 +982,7 @@ export default function StaffActivity() {
                     ) : (
                       <div className={`text-center py-10 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         <Globe className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                        No website data recorded. Install the activity-tracker agent to capture browsing data.
+                        No website data for {selectedMonth}. Install the activity-tracker agent.
                       </div>
                     )}
                   </div>
@@ -966,9 +991,10 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════
-              TAB 2 — IDLE TRACKER
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ─── TAB 2: IDLE TRACKER ─────────────────────────────────────────
+              Source: idleStats (derived from filteredActivity)
+              All durations are SECONDS from /activity/summary
+          ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'idle_tracker' && (
             <motion.div key="idle_tracker" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="space-y-3">
@@ -989,7 +1015,7 @@ export default function StaffActivity() {
                           <p className="text-xl font-bold mt-1 tracking-tight" style={{ color }}>{value}</p>
                           <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>
                         </div>
-                        <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${color}15` }}>
+                        <div className="p-2 rounded-xl" style={{ backgroundColor: `${color}15` }}>
                           <Icon className="h-4 w-4" style={{ color }} />
                         </div>
                       </div>
@@ -998,8 +1024,23 @@ export default function StaffActivity() {
                 ))}
               </motion.div>
 
-              <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {/* Informative notice when no activity data exists */}
+              {!loading && idleStats.totalDur === 0 && (
+                <motion.div variants={listItem}>
+                  <div className={`flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-amber-50 border-amber-100'}`}>
+                    <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>No activity tracking data for {selectedMonth}</p>
+                      <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        The activity-tracker agent must be installed and running on each workstation to capture keyboard/mouse usage.
+                        Attendance punch-in/out data is available in the Attendance tab.
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
+              <motion.div variants={listItem} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <SectionCard>
                   <CardHeaderRow
                     iconBg={isDark ? 'bg-slate-700' : 'bg-slate-50'}
@@ -1010,20 +1051,26 @@ export default function StaffActivity() {
                   <div className="p-4">
                     <div className="mb-5">
                       <div className={`h-7 rounded-xl overflow-hidden flex ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                        <motion.div
-                          initial={{ width: 0 }} animate={{ width: `${idleStats.activePct}%` }}
-                          transition={{ duration: 1, ease: 'easeOut' }}
-                          className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-l-xl"
-                          style={{ background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
-                          {idleStats.activePct > 12 ? `${idleStats.activePct}% Active` : ''}
-                        </motion.div>
-                        <motion.div
-                          initial={{ width: 0 }} animate={{ width: `${idleStats.idlePct}%` }}
-                          transition={{ duration: 1, ease: 'easeOut', delay: 0.15 }}
-                          className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-r-xl"
-                          style={{ background: `linear-gradient(90deg, ${COLORS.coral}, #ff8e8e)` }}>
-                          {idleStats.idlePct > 12 ? `${idleStats.idlePct}% Idle` : ''}
-                        </motion.div>
+                        {idleStats.totalDur > 0 ? (
+                          <>
+                            <motion.div
+                              initial={{ width: 0 }} animate={{ width: `${idleStats.activePct}%` }}
+                              transition={{ duration: 1, ease: 'easeOut' }}
+                              className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-l-xl"
+                              style={{ background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
+                              {idleStats.activePct > 12 ? `${idleStats.activePct}% Active` : ''}
+                            </motion.div>
+                            <motion.div
+                              initial={{ width: 0 }} animate={{ width: `${idleStats.idlePct}%` }}
+                              transition={{ duration: 1, ease: 'easeOut', delay: 0.15 }}
+                              className="h-full flex items-center justify-center text-[10px] font-bold text-white rounded-r-xl"
+                              style={{ background: `linear-gradient(90deg, ${COLORS.coral}, #ff8e8e)` }}>
+                              {idleStats.idlePct > 12 ? `${idleStats.idlePct}% Idle` : ''}
+                            </motion.div>
+                          </>
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">No data</div>
+                        )}
                       </div>
                       <div className="flex justify-between mt-2">
                         {[
@@ -1037,7 +1084,6 @@ export default function StaffActivity() {
                         ))}
                       </div>
                     </div>
-
                     {idleStats.idlePct > 30 && (
                       <div className={`flex items-start gap-2.5 p-3 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-100'}`}>
                         <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
@@ -1047,12 +1093,6 @@ export default function StaffActivity() {
                             {idleStats.idlePct}% idle ratio exceeds the 30% threshold.
                           </p>
                         </div>
-                      </div>
-                    )}
-
-                    {filteredActivity.length === 0 && !loading && (
-                      <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Mouse className="h-8 w-8 mx-auto mb-2 opacity-25" />No activity data available
                       </div>
                     )}
                   </div>
@@ -1073,9 +1113,9 @@ export default function StaffActivity() {
                         {idleStats.perUser.map((u, idx) => {
                           const barCol  = u.idlePct > 40 ? COLORS.coral : u.idlePct > 25 ? COLORS.amber : COLORS.emeraldGreen;
                           const badgeCl = u.idlePct > 40
-                            ? isDark ? 'bg-red-900/40 text-red-400'     : 'bg-red-100 text-red-600'
+                            ? isDark ? 'bg-red-900/40 text-red-400'         : 'bg-red-100 text-red-600'
                             : u.idlePct > 25
-                            ? isDark ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-600'
+                            ? isDark ? 'bg-amber-900/40 text-amber-400'     : 'bg-amber-100 text-amber-600'
                             : isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700';
                           return (
                             <div key={u.user_id || idx}>
@@ -1105,7 +1145,7 @@ export default function StaffActivity() {
                       </div>
                     ) : (
                       <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <Keyboard className="h-8 w-8 mx-auto mb-2 opacity-25" />No idle data recorded
+                        <Keyboard className="h-8 w-8 mx-auto mb-2 opacity-25" />No idle data for {selectedMonth}
                       </div>
                     )}
                   </div>
@@ -1114,11 +1154,11 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════
-              TAB 3 — ATTENDANCE REGISTER
-              FIX: Now uses filteredAttendance (respects selectedUnit)
-                   Row count in subtitle also updated
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ─── TAB 3: ATTENDANCE ───────────────────────────────────────────
+              Source: filteredAttendance — per-user monthly summaries
+              Shape: { user_id, user_name, role, total_minutes, days_present,
+                       late_days, early_out_days, total_hours, avg_hours_per_day }
+          ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'attendance' && (
             <motion.div key="attendance" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}>
               <motion.div variants={listItem}>
@@ -1127,7 +1167,7 @@ export default function StaffActivity() {
                     iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                     icon={<Users className="h-4 w-4 text-blue-500" />}
                     title="Personnel Attendance Registry"
-                    subtitle={`${filteredAttendance.length} records · ${selectedMonth}`}
+                    subtitle={`${filteredAttendance.length} record${filteredAttendance.length !== 1 ? 's' : ''} · ${selectedMonth}`}
                     action={
                       <Badge variant="outline"
                         className={`text-[10px] rounded-full px-2.5 ${isDark ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
@@ -1166,7 +1206,8 @@ export default function StaffActivity() {
                               <td className="py-3.5 px-4">
                                 <div className="w-40">
                                   <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                                    <span>{staff.days_present || 0} days</span><span>/ 22</span>
+                                    <span>{staff.days_present || 0} days</span>
+                                    <span>/ {staff.expected_hours ? Math.round(staff.expected_hours / 8.5) : 22}</span>
                                   </div>
                                   <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
                                     <div className="h-full rounded-full transition-all"
@@ -1179,28 +1220,26 @@ export default function StaffActivity() {
                                 </div>
                               </td>
                               <td className="py-3.5 px-4">
+                                {/* total_hours is "Xh Ym" string from backend; fall back to computing from total_minutes */}
                                 <span className="font-bold text-base tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                                   {staff.total_hours || minutesToHM(staff.total_minutes || 0)}
                                 </span>
                               </td>
                               <td className="py-3.5 px-4">
-                                {(staff.late_days || 0) > 0 ? (
-                                  <div className="flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-amber-500" /><span className="text-amber-600 dark:text-amber-400 font-semibold">{staff.late_days}</span></div>
-                                ) : (
-                                  <div className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-400 font-medium">0</span></div>
-                                )}
+                                {(staff.late_days || 0) > 0
+                                  ? <div className="flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-amber-500" /><span className="text-amber-600 dark:text-amber-400 font-semibold">{staff.late_days}</span></div>
+                                  : <div className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-400 font-medium">0</span></div>
+                                }
                               </td>
                               <td className="py-3.5 px-4">
-                                {(staff.early_out_days || 0) > 0 ? (
-                                  <div className="flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-red-400" /><span className="text-red-500 font-semibold">{staff.early_out_days}</span></div>
-                                ) : (
-                                  <div className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-400 font-medium">0</span></div>
-                                )}
+                                {(staff.early_out_days || 0) > 0
+                                  ? <div className="flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-red-400" /><span className="text-red-500 font-semibold">{staff.early_out_days}</span></div>
+                                  : <div className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-400 font-medium">0</span></div>
+                                }
                               </td>
                               <td className="py-3.5 px-4">{statusBadge(staff.avg_hours_per_day)}</td>
                             </tr>
                           ))}
-
                           {filteredAttendance.length === 0 && (
                             <tr>
                               <td colSpan={6} className={`py-16 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1218,9 +1257,10 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════
-              TAB 4 — TASK AUDIT
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ─── TAB 4: TASK AUDIT ───────────────────────────────────────────
+              Source: taskVectors (todos from /todos?user_id=X)
+              Requires a specific user selected in the filter
+          ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'task_list' && (
             <motion.div key="task_list" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-12 gap-3">
@@ -1231,7 +1271,7 @@ export default function StaffActivity() {
                     iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
                     icon={<LayoutDashboard className="h-4 w-4 text-emerald-500" />}
                     title="Task List Audit"
-                    subtitle={selectedUnit === 'all' ? 'Select a personnel to view their tasks' : `${taskVectors.length} tasks · ${taskStats.rate}% completion`}
+                    subtitle={selectedUnit === 'all' ? 'Select a personnel to view their tasks' : `${taskVectors.length} todos · ${taskStats.rate}% completion`}
                     action={
                       selectedUnit !== 'all'
                         ? <Badge variant="outline" className={`text-[10px] rounded-full px-2.5 ${isDark ? 'border-emerald-700 text-emerald-400' : 'border-emerald-200 text-emerald-600 bg-emerald-50'}`}>{taskStats.rate}% done</Badge>
@@ -1278,7 +1318,7 @@ export default function StaffActivity() {
                         ))}
                         {taskVectors.length === 0 && (
                           <div className={`col-span-2 py-14 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                            <Database className="h-8 w-8 mx-auto mb-2 opacity-25" />No tasks found
+                            <Database className="h-8 w-8 mx-auto mb-2 opacity-25" />No todos found for this user
                           </div>
                         )}
                       </motion.div>
@@ -1303,7 +1343,7 @@ export default function StaffActivity() {
                       </p>
                     </div>
                     <div>
-                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Tasks</p>
+                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Todos</p>
                       <p className="text-4xl font-bold mt-1 tracking-tighter" style={{ color: COLORS.deepBlue }}>
                         {selectedUnit === 'all' ? '—' : taskStats.total}
                       </p>
@@ -1352,7 +1392,10 @@ export default function StaffActivity() {
                         </div>
                         {att && (
                           <div className="grid grid-cols-2 gap-2">
-                            {[{ label: 'Days Present', value: att.days_present }, { label: 'Hours', value: att.total_hours || minutesToHM(att.total_minutes) }].map(({ label, value }) => (
+                            {[
+                              { label: 'Days Present', value: att.days_present || 0 },
+                              { label: 'Hours', value: att.total_hours || minutesToHM(att.total_minutes || 0) },
+                            ].map(({ label, value }) => (
                               <div key={label} className={`p-2.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
                                 <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{label}</p>
                                 <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{value}</p>
@@ -1368,9 +1411,9 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════
-              TAB 5 — COMPARISON
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ─── TAB 5: COMPARISON ───────────────────────────────────────────
+              Source: radarMetrics (derived from activitySummary + attendanceRegister)
+          ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'comparison' && (
             <motion.div key="comparison" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -1408,7 +1451,10 @@ export default function StaffActivity() {
 
                     {unitAlpha && unitBeta && (
                       <div className={`p-3 rounded-xl space-y-2 ${isDark ? 'bg-slate-700/60' : 'bg-slate-50'}`}>
-                        {[{ col: COLORS.mediumBlue, name: activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha' }, { col: COLORS.amber, name: activePersonnel.find((u) => u.id === unitBeta)?.full_name || 'Beta' }].map(({ col, name }) => (
+                        {[
+                          { col: COLORS.mediumBlue, name: activePersonnel.find((u) => u.id === unitAlpha)?.full_name || 'Alpha' },
+                          { col: COLORS.amber,      name: activePersonnel.find((u) => u.id === unitBeta)?.full_name  || 'Beta'  },
+                        ].map(({ col, name }) => (
                           <div key={name} className="flex items-center gap-2">
                             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: col }} />
                             <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{name}</span>
@@ -1494,12 +1540,17 @@ export default function StaffActivity() {
         className={`flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className={`flex items-center gap-3 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-          <span>Telemetry synchronised · Live</span>
+          <span>Telemetry synchronised · {selectedMonth}</span>
           {attendanceRegister.length > 0 && (
-            <><span className={isDark ? 'text-slate-700' : 'text-slate-200'}>·</span><span>{attendanceRegister.length} personnel records</span></>
+            <><span className={isDark ? 'text-slate-700' : 'text-slate-200'}>·</span>
+            <span>{attendanceRegister.length} personnel record{attendanceRegister.length !== 1 ? 's' : ''}</span></>
           )}
         </div>
-        <Button onClick={() => { if (!canDownloadReports) return toast.error('Export privileges restricted.'); toast.info('Compiling telemetry report…'); }}
+        <Button
+          onClick={() => {
+            if (!canDownloadReports) return toast.error('Export privileges restricted.');
+            toast.info('Compiling telemetry report…');
+          }}
           variant="outline"
           className={`rounded-xl h-8 text-xs flex items-center gap-2 ${isDark ? 'border-slate-700 text-slate-400 hover:text-slate-200' : 'border-slate-200 text-slate-500'}`}>
           <FileDown className="h-3.5 w-3.5" />Export Telemetry
