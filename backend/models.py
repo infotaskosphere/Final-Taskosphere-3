@@ -382,6 +382,9 @@ class ActivityLogUpdate(BaseModel):
 
 # ======================
 # DSC MANAGEMENT
+# FIX: Added current_status field to DSCBase so it is
+# included in Pydantic serialization instead of being
+# silently dropped when routes set/read it.
 # ======================
 class DSCBase(BaseModel):
     holder_name: str
@@ -392,6 +395,7 @@ class DSCBase(BaseModel):
     issue_date: datetime
     expiry_date: datetime
     notes: Optional[str] = None
+    current_status: str = "IN"                      # FIX: was missing
     current_location: str = "with_company"
     taken_by: Optional[str] = None
     taken_date: Optional[datetime] = None
