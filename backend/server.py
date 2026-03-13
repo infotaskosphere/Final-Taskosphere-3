@@ -71,8 +71,8 @@ load_dotenv(ROOT_DIR / '.env')
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ====================== APP + FIXED CORS (MUST BE FIRST) ===========
 app = FastAPI(title="Taskosphere Backend")
+
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -80,7 +80,6 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://final-taskosphere-backend.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -88,6 +87,7 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 # ====================== HEALTH + STARTUP ======================
 @app.get("/health")
 async def health():
