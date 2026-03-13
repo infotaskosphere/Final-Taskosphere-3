@@ -14,7 +14,12 @@ from pathlib import Path
 from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
+from contextlib import asynccontextmanager
+
+# FIX: Single logger definition (removed duplicate)
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # FastAPI
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Query, Request
 from fastapi.security import HTTPBearer
@@ -47,10 +52,11 @@ from backend.dependencies import (
     get_current_user,
     create_access_token,
     check_permission,
-    require_admin,
+    require_admin,           # FIX: now a plain async function, use Depends(require_admin)
     require_manager_or_admin,
     verify_record_access,
-    verify_client_access
+    verify_client_access,
+    get_team_user_ids        # FIX: imported from dependencies, removed duplicate definition
 )
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
@@ -60,17 +66,58 @@ from fpdf import FPDF
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from apscheduler.schedulers.background import BackgroundScheduler
+
 # ====================== CONFIG ======================
+# FIX: Single IST definition (removed duplicate)
 IST = pytz.timezone('Asia/Kolkata')
 india_tz = ZoneInfo("Asia/Kolkata")
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
 # ====================== SECURITY CONFIG ===========================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-# ====================== APP + FIXED CORS (MUST BE FIRST) ===========
+
+# ====================== SCHEDULER ======================
+scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+
+# ── IN-MEMORY CACHE for daily reminder (avoids DB query on every request) ──
+_last_reminder_date_cache: Optional[str] = None
+
+# ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend")
+
+
+@app.on_event("startup")
+async def startup_event():
+    await db.tasks.create_index("assigned_to")
+    await db.tasks.create_index("created_by")
+    await db.tasks.create_index("due_date")
+    await db.users.create_index("email")
+    await db.staff_activity.create_index("user_id")
+    await db.staff_activity.create_index("timestamp")
+    await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+    await db.due_dates.create_index("department")
+    await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
+    await db.tasks.create_index("created_at")
+    await db.clients.create_index("assigned_to")
+    await db.dsc_register.create_index("expiry_date")
+    await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+    await db.attendance.create_index([("user_id", 1), ("date", -1)])
+    await db.notifications.create_index("user_id")
+    await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
+    await db.notifications.create_index("created_at")
+    await db.attendance.create_index(
+        [("user_id", 1), ("date", 1)],
+        unique=True
+    )
+    await db.clients.create_index(
+        [("created_by", 1), ("company_name", 1)],
+        unique=True
+    )
+    await db.holidays.create_index("date", unique=True)
+    scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+    scheduler.start()
 
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 app.add_middleware(
@@ -88,16 +135,16 @@ app.add_middleware(
     max_age=3600,
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
-# ====================== HEALTH + STARTUP ======================
+
+# ====================== HEALTH ======================
 @app.get("/health")
 async def health():
     return {"status": "ok", "cors": "configured correctly"}
+
 # ====================== SECURITY & DB ======================
 rankings_cache = {}
-rankings_cache_time = {}
-
-# ── IN-MEMORY CACHE for daily reminder (avoids DB query on every request) ──
-_last_reminder_date_cache: Optional[str] = None
+# FIX: Store cache times as timezone-aware UTC datetimes for consistent comparison
+rankings_cache_time: Dict[str, datetime] = {}
 
 # ===================== HELPER FUNCTIONS =====================
 def safe_dt(value):
@@ -112,7 +159,7 @@ def safe_dt(value):
         return dt
     except Exception:
         return None
-    
+
 def sanitize_user_data(users, current_user=None):
     is_single = False
     if not isinstance(users, list):
@@ -145,9 +192,6 @@ def convert_objectids(data):
         return new_dict
     return data
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PERMISSION HELPER — ownership-first check (Layer 4)
-# ─────────────────────────────────────────────────────────────────────────────
 def get_user_permissions(current_user: User) -> dict:
     if isinstance(current_user.permissions, dict):
         return current_user.permissions
@@ -164,8 +208,6 @@ def is_own_record(current_user: User, record: dict) -> bool:
         or uid in record.get("sub_assignees", [])
     )
 
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def create_audit_log(current_user: User, action: str, module: str, record_id: str, old_data: dict = None, new_data: dict = None):
     log_entry = AuditLog(
         user_id=current_user.id,
@@ -178,11 +220,8 @@ async def create_audit_log(current_user: User, action: str, module: str, record_
         timestamp=datetime.now(timezone.utc)
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
-   
+
 async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift_start: str = "10:30", shift_end: str = "19:00"):
-    """
-    Calculate target hours based on user's shift strings (HH:MM) and date range (YYYY-MM-DD).
-    """
     try:
         start = date.fromisoformat(start_date_str)
         end = date.fromisoformat(end_date_str)
@@ -206,9 +245,8 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
         current_date += timedelta(days=1)
     return round(total_hours, 2)
 
-# --- NEW: HOLIDAY AUTOFETCH LOGIC ---
-async def fetch_indian_holidays_task():
-    """Background job to fetch holidays for the current month."""
+def fetch_indian_holidays_task():
+    """Scheduled job to fetch holidays for the current month."""
     try:
         now = datetime.now(IST)
         year = now.year
@@ -237,159 +275,127 @@ async def fetch_indian_holidays_task():
     except Exception as e:
         logger.error(f"Holiday Autofetch Failed: {str(e)}")
 
-# Initialize Scheduler
-scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
-scheduler.add_job(lambda: asyncio.run(fetch_indian_holidays_task()), 'cron', day=1, hour=0, minute=5)
-scheduler.start()
 
-@app.on_event("startup")
-async def create_indexes():
- await db.tasks.create_index("assigned_to")
- await db.tasks.create_index("created_by")
- await db.tasks.create_index("due_date")
- await db.users.create_index("email")
- await db.staff_activity.create_index("user_id")
- await db.staff_activity.create_index("timestamp")
- await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
- await db.due_dates.create_index("department")
- await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
- await db.tasks.create_index("created_at")
- await db.clients.create_index("assigned_to")
- await db.dsc_register.create_index("expiry_date")
- await db.todos.create_index([("user_id", 1), ("created_at", -1)])
- await db.attendance.create_index([("user_id", 1), ("date", -1)])
- await db.notifications.create_index("user_id")
- await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
- await db.notifications.create_index("created_at")
- await db.attendance.create_index(
-  [("user_id", 1), ("date", 1)],
-  unique=True
- )
- await db.clients.create_index(
-  [("created_by", 1), ("company_name", 1)],
-  unique=True
- )
- await db.holidays.create_index("date", unique=True)
 
 # ROUTER
 api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
 def send_birthday_email(recipient_email: str, client_name: str):
- """Send birthday wish email to client"""
- sendgrid_key = os.environ.get('SENDGRID_API_KEY')
- sender_email = os.environ.get('SENDER_EMAIL', 'noreply@taskosphere.com')
- if not sendgrid_key:
-  logger.warning("SENDGRID_API_KEY not configured, email not sent")
-  return False
- subject = f"Happy Birthday, {client_name}!"
- html_content = f"""
- <html>
- <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;">
- <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
- <h1 style="color: #4F46E5; text-align: center;"> Happy Birthday! </h1>
- <p style="font-size: 16px; line-height: 1.6; color: #333;">
-  Dear {client_name},
- </p>
- <p style="font-size: 16px; line-height: 1.6; color: #333;">
-  On behalf of our entire team, we wish you a very Happy Birthday!
- </p>
- <p style="font-size: 16px; line-height: 1.6; color: #333;">
-  We appreciate your continued trust and partnership. May this year bring you prosperity, success, and happiness.
- </p>
- <div style="background-color: #4F46E5; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
- <p style="margin: 0; font-size: 18px; font-weight: bold;">
-  Wishing you all the best!
- </p>
- </div>
- <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
-  Best regards,<br>
-  <strong>Taskosphere Team</strong>
- </p>
- </div>
- </body>
- </html>
- """
- message = Mail(
-  from_email=sender_email,
-  to_emails=recipient_email,
-  subject=subject,
-  html_content=html_content
- )
- try:
-  sg = SendGridAPIClient(sendgrid_key)
-  response = sg.send(message)
-  logger.info(f"Birthday email sent to {recipient_email}, status: {response.status_code}")
-  return response.status_code == 202
- except Exception as e:
-  logger.error(f"Failed to send birthday email: {str(e)}")
-  return False
+    """Send birthday wish email to client"""
+    sendgrid_key = os.environ.get('SENDGRID_API_KEY')
+    sender_email = os.environ.get('SENDER_EMAIL', 'noreply@taskosphere.com')
+    if not sendgrid_key:
+        logger.warning("SENDGRID_API_KEY not configured, email not sent")
+        return False
+    subject = f"Happy Birthday, {client_name}!"
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+    <h1 style="color: #4F46E5; text-align: center;"> Happy Birthday! </h1>
+    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+     Dear {client_name},
+    </p>
+    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+     On behalf of our entire team, we wish you a very Happy Birthday!
+    </p>
+    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+     We appreciate your continued trust and partnership. May this year bring you prosperity, success, and happiness.
+    </p>
+    <div style="background-color: #4F46E5; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
+    <p style="margin: 0; font-size: 18px; font-weight: bold;">
+     Wishing you all the best!
+    </p>
+    </div>
+    <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
+     Best regards,<br>
+     <strong>Taskosphere Team</strong>
+    </p>
+    </div>
+    </body>
+    </html>
+    """
+    message = Mail(
+        from_email=sender_email,
+        to_emails=recipient_email,
+        subject=subject,
+        html_content=html_content
+    )
+    try:
+        sg = SendGridAPIClient(sendgrid_key)
+        response = sg.send(message)
+        logger.info(f"Birthday email sent to {recipient_email}, status: {response.status_code}")
+        return response.status_code == 202
+    except Exception as e:
+        logger.error(f"Failed to send birthday email: {str(e)}")
+        return False
 
 # Task Analytics
 @api_router.get("/tasks/analytics")
 async def get_task_analytics(
- month: str,
- current_user: User = Depends(get_current_user)
+    month: str,
+    current_user: User = Depends(get_current_user)
 ):
- """ Get task analytics for a specific month (YYYY-MM) """
- query = {}
- if current_user.role != "admin":
-  query["$or"] = [
-   {"assigned_to": current_user.id},
-   {"sub_assignees": current_user.id},
-   {"created_by": current_user.id}
-  ]
- tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
- total = 0
- completed = 0
- pending = 0
- for task in tasks:
-  created = task.get("created_at")
-  if isinstance(created, str):
-   if created.startswith(month):
-    total += 1
-    if task.get("status") == "completed":
-     completed += 1
-    elif task.get("status") == "pending":
-     pending += 1
-  elif isinstance(created, datetime):
-   if created.strftime("%Y-%m") == month:
-    total += 1
-    if task.get("status") == "completed":
-     completed += 1
-    elif task.get("status") == "pending":
-     pending += 1
- return {
-  "month": month,
-  "total_tasks": total,
-  "completed_tasks": completed,
-  "pending_tasks": pending
- }
+    """ Get task analytics for a specific month (YYYY-MM) """
+    query = {}
+    if current_user.role != "admin":
+        query["$or"] = [
+            {"assigned_to": current_user.id},
+            {"sub_assignees": current_user.id},
+            {"created_by": current_user.id}
+        ]
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+    total = 0
+    completed = 0
+    pending = 0
+    for task in tasks:
+        created = task.get("created_at")
+        if isinstance(created, str):
+            if created.startswith(month):
+                total += 1
+                if task.get("status") == "completed":
+                    completed += 1
+                elif task.get("status") == "pending":
+                    pending += 1
+        elif isinstance(created, datetime):
+            if created.strftime("%Y-%m") == month:
+                total += 1
+                if task.get("status") == "completed":
+                    completed += 1
+                elif task.get("status") == "pending":
+                    pending += 1
+    return {
+        "month": month,
+        "total_tasks": total,
+        "completed_tasks": completed,
+        "pending_tasks": pending
+    }
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
- return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password):
- return pwd_context.hash(password)
+    return pwd_context.hash(password)
 
 def send_email(to_email: str, subject: str, body: str):
- sendgrid_key = os.getenv("SENDGRID_API_KEY")
- sender_email = os.getenv("SENDER_EMAIL")
- if not sendgrid_key or not sender_email:
-  raise Exception("SendGrid environment variables not configured")
- message = Mail(
-  from_email=sender_email,
-  to_emails=to_email,
-  subject=subject,
-  plain_text_content=body
- )
- try:
-  sg = SendGridAPIClient(sendgrid_key)
-  response = sg.send(message)
-  return response.status_code == 202
- except Exception as e:
-  raise Exception(f"SendGrid error: {str(e)}")
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    sender_email = os.getenv("SENDER_EMAIL")
+    if not sendgrid_key or not sender_email:
+        raise Exception("SendGrid environment variables not configured")
+    message = Mail(
+        from_email=sender_email,
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=body
+    )
+    try:
+        sg = SendGridAPIClient(sendgrid_key)
+        response = sg.send(message)
+        return response.status_code == 202
+    except Exception as e:
+        raise Exception(f"SendGrid error: {str(e)}")
 
 #===========================================================
 # AUTH ROUTES
@@ -408,32 +414,21 @@ async def get_system_time():
 # ==========================================================
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
- todo_data: TodoCreate,
- current_user: User = Depends(get_current_user)
+    todo_data: TodoCreate,
+    current_user: User = Depends(get_current_user)
 ):
- todo = Todo(
-  user_id=current_user.id,
-  **todo_data.model_dump()
- )
- doc = todo.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- doc["updated_at"] = doc["updated_at"].isoformat()
- if doc.get("due_date"):
-  doc["due_date"] = doc["due_date"].isoformat()
- result = await db.todos.insert_one(doc)
- doc["id"] = str(result.inserted_id)
- return doc
-
-async def get_team_user_ids(manager_id: str):
-    manager = await db.users.find_one({"id": manager_id})
-    if not manager or not manager.get("departments"):
-        return []
-    team = await db.users.find({
-        "departments": {"$in": manager["departments"]},
-        "id": {"$ne": manager_id},
-        "role": "staff"
-    }).to_list(100)
-    return [u["id"] for u in team]
+    todo = Todo(
+        user_id=current_user.id,
+        **todo_data.model_dump()
+    )
+    doc = todo.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    doc["updated_at"] = doc["updated_at"].isoformat()
+    if doc.get("due_date"):
+        doc["due_date"] = doc["due_date"].isoformat()
+    result = await db.todos.insert_one(doc)
+    doc["id"] = str(result.inserted_id)
+    return doc
 
 @api_router.get("/todos")
 async def get_todos(
@@ -441,9 +436,6 @@ async def get_todos(
     current_user: User = Depends(get_current_user)
 ):
     if current_user.role == "admin":
-        # user_id="all"  → explicit request to fetch every user's todos (TodoDashboard dropdown)
-        # user_id=<some id> → fetch that specific user's todos
-        # user_id not provided → fetch only the admin's own todos (Dashboard card)
         if user_id == "all":
             query = {}
         elif user_id:
@@ -458,11 +450,9 @@ async def get_todos(
                 raise HTTPException(status_code=403, detail="Not allowed")
             query = {"user_id": user_id}
         else:
-            # Manager default: only own todos on Dashboard card
             query = {"user_id": current_user.id}
 
     else:
-        # Staff: own todos only; view_other_todos permission respected when user_id is passed
         permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
         allowed_others = permissions.get("view_other_todos", []) if isinstance(permissions, dict) else []
         if user_id:
@@ -477,127 +467,131 @@ async def get_todos(
         t["id"] = str(t["_id"])
         del t["_id"]
     return todos
-    
+
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
- is_admin = current_user.role == "admin"
- if is_admin:
-  todos = await db.todos.find().to_list(2000)
-  grouped_todos = {}
-  all_todos_flat = []
-  for todo in todos:
-   user = await db.users.find_one({"id": todo["user_id"]}, {"_id": 0})
-   user_name = user["full_name"] if user else "Unknown User"
-   if user_name not in grouped_todos:
-    grouped_todos[user_name] = []
-   todo["_id"] = str(todo["_id"])
-   grouped_todos[user_name].append(todo)
-   all_todos_flat.append(todo)
-  return {
-   "role": "admin",
-   "todos": all_todos_flat,
-   "grouped_todos": grouped_todos
-  }
- elif current_user.role == "manager":
-  team_ids = await get_team_user_ids(current_user.id)
-  visible_ids = list(set(team_ids + [current_user.id]))
-  todos = await db.todos.find({"user_id": {"$in": visible_ids}}).to_list(2000)
-  for todo in todos:
-   todo["_id"] = str(todo["_id"])
-  return {
-   "role": "manager",
-   "todos": todos
-  }
- else:
-  permissions = get_user_permissions(current_user)
-  allowed_users = permissions.get("view_other_todos", [])
-  if not isinstance(allowed_users, list):
-   allowed_users = []
-  query_ids = list(set(allowed_users + [current_user.id]))
-  todos = await db.todos.find({"user_id": {"$in": query_ids}}).to_list(2000)
-  for todo in todos:
-   todo["_id"] = str(todo["_id"])
-  return {
-   "role": "staff",
-   "todos": todos
-  }
+    is_admin = current_user.role == "admin"
+    if is_admin:
+        todos = await db.todos.find().to_list(2000)
+        # FIX: Replaced N+1 user queries with a single batch lookup
+        user_ids = list({t["user_id"] for t in todos if t.get("user_id")})
+        users_raw = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(1000)
+        user_name_map = {u["id"]: u.get("full_name", "Unknown User") for u in users_raw}
+
+        grouped_todos = {}
+        all_todos_flat = []
+        for todo in todos:
+            user_name = user_name_map.get(todo["user_id"], "Unknown User")
+            if user_name not in grouped_todos:
+                grouped_todos[user_name] = []
+            todo["_id"] = str(todo["_id"])
+            grouped_todos[user_name].append(todo)
+            all_todos_flat.append(todo)
+        return {
+            "role": "admin",
+            "todos": all_todos_flat,
+            "grouped_todos": grouped_todos
+        }
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        visible_ids = list(set(team_ids + [current_user.id]))
+        todos = await db.todos.find({"user_id": {"$in": visible_ids}}).to_list(2000)
+        for todo in todos:
+            todo["_id"] = str(todo["_id"])
+        return {
+            "role": "manager",
+            "todos": todos
+        }
+    else:
+        permissions = get_user_permissions(current_user)
+        allowed_users = permissions.get("view_other_todos", [])
+        if not isinstance(allowed_users, list):
+            allowed_users = []
+        query_ids = list(set(allowed_users + [current_user.id]))
+        todos = await db.todos.find({"user_id": {"$in": query_ids}}).to_list(2000)
+        for todo in todos:
+            todo["_id"] = str(todo["_id"])
+        return {
+            "role": "staff",
+            "todos": todos
+        }
 
 @api_router.post("/todos/{todo_id}/promote-to-task")
 async def promote_todo(todo_id: str, current_user: User = Depends(get_current_user)):
- try:
-  todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
- except:
-  raise HTTPException(status_code=400, detail="Invalid Todo ID")
- if not todo:
-  raise HTTPException(status_code=404, detail="Todo not found")
- if current_user.role != "admin" and todo["user_id"] != current_user.id:
-  raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
- now = datetime.now(IST)
- new_task = {
-  "id": str(uuid.uuid4()),
-  "title": todo["title"],
-  "description": todo.get("description"),
-  "assigned_to": todo["user_id"],
-  "sub_assignees": [],
-  "priority": "medium",
-  "status": "pending",
-  "category": "other",
-  "client_id": None,
-  "is_recurring": False,
-  "type": "task",
-  "created_by": current_user.id,
-  "created_at": now,
-  "updated_at": now
- }
- async with await client.start_session() as session:
-     async def cb(session):
-         await db.tasks.insert_one(new_task, session=session)
-         await db.todos.delete_one({"_id": ObjectId(todo_id)}, session=session)
-     await session.with_transaction(cb)
- return {"message": "Todo promoted to task successfully"}
+    try:
+        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if current_user.role != "admin" and todo["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+    now = datetime.now(IST)
+    new_task = {
+        "id": str(uuid.uuid4()),
+        "title": todo["title"],
+        "description": todo.get("description"),
+        "assigned_to": todo["user_id"],
+        "sub_assignees": [],
+        "priority": "medium",
+        "status": "pending",
+        "category": "other",
+        "client_id": None,
+        "is_recurring": False,
+        "type": "task",
+        "created_by": current_user.id,
+        "created_at": now,
+        "updated_at": now
+    }
+    async with await client.start_session() as session:
+        async def cb(session):
+            await db.tasks.insert_one(new_task, session=session)
+            await db.todos.delete_one({"_id": ObjectId(todo_id)}, session=session)
+        await session.with_transaction(cb)
+    return {"message": "Todo promoted to task successfully"}
 
 @api_router.delete("/todos/{todo_id}")
 async def delete_todo(
- todo_id: str,
- current_user: User = Depends(get_current_user)
+    todo_id: str,
+    current_user: User = Depends(get_current_user)
 ):
- try:
-  obj_id = ObjectId(todo_id)
- except:
-  raise HTTPException(status_code=400, detail="Invalid Todo ID")
- todo = await db.todos.find_one({"_id": obj_id})
- if not todo:
-  raise HTTPException(status_code=404, detail="Todo not found")
- if current_user.role != "admin" and todo["user_id"] != current_user.id:
-  raise HTTPException(status_code=403, detail="Not authorized")
- await db.todos.delete_one({"_id": obj_id})
- return {"message": "Todo deleted successfully"}
+    try:
+        obj_id = ObjectId(todo_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+    todo = await db.todos.find_one({"_id": obj_id})
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if current_user.role != "admin" and todo["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    await db.todos.delete_one({"_id": obj_id})
+    return {"message": "Todo deleted successfully"}
 
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
- todo_id: str,
- updates: dict,
- current_user: User = Depends(get_current_user)
+    todo_id: str,
+    updates: dict,
+    current_user: User = Depends(get_current_user)
 ):
- try:
-  todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
- except:
-  raise HTTPException(status_code=400, detail="Invalid Todo ID")
- if not todo:
-  raise HTTPException(status_code=404, detail="Todo not found")
- if current_user.role != "admin" and todo["user_id"] != current_user.id:
-  raise HTTPException(status_code=403, detail="Not authorized")
- now = datetime.now(IST)
- if updates.get("is_completed") is True:
-  updates["completed_at"] = now
- updates["updated_at"] = now
- await db.todos.update_one(
-  {"_id": ObjectId(todo_id)},
-  {"$set": updates}
- )
- return {"message": "Todo updated successfully"}
+    try:
+        todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Todo ID")
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if current_user.role != "admin" and todo["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    now = datetime.now(IST)
+    if updates.get("is_completed") is True:
+        updates["completed_at"] = now
+    updates["updated_at"] = now
+    await db.todos.update_one(
+        {"_id": ObjectId(todo_id)},
+        {"$set": updates}
+    )
+    return {"message": "Todo updated successfully"}
 
-# CHANGE SET 8: Register Endpoint
+# REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
 async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
@@ -639,7 +633,8 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     }
     await db.users.insert_one(new_user)
     access_token = create_access_token({"sub": user_id})
-    new_user["password"] = None
+    # FIX: Remove password from response dict before returning to prevent leaking hash
+    new_user.pop("password", None)
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
 @api_router.post("/auth/login", response_model=Token)
@@ -664,6 +659,7 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+# FIX: require_admin is now a plain async function — use Depends(require_admin) without ()
 @api_router.post("/users/{user_id}/approve")
 async def approve_user(user_id: str, current_user: User = Depends(require_admin)):
     existing = await db.users.find_one({"id": user_id})
@@ -723,11 +719,6 @@ async def get_reminders(
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Get reminders.
-    - Admins can pass user_id to see another user's reminders.
-    - Regular users always see only their own.
-    """
     if user_id and user_id != current_user.id:
         if current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Not authorized")
@@ -745,7 +736,6 @@ async def update_reminder(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a reminder (e.g., dismiss it, change title/time)."""
     existing = await db.reminders.find_one({"id": reminder_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Reminder not found")
@@ -754,8 +744,6 @@ async def update_reminder(
 
     allowed = {"title", "description", "remind_at", "is_dismissed"}
     update = {k: v for k, v in data.items() if k in allowed}
-    if "remind_at" in update and isinstance(update["remind_at"], str):
-        pass  # keep as string
     if update:
         await db.reminders.update_one({"id": reminder_id}, {"$set": update})
     return {"message": "Reminder updated"}
@@ -766,7 +754,6 @@ async def delete_reminder(
     reminder_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a reminder."""
     existing = await db.reminders.find_one({"id": reminder_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Reminder not found")
@@ -774,7 +761,6 @@ async def delete_reminder(
         raise HTTPException(status_code=403, detail="Not authorized")
     await db.reminders.delete_one({"id": reminder_id})
     return {"message": "Reminder deleted"}
-
 
 
 #============================================================
@@ -911,34 +897,25 @@ async def update_user_permissions(
     return {"message": "Permissions updated successfully"}
 
 #====================================================================================
-# ATTENDANCE ROUTES - FIXED: is_late and punched_out_early correctly calculated
+# ATTENDANCE ROUTES
 #=====================================================================================
 def get_real_client_ip(request: Request):
- x_forwarded_for = request.headers.get("x-forwarded-for")
- if x_forwarded_for:
-  return x_forwarded_for.split(",")[0].strip()
- if request.client:
-  return request.client.host
- return None
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
 
-# ── ATTENDANCE HELPER: Check if punch-in is late ───────────────────────────
 def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
-    """
-    Uses late_grace_minutes (int) if available,
-    otherwise falls back to parsing grace_time as HH:MM deadline or duration.
-    """
     try:
         pit = datetime.strptime(user.get("punch_in_time", "10:30"), "%H:%M")
-
-        # Prefer the dedicated field — stored as plain integer e.g. 15
         if user.get("late_grace_minutes") is not None:
             grace_minutes = int(user["late_grace_minutes"])
         else:
-            # Fallback: treat grace_time as a duration HH:MM e.g. "00:15"
             raw = str(user.get("grace_time", "00:15"))
-            gt  = datetime.strptime(raw, "%H:%M")
+            gt = datetime.strptime(raw, "%H:%M")
             grace_minutes = gt.hour * 60 + gt.minute
-
         deadline = punch_in_ist.replace(
             hour=pit.hour, minute=pit.minute, second=0, microsecond=0
         ) + timedelta(minutes=grace_minutes)
@@ -946,13 +923,7 @@ def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
     except Exception:
         return False
 
-# ── ATTENDANCE HELPER: Check if punch-out is early ─────────────────────────
 def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
-    """
-    Returns True if punch_out_ist is before the user's scheduled punch-out time.
-    All comparisons done in IST.
-    user dict must have key: punch_out_time (HH:MM)
-    """
     try:
         pot = datetime.strptime(user.get("punch_out_time", "19:00"), "%H:%M")
         expected_out = punch_out_ist.replace(
@@ -962,7 +933,6 @@ def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
     except Exception:
         return False
 
-# ── /attendance ENDPOINT ───────────────────────────────
 @api_router.post("/attendance")
 async def handle_attendance(
     data: dict,
@@ -985,7 +955,6 @@ async def handle_attendance(
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Already punched in")
-        # Fetch fresh user doc to read shift settings
         user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
         punch_in_utc = datetime.now(timezone.utc)
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
@@ -1004,7 +973,6 @@ async def handle_attendance(
         )
         return {"message": "Punched in successfully", "is_late": is_late}
 
-#=================PUNCH OUT==================================
     if action == "punch_out":
         if not attendance or not attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Not punched in yet")
@@ -1013,10 +981,8 @@ async def handle_attendance(
         punch_in_dt = attendance.get("punch_in")
         punch_out_utc = datetime.now(timezone.utc)
         punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
-        # Fetch fresh user doc to read shift settings
         user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
         punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
-        # Calculate duration in minutes
         delta = punch_out_utc.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc)
         duration_minutes = int(delta.total_seconds() / 60)
         await db.attendance.update_one(
@@ -1035,7 +1001,6 @@ async def handle_attendance(
             "punched_out_early": punched_out_early
         }
 
-# ── MARK LEAVE TODAY ───────────────────────────────────────────────────
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -1060,7 +1025,6 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
     )
     return {"message": "Marked on leave today"}
 
-# ── GET TODAY ATTENDANCE ───────────────────────────────────────────────
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -1091,299 +1055,297 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
         )
     return attendance
 
-# ── APPLY LEAVE (DATE RANGE SUPPORT) ───────────────────────────────
 @api_router.post("/attendance/apply-leave")
 async def apply_leave(
- data: dict,
- current_user: User = Depends(get_current_user)
+    data: dict,
+    current_user: User = Depends(get_current_user)
 ):
- try:
-  from_date = datetime.fromisoformat(data["from_date"]).date()
-  to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
-  reason = data.get("reason", "Leave Applied")
-  if to_date < from_date:
-   raise HTTPException(status_code=400, detail="Invalid date range")
-  current = from_date
-  while current <= to_date:
-   await db.attendance.update_one(
-    {
-     "user_id": current_user.id,
-     "date": current.isoformat()
-    },
-    {
-     "$set": {
-      "status": "leave",
-      "leave_reason": reason,
-      "punch_in": None,
-      "punch_out": None
-     }
-    },
-    upsert=True
-   )
-   current += timedelta(days=1)
-  return {"message": "Leave applied successfully"}
- except Exception as e:
-  raise HTTPException(status_code=400, detail=str(e))
+    try:
+        from_date = datetime.fromisoformat(data["from_date"]).date()
+        to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
+        reason = data.get("reason", "Leave Applied")
+        if to_date < from_date:
+            raise HTTPException(status_code=400, detail="Invalid date range")
+        current = from_date
+        while current <= to_date:
+            await db.attendance.update_one(
+                {
+                    "user_id": current_user.id,
+                    "date": current.isoformat()
+                },
+                {
+                    "$set": {
+                        "status": "leave",
+                        "leave_reason": reason,
+                        "punch_in": None,
+                        "punch_out": None
+                    }
+                },
+                upsert=True
+            )
+            current += timedelta(days=1)
+        return {"message": "Leave applied successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-# ── GET ATTENDANCE HISTORY ─────────────────────────────────────────────
 @api_router.get("/attendance/history", response_model=List[Attendance])
 async def get_attendance_history(
- user_id: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- query = {}
- if current_user.role == "admin":
-    if user_id:
-        query["user_id"] = user_id
- elif current_user.role == "manager":
-    permissions_mgr = get_user_permissions(current_user)
-    allowed_users = permissions_mgr.get("view_other_attendance", [])
-    if user_id:
-        if user_id == current_user.id:
+    query = {}
+    if current_user.role == "admin":
+        if user_id:
             query["user_id"] = user_id
+    elif current_user.role == "manager":
+        permissions_mgr = get_user_permissions(current_user)
+        allowed_users = permissions_mgr.get("view_other_attendance", [])
+        if user_id:
+            if user_id == current_user.id:
+                query["user_id"] = user_id
+            else:
+                if not permissions_mgr.get("can_view_attendance", False):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You do not have permission to view other users' attendance"
+                    )
+                if user_id not in allowed_users:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="This user is outside your cross-visibility scope"
+                    )
+                query["user_id"] = user_id
         else:
-            if not permissions_mgr.get("can_view_attendance", False):
-                raise HTTPException(
-                    status_code=403,
-                    detail="You do not have permission to view other users' attendance"
-                )
+            if permissions_mgr.get("can_view_attendance", False) and allowed_users:
+                query["user_id"] = {"$in": allowed_users + [current_user.id]}
+            else:
+                query["user_id"] = current_user.id
+    else:
+        if user_id and user_id != current_user.id:
+            permissions = get_user_permissions(current_user)
+            allowed_users = permissions.get("view_other_attendance", [])
             if user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
-                    detail="This user is outside your cross-visibility scope"
+                    detail="Not authorized to view other users' attendance"
                 )
-            query["user_id"] = user_id
-    else:
-        if permissions_mgr.get("can_view_attendance", False) and allowed_users:
-            query["user_id"] = {"$in": allowed_users + [current_user.id]}
-        else:
-            query["user_id"] = current_user.id
- else:
-    if user_id and user_id != current_user.id:
-        permissions = get_user_permissions(current_user)
-        allowed_users = permissions.get("view_other_attendance", [])
-        if user_id not in allowed_users:
-            raise HTTPException(
-                status_code=403,
-                detail="Not authorized to view other users' attendance"
+        query["user_id"] = user_id if user_id else current_user.id
+    attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    for attendance in attendance_list:
+        attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
+        attendance["punch_out"] = safe_dt(attendance.get("punch_out"))
+        if "status" not in attendance:
+            attendance["status"] = (
+                "present" if attendance.get("punch_in") else "absent"
             )
-    query["user_id"] = user_id if user_id else current_user.id
- attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
- for attendance in attendance_list:
-  attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
-  attendance["punch_out"] = safe_dt(attendance.get("punch_out"))
-  if "status" not in attendance:
-   attendance["status"] = (
-    "present" if attendance.get("punch_in") else "absent"
-   )
- return attendance_list
+    return attendance_list
 
 @api_router.get("/attendance/my-summary")
 async def get_my_attendance_summary(
- current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
- now = datetime.now(IST)
- current_month = now.strftime("%Y-%m")
- attendance_list = await db.attendance.find(
-  {"user_id": current_user.id},
-  {"_id": 0}
- ).sort("date", -1).to_list(1000)
- monthly_data = {}
- total_minutes_all = 0
- total_days = 0
- for attendance in attendance_list:
-  month = attendance["date"][:7]
-  if month not in monthly_data:
-   monthly_data[month] = {
-    "total_minutes": 0,
-    "days_present": 0
-   }
-  duration = attendance.get("duration_minutes")
-  if isinstance(duration, (int, float)):
-   monthly_data[month]["total_minutes"] += duration
-   total_minutes_all += duration
-   monthly_data[month]["days_present"] += 1
-   total_days += 1
- formatted_data = []
- for month, data in monthly_data.items():
-  minutes = data["total_minutes"]
-  hours = minutes // 60
-  mins = minutes % 60
-  formatted_data.append({
-   "month": month,
-   "total_minutes": minutes,
-   "total_hours": f"{hours}h {mins}m",
-   "days_present": data["days_present"]
-  })
- return {
-  "current_month": current_month,
-  "total_days": total_days,
-  "total_minutes": total_minutes_all,
-  "monthly_summary": formatted_data
- }
+    now = datetime.now(IST)
+    current_month = now.strftime("%Y-%m")
+    attendance_list = await db.attendance.find(
+        {"user_id": current_user.id},
+        {"_id": 0}
+    ).sort("date", -1).to_list(1000)
+    monthly_data = {}
+    total_minutes_all = 0
+    total_days = 0
+    for attendance in attendance_list:
+        month = attendance["date"][:7]
+        if month not in monthly_data:
+            monthly_data[month] = {
+                "total_minutes": 0,
+                "days_present": 0
+            }
+        duration = attendance.get("duration_minutes")
+        if isinstance(duration, (int, float)):
+            monthly_data[month]["total_minutes"] += duration
+            total_minutes_all += duration
+            monthly_data[month]["days_present"] += 1
+            total_days += 1
+    formatted_data = []
+    for month, data in monthly_data.items():
+        minutes = data["total_minutes"]
+        hours = minutes // 60
+        mins = minutes % 60
+        formatted_data.append({
+            "month": month,
+            "total_minutes": minutes,
+            "total_hours": f"{hours}h {mins}m",
+            "days_present": data["days_present"]
+        })
+    return {
+        "current_month": current_month,
+        "total_days": total_days,
+        "total_minutes": total_minutes_all,
+        "monthly_summary": formatted_data
+    }
 
 @api_router.get("/attendance/staff-report")
 async def get_staff_attendance_report(
- month: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    month: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- if current_user.role != "admin":
-  permissions = get_user_permissions(current_user)
-  if not permissions.get("can_view_attendance"):
-   raise HTTPException(status_code=403, detail="Not allowed")
- now = datetime.now(IST)
- target_month = month or now.strftime("%Y-%m")
- users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
- user_map = {u["id"]: u for u in users}
- attendance_list = await db.attendance.find(
-  {"date": {"$regex": f"^{target_month}"}},
-  {"_id": 0}
- ).to_list(5000)
- staff_report = {}
- for attendance in attendance_list:
-  uid = attendance["user_id"]
-  if uid not in staff_report:
-   user_info = user_map.get(uid, {})
-   staff_report[uid] = {
-    "user_id": uid,
-    "user_name": user_info.get("full_name", "Unknown"),
-    "role": user_info.get("role", "staff"),
-    "total_minutes": 0,
-    "days_present": 0,
-    "late_days": 0,
-    "early_out_days": 0,
-    "records": []
-   }
-  duration = attendance.get("duration_minutes")
-  if isinstance(duration, (int, float)):
-   staff_report[uid]["total_minutes"] += duration
-  staff_report[uid]["days_present"] += 1
-  if attendance.get("is_late"):
-   staff_report[uid]["late_days"] += 1
-  if attendance.get("punched_out_early"):
-   staff_report[uid]["early_out_days"] += 1
-  staff_report[uid]["records"].append({
-   "date": attendance["date"],
-   "punch_in": attendance.get("punch_in"),
-   "punch_out": attendance.get("punch_out"),
-   "duration_minutes": duration,
-   "is_late": attendance.get("is_late", False),
-   "punched_out_early": attendance.get("punched_out_early", False)
-  })
- result = []
- for uid, data in staff_report.items():
-  total_minutes = data["total_minutes"]
-  hours = total_minutes // 60
-  minutes = total_minutes % 60
-  data["total_hours"] = f"{hours}h {minutes}m"
-  if data["days_present"] > 0:
-   data["avg_hours_per_day"] = round(
-    (total_minutes / data["days_present"]) / 60, 1
-   )
-  else:
-   data["avg_hours_per_day"] = 0
-  user_data = user_map.get(uid, {})
-  year, month_val = map(int, target_month.split("-"))
-  _, last_day = calendar.monthrange(year, month_val)
-  expected_hours = await calculate_expected_hours(
-      f"{target_month}-01",
-      f"{target_month}-{last_day}",
-      user_data.get("punch_in_time", "10:30"),
-      user_data.get("punch_out_time", "19:00")
-  )
-  data["expected_hours"] = expected_hours
-  result.append(data)
- result.sort(key=lambda x: x["total_minutes"], reverse=True)
- return result
+    if current_user.role != "admin":
+        permissions = get_user_permissions(current_user)
+        if not permissions.get("can_view_attendance"):
+            raise HTTPException(status_code=403, detail="Not allowed")
+    now = datetime.now(IST)
+    target_month = month or now.strftime("%Y-%m")
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    user_map = {u["id"]: u for u in users}
+    attendance_list = await db.attendance.find(
+        {"date": {"$regex": f"^{target_month}"}},
+        {"_id": 0}
+    ).to_list(5000)
+    staff_report = {}
+    for attendance in attendance_list:
+        uid = attendance["user_id"]
+        if uid not in staff_report:
+            user_info = user_map.get(uid, {})
+            staff_report[uid] = {
+                "user_id": uid,
+                "user_name": user_info.get("full_name", "Unknown"),
+                "role": user_info.get("role", "staff"),
+                "total_minutes": 0,
+                "days_present": 0,
+                "late_days": 0,
+                "early_out_days": 0,
+                "records": []
+            }
+        duration = attendance.get("duration_minutes")
+        if isinstance(duration, (int, float)):
+            staff_report[uid]["total_minutes"] += duration
+        staff_report[uid]["days_present"] += 1
+        if attendance.get("is_late"):
+            staff_report[uid]["late_days"] += 1
+        if attendance.get("punched_out_early"):
+            staff_report[uid]["early_out_days"] += 1
+        staff_report[uid]["records"].append({
+            "date": attendance["date"],
+            "punch_in": attendance.get("punch_in"),
+            "punch_out": attendance.get("punch_out"),
+            "duration_minutes": duration,
+            "is_late": attendance.get("is_late", False),
+            "punched_out_early": attendance.get("punched_out_early", False)
+        })
+    result = []
+    for uid, data in staff_report.items():
+        total_minutes = data["total_minutes"]
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        data["total_hours"] = f"{hours}h {minutes}m"
+        if data["days_present"] > 0:
+            data["avg_hours_per_day"] = round(
+                (total_minutes / data["days_present"]) / 60, 1
+            )
+        else:
+            data["avg_hours_per_day"] = 0
+        user_data = user_map.get(uid, {})
+        year, month_val = map(int, target_month.split("-"))
+        _, last_day = calendar.monthrange(year, month_val)
+        expected_hours = await calculate_expected_hours(
+            f"{target_month}-01",
+            f"{target_month}-{last_day}",
+            user_data.get("punch_in_time", "10:30"),
+            user_data.get("punch_out_time", "19:00")
+        )
+        data["expected_hours"] = expected_hours
+        result.append(data)
+    result.sort(key=lambda x: x["total_minutes"], reverse=True)
+    return result
 
 @api_router.get("/attendance/export-pdf")
 async def export_attendance_pdf(
- user_id: str,
- current_user: User = Depends(get_current_user)
+    user_id: str,
+    current_user: User = Depends(get_current_user)
 ):
- if user_id != current_user.id:
-  permissions = get_user_permissions(current_user)
-  if current_user.role != "admin" and not permissions.get("can_view_attendance"):
-   raise HTTPException(status_code=403, detail="Not authorized to export other users' attendance")
- records = await db.attendance.find(
-  {"user_id": user_id},
-  {"_id": 0}
- ).sort("date", 1).to_list(1000)
- pdf = FPDF()
- pdf.add_page()
- pdf.set_font("Arial", "B", 14)
- pdf.cell(200, 10, txt="Attendance Report", ln=True, align="C")
- pdf.ln(5)
- pdf.set_font("Arial", size=10)
- for rec in records:
-  late_flag = " [LATE]" if rec.get("is_late") else ""
-  early_flag = " [EARLY OUT]" if rec.get("punched_out_early") else ""
-  pdf.multi_cell(
-   0,
-   8,
-   f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
-   f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
-   f"{late_flag}{early_flag}"
-  )
-  pdf.ln(2)
- output = BytesIO()
- output.write(pdf.output(dest="S").encode("latin1"))
- output.seek(0)
- return StreamingResponse(
-  output,
-  media_type="application/pdf",
-  headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
- )
+    if user_id != current_user.id:
+        permissions = get_user_permissions(current_user)
+        if current_user.role != "admin" and not permissions.get("can_view_attendance"):
+            raise HTTPException(status_code=403, detail="Not authorized to export other users' attendance")
+    records = await db.attendance.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("date", 1).to_list(1000)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(200, 10, txt="Attendance Report", ln=True, align="C")
+    pdf.ln(5)
+    pdf.set_font("Arial", size=10)
+    for rec in records:
+        late_flag = " [LATE]" if rec.get("is_late") else ""
+        early_flag = " [EARLY OUT]" if rec.get("punched_out_early") else ""
+        pdf.multi_cell(
+            0,
+            8,
+            f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
+            f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
+            f"{late_flag}{early_flag}"
+        )
+        pdf.ln(2)
+    output = BytesIO()
+    output.write(pdf.output(dest="S").encode("latin1"))
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
+    )
 
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
- period: str = "monthly",
- limit: int = 5,
- db = None
+    period: str = "monthly",
+    limit: int = 5,
+    db=None
 ):
- now = datetime.now(IST)
- if period == "weekly":
-  start_date = now - timedelta(days=7)
- elif period == "monthly":
-  start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
- else:
-  start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
- pipeline = [
-  {
-   "$match": {
-    "status": "completed",
-    "assigned_to": {"$ne": None},
-    "$or": [
-     {"completed_at": {"$gte": start_date.isoformat()}},
-     {"updated_at": {"$gte": start_date.isoformat()}}
+    now = datetime.now(IST)
+    if period == "weekly":
+        start_date = now - timedelta(days=7)
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    pipeline = [
+        {
+            "$match": {
+                "status": "completed",
+                "assigned_to": {"$ne": None},
+                "$or": [
+                    {"completed_at": {"$gte": start_date.isoformat()}},
+                    {"updated_at": {"$gte": start_date.isoformat()}}
+                ]
+            }
+        },
+        {"$group": {"_id": "$assigned_to", "completed_tasks": {"$sum": 1}}},
+        {
+            "$lookup": {
+                "from": "users",
+                "localField": "_id",
+                "foreignField": "id",
+                "as": "user_info"
+            }
+        },
+        {"$unwind": "$user_info"},
+        {
+            "$project": {
+                "user_id": "$_id",
+                "user_name": "$user_info.full_name",
+                "profile_picture": "$user_info.profile_picture",
+                "completed_tasks": 1
+            }
+        },
+        {"$sort": {"completed_tasks": -1}},
+        {"$limit": limit}
     ]
-   }
-  },
-  {"$group": {"_id": "$assigned_to", "completed_tasks": {"$sum": 1}}},
-  {
-   "$lookup": {
-    "from": "users",
-    "localField": "_id",
-    "foreignField": "id",
-    "as": "user_info"
-   }
-  },
-  {"$unwind": "$user_info"},
-  {
-   "$project": {
-    "user_id": "$_id",
-    "user_name": "$user_info.full_name",
-    "profile_picture": "$user_info.profile_picture",
-    "completed_tasks": 1
-   }
-  },
-  {"$sort": {"completed_tasks": -1}},
-  {"$limit": limit}
- ]
- performers = await db.tasks.aggregate(pipeline).to_list(limit)
- for idx, p in enumerate(performers):
-  p["rank"] = idx + 1
- return performers
+    performers = await db.tasks.aggregate(pipeline).to_list(limit)
+    for idx, p in enumerate(performers):
+        p["rank"] = idx + 1
+    return performers
 
 # Task routes
 @api_router.post("/tasks", response_model=Task)
@@ -1447,102 +1409,102 @@ async def get_task_comments(
 
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
- payload: BulkTaskCreate,
- current_user: User = Depends(get_current_user)
+    payload: BulkTaskCreate,
+    current_user: User = Depends(get_current_user)
 ):
- created_tasks = []
- for task_data in payload.tasks:
-  task_dict = task_data.dict()
-  task_dict["id"] = str(uuid.uuid4())
-  task_dict["created_by"] = current_user.id
-  task_dict["created_at"] = datetime.now(IST).isoformat()
-  task_dict["updated_at"] = datetime.now(IST).isoformat()
-  if task_dict.get("due_date"):
-   task_dict["due_date"] = task_dict["due_date"].isoformat()
-  await db.tasks.insert_one(task_dict)
-  if task_dict.get("assigned_to") and task_dict["assigned_to"] != current_user.id:
-   await create_notification(
-    user_id=task_dict["assigned_to"],
-    title="New Task Assigned",
-    message=f"You have been assigned task '{task_dict['title']}'"
-   )
-  created_tasks.append(task_dict)
- return {"message": "Tasks created successfully", "count": len(created_tasks)}
+    created_tasks = []
+    for task_data in payload.tasks:
+        task_dict = task_data.dict()
+        task_dict["id"] = str(uuid.uuid4())
+        task_dict["created_by"] = current_user.id
+        task_dict["created_at"] = datetime.now(IST).isoformat()
+        task_dict["updated_at"] = datetime.now(IST).isoformat()
+        if task_dict.get("due_date"):
+            task_dict["due_date"] = task_dict["due_date"].isoformat()
+        await db.tasks.insert_one(task_dict)
+        if task_dict.get("assigned_to") and task_dict["assigned_to"] != current_user.id:
+            await create_notification(
+                user_id=task_dict["assigned_to"],
+                title="New Task Assigned",
+                message=f"You have been assigned task '{task_dict['title']}'"
+            )
+        created_tasks.append(task_dict)
+    return {"message": "Tasks created successfully", "count": len(created_tasks)}
 
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
- file: UploadFile = File(...),
- current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
- if file.content_type != "text/csv":
-  raise HTTPException(400, "Invalid file type")
- content = await file.read()
- content_str = content.decode("utf-8")
- csv_reader = csv.DictReader(StringIO(content_str))
- tasks = []
- for row in csv_reader:
-  task_data = TaskCreate(
-   title=row.get("title", ""),
-   description=row.get("description"),
-   assigned_to=row.get("assigned_to"),
-   sub_assignees=row.get("sub_assignees", "").split(",") if row.get("sub_assignees") else [],
-   due_date=parser.parse(row["due_date"]) if row.get("due_date") else None,
-   priority=row.get("priority", "medium"),
-   status=row.get("status", "pending"),
-   category=row.get("category", "other"),
-   client_id=row.get("client_id"),
-   is_recurring=bool(row.get("is_recurring", False)),
-   recurrence_pattern=row.get("recurrence_pattern", "monthly"),
-   recurrence_interval=int(row.get("recurrence_interval", 1))
-  )
-  tasks.append(task_data)
- payload = BulkTaskCreate(tasks=tasks)
- return await create_tasks_bulk(payload, current_user)
+    if file.content_type != "text/csv":
+        raise HTTPException(400, "Invalid file type")
+    content = await file.read()
+    content_str = content.decode("utf-8")
+    csv_reader = csv.DictReader(StringIO(content_str))
+    tasks = []
+    for row in csv_reader:
+        task_data = TaskCreate(
+            title=row.get("title", ""),
+            description=row.get("description"),
+            assigned_to=row.get("assigned_to"),
+            sub_assignees=row.get("sub_assignees", "").split(",") if row.get("sub_assignees") else [],
+            due_date=parser.parse(row["due_date"]) if row.get("due_date") else None,
+            priority=row.get("priority", "medium"),
+            status=row.get("status", "pending"),
+            category=row.get("category", "other"),
+            client_id=row.get("client_id"),
+            is_recurring=bool(row.get("is_recurring", False)),
+            recurrence_pattern=row.get("recurrence_pattern", "monthly"),
+            recurrence_interval=int(row.get("recurrence_interval", 1))
+        )
+        tasks.append(task_data)
+    payload = BulkTaskCreate(tasks=tasks)
+    return await create_tasks_bulk(payload, current_user)
 
 @api_router.get("/tasks")
 async def get_tasks(current_user: User = Depends(get_current_user)):
- query = {"type": {"$ne": "todo"}}
- if current_user.role == "admin":
-  pass
- elif current_user.role == "manager":
-  team_ids = await get_team_user_ids(current_user.id)
-  query["$or"] = [
-   {"assigned_to": current_user.id},
-   {"assigned_to": {"$in": team_ids}},
-   {"sub_assignees": current_user.id},
-   {"created_by": current_user.id}
-  ]
- else:
-  permissions = get_user_permissions(current_user)
-  allowed_users = permissions.get("view_other_tasks", [])
-  query["$or"] = [
-   {"assigned_to": current_user.id},
-   {"sub_assignees": current_user.id},
-   {"created_by": current_user.id},
-   {"assigned_to": {"$in": allowed_users}}
-  ]
- tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
- user_ids = {
-  task.get("assigned_to") for task in tasks if task.get("assigned_to")
- } | {
-  task.get("created_by") for task in tasks if task.get("created_by")
- }
- users = await db.users.find(
-  {"id": {"$in": list(user_ids)}},
-  {"_id": 0, "password": 0}
- ).to_list(1000)
- user_map = {u["id"]: u["full_name"] for u in users}
- for task in tasks:
-  task["created_at"] = safe_dt(task.get("created_at"))
-  task["updated_at"] = safe_dt(task.get("updated_at"))
-  task["due_date"] = safe_dt(task.get("due_date"))
-  task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
-  task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
-  if not isinstance(task.get("sub_assignees"), list):
-   task["sub_assignees"] = []
-  if not isinstance(task.get("comments"), list):
-   task["comments"] = []
- return tasks
+    query = {"type": {"$ne": "todo"}}
+    if current_user.role == "admin":
+        pass
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        query["$or"] = [
+            {"assigned_to": current_user.id},
+            {"assigned_to": {"$in": team_ids}},
+            {"sub_assignees": current_user.id},
+            {"created_by": current_user.id}
+        ]
+    else:
+        permissions = get_user_permissions(current_user)
+        allowed_users = permissions.get("view_other_tasks", [])
+        query["$or"] = [
+            {"assigned_to": current_user.id},
+            {"sub_assignees": current_user.id},
+            {"created_by": current_user.id},
+            {"assigned_to": {"$in": allowed_users}}
+        ]
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+    user_ids = {
+        task.get("assigned_to") for task in tasks if task.get("assigned_to")
+    } | {
+        task.get("created_by") for task in tasks if task.get("created_by")
+    }
+    users = await db.users.find(
+        {"id": {"$in": list(user_ids)}},
+        {"_id": 0, "password": 0}
+    ).to_list(1000)
+    user_map = {u["id"]: u["full_name"] for u in users}
+    for task in tasks:
+        task["created_at"] = safe_dt(task.get("created_at"))
+        task["updated_at"] = safe_dt(task.get("updated_at"))
+        task["due_date"] = safe_dt(task.get("due_date"))
+        task["assigned_to_name"] = user_map.get(task.get("assigned_to"), "Unknown")
+        task["created_by_name"] = user_map.get(task.get("created_by"), "Unknown")
+        if not isinstance(task.get("sub_assignees"), list):
+            task["sub_assignees"] = []
+        if not isinstance(task.get("comments"), list):
+            task["comments"] = []
+    return tasks
 
 @api_router.get("/tasks/{task_id}/detail")
 async def get_task_detail(task_id: str, current_user: User = Depends(get_current_user)):
@@ -1597,456 +1559,455 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
 
 @api_router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str, current_user: User = Depends(get_current_user)):
- task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- if not task:
-  raise HTTPException(status_code=404, detail="Task not found")
- if current_user.role == "admin":
-  pass
- elif is_own_record(current_user, task):
-  pass
- else:
-  permissions = get_user_permissions(current_user)
-  allowed_users = permissions.get("view_other_tasks", [])
-  if task.get("assigned_to") not in allowed_users:
-   raise HTTPException(status_code=403, detail="Not authorized")
- return Task(**task)
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if current_user.role == "admin":
+        pass
+    elif is_own_record(current_user, task):
+        pass
+    else:
+        permissions = get_user_permissions(current_user)
+        allowed_users = permissions.get("view_other_tasks", [])
+        if task.get("assigned_to") not in allowed_users:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    return Task(**task)
 
 @api_router.api_route("/tasks/{task_id}", methods=["PATCH", "PUT"], response_model=Task)
 async def patch_task(
- task_id: str,
- updates: dict,
- current_user: User = Depends(get_current_user)
+    task_id: str,
+    updates: dict,
+    current_user: User = Depends(get_current_user)
 ):
- existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- if not existing_task:
-  raise HTTPException(status_code=404, detail="Task not found")
- is_authorized = (
-  current_user.role.lower() == "admin" or
-  is_own_record(current_user, existing_task)
- )
- if not is_authorized:
-  raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
- old_data = existing_task.copy()
- updates["updated_at"] = datetime.now(IST).isoformat()
- if updates.get("status") == "completed":
-  updates["completed_at"] = datetime.now(IST).isoformat()
- await db.tasks.update_one({"id": task_id}, {"$set": updates})
- updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- action_type = "TASK_STATUS_CHANGED" if "status" in updates and old_data.get("status") != updates.get("status") else "UPDATE_TASK"
- await create_audit_log(
-  current_user=current_user,
-  action=action_type,
-  module="task",
-  record_id=task_id,
-  old_data=old_data,
-  new_data=updates
- )
- return Task(**updated_task)
+    existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not existing_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    is_authorized = (
+        current_user.role.lower() == "admin" or
+        is_own_record(current_user, existing_task)
+    )
+    if not is_authorized:
+        raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
+    old_data = existing_task.copy()
+    updates["updated_at"] = datetime.now(IST).isoformat()
+    if updates.get("status") == "completed":
+        updates["completed_at"] = datetime.now(IST).isoformat()
+    await db.tasks.update_one({"id": task_id}, {"$set": updates})
+    updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    action_type = "TASK_STATUS_CHANGED" if "status" in updates and old_data.get("status") != updates.get("status") else "UPDATE_TASK"
+    await create_audit_log(
+        current_user=current_user,
+        action=action_type,
+        module="task",
+        record_id=task_id,
+        old_data=old_data,
+        new_data=updates
+    )
+    return Task(**updated_task)
 
 @api_router.delete("/tasks/{task_id}")
 async def delete_task(
- task_id: str,
- current_user: User = Depends(get_current_user)
+    task_id: str,
+    current_user: User = Depends(get_current_user)
 ):
- existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="Task not found")
- is_admin = current_user.role.lower() == "admin"
- permissions = get_user_permissions(current_user)
- is_creator = existing.get("created_by") == current_user.id
- has_delete_perm = permissions.get("can_edit_tasks", False)
- if not (is_admin or is_creator or has_delete_perm):
-  raise HTTPException(status_code=403, detail="Only Admin, task creator, or users with explicit permission can delete tasks.")
- await db.tasks.delete_one({"id": task_id})
- await create_audit_log(
-  current_user=current_user,
-  action="DELETE_TASK",
-  module="task",
-  record_id=task_id,
-  old_data=existing
- )
- return {"message": "Task deleted successfully"}
+    existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+    is_admin = current_user.role.lower() == "admin"
+    permissions = get_user_permissions(current_user)
+    is_creator = existing.get("created_by") == current_user.id
+    has_delete_perm = permissions.get("can_edit_tasks", False)
+    if not (is_admin or is_creator or has_delete_perm):
+        raise HTTPException(status_code=403, detail="Only Admin, task creator, or users with explicit permission can delete tasks.")
+    await db.tasks.delete_one({"id": task_id})
+    await create_audit_log(
+        current_user=current_user,
+        action="DELETE_TASK",
+        module="task",
+        record_id=task_id,
+        old_data=existing
+    )
+    return {"message": "Task deleted successfully"}
 
 @api_router.post("/tasks/{task_id}/comments")
 async def add_task_comment(
- task_id: str,
- comment_data: dict,
- current_user: User = Depends(get_current_user)
+    task_id: str,
+    comment_data: dict,
+    current_user: User = Depends(get_current_user)
 ):
- task = await db.tasks.find_one({"id": task_id})
- if not task:
-  raise HTTPException(status_code=404, detail="Task not found")
- is_involved = (
-  current_user.role.lower() == "admin" or
-  is_own_record(current_user, task)
- )
- if not is_involved:
-  raise HTTPException(status_code=403, detail="Access denied: You must be involved in this task to comment.")
- comment = {
-  "id": str(uuid.uuid4()),
-  "user_id": current_user.id,
-  "user_name": current_user.full_name,
-  "text": comment_data.get("text"),
-  "created_at": datetime.now(IST).isoformat()
- }
- await db.tasks.update_one({"id": task_id}, {"$push": {"comments": comment}})
- return comment
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    is_involved = (
+        current_user.role.lower() == "admin" or
+        is_own_record(current_user, task)
+    )
+    if not is_involved:
+        raise HTTPException(status_code=403, detail="Access denied: You must be involved in this task to comment.")
+    comment = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.id,
+        "user_name": current_user.full_name,
+        "text": comment_data.get("text"),
+        "created_at": datetime.now(IST).isoformat()
+    }
+    await db.tasks.update_one({"id": task_id}, {"$push": {"comments": comment}})
+    return comment
 
 # =========================================================
 # EXPORT TASK AUDIT LOG PDF
 # =========================================================
 @api_router.get("/tasks/{task_id}/export-log-pdf")
 async def export_task_log_pdf(
- task_id: str,
- current_user: User = Depends(check_permission("can_view_audit_logs"))
+    task_id: str,
+    current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
- task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
- if not task:
-  raise HTTPException(status_code=404, detail="Task not found")
- logs = await db.audit_logs.find(
-  {"module": "task", "record_id": task_id},
-  {"_id": 0}
- ).sort("timestamp", 1).to_list(1000)
- if not logs:
-  raise HTTPException(status_code=404, detail="No audit logs found")
- pdf = FPDF()
- pdf.set_auto_page_break(auto=True, margin=10)
- pdf.add_page()
- pdf.set_font("Arial", "B", 16)
- pdf.cell(0, 10, "Task Lifecycle Report", ln=True, align="C")
- pdf.ln(5)
- pdf.set_font("Arial", "B", 12)
- pdf.cell(0, 8, "Task Information", ln=True)
- pdf.ln(3)
- pdf.set_font("Arial", size=11)
- pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}")
- pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}")
- pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}")
- pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}")
- pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}")
- pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}")
- pdf.ln(8)
- pdf.set_font("Arial", "B", 12)
- pdf.cell(0, 8, "Activity Timeline", ln=True)
- pdf.ln(4)
- pdf.set_font("Arial", size=10)
- for log in logs:
-  timestamp = log.get("timestamp")
-  if isinstance(timestamp, datetime):
-   timestamp = timestamp.strftime("%b %d, %Y %I:%M %p")
-  action = log.get("action", "UNKNOWN")
-  user = log.get("user_name", "Unknown User")
-  pdf.set_font("Arial", "B", 10)
-  pdf.multi_cell(0, 6, f"{timestamp} — {action.replace('_', ' ').title()} by {user}")
-  pdf.set_font("Arial", size=10)
-  if action == "TASK_STATUS_CHANGED":
-   old_status = log.get("old_data", {}).get("status", "-")
-   new_status = log.get("new_data", {}).get("status", "-")
-   pdf.multi_cell(0, 6, f" Status changed: {old_status} → {new_status}")
-  elif action == "TASK_COMPLETED":
-   pdf.multi_cell(0, 6, " Task marked as completed.")
-  elif action == "DELETE_TASK":
-   pdf.multi_cell(0, 6, " Task was deleted.")
-  elif action == "CREATE_TASK":
-   pdf.multi_cell(0, 6, " Task was created.")
-  elif action == "UPDATE_TASK":
-   pdf.multi_cell(0, 6, " Task details updated.")
-  if log.get("old_data") and log.get("new_data"):
-   old_data = log.get("old_data")
-   new_data = log.get("new_data")
-   for key in new_data:
-    old_val = old_data.get(key)
-    new_val = new_data.get(key)
-    if old_val != new_val:
-     pdf.multi_cell(0, 6, f" {key.replace('_',' ').title()}: {old_val} → {new_val}")
-  pdf.ln(3)
- pdf.ln(5)
- pdf.set_font("Arial", "I", 8)
- pdf.multi_cell(0, 5, f"Generated on {datetime.utcnow().strftime('%b %d, %Y %I:%M %p')} UTC")
- output = BytesIO()
- output.write(pdf.output(dest="S").encode("latin1"))
- output.seek(0)
- return StreamingResponse(
-  output,
-  media_type="application/pdf",
-  headers={"Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"}
- )
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    logs = await db.audit_logs.find(
+        {"module": "task", "record_id": task_id},
+        {"_id": 0}
+    ).sort("timestamp", 1).to_list(1000)
+    if not logs:
+        raise HTTPException(status_code=404, detail="No audit logs found")
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Task Lifecycle Report", ln=True, align="C")
+    pdf.ln(5)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, "Task Information", ln=True)
+    pdf.ln(3)
+    pdf.set_font("Arial", size=11)
+    pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}")
+    pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}")
+    pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}")
+    pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}")
+    pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}")
+    pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}")
+    pdf.ln(8)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, "Activity Timeline", ln=True)
+    pdf.ln(4)
+    pdf.set_font("Arial", size=10)
+    for log in logs:
+        timestamp = log.get("timestamp")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.strftime("%b %d, %Y %I:%M %p")
+        action = log.get("action", "UNKNOWN")
+        user = log.get("user_name", "Unknown User")
+        pdf.set_font("Arial", "B", 10)
+        pdf.multi_cell(0, 6, f"{timestamp} — {action.replace('_', ' ').title()} by {user}")
+        pdf.set_font("Arial", size=10)
+        if action == "TASK_STATUS_CHANGED":
+            old_status = log.get("old_data", {}).get("status", "-")
+            new_status = log.get("new_data", {}).get("status", "-")
+            pdf.multi_cell(0, 6, f" Status changed: {old_status} → {new_status}")
+        elif action == "TASK_COMPLETED":
+            pdf.multi_cell(0, 6, " Task marked as completed.")
+        elif action == "DELETE_TASK":
+            pdf.multi_cell(0, 6, " Task was deleted.")
+        elif action == "CREATE_TASK":
+            pdf.multi_cell(0, 6, " Task was created.")
+        elif action == "UPDATE_TASK":
+            pdf.multi_cell(0, 6, " Task details updated.")
+        if log.get("old_data") and log.get("new_data"):
+            old_data = log.get("old_data")
+            new_data = log.get("new_data")
+            for key in new_data:
+                old_val = old_data.get(key)
+                new_val = new_data.get(key)
+                if old_val != new_val:
+                    pdf.multi_cell(0, 6, f" {key.replace('_', ' ').title()}: {old_val} → {new_val}")
+        pdf.ln(3)
+    pdf.ln(5)
+    pdf.set_font("Arial", "I", 8)
+    pdf.multi_cell(0, 5, f"Generated on {datetime.utcnow().strftime('%b %d, %Y %I:%M %p')} UTC")
+    output = BytesIO()
+    output.write(pdf.output(dest="S").encode("latin1"))
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"}
+    )
 
 # Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
- dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
- doc = dsc.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- doc["issue_date"] = doc["issue_date"].isoformat()
- doc["expiry_date"] = doc["expiry_date"].isoformat()
- await db.dsc_register.insert_one(doc)
- return dsc
+    dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
+    doc = dsc.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    doc["issue_date"] = doc["issue_date"].isoformat()
+    doc["expiry_date"] = doc["expiry_date"].isoformat()
+    await db.dsc_register.insert_one(doc)
+    return dsc
 
 @api_router.get("/dsc")
 async def get_dsc_list(
- sort_by: str = Query("holder_name"),
- order: str = Query("asc", pattern="^(asc|desc)$", ignore_case=True),
- search: Optional[str] = Query(None),
- page: int = Query(1, ge=1),
- limit: int = Query(500, ge=1, le=500),
- current_user: User = Depends(check_permission("can_view_all_dsc"))
+    sort_by: str = Query("holder_name"),
+    order: str = Query("asc", pattern="^(asc|desc)$", ignore_case=True),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(500, ge=1, le=500),
+    current_user: User = Depends(check_permission("can_view_all_dsc"))
 ):
- query = {}
- if search:
-  safe_search = re.escape(search)
-  search_regex = {"$regex": safe_search, "$options": "i"}
-  query["$or"] = [
-   {"holder_name": search_regex},
-   {"dsc_type": search_regex},
-   {"associated_with": search_regex},
-   {"current_status": search_regex}
-  ]
- sort_dir = 1 if order.lower() == "asc" else -1
- skip = (page - 1) * limit
- total = await db.dsc_register.count_documents(query)
- cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip(skip).limit(limit)
- dsc_list = await cursor.to_list(length=limit)
- now = datetime.now(IST)
- for dsc in dsc_list:
-  if isinstance(dsc.get("created_at"), str):
-   dsc["created_at"] = datetime.fromisoformat(dsc["created_at"])
-  if isinstance(dsc.get("issue_date"), str):
-   dsc["issue_date"] = datetime.fromisoformat(dsc["issue_date"])
-  if isinstance(dsc.get("expiry_date"), str):
-   dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
-  expiry_date = dsc.get("expiry_date")
-  if expiry_date and expiry_date < now:
-   movement_log = dsc.get("movement_log", [])
-   updated = False
-   if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
-    movement_log.append({
-     "id": str(uuid.uuid4()),
-     "movement_type": "EXPIRED",
-     "person_name": "System Auto",
-     "notes": "Auto marked as expired",
-     "timestamp": now.isoformat(),
-     "recorded_by": "System"
-    })
-    updated = True
-   if dsc.get("current_status") != "EXPIRED":
-    updated = True
-   if updated:
-    await db.dsc_register.update_one(
-     {"id": dsc["id"]},
-     {"$set": {"current_status": "EXPIRED", "movement_log": movement_log}}
-    )
-    dsc["current_status"] = "EXPIRED"
-    dsc["movement_log"] = movement_log
- return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
+    query = {}
+    if search:
+        safe_search = re.escape(search)
+        search_regex = {"$regex": safe_search, "$options": "i"}
+        query["$or"] = [
+            {"holder_name": search_regex},
+            {"dsc_type": search_regex},
+            {"associated_with": search_regex},
+            {"current_status": search_regex}
+        ]
+    sort_dir = 1 if order.lower() == "asc" else -1
+    skip = (page - 1) * limit
+    total = await db.dsc_register.count_documents(query)
+    cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip(skip).limit(limit)
+    dsc_list = await cursor.to_list(length=limit)
+    now = datetime.now(IST)
+    for dsc in dsc_list:
+        if isinstance(dsc.get("created_at"), str):
+            dsc["created_at"] = datetime.fromisoformat(dsc["created_at"])
+        if isinstance(dsc.get("issue_date"), str):
+            dsc["issue_date"] = datetime.fromisoformat(dsc["issue_date"])
+        if isinstance(dsc.get("expiry_date"), str):
+            dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
+        expiry_date = dsc.get("expiry_date")
+        if expiry_date and expiry_date < now:
+            movement_log = dsc.get("movement_log", [])
+            updated = False
+            if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
+                movement_log.append({
+                    "id": str(uuid.uuid4()),
+                    "movement_type": "EXPIRED",
+                    "person_name": "System Auto",
+                    "notes": "Auto marked as expired",
+                    "timestamp": now.isoformat(),
+                    "recorded_by": "System"
+                })
+                updated = True
+            if dsc.get("current_status") != "EXPIRED":
+                updated = True
+            if updated:
+                await db.dsc_register.update_one(
+                    {"id": dsc["id"]},
+                    {"$set": {"current_status": "EXPIRED", "movement_log": movement_log}}
+                )
+                dsc["current_status"] = "EXPIRED"
+                dsc["movement_log"] = movement_log
+    return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
 
 @api_router.put("/dsc/{dsc_id}", response_model=DSC)
 async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depends(check_permission("can_edit_dsc"))):
- existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="DSC not found")
- update_data = dsc_data.model_dump()
- update_data["issue_date"] = update_data["issue_date"].isoformat()
- update_data["expiry_date"] = update_data["expiry_date"].isoformat()
- await db.dsc_register.update_one({"id": dsc_id}, {"$set": update_data})
- await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data=update_data)
- updated = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
- if isinstance(updated["created_at"], str):
-  updated["created_at"] = datetime.fromisoformat(updated["created_at"])
- if isinstance(updated["issue_date"], str):
-  updated["issue_date"] = datetime.fromisoformat(updated["issue_date"])
- if isinstance(updated["expiry_date"], str):
-  updated["expiry_date"] = datetime.fromisoformat(updated["expiry_date"])
- return DSC(**updated)
+    existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="DSC not found")
+    update_data = dsc_data.model_dump()
+    update_data["issue_date"] = update_data["issue_date"].isoformat()
+    update_data["expiry_date"] = update_data["expiry_date"].isoformat()
+    await db.dsc_register.update_one({"id": dsc_id}, {"$set": update_data})
+    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data=update_data)
+    updated = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
+    if isinstance(updated["created_at"], str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+    if isinstance(updated["issue_date"], str):
+        updated["issue_date"] = datetime.fromisoformat(updated["issue_date"])
+    if isinstance(updated["expiry_date"], str):
+        updated["expiry_date"] = datetime.fromisoformat(updated["expiry_date"])
+    return DSC(**updated)
 
 @api_router.delete("/dsc/{dsc_id}")
 async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission("can_edit_dsc"))):
- existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="DSC not found")
- await create_audit_log(current_user, action="DELETE_DSC", module="dsc", record_id=dsc_id, old_data=existing)
- result = await db.dsc_register.delete_one({"id": dsc_id})
- if result.deleted_count == 0:
-  raise HTTPException(status_code=404, detail="DSC not found")
- return {"message": "DSC deleted successfully"}
+    existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="DSC not found")
+    await create_audit_log(current_user, action="DELETE_DSC", module="dsc", record_id=dsc_id, old_data=existing)
+    result = await db.dsc_register.delete_one({"id": dsc_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="DSC not found")
+    return {"message": "DSC deleted successfully"}
 
 @api_router.post("/dsc/{dsc_id}/movement")
 async def record_dsc_movement(
- dsc_id: str,
- movement_data: DSCMovementRequest,
- current_user: User = Depends(get_current_user)
+    dsc_id: str,
+    movement_data: DSCMovementRequest,
+    current_user: User = Depends(get_current_user)
 ):
- existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="DSC not found")
- movement = {
-  "id": str(uuid.uuid4()),
-  "movement_type": movement_data.movement_type,
-  "person_name": movement_data.person_name,
-  "timestamp": datetime.now(IST).isoformat(),
-  "notes": movement_data.notes,
-  "recorded_by": current_user.full_name
- }
- movement_log = existing.get("movement_log", [])
- movement_log.append(movement)
- await db.dsc_register.update_one(
-  {"id": dsc_id},
-  {
-   "$set": {
-    "current_status": movement_data.movement_type,
-    "current_location": "with_company" if movement_data.movement_type == "IN" else "taken_by_client",
-    "movement_log": movement_log
-   }
-  }
- )
- await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
- return {"message": f"DSC marked as {movement_data.movement_type}", "movement": movement}
+    existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="DSC not found")
+    movement = {
+        "id": str(uuid.uuid4()),
+        "movement_type": movement_data.movement_type,
+        "person_name": movement_data.person_name,
+        "timestamp": datetime.now(IST).isoformat(),
+        "notes": movement_data.notes,
+        "recorded_by": current_user.full_name
+    }
+    movement_log = existing.get("movement_log", [])
+    movement_log.append(movement)
+    await db.dsc_register.update_one(
+        {"id": dsc_id},
+        {
+            "$set": {
+                "current_status": movement_data.movement_type,
+                "current_location": "with_company" if movement_data.movement_type == "IN" else "taken_by_client",
+                "movement_log": movement_log
+            }
+        }
+    )
+    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
+    return {"message": f"DSC marked as {movement_data.movement_type}", "movement": movement}
 
 @api_router.put("/dsc/{dsc_id}/movement/{movement_id}")
 async def update_dsc_movement(
- dsc_id: str,
- movement_id: str,
- update_data: MovementUpdateRequest,
- current_user: User = Depends(get_current_user)
+    dsc_id: str,
+    movement_id: str,
+    update_data: MovementUpdateRequest,
+    current_user: User = Depends(get_current_user)
 ):
- existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="DSC not found")
- movement_log = existing.get("movement_log", [])
- movement_found = False
- for i, movement in enumerate(movement_log):
-  if movement.get("id") == movement_id:
-   movement_log[i]["movement_type"] = update_data.movement_type
-   if update_data.person_name:
-    movement_log[i]["person_name"] = update_data.person_name
-   if update_data.notes is not None:
-    movement_log[i]["notes"] = update_data.notes
-   movement_log[i]["edited_by"] = current_user.full_name
-   movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
-   movement_found = True
-   break
- if not movement_found:
-  raise HTTPException(status_code=404, detail="Movement entry not found")
- new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
- await db.dsc_register.update_one(
-  {"id": dsc_id},
-  {"$set": {"current_status": new_status, "movement_log": movement_log}}
- )
- await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
- return {"message": "Movement updated successfully", "movement_log": movement_log}
+    existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="DSC not found")
+    movement_log = existing.get("movement_log", [])
+    movement_found = False
+    for i, movement in enumerate(movement_log):
+        if movement.get("id") == movement_id:
+            movement_log[i]["movement_type"] = update_data.movement_type
+            if update_data.person_name:
+                movement_log[i]["person_name"] = update_data.person_name
+            if update_data.notes is not None:
+                movement_log[i]["notes"] = update_data.notes
+            movement_log[i]["edited_by"] = current_user.full_name
+            movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
+            movement_found = True
+            break
+    if not movement_found:
+        raise HTTPException(status_code=404, detail="Movement entry not found")
+    new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+    await db.dsc_register.update_one(
+        {"id": dsc_id},
+        {"$set": {"current_status": new_status, "movement_log": movement_log}}
+    )
+    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
+    return {"message": "Movement updated successfully", "movement_log": movement_log}
 
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
- document = Document(**document_data.model_dump(), created_by=current_user.id)
- doc = document.model_dump()
- doc["created_at"] = doc["created_at"].isoformat()
- if doc.get("issue_date"):
-  doc["issue_date"] = doc["issue_date"].isoformat()
- if doc.get("valid_upto"):
-  doc["valid_upto"] = doc["valid_upto"].isoformat()
- await db.documents.insert_one(doc)
- return document
+    document = Document(**document_data.model_dump(), created_by=current_user.id)
+    doc = document.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    if doc.get("issue_date"):
+        doc["issue_date"] = doc["issue_date"].isoformat()
+    if doc.get("valid_upto"):
+        doc["valid_upto"] = doc["valid_upto"].isoformat()
+    await db.documents.insert_one(doc)
+    return document
 
 @api_router.get("/documents", response_model=List[Document])
 async def get_documents(current_user: User = Depends(check_permission("can_view_documents"))):
- documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
- for d in documents:
-  if isinstance(d["created_at"], str):
-   d["created_at"] = datetime.fromisoformat(d["created_at"])
-  if d.get("issue_date") and isinstance(d["issue_date"], str):
-   d["issue_date"] = datetime.fromisoformat(d["issue_date"])
-  if d.get("valid_upto") and isinstance(d["valid_upto"], str):
-   d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
- return documents
+    documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
+    for d in documents:
+        if isinstance(d["created_at"], str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+        if d.get("issue_date") and isinstance(d["issue_date"], str):
+            d["issue_date"] = datetime.fromisoformat(d["issue_date"])
+        if d.get("valid_upto") and isinstance(d["valid_upto"], str):
+            d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
+    return documents
 
 @api_router.put("/documents/{document_id}", response_model=Document)
 async def update_document(document_id: str, document_data: DocumentCreate, current_user: User = Depends(check_permission("can_edit_documents"))):
- existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="Document not found")
- update_data = document_data.model_dump()
- if update_data.get("issue_date"):
-  update_data["issue_date"] = update_data["issue_date"].isoformat()
- if update_data.get("valid_upto"):
-  update_data["valid_upto"] = update_data["valid_upto"].isoformat()
- await db.documents.update_one({"id": document_id}, {"$set": update_data})
- await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=existing, new_data=update_data)
- updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
- if isinstance(updated["created_at"], str):
-  updated["created_at"] = datetime.fromisoformat(updated["created_at"])
- return Document(**updated)
+    existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Document not found")
+    update_data = document_data.model_dump()
+    if update_data.get("issue_date"):
+        update_data["issue_date"] = update_data["issue_date"].isoformat()
+    if update_data.get("valid_upto"):
+        update_data["valid_upto"] = update_data["valid_upto"].isoformat()
+    await db.documents.update_one({"id": document_id}, {"$set": update_data})
+    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=existing, new_data=update_data)
+    updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if isinstance(updated["created_at"], str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+    return Document(**updated)
 
 @api_router.delete("/documents/{document_id}")
 async def delete_document(document_id: str, current_user: User = Depends(check_permission("can_edit_documents"))):
- existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="Document not found")
- await create_audit_log(current_user, action="DELETE_DOCUMENT", module="document", record_id=document_id, old_data=existing)
- result = await db.documents.delete_one({"id": document_id})
- if result.deleted_count == 0:
-  raise HTTPException(status_code=404, detail="Document not found")
- return {"message": "Document deleted successfully"}
+    existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await create_audit_log(current_user, action="DELETE_DOCUMENT", module="document", record_id=document_id, old_data=existing)
+    result = await db.documents.delete_one({"id": document_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": "Document deleted successfully"}
 
 @api_router.post("/documents/{document_id}/movement")
 async def record_document_movement(
- document_id: str,
- movement_data: DocumentMovementRequest,
- current_user: User = Depends(get_current_user)
+    document_id: str,
+    movement_data: DocumentMovementRequest,
+    current_user: User = Depends(get_current_user)
 ):
- document = await db.documents.find_one({"id": document_id}, {"_id": 0})
- if not document:
-  raise HTTPException(status_code=404, detail="Document not found")
- movement = {
-  "id": str(uuid.uuid4()),
-  "movement_type": movement_data.movement_type,
-  "person_name": movement_data.person_name,
-  "timestamp": datetime.now(IST).isoformat(),
-  "notes": movement_data.notes,
-  "recorded_by": current_user.full_name
- }
- movement_log = document.get("movement_log", [])
- movement_log.append(movement)
- await db.documents.update_one(
-  {"id": document_id},
-  {"$set": {"current_status": movement_data.movement_type, "movement_log": movement_log}}
- )
- await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
- return {"message": "Movement recorded successfully"}
+    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    movement = {
+        "id": str(uuid.uuid4()),
+        "movement_type": movement_data.movement_type,
+        "person_name": movement_data.person_name,
+        "timestamp": datetime.now(IST).isoformat(),
+        "notes": movement_data.notes,
+        "recorded_by": current_user.full_name
+    }
+    movement_log = document.get("movement_log", [])
+    movement_log.append(movement)
+    await db.documents.update_one(
+        {"id": document_id},
+        {"$set": {"current_status": movement_data.movement_type, "movement_log": movement_log}}
+    )
+    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
+    return {"message": "Movement recorded successfully"}
 
 @api_router.put("/documents/{document_id}/movement/{movement_id}")
 async def update_document_movement(
- document_id: str,
- movement_id: str,
- update_data: DocumentMovementRequest,
- current_user: User = Depends(get_current_user)
+    document_id: str,
+    movement_id: str,
+    update_data: DocumentMovementRequest,
+    current_user: User = Depends(get_current_user)
 ):
- document = await db.documents.find_one({"id": document_id}, {"_id": 0})
- if not document:
-  raise HTTPException(status_code=404, detail="Document not found")
- movement_log = document.get("movement_log", [])
- movement_found = False
- for i, movement in enumerate(movement_log):
-  if movement.get("id") == movement_id:
-   movement_log[i]["movement_type"] = update_data.movement_type
-   movement_log[i]["person_name"] = update_data.person_name
-   movement_log[i]["notes"] = update_data.notes
-   movement_log[i]["edited_by"] = current_user.full_name
-   movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
-   movement_found = True
-   break
- if not movement_found:
-  raise HTTPException(status_code=404, detail="Movement entry not found")
- new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
- await db.documents.update_one(
-  {"id": document_id},
-  {"$set": {"current_status": new_status, "movement_log": movement_log}}
- )
- await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
- return {"message": "Movement updated successfully"}
+    document = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    movement_log = document.get("movement_log", [])
+    movement_found = False
+    for i, movement in enumerate(movement_log):
+        if movement.get("id") == movement_id:
+            movement_log[i]["movement_type"] = update_data.movement_type
+            movement_log[i]["person_name"] = update_data.person_name
+            movement_log[i]["notes"] = update_data.notes
+            movement_log[i]["edited_by"] = current_user.full_name
+            movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
+            movement_found = True
+            break
+    if not movement_found:
+        raise HTTPException(status_code=404, detail="Movement entry not found")
+    new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+    await db.documents.update_one(
+        {"id": document_id},
+        {"$set": {"current_status": new_status, "movement_log": movement_log}}
+    )
+    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
+    return {"message": "Movement updated successfully"}
 
 # DUE DATE ROUTES
-# ── Compliance extraction helpers ──────────────────────────────────────────
 COMPLIANCE_RULES = [
     {"keywords": ["gstr-1", "gstr1", "outward supply"],                                "category": "GST",        "department": "GST"},
     {"keywords": ["gstr-3b", "gstr3b", "summary return"],                              "category": "GST",        "department": "GST"},
@@ -2109,7 +2070,6 @@ def parse_date_from_text(text: str):
     now = datetime.now()
     year = now.year
 
-    # Pattern: 31 December 2026  /  31st December 2026
     m = re.search(
         r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
         r'(january|february|march|april|may|june|july|august|september|october|november|december)'
@@ -2120,7 +2080,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: December 31, 2026
     m = re.search(
         r'\b(january|february|march|april|may|june|july|august|september|october|november|december)'
         r'\s+(\d{1,2}),?\s+(\d{4})\b', text, re.IGNORECASE)
@@ -2130,7 +2089,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: DD/MM/YYYY or DD-MM-YYYY
     m = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b', text)
     if m:
         try:
@@ -2138,7 +2096,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: YYYY-MM-DD
     m = re.search(r'\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b', text)
     if m:
         try:
@@ -2146,7 +2103,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: 31st December (no year)
     m = re.search(
         r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
         r'(january|february|march|april|may|june|july|august|september|october|november|december)\b',
@@ -2162,7 +2118,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: December 31 (no year)
     m = re.search(
         r'\b(january|february|march|april|may|june|july|august|september|october|november|december)'
         r'\s+(\d{1,2})\b', text, re.IGNORECASE)
@@ -2177,7 +2132,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: 11th of next month
     m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+next\s+month\b', text, re.IGNORECASE)
     if m:
         try:
@@ -2191,7 +2145,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: within X days
     m = re.search(r'within\s+(\d+)\s+days?', text, re.IGNORECASE)
     if m:
         try:
@@ -2199,7 +2152,6 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    # Pattern: 31 Dec (short month)
     m = re.search(r'\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b', text, re.IGNORECASE)
     if m:
         try:
@@ -2236,7 +2188,6 @@ def parse_compliance_dates(raw_text: str):
     seen = set()
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
 
-    # ── Pass 1: table rows with | separators ─────────────────────────────
     for i, line in enumerate(lines):
         if "|" not in line:
             continue
@@ -2272,7 +2223,6 @@ def parse_compliance_dates(raw_text: str):
             "status": "pending",
         })
 
-    # ── Pass 2: free-form lines ───────────────────────────────────────────
     for i, line in enumerate(lines):
         if len(line) < 8:
             continue
@@ -2302,7 +2252,6 @@ def parse_compliance_dates(raw_text: str):
             "status": "pending",
         })
 
-    # ── Pass 3: explicit form names (GSTR-1, MGT-7, DIR-3 …) ─────────────
     form_pat = re.compile(
         r'((?:GSTR?|ITR|MGT|AOC|DIR|DPT|ADT|PAS|INC|CHG|BEN|SH|CSR|MSME)-[\w\/]+)',
         re.IGNORECASE)
@@ -2336,7 +2285,7 @@ def parse_compliance_dates(raw_text: str):
     return results
 
 
-# ── Extract endpoint (MUST be before /duedates POST) ─────────────────────
+# FIX: Route registered BEFORE /{due_date_id} param routes to prevent shadowing
 @api_router.post("/duedates/extract-from-file")
 async def extract_due_dates_from_file(
     file: UploadFile = File(...),
@@ -2397,7 +2346,6 @@ async def extract_due_dates_from_file(
     return {"extracted": extracted, "count": len(extracted)}
 
 
-# ── Standard CRUD routes ──────────────────────────────────────────────────
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
     due_date_data: DueDateCreate,
@@ -2411,30 +2359,6 @@ async def create_due_date(
     doc["due_date"] = doc["due_date"].isoformat()
     await db.due_dates.insert_one(doc)
     return due_date
-
-
-@api_router.get("/duedates", response_model=List[DueDate])
-async def get_due_dates(current_user: User = Depends(get_current_user)):
-    query = {}
-    if current_user.role == "admin":
-        pass
-    elif current_user.role == "manager":
-        if current_user.departments:
-            query["department"] = {"$in": current_user.departments}
-    else:
-        permissions = get_user_permissions(current_user)
-        if not permissions.get("can_view_all_duedates", False):
-            if current_user.departments:
-                query["department"] = {"$in": current_user.departments}
-            else:
-                return []
-    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
-    for dd in due_dates:
-        if isinstance(dd.get("created_at"), str):
-            dd["created_at"] = datetime.fromisoformat(dd["created_at"])
-        if isinstance(dd.get("due_date"), str):
-            dd["due_date"] = datetime.fromisoformat(dd["due_date"])
-    return [DueDate(**dd) for dd in due_dates]
 
 
 @api_router.get("/duedates/upcoming")
@@ -2463,6 +2387,30 @@ async def get_upcoming_due_dates(
             dd["days_remaining"] = (dd_date - now).days
             upcoming.append(dd)
     return sorted(upcoming, key=lambda x: x["days_remaining"])
+
+
+@api_router.get("/duedates", response_model=List[DueDate])
+async def get_due_dates(current_user: User = Depends(get_current_user)):
+    query = {}
+    if current_user.role == "admin":
+        pass
+    elif current_user.role == "manager":
+        if current_user.departments:
+            query["department"] = {"$in": current_user.departments}
+    else:
+        permissions = get_user_permissions(current_user)
+        if not permissions.get("can_view_all_duedates", False):
+            if current_user.departments:
+                query["department"] = {"$in": current_user.departments}
+            else:
+                return []
+    due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+    for dd in due_dates:
+        if isinstance(dd.get("created_at"), str):
+            dd["created_at"] = datetime.fromisoformat(dd["created_at"])
+        if isinstance(dd.get("due_date"), str):
+            dd["due_date"] = datetime.fromisoformat(dd["due_date"])
+    return [DueDate(**dd) for dd in due_dates]
 
 
 @api_router.put("/duedates/{due_date_id}", response_model=DueDate)
@@ -2514,6 +2462,35 @@ async def delete_due_date(
     return {"message": "Due date deleted successfully"}
 
 
+# FIX: Registered before /clients/{client_id} to prevent route shadowing
+@api_router.get("/clients/upcoming-birthdays")
+async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
+    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    today = date.today()
+    upcoming = []
+    for client in clients:
+        if client.get("birthday"):
+            try:
+                bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
+                # FIX: Added leap year guard (was missing in original)
+                try:
+                    this_year_bday = bday.replace(year=today.year)
+                except ValueError:
+                    this_year_bday = bday.replace(year=today.year, day=28)
+                if this_year_bday < today:
+                    try:
+                        this_year_bday = bday.replace(year=today.year + 1)
+                    except ValueError:
+                        this_year_bday = bday.replace(year=today.year + 1, day=28)
+                days_until = (this_year_bday - today).days
+                if 0 <= days_until <= days:
+                    client["days_until_birthday"] = days_until
+                    upcoming.append(client)
+            except (ValueError, TypeError):
+                continue
+    return sorted(upcoming, key=lambda x: x["days_until_birthday"])
+
+
 @api_router.get("/leads/meta/services")
 async def get_leads_services_meta(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
@@ -2523,304 +2500,308 @@ async def get_leads_services_meta(current_user: User = Depends(get_current_user)
     services = await db.clients.distinct("services")
     services = [s for s in services if s and isinstance(s, str)]
     return {"services": list(set(services))}
-    
+
 # REPORTS ROUTES
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
- user_id: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- target_user_id = user_id or current_user.id
- if target_user_id != current_user.id:
-  perms = get_user_permissions(current_user)
-  if current_user.role != "admin" and not perms.get("can_view_reports", False):
-   raise HTTPException(status_code=403, detail="You do not have permission to view reports")
- if target_user_id != current_user.id:
-  if current_user.role != "admin":
-   permissions = get_user_permissions(current_user)
-   allowed_users = permissions.get("view_other_reports", [])
-   if target_user_id not in allowed_users:
-    raise HTTPException(status_code=403, detail="Not authorized to view other users' reports")
- logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
- total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
- total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
- target_user_doc = await db.users.find_one({"id": target_user_id}, {"_id": 0, "password": 0})
- user_info = {
-  "id": target_user_id,
-  "full_name": target_user_doc.get("full_name", "Unknown") if target_user_doc else "Unknown"
- }
- return {
-  "user_id": target_user_id,
-  "user": user_info,
-  "total_screen_time": total_screen_time,
-  "total_tasks_completed": total_tasks_completed,
-  "days_logged": len(logs)
- }
+    target_user_id = user_id or current_user.id
+    if target_user_id != current_user.id:
+        perms = get_user_permissions(current_user)
+        if current_user.role != "admin" and not perms.get("can_view_reports", False):
+            raise HTTPException(status_code=403, detail="You do not have permission to view reports")
+    if target_user_id != current_user.id:
+        if current_user.role != "admin":
+            permissions = get_user_permissions(current_user)
+            allowed_users = permissions.get("view_other_reports", [])
+            if target_user_id not in allowed_users:
+                raise HTTPException(status_code=403, detail="Not authorized to view other users' reports")
+    logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
+    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+    target_user_doc = await db.users.find_one({"id": target_user_id}, {"_id": 0, "password": 0})
+    user_info = {
+        "id": target_user_id,
+        "full_name": target_user_doc.get("full_name", "Unknown") if target_user_doc else "Unknown"
+    }
+    return {
+        "user_id": target_user_id,
+        "user": user_info,
+        "total_screen_time": total_screen_time,
+        "total_tasks_completed": total_tasks_completed,
+        "days_logged": len(logs)
+    }
 
 @api_router.get("/reports/export")
 async def export_reports(
- format: str = "csv",
- user_id: Optional[str] = None,
- current_user: User = Depends(get_current_user)
+    format: str = "csv",
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
- perms = get_user_permissions(current_user)
- if current_user.role != "admin" and not perms.get("can_download_reports", False):
-  raise HTTPException(status_code=403, detail="You do not have permission to download reports")
- target_user_id = user_id or current_user.id
- if target_user_id != current_user.id:
-  if current_user.role != "admin":
-   permissions = get_user_permissions(current_user)
-   allowed_users = permissions.get("view_other_reports", [])
-   if target_user_id not in allowed_users:
-    raise HTTPException(status_code=403, detail="Not authorized to access other users' reports")
- logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).to_list(100)
- total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
- total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
- report = {
-  "user_id": target_user_id,
-  "total_screen_time": total_screen_time,
-  "total_tasks_completed": total_tasks_completed,
-  "days_logged": len(logs)
- }
- if format == "csv":
-  output = StringIO()
-  def sanitize_csv_value(val):
-      val_str = str(val)
-      if val_str and val_str[0] in ['=', '+', '-', '@']:
-          return f"'{val_str}"
-      return val_str
-  writer = csv.writer(output)
-  writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
-  writer.writerow([
-   sanitize_csv_value(report["user_id"]),
-   sanitize_csv_value(report["total_screen_time"]),
-   sanitize_csv_value(report["total_tasks_completed"]),
-   sanitize_csv_value(report["days_logged"])
-  ])
-  output.seek(0)
-  return StreamingResponse(
-   iter([output.getvalue()]),
-   media_type="text/csv",
-   headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"}
-  )
- elif format == "pdf":
-  pdf = FPDF()
-  pdf.add_page()
-  pdf.set_font("Arial", size=12)
-  pdf.cell(200, 10, txt="Efficiency Report", ln=1, align="C")
-  pdf.ln(10)
-  pdf.multi_cell(0, 8, f"User ID: {report['user_id']}")
-  pdf.multi_cell(0, 8, f"Screen Time: {report['total_screen_time']} minutes")
-  pdf.multi_cell(0, 8, f"Tasks Completed: {report['total_tasks_completed']}")
-  pdf.multi_cell(0, 8, f"Days Logged: {report['days_logged']}")
-  pdf_output = BytesIO()
-  pdf_output.write(pdf.output(dest='S').encode('latin1'))
-  pdf_output.seek(0)
-  return StreamingResponse(
-   pdf_output,
-   media_type="application/pdf",
-   headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"}
-  )
- else:
-  raise HTTPException(status_code=400, detail="Invalid format")
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_download_reports", False):
+        raise HTTPException(status_code=403, detail="You do not have permission to download reports")
+    target_user_id = user_id or current_user.id
+    if target_user_id != current_user.id:
+        if current_user.role != "admin":
+            permissions = get_user_permissions(current_user)
+            allowed_users = permissions.get("view_other_reports", [])
+            if target_user_id not in allowed_users:
+                raise HTTPException(status_code=403, detail="Not authorized to access other users' reports")
+    logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).to_list(100)
+    total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
+    total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
+    report = {
+        "user_id": target_user_id,
+        "total_screen_time": total_screen_time,
+        "total_tasks_completed": total_tasks_completed,
+        "days_logged": len(logs)
+    }
+    if format == "csv":
+        output = StringIO()
+        def sanitize_csv_value(val):
+            val_str = str(val)
+            # FIX: Strip newlines to prevent CSV row injection in addition to formula injection
+            val_str = val_str.replace('\r', '').replace('\n', ' ')
+            if val_str and val_str[0] in ['=', '+', '-', '@']:
+                return f"'{val_str}"
+            return val_str
+        writer = csv.writer(output)
+        writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
+        writer.writerow([
+            sanitize_csv_value(report["user_id"]),
+            sanitize_csv_value(report["total_screen_time"]),
+            sanitize_csv_value(report["total_tasks_completed"]),
+            sanitize_csv_value(report["days_logged"])
+        ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"}
+        )
+    elif format == "pdf":
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="Efficiency Report", ln=1, align="C")
+        pdf.ln(10)
+        pdf.multi_cell(0, 8, f"User ID: {report['user_id']}")
+        pdf.multi_cell(0, 8, f"Screen Time: {report['total_screen_time']} minutes")
+        pdf.multi_cell(0, 8, f"Tasks Completed: {report['total_tasks_completed']}")
+        pdf.multi_cell(0, 8, f"Days Logged: {report['days_logged']}")
+        pdf_output = BytesIO()
+        pdf_output.write(pdf.output(dest='S').encode('latin1'))
+        pdf_output.seek(0)
+        return StreamingResponse(
+            pdf_output,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"}
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid format")
 
 # ====================== PERFORMANCE RANKINGS ======================
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
- period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
- current_user: User = Depends(get_current_user)
+    period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
+    current_user: User = Depends(get_current_user)
 ):
- global rankings_cache, rankings_cache_time
- cache_key = f"rankings_{period}"
- if (
-  cache_key in rankings_cache and
-  cache_key in rankings_cache_time and
-  (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
- ):
-  return rankings_cache[cache_key]
- now = datetime.now(IST)
- if period == "weekly":
-  start_date = now - timedelta(days=7)
-  expected_working_days = 5
- elif period == "monthly":
-  start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-  expected_working_days = 22
- else:
-  start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
-  months = max((now - start_date).days // 30, 1)
-  expected_working_days = max(22, months * 22)
- end_date_str = now.strftime("%Y-%m-%d")
- start_date_str = start_date.strftime("%Y-%m-%d")
- users = await db.users.find(
-  {"role": {"$ne": "admin"}},
-  {"id": 1, "full_name": 1, "profile_picture": 1}
- ).to_list(100)
- rankings = []
- for user in users:
-  uid = user["id"]
-  att_records = await db.attendance.find(
-   {
-    "user_id": uid,
-    "date": {"$gte": start_date_str, "$lte": end_date_str}
-   },
-   {"_id": 0, "duration_minutes": 1, "is_late": 1}
-  ).to_list(1000)
-  days_present = len(att_records)
-  total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
-  total_hours = round(total_minutes / 60, 1)
-  attendance_percent = round(
-   (days_present / expected_working_days) * 100, 1
-  ) if expected_working_days else 0
-  timely_days = len([r for r in att_records if not r.get("is_late", False)])
-  timely_punchin_percent = round(
-   (timely_days / days_present) * 100, 1
-  ) if days_present else 0
-  tasks_assigned = await db.tasks.count_documents({
-   "assigned_to": uid,
-   "created_at": {"$gte": start_date}
-  })
-  completed_tasks = await db.tasks.count_documents({
-   "assigned_to": uid,
-   "status": "completed",
-   "$or": [
-    {"completed_at": {"$gte": start_date}},
-    {"updated_at": {"$gte": start_date}}
-   ]
-  })
-  completed_todos = await db.todos.count_documents({
-   "user_id": uid,
-   "is_completed": True,
-   "completed_at": {"$gte": start_date}
-  })
-  total_completed = completed_tasks + completed_todos
-  task_completion_percent = round(
-   (total_completed / tasks_assigned) * 100, 1
-  ) if tasks_assigned else 0
-  todos = await db.todos.find({
-   "user_id": uid,
-   "created_at": {"$gte": start_date}
-  }).to_list(500)
-  completed_ontime = 0
-  for t in todos:
-   if t.get("is_completed"):
-    due = safe_dt(t.get("due_date"))
-    completed_at = safe_dt(t.get("completed_at"))
-    if due and completed_at and completed_at <= due:
-     completed_ontime += 1
-  todo_ontime_percent = round(
-   (completed_ontime / len(todos)) * 100, 1
-  ) if todos else 0
-  safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
-  score = (
-   float(attendance_percent or 0) * 0.25 +
-   safe_hours_ratio * 100 * 0.20 +
-   float(task_completion_percent or 0) * 0.25 +
-   float(todo_ontime_percent or 0) * 0.15 +
-   float(timely_punchin_percent or 0) * 0.15
-  )
-  overall_score = round(min(score, 100), 1)
-  if overall_score >= 95:
-   badge = "⭐ Star Performer"
-  elif overall_score >= 85:
-   badge = "🏆 Top Performer"
-  else:
-   badge = "Good Performer"
-  rankings.append(
-   PerformanceMetric(
-    user_id=str(uid),
-    user_name=str(user.get("full_name", "Unknown")),
-    profile_picture=user.get("profile_picture"),
-    attendance_percent=float(attendance_percent or 0),
-    total_hours=float(total_hours or 0),
-    task_completion_percent=float(task_completion_percent or 0),
-    todo_ontime_percent=float(todo_ontime_percent or 0),
-    timely_punchin_percent=float(timely_punchin_percent or 0),
-    overall_score=float(overall_score or 0),
-    badge=str(badge)
-   )
-  )
- rankings.sort(key=lambda x: x.overall_score, reverse=True)
- for i, r in enumerate(rankings):
-  r.rank = i + 1
- rankings_cache[cache_key] = rankings
- rankings_cache_time[cache_key] = datetime.now(timezone.utc)
- return rankings
+    global rankings_cache, rankings_cache_time
+    cache_key = f"rankings_{period}"
+    if (
+        cache_key in rankings_cache and
+        cache_key in rankings_cache_time and
+        # FIX: Use timezone-aware UTC datetime for cache comparison to avoid TypeError
+        (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
+    ):
+        return rankings_cache[cache_key]
+    now = datetime.now(IST)
+    if period == "weekly":
+        start_date = now - timedelta(days=7)
+        expected_working_days = 5
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        expected_working_days = 22
+    else:
+        start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        months = max((now - start_date).days // 30, 1)
+        expected_working_days = max(22, months * 22)
+    end_date_str = now.strftime("%Y-%m-%d")
+    start_date_str = start_date.strftime("%Y-%m-%d")
+    users = await db.users.find(
+        {"role": {"$ne": "admin"}},
+        {"id": 1, "full_name": 1, "profile_picture": 1}
+    ).to_list(100)
+    rankings = []
+    for user in users:
+        uid = user["id"]
+        att_records = await db.attendance.find(
+            {
+                "user_id": uid,
+                "date": {"$gte": start_date_str, "$lte": end_date_str}
+            },
+            {"_id": 0, "duration_minutes": 1, "is_late": 1}
+        ).to_list(1000)
+        days_present = len(att_records)
+        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
+        total_hours = round(total_minutes / 60, 1)
+        attendance_percent = round(
+            (days_present / expected_working_days) * 100, 1
+        ) if expected_working_days else 0
+        timely_days = len([r for r in att_records if not r.get("is_late", False)])
+        timely_punchin_percent = round(
+            (timely_days / days_present) * 100, 1
+        ) if days_present else 0
+        tasks_assigned = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "created_at": {"$gte": start_date}
+        })
+        completed_tasks = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": "completed",
+            "$or": [
+                {"completed_at": {"$gte": start_date}},
+                {"updated_at": {"$gte": start_date}}
+            ]
+        })
+        completed_todos = await db.todos.count_documents({
+            "user_id": uid,
+            "is_completed": True,
+            "completed_at": {"$gte": start_date}
+        })
+        total_completed = completed_tasks + completed_todos
+        task_completion_percent = round(
+            (total_completed / tasks_assigned) * 100, 1
+        ) if tasks_assigned else 0
+        todos = await db.todos.find({
+            "user_id": uid,
+            "created_at": {"$gte": start_date}
+        }).to_list(500)
+        completed_ontime = 0
+        for t in todos:
+            if t.get("is_completed"):
+                due = safe_dt(t.get("due_date"))
+                completed_at = safe_dt(t.get("completed_at"))
+                if due and completed_at and completed_at <= due:
+                    completed_ontime += 1
+        todo_ontime_percent = round(
+            (completed_ontime / len(todos)) * 100, 1
+        ) if todos else 0
+        safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
+        score = (
+            float(attendance_percent or 0) * 0.25 +
+            safe_hours_ratio * 100 * 0.20 +
+            float(task_completion_percent or 0) * 0.25 +
+            float(todo_ontime_percent or 0) * 0.15 +
+            float(timely_punchin_percent or 0) * 0.15
+        )
+        overall_score = round(min(score, 100), 1)
+        if overall_score >= 95:
+            badge = "⭐ Star Performer"
+        elif overall_score >= 85:
+            badge = "🏆 Top Performer"
+        else:
+            badge = "Good Performer"
+        rankings.append(
+            PerformanceMetric(
+                user_id=str(uid),
+                user_name=str(user.get("full_name", "Unknown")),
+                profile_picture=user.get("profile_picture"),
+                attendance_percent=float(attendance_percent or 0),
+                total_hours=float(total_hours or 0),
+                task_completion_percent=float(task_completion_percent or 0),
+                todo_ontime_percent=float(todo_ontime_percent or 0),
+                timely_punchin_percent=float(timely_punchin_percent or 0),
+                overall_score=float(overall_score or 0),
+                badge=str(badge)
+            )
+        )
+    rankings.sort(key=lambda x: x.overall_score, reverse=True)
+    for i, r in enumerate(rankings):
+        r.rank = i + 1
+    rankings_cache[cache_key] = rankings
+    # FIX: Store as timezone-aware UTC datetime so comparison never throws TypeError
+    rankings_cache_time[cache_key] = datetime.now(timezone.utc)
+    return rankings
 
 # ==============================================================
 # INTEGRATED MASTER DATA SYSTEM & CLIENT ROUTES
 # ==============================================================
 @api_router.post("/master/import-master-preview")
 async def import_master_data_preview(
- file: UploadFile = File(...),
- current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
- if current_user.role.lower() != "admin":
-  raise HTTPException(status_code=403, detail="Administrative clearance required for Master Data access.")
- filename = file.filename.lower()
- if not filename.endswith((".xlsx", ".xls")):
-  raise HTTPException(status_code=400, detail="Deployment failed: Only Excel formats (.xlsx, .xls) supported.")
- try:
-  content = await file.read()
-  excel = pd.ExcelFile(BytesIO(content))
-  parsed_blueprint = {}
-  total_vectors = 0
-  for sheet_name in excel.sheet_names:
-   df = pd.read_excel(excel, sheet_name=sheet_name)
-   df = df.fillna("")
-   records = df.to_dict(orient="records")
-   parsed_blueprint[sheet_name] = records
-   total_vectors += len(records)
-  return {
-   "status": "Ready for Audit",
-   "message": f"Detected {len(excel.sheet_names)} operational layers with {total_vectors} vectors.",
-   "sheets_found": excel.sheet_names,
-   "data": parsed_blueprint
-  }
- except Exception as e:
-  logger.error(f"Blueprint Error: {str(e)}")
-  raise HTTPException(status_code=400, detail=f"Excel parse failure: {str(e)}")
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Administrative clearance required for Master Data access.")
+    filename = file.filename.lower()
+    if not filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Deployment failed: Only Excel formats (.xlsx, .xls) supported.")
+    try:
+        content = await file.read()
+        excel = pd.ExcelFile(BytesIO(content))
+        parsed_blueprint = {}
+        total_vectors = 0
+        for sheet_name in excel.sheet_names:
+            df = pd.read_excel(excel, sheet_name=sheet_name)
+            df = df.fillna("")
+            records = df.to_dict(orient="records")
+            parsed_blueprint[sheet_name] = records
+            total_vectors += len(records)
+        return {
+            "status": "Ready for Audit",
+            "message": f"Detected {len(excel.sheet_names)} operational layers with {total_vectors} vectors.",
+            "sheets_found": excel.sheet_names,
+            "data": parsed_blueprint
+        }
+    except Exception as e:
+        logger.error(f"Blueprint Error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Excel parse failure: {str(e)}")
 
 @api_router.post("/master/sync-sheets")
 async def sync_master_sheets(
- file: UploadFile = File(...),
- current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
- if current_user.role.lower() != "admin":
-  raise HTTPException(status_code=403, detail="Master Data clearance level 5 required.")
- try:
-  content = await file.read()
-  excel = pd.ExcelFile(BytesIO(content))
-  sync_results = {"clients": 0, "compliance": 0, "staff": 0}
-  now_iso = datetime.now(timezone.utc).isoformat()
-  for sheet in excel.sheet_names:
-   df = pd.read_excel(excel, sheet_name=sheet).fillna("")
-   records = df.to_dict(orient="records")
-   sheet_type = sheet.lower()
-   if "client" in sheet_type:
-    for rec in records:
-     await db.clients.update_one(
-      {"company_name": str(rec.get("company_name", "")).strip()},
-      {"$set": {**rec, "id": str(uuid.uuid4()) if "id" not in rec else rec["id"], "created_by": current_user.id, "updated_at": now_iso}},
-      upsert=True
-     )
-     sync_results["clients"] += 1
-   elif "due" in sheet_type or "compliance" in sheet_type:
-    for rec in records:
-     await db.due_dates.insert_one({**rec, "id": str(uuid.uuid4()), "created_by": current_user.id, "created_at": now_iso, "status": "pending"})
-     sync_results["compliance"] += 1
-   elif "staff" in sheet_type or "user" in sheet_type:
-    for rec in records:
-     await db.users.update_one(
-      {"email": rec.get("email")},
-      {"$set": {**rec, "id": str(uuid.uuid4()), "is_active": True}},
-      upsert=True
-     )
-     sync_results["staff"] += 1
-   await create_audit_log(current_user=current_user, action="GLOBAL_MASTER_SYNC", module="master_data", record_id="multi_sheet_payload", new_data=sync_results)
-  return {"message": "Global Master Sync Successfully Executed", "telemetry": sync_results}
- except Exception as e:
-  logger.error(f"Sync Failure: {str(e)}")
-  raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Master Data clearance level 5 required.")
+    try:
+        content = await file.read()
+        excel = pd.ExcelFile(BytesIO(content))
+        sync_results = {"clients": 0, "compliance": 0, "staff": 0}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for sheet in excel.sheet_names:
+            df = pd.read_excel(excel, sheet_name=sheet).fillna("")
+            records = df.to_dict(orient="records")
+            sheet_type = sheet.lower()
+            if "client" in sheet_type:
+                for rec in records:
+                    await db.clients.update_one(
+                        {"company_name": str(rec.get("company_name", "")).strip()},
+                        {"$set": {**rec, "id": str(uuid.uuid4()) if "id" not in rec else rec["id"], "created_by": current_user.id, "updated_at": now_iso}},
+                        upsert=True
+                    )
+                    sync_results["clients"] += 1
+            elif "due" in sheet_type or "compliance" in sheet_type:
+                for rec in records:
+                    await db.due_dates.insert_one({**rec, "id": str(uuid.uuid4()), "created_by": current_user.id, "created_at": now_iso, "status": "pending"})
+                    sync_results["compliance"] += 1
+            elif "staff" in sheet_type or "user" in sheet_type:
+                for rec in records:
+                    await db.users.update_one(
+                        {"email": rec.get("email")},
+                        {"$set": {**rec, "id": str(uuid.uuid4()), "is_active": True}},
+                        upsert=True
+                    )
+                    sync_results["staff"] += 1
+            await create_audit_log(current_user=current_user, action="GLOBAL_MASTER_SYNC", module="master_data", record_id="multi_sheet_payload", new_data=sync_results)
+        return {"message": "Global Master Sync Successfully Executed", "telemetry": sync_results}
+    except Exception as e:
+        logger.error(f"Sync Failure: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
 
 # ==============================================================
 # MDS (MCA) EXCEL SMART PARSER
@@ -2884,7 +2865,7 @@ async def parse_mds_excel_for_client_form(
         sheet_lower = sheet_name.lower().strip()
         if "master" in sheet_lower or "company" in sheet_lower or sheet_lower == "masterdata":
             for _, row in df.iterrows():
-                key   = str(row.iloc[0]).strip()
+                key = str(row.iloc[0]).strip()
                 value = str(row.iloc[1]).strip() if len(row) > 1 else ""
                 if key and key not in ("", "nan") and value not in ("", "nan"):
                     company_info[key] = value
@@ -2985,30 +2966,29 @@ async def parse_mds_excel_for_client_form(
 
 @api_router.post("/clients", response_model=Client)
 async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
- try:
-  client_data = ClientCreate(**{k: v for k, v in payload.items() if k in ClientCreate.model_fields})
-  client = Client(**client_data.model_dump(), created_by=current_user.id)
-  doc = client.model_dump()
-  doc["created_at"] = doc["created_at"].isoformat()
-  if doc.get("birthday"):
-   doc["birthday"] = doc["birthday"].isoformat()
-  extra_fields = {
-   "address": payload.get("address", ""),
-   "city": payload.get("city", ""),
-   "state": payload.get("state", "")
-  }
-  for key, value in extra_fields.items():
-   if value:
-    doc[key] = value
-  await db.clients.insert_one(doc)
-  return client
- except Exception as e:
-  raise HTTPException(status_code=400, detail=str(e))
+    try:
+        client_data = ClientCreate(**{k: v for k, v in payload.items() if k in ClientCreate.model_fields})
+        client = Client(**client_data.model_dump(), created_by=current_user.id)
+        doc = client.model_dump()
+        doc["created_at"] = doc["created_at"].isoformat()
+        if doc.get("birthday"):
+            doc["birthday"] = doc["birthday"].isoformat()
+        extra_fields = {
+            "address": payload.get("address", ""),
+            "city": payload.get("city", ""),
+            "state": payload.get("state", "")
+        }
+        for key, value in extra_fields.items():
+            if value:
+                doc[key] = value
+        await db.clients.insert_one(doc)
+        return client
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
     query = {}
-    
     if current_user.role == "admin":
         query = {}
     elif current_user.role == "manager":
@@ -3024,210 +3004,189 @@ async def get_clients(current_user: User = Depends(get_current_user)):
                 query = {"$or": [{"assigned_to": current_user.id}, {"id": {"$in": extra_clients}}]}
             else:
                 query = {"assigned_to": current_user.id}
-                
+
     clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
-    
+
     for client in clients:
-        # Safely parse created_at
         if isinstance(client.get("created_at"), str):
             try:
                 client["created_at"] = datetime.fromisoformat(client["created_at"])
             except ValueError:
-                client["created_at"] = None # Fallback if database string is corrupted
-                
-        # Safely parse birthday to prevent Leap Year crashes from invalid DB entries
+                client["created_at"] = None
+
         if client.get("birthday") and isinstance(client["birthday"], str):
             try:
                 client["birthday"] = date.fromisoformat(client["birthday"])
             except ValueError:
-                # If the DB contains an invalid date like "2026-02-29", ignore it safely
-                # rather than crashing the entire /clients endpoint with a 500 error.
-                client["birthday"] = None 
-                
+                client["birthday"] = None
+
     return clients
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
- client = await db.clients.find_one({"id": client_id}, {"_id": 0})
- if not client:
-  raise HTTPException(status_code=404, detail="Client not found")
- if current_user.role != "admin":
-  is_assigned = client.get("assigned_to") == current_user.id
-  permissions = get_user_permissions(current_user)
-  extra_clients = permissions.get("assigned_clients", [])
-  if not is_assigned and client_id not in extra_clients:
-   raise HTTPException(status_code=403, detail="Not authorized to view this client")
- if isinstance(client["created_at"], str):
-  client["created_at"] = datetime.fromisoformat(client["created_at"])
- if client.get("birthday") and isinstance(client["birthday"], str):
-  client["birthday"] = date.fromisoformat(client["birthday"])
- return Client(**client)
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if current_user.role != "admin":
+        is_assigned = client.get("assigned_to") == current_user.id
+        permissions = get_user_permissions(current_user)
+        extra_clients = permissions.get("assigned_clients", [])
+        if not is_assigned and client_id not in extra_clients:
+            raise HTTPException(status_code=403, detail="Not authorized to view this client")
+    if isinstance(client["created_at"], str):
+        client["created_at"] = datetime.fromisoformat(client["created_at"])
+    if client.get("birthday") and isinstance(client["birthday"], str):
+        client["birthday"] = date.fromisoformat(client["birthday"])
+    return Client(**client)
 
 @api_router.put("/clients/{client_id}", response_model=Client)
 async def update_client(client_id: str, client_data: ClientCreate, current_user: User = Depends(get_current_user)):
- existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="Client not found")
- perms = get_user_permissions(current_user)
- if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
-  raise HTTPException(status_code=403, detail="Not authorized to edit this client")
- update_data = client_data.model_dump()
- if update_data.get("birthday"):
-  update_data["birthday"] = update_data["birthday"].isoformat()
- await db.clients.update_one({"id": client_id}, {"$set": update_data})
- await create_audit_log(current_user, action="UPDATE_CLIENT", module="client", record_id=client_id, old_data=existing, new_data=update_data)
- updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
- if isinstance(updated["created_at"], str):
-  updated["created_at"] = datetime.fromisoformat(updated["created_at"])
- if updated.get("birthday") and isinstance(updated["birthday"], str):
-  updated["birthday"] = date.fromisoformat(updated["birthday"])
- return Client(**updated)
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
+    perms = get_user_permissions(current_user)
+    if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this client")
+    update_data = client_data.model_dump()
+    if update_data.get("birthday"):
+        update_data["birthday"] = update_data["birthday"].isoformat()
+    await db.clients.update_one({"id": client_id}, {"$set": update_data})
+    await create_audit_log(current_user, action="UPDATE_CLIENT", module="client", record_id=client_id, old_data=existing, new_data=update_data)
+    updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if isinstance(updated["created_at"], str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+    if updated.get("birthday") and isinstance(updated["birthday"], str):
+        updated["birthday"] = date.fromisoformat(updated["birthday"])
+    return Client(**updated)
 
 @api_router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, current_user: User = Depends(get_current_user)):
- existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
- if not existing:
-  raise HTTPException(status_code=404, detail="Client not found")
- perms = get_user_permissions(current_user)
- if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
-  raise HTTPException(status_code=403, detail="Not authorized to delete this client")
- await create_audit_log(current_user, action="DELETE_CLIENT", module="client", record_id=client_id, old_data=existing)
- result = await db.clients.delete_one({"id": client_id})
- if result.deleted_count == 0:
-  raise HTTPException(status_code=404, detail="Client not found")
- return {"message": "Client deleted successfully"}
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
+    perms = get_user_permissions(current_user)
+    if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this client")
+    await create_audit_log(current_user, action="DELETE_CLIENT", module="client", record_id=client_id, old_data=existing)
+    result = await db.clients.delete_one({"id": client_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"message": "Client deleted successfully"}
 
 @api_router.post("/clients/{client_id}/send-birthday-email")
 async def send_client_birthday_email(
- client_id: str,
- background_tasks: BackgroundTasks,
- current_user: User = Depends(get_current_user)
+    client_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user)
 ):
- client = await db.clients.find_one({"id": client_id}, {"_id": 0})
- if not client:
-  raise HTTPException(status_code=404, detail="Client not found")
- background_tasks.add_task(send_birthday_email, client["email"], client["company_name"])
- return {"message": "Birthday email queued for delivery"}
-
-@api_router.get("/clients/upcoming-birthdays")
-async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
- clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
- today = date.today()
- upcoming = []
- for client in clients:
-  if client.get("birthday"):
-   bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-   this_year_bday = bday.replace(year=today.year)
-   if this_year_bday < today:
-    this_year_bday = bday.replace(year=today.year + 1)
-   days_until = (this_year_bday - today).days
-   if 0 <= days_until <= days:
-    client["days_until_birthday"] = days_until
-    upcoming.append(client)
- return sorted(upcoming, key=lambda x: x["days_until_birthday"])
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    background_tasks.add_task(send_birthday_email, client["email"], client["company_name"])
+    return {"message": "Birthday email queued for delivery"}
 
 @api_router.post("/clients/import")
 async def import_clients_from_file(
- file: UploadFile = File(...),
- current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
 ):
- filename = file.filename.lower()
- try:
-  if filename.endswith(".csv"):
-   content = await file.read()
-   df = pd.read_csv(BytesIO(content))
-  elif filename.endswith(".xlsx"):
-   content = await file.read()
-   df = pd.read_excel(BytesIO(content))
-  else:
-   raise HTTPException(status_code=400, detail="Only CSV or XLSX files are supported")
- except Exception as e:
-  raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
- df = df.dropna(how="all").reset_index(drop=True)
- created_clients = 0
- duplicate_clients = 0
- added_contacts = 0
- skipped_rows = 0
- invalid_rows = 0
- validation_errors = []
- current_client_id = None
- for idx, row in df.iterrows():
-  try:
-   row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
-   company_name = row.get("company_name", "").strip()
-   if company_name:
-    safe_company = re.escape(company_name)
-    user_id = current_user.id
-    existing = await db.clients.find_one({
-     "created_by": user_id,
-     "company_name": {"$regex": f"^{safe_company}$", "$options": "i"}
-    })
-    if existing:
-     current_client_id = existing["id"]
-     duplicate_clients += 1
-     continue
-    birthday = None
-    if row.get("birthday"):
-     try:
-      birthday = parser.parse(row["birthday"]).date()
-     except Exception:
-      birthday = None
-    services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
-    contact_persons = []
-    if row.get("contact_name_1"):
-     contact_persons.append({
-      "name": row.get("contact_name_1"),
-      "designation": row.get("contact_designation_1"),
-      "email": row.get("contact_email_1") or None,
-      "phone": row.get("contact_phone_1") or None,
-     })
-    client_create = ClientCreate(
-     company_name=company_name,
-     client_type=row.get("client_type") or "other",
-     email=row.get("email"),
-     phone=row.get("phone"),
-     birthday=birthday,
-     services=services,
-     contact_persons=contact_persons,
-     notes=row.get("notes")
-    )
-    client_doc = client_create.model_dump()
-    client_doc["id"] = str(uuid.uuid4())
-    client_doc["created_by"] = user_id
-    client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
-    await db.clients.insert_one(client_doc)
-    current_client_id = client_doc["id"]
-    created_clients += 1
-   else:
-    if current_client_id and row.get("contact_name_1"):
-     contact_data = {
-      "name": row.get("contact_name_1"),
-      "designation": row.get("contact_designation_1"),
-      "email": row.get("contact_email_1") or None,
-      "phone": row.get("contact_phone_1") or None,
-     }
-     await db.clients.update_one({"id": current_client_id}, {"$push": {"contact_persons": contact_data}})
-     added_contacts += 1
-    else:
-     skipped_rows += 1
-  except ValidationError as ve:
-   invalid_rows += 1
-   validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
-   skipped_rows += 1
-   continue
-  except Exception:
-   invalid_rows += 1
-   skipped_rows += 1
-   continue
- return {
-  "message": "Client import completed successfully",
-  "clients_created": created_clients,
-  "duplicate_clients_skipped": duplicate_clients,
-  "contacts_added": added_contacts,
-  "invalid_rows": invalid_rows,
-  "rows_skipped": skipped_rows,
-  "validation_errors": validation_errors[:20]
- }
+    filename = file.filename.lower()
+    try:
+        if filename.endswith(".csv"):
+            content = await file.read()
+            df = pd.read_csv(BytesIO(content))
+        elif filename.endswith(".xlsx"):
+            content = await file.read()
+            df = pd.read_excel(BytesIO(content))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV or XLSX files are supported")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
+    df = df.dropna(how="all").reset_index(drop=True)
+    created_clients = 0
+    duplicate_clients = 0
+    added_contacts = 0
+    skipped_rows = 0
+    invalid_rows = 0
+    validation_errors = []
+    current_client_id = None
+    for idx, row in df.iterrows():
+        try:
+            row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
+            company_name = row.get("company_name", "").strip()
+            if company_name:
+                safe_company = re.escape(company_name)
+                user_id = current_user.id
+                existing = await db.clients.find_one({
+                    "created_by": user_id,
+                    "company_name": {"$regex": f"^{safe_company}$", "$options": "i"}
+                })
+                if existing:
+                    current_client_id = existing["id"]
+                    duplicate_clients += 1
+                    continue
+                birthday = None
+                if row.get("birthday"):
+                    try:
+                        birthday = parser.parse(row["birthday"]).date()
+                    except Exception:
+                        birthday = None
+                services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
+                contact_persons = []
+                if row.get("contact_name_1"):
+                    contact_persons.append({
+                        "name": row.get("contact_name_1"),
+                        "designation": row.get("contact_designation_1"),
+                        "email": row.get("contact_email_1") or None,
+                        "phone": row.get("contact_phone_1") or None,
+                    })
+                client_create = ClientCreate(
+                    company_name=company_name,
+                    client_type=row.get("client_type") or "other",
+                    email=row.get("email"),
+                    phone=row.get("phone"),
+                    birthday=birthday,
+                    services=services,
+                    contact_persons=contact_persons,
+                    notes=row.get("notes")
+                )
+                client_doc = client_create.model_dump()
+                client_doc["id"] = str(uuid.uuid4())
+                client_doc["created_by"] = user_id
+                client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                await db.clients.insert_one(client_doc)
+                current_client_id = client_doc["id"]
+                created_clients += 1
+            else:
+                if current_client_id and row.get("contact_name_1"):
+                    contact_data = {
+                        "name": row.get("contact_name_1"),
+                        "designation": row.get("contact_designation_1"),
+                        "email": row.get("contact_email_1") or None,
+                        "phone": row.get("contact_phone_1") or None,
+                    }
+                    await db.clients.update_one({"id": current_client_id}, {"$push": {"contact_persons": contact_data}})
+                    added_contacts += 1
+                else:
+                    skipped_rows += 1
+        except ValidationError as ve:
+            invalid_rows += 1
+            validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
+            skipped_rows += 1
+            continue
+        except Exception:
+            invalid_rows += 1
+            skipped_rows += 1
+            continue
+    return {
+        "message": "Client import completed successfully",
+        "clients_created": created_clients,
+        "duplicate_clients_skipped": duplicate_clients,
+        "contacts_added": added_contacts,
+        "invalid_rows": invalid_rows,
+        "rows_skipped": skipped_rows,
+        "validation_errors": validation_errors[:20]
+    }
 
 #============================================
 # DASHBOARD ROUTES
@@ -3246,7 +3205,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 {"created_by": current_user.id},
                 {"assigned_to": {"$in": allowed_users}},
             ]
-            
+
     tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
     total_tasks = len(tasks)
     completed_tasks = len([t for t in tasks if t["status"] == "completed"])
@@ -3265,16 +3224,19 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 if due_date < now:
                     overdue_tasks += 1
             except (ValueError, TypeError):
-                continue # Skip if date is corrupted
+                continue
 
     dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
     total_dsc = len(dsc_list)
     expiring_dsc_count = 0
+    expired_dsc_count = 0
     expiring_dsc_list = []
     for dsc in dsc_list:
         try:
             expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
             days_left = (expiry_date - now).days
+            if days_left < 0:
+                expired_dsc_count += 1
             if days_left <= 90:
                 expiring_dsc_count += 1
                 expiring_dsc_list.append({
@@ -3286,7 +3248,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                     "status": "expired" if days_left < 0 else "expiring"
                 })
         except (ValueError, TypeError):
-            continue # Skip if date is corrupted
+            continue
 
     if current_user.role == "admin":
         client_query = {}
@@ -3295,42 +3257,36 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         client_query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
     else:
         client_query = {"assigned_to": current_user.id}
-        
+
     clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
     total_clients = len(clients)
     today = date.today()
     upcoming_birthdays = 0
-    
+
     for client in clients:
         if client.get("birthday"):
             try:
-                # 1. Parse the date safely
                 bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-                
-                # 2. Leap year check for current year
                 try:
                     this_year_bday = bday.replace(year=today.year)
                 except ValueError:
                     this_year_bday = bday.replace(year=today.year, day=28)
-                    
-                # 3. Leap year check for next year
                 if this_year_bday < today:
                     try:
                         this_year_bday = bday.replace(year=today.year + 1)
                     except ValueError:
                         this_year_bday = bday.replace(year=today.year + 1, day=28)
-                        
                 days_until = (this_year_bday - today).days
                 if 0 <= days_until <= 7:
                     upcoming_birthdays += 1
             except (ValueError, TypeError):
-                continue # Skip client if birthday string is completely broken
+                continue
 
     upcoming_due_dates_count = 0
     due_date_query = {"status": "pending"}
     if current_user.role != "admin" and current_user.departments:
         due_date_query["department"] = {"$in": current_user.departments}
-        
+
     due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
     for dd in due_dates:
         try:
@@ -3339,8 +3295,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             if days_until_due <= 120:
                 upcoming_due_dates_count += 1
         except (ValueError, TypeError):
-            continue # Skip if date is corrupted
-            
+            continue
+
     team_workload = []
     if current_user.role != "staff":
         users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
@@ -3353,20 +3309,20 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 "pending_tasks": len([t for t in user_tasks if t["status"] == "pending"]),
                 "completed_tasks": len([t for t in user_tasks if t["status"] == "completed"])
             })
-            
+
     compliance_score = 100
     if total_tasks > 0:
         compliance_score -= (overdue_tasks / total_tasks) * 50
     if total_dsc > 0:
         compliance_score -= (expiring_dsc_count / total_dsc) * 30
-        
+
     compliance_status = {
         "score": max(0, int(compliance_score)),
         "status": "good" if compliance_score >= 80 else "warning" if compliance_score >= 50 else "critical",
         "overdue_tasks": overdue_tasks,
         "expiring_certificates": expiring_dsc_count
     }
-    
+
     return DashboardStats(
         total_tasks=total_tasks,
         completed_tasks=completed_tasks,
@@ -3379,18 +3335,14 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         upcoming_birthdays=upcoming_birthdays,
         upcoming_due_dates=upcoming_due_dates_count,
         team_workload=team_workload,
-        compliance_status=compliance_status
+        compliance_status=compliance_status,
+        # FIX: expired_dsc_count was never populated — now correctly calculated above
+        expired_dsc_count=expired_dsc_count
     )
 
 # ==========================================================
 # STAFF ACTIVITY ROUTES
 # ==========================================================
-from fastapi import HTTPException, Depends
-from typing import Optional
-from datetime import datetime
-import pytz
-IST = pytz.timezone("Asia/Kolkata")
-
 @api_router.post("/activity/log")
 async def log_staff_activity(
     activity_data: StaffActivityCreate,
@@ -3419,12 +3371,12 @@ async def get_activity_summary(
     if date_from:
         try:
             query["timestamp"]["$gte"] = datetime.fromisoformat(date_from)
-        except:
+        except Exception:
             pass
     if date_to:
         try:
             query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
-        except:
+        except Exception:
             pass
     activities = await db.staff_activity.find(query, {"_id": 0}).to_list(10000)
     user_summary = {}
@@ -3504,95 +3456,95 @@ async def get_user_activity(
     activities = await db.staff_activity.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return activities
 
-# REMINDER ROUTES
+# TASK REMINDER ROUTES
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
- perms = get_user_permissions(current_user)
- if current_user.role != "admin" and not perms.get("can_send_reminders", False):
-  raise HTTPException(status_code=403, detail="Reminder permission required")
- tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
- if not tasks:
-  return {"message": "No pending tasks found", "emails_sent": 0, "emails_failed": []}
- user_task_map = {}
- for task in tasks:
-  assigned_to = task.get("assigned_to")
-  if not assigned_to:
-   continue
-  user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
-  if not user:
-   continue
-  user_task_map.setdefault(user["email"], []).append(task)
- success_count = 0
- failed_emails = []
- for email, task_list in user_task_map.items():
-  try:
-   body = "Hello,\n\nYou have the following pending tasks:\n\n"
-   for t in task_list:
-    body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
-   body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
-   sent = send_email(email, "Pending Task Reminder - TaskoSphere", body)
-   if sent:
-    success_count += 1
-   else:
-    failed_emails.append(email)
-  except Exception as e:
-   failed_emails.append(email)
-   logger.error(f"Error sending reminder to {email}: {str(e)}")
- return {
-  "message": "Reminder process completed",
-  "total_users": len(user_task_map),
-  "emails_sent": success_count,
-  "emails_failed": failed_emails
- }
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_send_reminders", False):
+        raise HTTPException(status_code=403, detail="Reminder permission required")
+    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
+    if not tasks:
+        return {"message": "No pending tasks found", "emails_sent": 0, "emails_failed": []}
+    user_task_map = {}
+    for task in tasks:
+        assigned_to = task.get("assigned_to")
+        if not assigned_to:
+            continue
+        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
+        if not user:
+            continue
+        user_task_map.setdefault(user["email"], []).append(task)
+    success_count = 0
+    failed_emails = []
+    for email, task_list in user_task_map.items():
+        try:
+            body = "Hello,\n\nYou have the following pending tasks:\n\n"
+            for t in task_list:
+                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+            body += "\nPlease complete them at the earliest.\n\nRegards,\nTaskoSphere"
+            sent = send_email(email, "Pending Task Reminder - TaskoSphere", body)
+            if sent:
+                success_count += 1
+            else:
+                failed_emails.append(email)
+        except Exception as e:
+            failed_emails.append(email)
+            logger.error(f"Error sending reminder to {email}: {str(e)}")
+    return {
+        "message": "Reminder process completed",
+        "total_users": len(user_task_map),
+        "emails_sent": success_count,
+        "emails_failed": failed_emails
+    }
 
 # AUDIT LOGS ROUTE
 @api_router.get("/audit-logs")
 async def get_audit_logs(
- module: Optional[str] = None,
- record_id: Optional[str] = None,
- action: Optional[str] = None,
- current_user: User = Depends(check_permission("can_view_audit_logs"))
+    module: Optional[str] = None,
+    record_id: Optional[str] = None,
+    action: Optional[str] = None,
+    current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
- query = {}
- if module:
-  query["module"] = module
- if record_id:
-  query["record_id"] = record_id
- if action and action != "ALL":
-  query["action"] = action
- logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(2000)
- logs = convert_objectids(logs)
- for log in logs:
-  if isinstance(log.get("timestamp"), str):
-   try:
-    log["timestamp"] = datetime.fromisoformat(log["timestamp"])
-   except:
-    pass
- return logs
+    query = {}
+    if module:
+        query["module"] = module
+    if record_id:
+        query["record_id"] = record_id
+    if action and action != "ALL":
+        query["action"] = action
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(2000)
+    logs = convert_objectids(logs)
+    for log in logs:
+        if isinstance(log.get("timestamp"), str):
+            try:
+                log["timestamp"] = datetime.fromisoformat(log["timestamp"])
+            except Exception:
+                pass
+    return logs
 
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
- tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
- if not tasks:
-  return
- user_task_map = {}
- for task in tasks:
-  assigned_to = task.get("assigned_to")
-  if not assigned_to:
-   continue
-  user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
-  if not user:
-   continue
-  user_task_map.setdefault(user["email"], []).append(task)
- for email, task_list in user_task_map.items():
-  try:
-   body = "Hello,\n\nYou have the following pending tasks:\n\n"
-   for t in task_list:
-    body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
-   body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
-   send_email(email, "Daily Pending Task Reminder - TaskoSphere", body)
-  except Exception as e:
-   logger.error(f"Auto reminder failed for {email}: {str(e)}")
+    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
+    if not tasks:
+        return
+    user_task_map = {}
+    for task in tasks:
+        assigned_to = task.get("assigned_to")
+        if not assigned_to:
+            continue
+        user = await db.users.find_one({"id": assigned_to}, {"_id": 0})
+        if not user:
+            continue
+        user_task_map.setdefault(user["email"], []).append(task)
+    for email, task_list in user_task_map.items():
+        try:
+            body = "Hello,\n\nYou have the following pending tasks:\n\n"
+            for t in task_list:
+                body += f"- {t.get('title')} (Due: {t.get('due_date', 'N/A')})\n"
+            body += "\nPlease complete them.\n\nRegards,\nTaskoSphere"
+            send_email(email, "Daily Pending Task Reminder - TaskoSphere", body)
+        except Exception as e:
+            logger.error(f"Auto reminder failed for {email}: {str(e)}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO DAILY REMINDER MIDDLEWARE
@@ -3611,8 +3563,6 @@ async def _run_daily_reminder_job(today_str: str):
                 {"$set": {"value": today_str}},
                 upsert=True
             )
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-            await db.staff_activity.delete_many({"timestamp": {"$lt": cutoff}})
         _last_reminder_date_cache = today_str
     except Exception as e:
         logger.error(f"Auto daily reminder job failed: {e}")
@@ -3631,6 +3581,7 @@ async def auto_daily_reminder(request: Request, call_next):
         logger.error(f"Auto reminder middleware error: {e}")
     response = await call_next(request)
     return response
+
 # ==================== HOLIDAY ROUTES ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
