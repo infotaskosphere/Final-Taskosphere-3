@@ -2,16 +2,13 @@
 const path = require("path");
 require("dotenv").config();
 
-// Detect dev server
 const isDevServer = process.env.NODE_ENV !== "production";
 
-// Feature flags
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
   enableVisualEdits: isDevServer,
 };
 
-// Optional modules
 let setupDevServer;
 let babelMetadataPlugin;
 
@@ -48,13 +45,6 @@ module.exports = {
 
     configure: (webpackConfig) => {
 
-      // 🔧 Fix PapaParse stack overflow in Render builds
-      webpackConfig.resolve.alias = {
-        ...webpackConfig.resolve.alias,
-        "papaparse$": require.resolve("papaparse"),
-      };
-
-      // Reduce watched files
       webpackConfig.watchOptions = {
         ...webpackConfig.watchOptions,
         ignored: [
@@ -67,7 +57,6 @@ module.exports = {
         ],
       };
 
-      // Add health check plugin
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
@@ -77,9 +66,7 @@ module.exports = {
   },
 
   babel: config.enableVisualEdits
-    ? {
-        plugins: [babelMetadataPlugin],
-      }
+    ? { plugins: [babelMetadataPlugin] }
     : {},
 
   devServer: (devServerConfig) => {
