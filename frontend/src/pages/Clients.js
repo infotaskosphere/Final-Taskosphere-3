@@ -1,3 +1,4 @@
+import Papa from "papaparse";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,15 +26,17 @@ import * as XLSX from 'xlsx';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
 
-const Papa = (await import("papaparse")).default;
+const handleCsvUpload = (e) => {
+  const file = e.target.files[0];
 
-Papa.parse(file, {
-  header: true,
-  skipEmptyLines: true,
-  complete: (results) => {
-    console.log(results.data);
-  }
-});
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: (results) => {
+      console.log(results.data);
+    }
+  });
+};
 
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
