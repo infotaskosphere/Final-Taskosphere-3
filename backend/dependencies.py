@@ -151,10 +151,9 @@ def check_permission(required_permission: str):
     return permission_checker
 
 # ==========================================================
-# ROLE CHECK HELPERS
+# ROLE CHECK HELPERS (original factory-function style preserved)
 # ==========================================================
 def require_admin():
-    """Strict admin-only gate."""
     async def checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role != "admin":
             raise HTTPException(
@@ -166,7 +165,6 @@ def require_admin():
 
 
 def require_manager_or_admin():
-    """Gate for manager or admin roles."""
     async def checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role not in ["admin", "manager"]:
             raise HTTPException(
