@@ -246,34 +246,39 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
     return round(total_hours, 2)
 
 def fetch_indian_holidays_task():
-    """Scheduled job to fetch holidays for the current month."""
-    try:
-        now = datetime.now(IST)
-        year = now.year
-        month = now.month
-        url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            external_holidays = response.json()
-            count = 0
-            for h in external_holidays:
-                h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
-                if h_date_obj.month == month:
-                    date_str = h_date_obj.isoformat()
-                    existing = await db.holidays.find_one({"date": date_str})
-                    if not existing:
-                        new_holiday = {
-                            "date": date_str,
-                            "name": h['localName'],
-                            "status": "pending",
-                            "type": "public",
-                            "created_at": datetime.now(IST).isoformat()
-                        }
-                        await db.holidays.insert_one(new_holiday)
-                        count += 1
-            logger.info(f"Auto-fetched {count} holidays for {now.strftime('%B %Y')}")
-    except Exception as e:
-        logger.error(f"Holiday Autofetch Failed: {str(e)}")
+    """Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays for the current month."""
+    import asyncio
+
+    async def _async_fetch():
+        try:
+            now = datetime.now(IST)
+            year = now.year
+            month = now.month
+            url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                external_holidays = response.json()
+                count = 0
+                for h in external_holidays:
+                    h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
+                    if h_date_obj.month == month:
+                        date_str = h_date_obj.isoformat()
+                        existing = await db.holidays.find_one({"date": date_str})
+                        if not existing:
+                            new_holiday = {
+                                "date": date_str,
+                                "name": h['localName'],
+                                "status": "pending",
+                                "type": "public",
+                                "created_at": datetime.now(IST).isoformat()
+                            }
+                            await db.holidays.insert_one(new_holiday)
+                            count += 1
+                logger.info(f"Auto-fetched {count} holidays for {now.strftime('%B %Y')}")
+        except Exception as e:
+            logger.error(f"Holiday Autofetch Failed: {str(e)}")
+
+    asyncio.run(_async_fetch())
 
 
 
