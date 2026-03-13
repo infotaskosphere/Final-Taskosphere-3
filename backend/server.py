@@ -3229,121 +3229,158 @@ async def import_clients_from_file(
   "validation_errors": validation_errors[:20]
  }
 
+#============================================
 # DASHBOARD ROUTES
+#============================================
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
- now = datetime.now(IST)
- task_query = {}
- if current_user.role != "admin":
-  permissions = get_user_permissions(current_user)
-  if not permissions.get("can_view_all_tasks", False):
-   allowed_users = permissions.get("view_other_tasks", [])
-   task_query["$or"] = [
-    {"assigned_to": current_user.id},
-    {"sub_assignees": current_user.id},
-    {"created_by": current_user.id},
-    {"assigned_to": {"$in": allowed_users}},
-   ]
- tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
- total_tasks = len(tasks)
- completed_tasks = len([t for t in tasks if t["status"] == "completed"])
- pending_tasks = len([t for t in tasks if t["status"] == "pending"])
- overdue_tasks = 0
- for task in tasks:
-  if task.get("due_date") and task["status"] != "completed":
-   due_date = (
-    datetime.fromisoformat(task["due_date"])
-    if isinstance(task["due_date"], str)
-    else task["due_date"]
-   )
-   if due_date.tzinfo is None:
-    due_date = due_date.replace(tzinfo=timezone.utc)
-   if due_date < now:
-    overdue_tasks += 1
- dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
- total_dsc = len(dsc_list)
- expiring_dsc_count = 0
- expiring_dsc_list = []
- for dsc in dsc_list:
-  expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
-  days_left = (expiry_date - now).days
-  if days_left <= 90:
-   expiring_dsc_count += 1
-   expiring_dsc_list.append({
-    "id": dsc["id"],
-    "holder_name": dsc["holder_name"],
-    "certificate_number": dsc.get("certificate_number", "N/A"),
-    "expiry_date": dsc["expiry_date"],
-    "days_left": days_left,
-    "status": "expired" if days_left < 0 else "expiring"
-   })
- if current_user.role == "admin":
-  client_query = {}
- elif current_user.role == "manager":
-  team_ids = await get_team_user_ids(current_user.id)
-  client_query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
- else:
-  client_query = {"assigned_to": current_user.id}
- clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
- total_clients = len(clients)
- today = date.today()
- upcoming_birthdays = 0
- for client in clients:
-  if client.get("birthday"):
-   bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-   this_year_bday = bday.replace(year=today.year)
-   if this_year_bday < today:
-    this_year_bday = bday.replace(year=today.year + 1)
-   days_until = (this_year_bday - today).days
-   if 0 <= days_until <= 7:
-    upcoming_birthdays += 1
- upcoming_due_dates_count = 0
- due_date_query = {"status": "pending"}
- if current_user.role != "admin" and current_user.departments:
-  due_date_query["department"] = {"$in": current_user.departments}
- due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
- for dd in due_dates:
-  dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
-  days_until_due = (dd_date - now).days
-  if days_until_due <= 120:
-   upcoming_due_dates_count += 1
- team_workload = []
- if current_user.role != "staff":
-  users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
-  for user in users:
-   user_tasks = [t for t in tasks if t.get("assigned_to") == user["id"]]
-   team_workload.append({
-    "user_id": user["id"],
-    "user_name": user["full_name"],
-    "total_tasks": len(user_tasks),
-    "pending_tasks": len([t for t in user_tasks if t["status"] == "pending"]),
-    "completed_tasks": len([t for t in user_tasks if t["status"] == "completed"])
-   })
- compliance_score = 100
- if total_tasks > 0:
-  compliance_score -= (overdue_tasks / total_tasks) * 50
- if total_dsc > 0:
-  compliance_score -= (expiring_dsc_count / total_dsc) * 30
- compliance_status = {
-  "score": max(0, int(compliance_score)),
-  "status": "good" if compliance_score >= 80 else "warning" if compliance_score >= 50 else "critical",
-  "overdue_tasks": overdue_tasks,
-  "expiring_certificates": expiring_dsc_count
- }
- return DashboardStats(
-  total_tasks=total_tasks,
-  completed_tasks=completed_tasks,
-  pending_tasks=pending_tasks,
-  overdue_tasks=overdue_tasks,
-  total_dsc=total_dsc,
-  expiring_dsc_count=expiring_dsc_count,
-  expiring_dsc_list=expiring_dsc_list,
-  total_clients=total_clients,
-  upcoming_birthdays=upcoming_birthdays,
-  upcoming_due_dates=upcoming_due_dates_count,
-  team_workload=team_workload,
-  compliance_status=compliance_status
- )
+    now = datetime.now(IST)
+    task_query = {}
+    if current_user.role != "admin":
+        permissions = get_user_permissions(current_user)
+        if not permissions.get("can_view_all_tasks", False):
+            allowed_users = permissions.get("view_other_tasks", [])
+            task_query["$or"] = [
+                {"assigned_to": current_user.id},
+                {"sub_assignees": current_user.id},
+                {"created_by": current_user.id},
+                {"assigned_to": {"$in": allowed_users}},
+            ]
+            
+    tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
+    total_tasks = len(tasks)
+    completed_tasks = len([t for t in tasks if t["status"] == "completed"])
+    pending_tasks = len([t for t in tasks if t["status"] == "pending"])
+    overdue_tasks = 0
+    for task in tasks:
+        if task.get("due_date") and task["status"] != "completed":
+            try:
+                due_date = (
+                    datetime.fromisoformat(task["due_date"])
+                    if isinstance(task["due_date"], str)
+                    else task["due_date"]
+                )
+                if due_date.tzinfo is None:
+                    due_date = due_date.replace(tzinfo=timezone.utc)
+                if due_date < now:
+                    overdue_tasks += 1
+            except (ValueError, TypeError):
+                continue # Skip if date is corrupted
+
+    dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
+    total_dsc = len(dsc_list)
+    expiring_dsc_count = 0
+    expiring_dsc_list = []
+    for dsc in dsc_list:
+        try:
+            expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
+            days_left = (expiry_date - now).days
+            if days_left <= 90:
+                expiring_dsc_count += 1
+                expiring_dsc_list.append({
+                    "id": dsc["id"],
+                    "holder_name": dsc["holder_name"],
+                    "certificate_number": dsc.get("certificate_number", "N/A"),
+                    "expiry_date": dsc["expiry_date"],
+                    "days_left": days_left,
+                    "status": "expired" if days_left < 0 else "expiring"
+                })
+        except (ValueError, TypeError):
+            continue # Skip if date is corrupted
+
+    if current_user.role == "admin":
+        client_query = {}
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        client_query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
+    else:
+        client_query = {"assigned_to": current_user.id}
+        
+    clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
+    total_clients = len(clients)
+    today = date.today()
+    upcoming_birthdays = 0
+    
+    for client in clients:
+        if client.get("birthday"):
+            try:
+                # 1. Parse the date safely
+                bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
+                
+                # 2. Leap year check for current year
+                try:
+                    this_year_bday = bday.replace(year=today.year)
+                except ValueError:
+                    this_year_bday = bday.replace(year=today.year, day=28)
+                    
+                # 3. Leap year check for next year
+                if this_year_bday < today:
+                    try:
+                        this_year_bday = bday.replace(year=today.year + 1)
+                    except ValueError:
+                        this_year_bday = bday.replace(year=today.year + 1, day=28)
+                        
+                days_until = (this_year_bday - today).days
+                if 0 <= days_until <= 7:
+                    upcoming_birthdays += 1
+            except (ValueError, TypeError):
+                continue # Skip client if birthday string is completely broken
+
+    upcoming_due_dates_count = 0
+    due_date_query = {"status": "pending"}
+    if current_user.role != "admin" and current_user.departments:
+        due_date_query["department"] = {"$in": current_user.departments}
+        
+    due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
+    for dd in due_dates:
+        try:
+            dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
+            days_until_due = (dd_date - now).days
+            if days_until_due <= 120:
+                upcoming_due_dates_count += 1
+        except (ValueError, TypeError):
+            continue # Skip if date is corrupted
+            
+    team_workload = []
+    if current_user.role != "staff":
+        users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+        for user in users:
+            user_tasks = [t for t in tasks if t.get("assigned_to") == user["id"]]
+            team_workload.append({
+                "user_id": user["id"],
+                "user_name": user["full_name"],
+                "total_tasks": len(user_tasks),
+                "pending_tasks": len([t for t in user_tasks if t["status"] == "pending"]),
+                "completed_tasks": len([t for t in user_tasks if t["status"] == "completed"])
+            })
+            
+    compliance_score = 100
+    if total_tasks > 0:
+        compliance_score -= (overdue_tasks / total_tasks) * 50
+    if total_dsc > 0:
+        compliance_score -= (expiring_dsc_count / total_dsc) * 30
+        
+    compliance_status = {
+        "score": max(0, int(compliance_score)),
+        "status": "good" if compliance_score >= 80 else "warning" if compliance_score >= 50 else "critical",
+        "overdue_tasks": overdue_tasks,
+        "expiring_certificates": expiring_dsc_count
+    }
+    
+    return DashboardStats(
+        total_tasks=total_tasks,
+        completed_tasks=completed_tasks,
+        pending_tasks=pending_tasks,
+        overdue_tasks=overdue_tasks,
+        total_dsc=total_dsc,
+        expiring_dsc_count=expiring_dsc_count,
+        expiring_dsc_list=expiring_dsc_list,
+        total_clients=total_clients,
+        upcoming_birthdays=upcoming_birthdays,
+        upcoming_due_dates=upcoming_due_dates_count,
+        team_workload=team_workload,
+        compliance_status=compliance_status
+    )
 
 # ==========================================================
 # STAFF ACTIVITY ROUTES
