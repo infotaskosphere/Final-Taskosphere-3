@@ -3007,29 +3007,44 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
 
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
- query = {}
- if current_user.role == "admin":
     query = {}
- elif current_user.role == "manager":
-    team_ids = await get_team_user_ids(current_user.id)
-    query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
- else:
-    permissions = get_user_permissions(current_user)
-    if permissions.get("can_view_all_clients", False):
+    
+    if current_user.role == "admin":
         query = {}
+    elif current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+        query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
     else:
-        extra_clients = permissions.get("assigned_clients", [])
-        if extra_clients:
-            query = {"$or": [{"assigned_to": current_user.id}, {"id": {"$in": extra_clients}}]}
+        permissions = get_user_permissions(current_user)
+        if permissions.get("can_view_all_clients", False):
+            query = {}
         else:
-            query = {"assigned_to": current_user.id}
- clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
- for client in clients:
-  if isinstance(client["created_at"], str):
-   client["created_at"] = datetime.fromisoformat(client["created_at"])
-  if client.get("birthday") and isinstance(client["birthday"], str):
-   client["birthday"] = date.fromisoformat(client["birthday"])
- return clients
+            extra_clients = permissions.get("assigned_clients", [])
+            if extra_clients:
+                query = {"$or": [{"assigned_to": current_user.id}, {"id": {"$in": extra_clients}}]}
+            else:
+                query = {"assigned_to": current_user.id}
+                
+    clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
+    
+    for client in clients:
+        # Safely parse created_at
+        if isinstance(client.get("created_at"), str):
+            try:
+                client["created_at"] = datetime.fromisoformat(client["created_at"])
+            except ValueError:
+                client["created_at"] = None # Fallback if database string is corrupted
+                
+        # Safely parse birthday to prevent Leap Year crashes from invalid DB entries
+        if client.get("birthday") and isinstance(client["birthday"], str):
+            try:
+                client["birthday"] = date.fromisoformat(client["birthday"])
+            except ValueError:
+                # If the DB contains an invalid date like "2026-02-29", ignore it safely
+                # rather than crashing the entire /clients endpoint with a 500 error.
+                client["birthday"] = None 
+                
+    return clients
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
