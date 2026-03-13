@@ -74,7 +74,7 @@ const COLORS = {
 
 // ─── Spring Physics ───────────────────────────────────────────────────────────
 const springPhysics = {
-  card:   { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
+  card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
 };
 
 // ─── Animation Variants ───────────────────────────────────────────────────────
@@ -185,22 +185,9 @@ export default function StaffActivity() {
   const [auditInsights,  setAuditInsights]  = useState([]);
 
   // ── Data state ────────────────────────────────────────────────────────────
-  // attendanceRegister — flat array of per-user monthly summaries from /attendance/staff-report
-  // Shape per item: { user_id, user_name, role, total_minutes, days_present,
-  //                   late_days, early_out_days, total_hours, avg_hours_per_day,
-  //                   expected_hours, records[] }
   const [attendanceRegister, setAttendanceRegister] = useState([]);
-
-  // activitySummary — flat array of per-user activity aggregates from /activity/summary
-  // Shape per item: { user_id, user_name, total_duration(sec), active_duration(sec),
-  //                   idle_duration(sec), apps_list[], websites{url:sec}, categories{name:sec},
-  //                   productivity_percent }
   const [activitySummary,    setActivitySummary]    = useState([]);
-
-  // activePersonnel — full users list from /users
   const [activePersonnel,    setActivePersonnel]    = useState([]);
-
-  // taskVectors — todos list from /todos?user_id=X
   const [taskVectors,        setTaskVectors]        = useState([]);
   const [taskVectorsLoading, setTaskVectorsLoading] = useState(false);
 
@@ -217,19 +204,18 @@ export default function StaffActivity() {
       return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') };
     }), []);
 
-  // ── 24-hr intensity map (stable, no random re-seeding) ────────────────────
+  // ── 24-hr intensity map ───────────────────────────────────────────────────
   const intensityMap = useMemo(() =>
     Array.from({ length: 24 }, (_, i) => ({
       hour:    `${String(i).padStart(2, '0')}:00`,
       density: (i >= 9 && i <= 18)
         ? 35 + (i === 10 || i === 11 || i === 14 || i === 15 ? 30 : 10) + (i * 2 % 15)
         : 2 + (i * 3 % 8),
-    })), []); // no deps — stable across renders
+    })), []);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ALL DOWNSTREAM DATA FLOWS FROM THESE TWO FILTERED ARRAYS ONLY
+  // FILTERED ARRAYS — all downstream data flows from these only
   // ─────────────────────────────────────────────────────────────────────────
-
   const filteredActivity = useMemo(() =>
     selectedUnit === 'all'
       ? activitySummary
@@ -256,19 +242,37 @@ export default function StaffActivity() {
   }, [filteredActivity]);
 
   // ── Aggregated websites ───────────────────────────────────────────────────
+  // FIX: handles both array shape [{ url, duration }] and object shape { url: seconds }
   const aggregatedWebsites = useMemo(() => {
     const map = {};
     filteredActivity.forEach((u) => {
-      Object.entries(u.websites || {}).forEach(([url, dur]) => {
-        const domain = getDomain(url);
-        if (!map[domain]) map[domain] = { domain, duration: 0 };
-        map[domain].duration += Number(dur) || 0;
-      });
+      const websites = u.websites;
+      if (!websites) return;
+
+      if (Array.isArray(websites)) {
+        // Array shape: [{ url: string, duration: number }, ...]
+        websites.forEach((entry) => {
+          const url      = entry?.url || entry?.domain || '';
+          const duration = Number(entry?.duration ?? entry?.time ?? 0);
+          if (!url) return;
+          const domain = getDomain(url);
+          if (!map[domain]) map[domain] = { domain, duration: 0 };
+          map[domain].duration += duration;
+        });
+      } else if (typeof websites === 'object') {
+        // Object shape: { "https://example.com": seconds, ... }
+        Object.entries(websites).forEach(([url, dur]) => {
+          if (!url) return;
+          const domain = getDomain(url);
+          if (!map[domain]) map[domain] = { domain, duration: 0 };
+          map[domain].duration += Number(dur) || 0;
+        });
+      }
     });
     return Object.values(map).sort((a, b) => b.duration - a.duration).slice(0, 10);
   }, [filteredActivity]);
 
-  // ── Idle stats (durations are SECONDS from activity API) ──────────────────
+  // ── Idle stats ────────────────────────────────────────────────────────────
   const idleStats = useMemo(() => {
     const totalDur  = filteredActivity.reduce((a, u) => a + (Number(u.total_duration)  || 0), 0);
     const idleDur   = filteredActivity.reduce((a, u) => a + (Number(u.idle_duration)   || 0), 0);
@@ -303,32 +307,29 @@ export default function StaffActivity() {
       .sort((a, b) => b.duration - a.duration);
   }, [filteredActivity]);
 
-  // ── Header: Total Hours Logged (MINUTES from attendance API) ─────────────
+  // ── Header metrics ────────────────────────────────────────────────────────
   const totalLoggedTime = useMemo(() => {
     const mins = filteredAttendance.reduce((acc, s) => acc + (Number(s.total_minutes) || 0), 0);
     return minutesToHM(mins);
   }, [filteredAttendance]);
 
-  // ── Header: Avg Productivity ──────────────────────────────────────────────
   const avgProductivity = useMemo(() => {
     if (!filteredActivity.length) return null;
     const sum = filteredActivity.reduce((a, s) => a + (Number(s.productivity_percent) || 0), 0);
     return Math.round(sum / filteredActivity.length);
   }, [filteredActivity]);
 
-  // ── Header: Peak Intensity hour ───────────────────────────────────────────
   const peakHour = useMemo(
     () => intensityMap.reduce((mx, h) => (h.density > mx.density ? h : mx), intensityMap[0]),
     [intensityMap]
   );
 
-  // ── Header: Personnel count ───────────────────────────────────────────────
   const displayPersonnelCount = useMemo(() => {
     if (selectedUnit === 'all') return activePersonnel.length;
     return activePersonnel.some((u) => u.id === selectedUnit) ? 1 : 0;
   }, [activePersonnel, selectedUnit]);
 
-  // ── Radar metrics for comparison ─────────────────────────────────────────
+  // ── Radar metrics ─────────────────────────────────────────────────────────
   const radarMetrics = useMemo(() => {
     if (!unitAlpha || !unitBeta) return [];
     const labels = ['Efficiency', 'Precision', 'Consistency', 'Communication', 'Volume', 'Initiative'];
@@ -336,8 +337,8 @@ export default function StaffActivity() {
     const b    = activitySummary.find((s) => s.user_id === unitBeta);
     const aAtt = attendanceRegister.find((s) => s.user_id === unitAlpha);
     const bAtt = attendanceRegister.find((s) => s.user_id === unitBeta);
-    const aBase = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
-    const bBase = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
+    const aBase   = a ? Math.min(100, Number(a.productivity_percent) || 60) : 60;
+    const bBase   = b ? Math.min(100, Number(b.productivity_percent) || 55) : 55;
     const aAttPct = aAtt ? Math.min(100, Math.round(((aAtt.days_present || 0) / 22) * 100)) : 70;
     const bAttPct = bAtt ? Math.min(100, Math.round(((bAtt.days_present || 0) / 22) * 100)) : 65;
     const variation = [0, 8, -5, 12, -3, 7];
@@ -357,9 +358,6 @@ export default function StaffActivity() {
 
   // ─────────────────────────────────────────────────────────────────────────
   // DATA FETCHING
-  // FIX 1: Activity summary now receives date_from/date_to matching selectedMonth
-  //        so activity and attendance data cover the same period.
-  // FIX 2: /attendance/staff-report returns a flat array — handled correctly.
   // ─────────────────────────────────────────────────────────────────────────
   const synchronize = useCallback(async () => {
     setLoading(true);
@@ -375,9 +373,9 @@ export default function StaffActivity() {
         api.get(`/attendance/staff-report?month=${selectedMonth}`),
       ]);
 
-      setActivePersonnel(Array.isArray(uRes.data)   ? uRes.data   : []);
-      setActivitySummary(Array.isArray(aRes.data)   ? aRes.data   : []);
-      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data : []);
+      setActivePersonnel(Array.isArray(uRes.data)     ? uRes.data     : []);
+      setActivitySummary(Array.isArray(aRes.data)     ? aRes.data     : []);
+      setAttendanceRegister(Array.isArray(attRes.data) ? attRes.data  : []);
     } catch (err) {
       console.error('Sync error:', err);
       toast.error('Telemetry sync failed. Check network.');
@@ -489,7 +487,6 @@ export default function StaffActivity() {
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
           <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-
           <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
@@ -498,7 +495,6 @@ export default function StaffActivity() {
               <h1 className="text-2xl font-bold text-white tracking-tight">Staff Activity</h1>
               <p className="text-white/60 text-sm mt-1">Real-time organisational telemetry</p>
             </div>
-
             <div className="flex flex-wrap items-center gap-2.5">
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
                 style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}>
@@ -515,7 +511,6 @@ export default function StaffActivity() {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
                 style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}>
                 <CalendarIcon className="h-3.5 w-3.5 text-white/60 flex-shrink-0" />
@@ -530,7 +525,6 @@ export default function StaffActivity() {
                   </SelectContent>
                 </Select>
               </div>
-
               <Button onClick={() => setRefreshTrigger((t) => t + 1)} disabled={loading}
                 className="rounded-xl h-9 text-sm font-medium"
                 style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>
@@ -566,7 +560,7 @@ export default function StaffActivity() {
           </CardContent>
         </motion.div>
 
-        {/* 2. Total Hours Logged — from filteredAttendance (minutes) */}
+        {/* 2. Total Hours Logged */}
         <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
@@ -587,7 +581,7 @@ export default function StaffActivity() {
           </CardContent>
         </motion.div>
 
-        {/* 3. Avg Productivity — from filteredActivity */}
+        {/* 3. Avg Productivity */}
         <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           className={`${metricCardCls} ${metricCardDefault}`}>
           <CardContent className="p-4">
@@ -635,7 +629,7 @@ export default function StaffActivity() {
           </CardContent>
         </motion.div>
 
-        {/* 5. Idle Time — from filteredActivity (seconds) */}
+        {/* 5. Idle Time */}
         <motion.div whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
           className={`${metricCardCls} ${idleStats.idlePct > 30
             ? isDark ? 'bg-red-900/20 border-red-800 hover:border-red-700' : 'bg-red-50/60 border-red-200 hover:border-red-300'
@@ -777,10 +771,7 @@ export default function StaffActivity() {
 
         <AnimatePresence mode="wait">
 
-          {/* ─── TAB 1: ACTIVITY LOG ─────────────────────────────────────────
-              Source: filteredActivity (apps_list, websites, categories)
-              Empty state when no activity tracker agent logs are present
-          ─────────────────────────────────────────────────────────────────── */}
+          {/* ─── TAB 1: ACTIVITY LOG ──────────────────────────────────────── */}
           {activeTab === 'activity_log' && (
             <motion.div key="activity_log" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -951,7 +942,7 @@ export default function StaffActivity() {
                         className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {aggregatedWebsites.map((site, idx) => {
                           const maxDur = aggregatedWebsites[0]?.duration || 1;
-                          const bar   = Math.round((site.duration / maxDur) * 100);
+                          const bar    = Math.round((site.duration / maxDur) * 100);
                           const isWork = ['gmail','drive','docs','sheets','notion','slack','teams','zoom','meet','jira','github']
                             .some((k) => site.domain.includes(k));
                           return (
@@ -991,10 +982,7 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ─── TAB 2: IDLE TRACKER ─────────────────────────────────────────
-              Source: idleStats (derived from filteredActivity)
-              All durations are SECONDS from /activity/summary
-          ─────────────────────────────────────────────────────────────────── */}
+          {/* ─── TAB 2: IDLE TRACKER ──────────────────────────────────────── */}
           {activeTab === 'idle_tracker' && (
             <motion.div key="idle_tracker" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="space-y-3">
@@ -1024,7 +1012,6 @@ export default function StaffActivity() {
                 ))}
               </motion.div>
 
-              {/* Informative notice when no activity data exists */}
               {!loading && idleStats.totalDur === 0 && (
                 <motion.div variants={listItem}>
                   <div className={`flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-amber-50 border-amber-100'}`}>
@@ -1154,11 +1141,7 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ─── TAB 3: ATTENDANCE ───────────────────────────────────────────
-              Source: filteredAttendance — per-user monthly summaries
-              Shape: { user_id, user_name, role, total_minutes, days_present,
-                       late_days, early_out_days, total_hours, avg_hours_per_day }
-          ─────────────────────────────────────────────────────────────────── */}
+          {/* ─── TAB 3: ATTENDANCE ────────────────────────────────────────── */}
           {activeTab === 'attendance' && (
             <motion.div key="attendance" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}>
               <motion.div variants={listItem}>
@@ -1220,7 +1203,6 @@ export default function StaffActivity() {
                                 </div>
                               </td>
                               <td className="py-3.5 px-4">
-                                {/* total_hours is "Xh Ym" string from backend; fall back to computing from total_minutes */}
                                 <span className="font-bold text-base tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                                   {staff.total_hours || minutesToHM(staff.total_minutes || 0)}
                                 </span>
@@ -1257,10 +1239,7 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ─── TAB 4: TASK AUDIT ───────────────────────────────────────────
-              Source: taskVectors (todos from /todos?user_id=X)
-              Requires a specific user selected in the filter
-          ─────────────────────────────────────────────────────────────────── */}
+          {/* ─── TAB 4: TASK AUDIT ────────────────────────────────────────── */}
           {activeTab === 'task_list' && (
             <motion.div key="task_list" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-12 gap-3">
@@ -1411,9 +1390,7 @@ export default function StaffActivity() {
             </motion.div>
           )}
 
-          {/* ─── TAB 5: COMPARISON ───────────────────────────────────────────
-              Source: radarMetrics (derived from activitySummary + attendanceRegister)
-          ─────────────────────────────────────────────────────────────────── */}
+          {/* ─── TAB 5: COMPARISON ────────────────────────────────────────── */}
           {activeTab === 'comparison' && (
             <motion.div key="comparison" variants={staggerChildren} initial="hidden" animate="visible" exit={{ opacity: 0 }}
               className="grid grid-cols-1 lg:grid-cols-3 gap-3">
