@@ -1080,7 +1080,6 @@ export default function Users() {
                     { key: 'can_send_reminders', label: 'Automated Reminders', desc: 'Trigger email/notification reminders' },
                     { key: 'can_download_reports', label: 'Export Data', desc: 'Download CSV/PDF versions of reports' },
                     { key: 'can_manage_settings', label: 'System Settings', desc: 'Modify global system configuration' },
-                    { key: 'can_use_chat', label: 'In-App Chat', desc: 'Access the team messaging and chat feature' },
                   ].map((perm) => (
                     <div key={perm.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
                       <div className="pr-4">
