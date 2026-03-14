@@ -311,19 +311,6 @@ class Task(TaskBase):
 # ATTENDANCE & ACTIVITY
 # ======================
 class Attendance(BaseModel):
-    """
-    Attendance record for a single user on a single date.
-
-    is_late:
-        Set to True at punch-in time when the user punches in AFTER their
-        configured punch_in_time + grace_time window (both stored on the
-        User document as HH:MM strings).  Stored permanently so historical
-        reports stay accurate even if the shift schedule is later changed.
-
-    punched_out_early:
-        Set to True at punch-out time when the user punches out BEFORE their
-        configured punch_out_time.  Stored permanently for the same reason.
-    """
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -382,9 +369,6 @@ class ActivityLogUpdate(BaseModel):
 
 # ======================
 # DSC MANAGEMENT
-# FIX: Added current_status field to DSCBase so it is
-# included in Pydantic serialization instead of being
-# silently dropped when routes set/read it.
 # ======================
 class DSCBase(BaseModel):
     holder_name: str
@@ -395,7 +379,7 @@ class DSCBase(BaseModel):
     issue_date: datetime
     expiry_date: datetime
     notes: Optional[str] = None
-    current_status: str = "IN"                      # FIX: was missing
+    current_status: str = "IN"
     current_location: str = "with_company"
     taken_by: Optional[str] = None
     taken_date: Optional[datetime] = None
@@ -445,7 +429,7 @@ class MovementUpdateRequest(BaseModel):
 class ReminderCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    remind_at: datetime   # ISO8601 string from frontend, Pydantic parses it
+    remind_at: datetime
 
 
 class Reminder(BaseModel):
@@ -509,6 +493,7 @@ class DocumentMovementUpdateRequest(BaseModel):
 
 # ======================
 # CLIENT MANAGEMENT
+# CHANGE: phone is now Optional (not required)
 # ======================
 class ContactPerson(BaseModel):
     name: str
@@ -532,7 +517,8 @@ class ClientBase(BaseModel):
     client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
     contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: Optional[EmailStr] = None
-    phone: str = Field(..., min_length=10, max_length=20)
+    # CHANGE: phone is now Optional — not required
+    phone: Optional[str] = None
     date_of_incorporation: Optional[date] = None
     birthday: Optional[date] = None
     services: List[str] = Field(default_factory=list)
@@ -545,11 +531,11 @@ class ClientBase(BaseModel):
         description="List of {user_id, services} assignments"
     )
 
-    @field_validator('phone')
+    @field_validator('phone', mode='before')
     @classmethod
-    def validate_phone(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError('Phone number is required')
+    def validate_phone(cls, v) -> Optional[str]:
+        if v is None or str(v).strip() == "":
+            return None
         cleaned = re.sub(r"\s|-|\+", "", str(v))
         if not cleaned.isdigit():
             raise ValueError('Phone number must contain only digits')
@@ -581,7 +567,7 @@ class MasterClientForm(BaseModel):
     company_name: str
     client_type: str
     email: Optional[EmailStr] = None
-    phone: str
+    phone: Optional[str] = None
     date_of_incorporation: Optional[date] = None
     gst_number: Optional[str] = None
     pan_number: Optional[str] = None
