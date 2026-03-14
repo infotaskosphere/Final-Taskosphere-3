@@ -1646,50 +1646,43 @@ export default function Clients() {
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
                       <div>
-                        <label className={labelCls}>Referred By</label>
-                        <div className="relative">
-                          <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
-                          <select
-                            className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
-                            value={
-                              !formData.referred_by || formData.referred_by === ''
-                                ? ''
-                                : formData.referred_by === 'Our Client'
-                                ? 'Our Client'
-                                : clients.some(c => c.company_name === formData.referred_by)
-                                ? formData.referred_by
-                                : '__other__'
-                            }
-                            onChange={e => {
-                              const val = e.target.value;
-                              if (val === '__other__') {
-                                setFormData({ ...formData, referred_by: '' });
-                              } else {
-                                setFormData({ ...formData, referred_by: val });
-                              }
-                            }}
-                          >
-                            <option value="">— Select referral source —</option>
-                            <option value="Our Client">Our Client</option>
-                            {clients.map(c => (
-                              <option key={c.id} value={c.company_name}>{c.company_name}</option>
-                            ))}
-                            <option value="__other__">Other (type below)</option>
-                          </select>
-                        </div>
-                        {/* Show free-text input when "Other" is chosen */}
-                        {formData.referred_by !== '' &&
-                          formData.referred_by !== 'Our Client' &&
-                          !clients.some(c => c.company_name === formData.referred_by) && (
-                          <Input
-                            className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                            placeholder="Type referral name…"
-                            value={formData.referred_by}
-                            onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
-                            autoFocus
-                          />
-                        )}
-                      </div>
+  <label className={labelCls}>Referred By</label>
+  <div className="relative">
+    <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+    <select
+      className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
+      value={
+        !formData.referred_by || formData.referred_by === ''
+          ? ''
+          : formData.referred_by === 'Our Client'
+          ? 'Our Client'
+          : '__other__'
+      }
+      onChange={e => {
+        const val = e.target.value;
+        if (val === '__other__') {
+          setFormData({ ...formData, referred_by: '' });
+        } else {
+          setFormData({ ...formData, referred_by: val });
+        }
+      }}
+    >
+      <option value="">— Select referral source —</option>
+      <option value="Our Client">Our Client</option>
+      <option value="__other__">Other</option>
+    </select>
+  </div>
+  {/* Free-text input shown only when "Other" is selected */}
+  {formData.referred_by !== '' && formData.referred_by !== 'Our Client' && (
+    <Input
+      className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+      placeholder="Type referrer's name…"
+      value={formData.referred_by}
+      onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
+      autoFocus
+    />
+  )}
+</div>
                       <div className="md:col-span-2">
                         <label className={labelCls}>Address</label>
                         <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" placeholder="Street address (optional)"
