@@ -28,7 +28,6 @@ import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
 
 const handleCsvUpload = (e) => {
   const file = e.target.files[0];
-
   Papa.parse(file, {
     header: true,
     skipEmptyLines: true,
@@ -123,7 +122,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
   const [exportDone, setExportDone] = useState(false);
   const [sending, setSending] = useState(false);
 
-  // Pre-select all filtered clients when modal opens
   useEffect(() => {
     if (open) {
       setSelectedIds(new Set(filteredClients.map(c => c.id)));
@@ -171,16 +169,11 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
   const phoneCount = selectedClients.filter(c => c.phone).length;
   const emailCount = selectedClients.filter(c => c.email).length;
 
-  // ── Export for WhatsApp Broadcast ──────────────────────────────────────────
-  // Produces a CSV with Name + Phone + a pre-filled message column,
-  // ready to paste into WhatsApp Business broadcast or save as contacts.
   const handleExportBroadcast = () => {
     if (selectedClients.length === 0) { toast.error('Select at least one client first'); return; }
-
     const withPhone = selectedClients.filter(c => c.phone);
     if (withPhone.length === 0) { toast.error('No selected clients have a phone number'); return; }
 
-    // ── 1. CSV export: Name, Phone, Message ──────────────────────────────
     const rows = [
       ['Name', 'Phone', 'WhatsApp Number (91XXXXXXXXXX)', 'Message'],
       ...withPhone.map(c => {
@@ -207,7 +200,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    // ── 2. Also copy just the phone numbers for quick paste ──────────────
     const phoneList = withPhone.map(c => {
       const p = c.phone.replace(/\D/g, '');
       return p.length === 10 ? `91${p}` : p;
@@ -223,7 +215,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
     setTimeout(() => setExportDone(false), 3000);
   };
 
-  // ── Copy message + open WhatsApp Web ──────────────────────────────────────
   const handleWhatsApp = async () => {
     if (!message.trim()) { toast.error('Please write a message first'); return; }
     if (selectedClients.length === 0) { toast.error('Please select at least one client'); return; }
@@ -237,7 +228,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
     }
   };
 
-  // ── Email: open mailto BCC ────────────────────────────────────────────────
   const handleEmail = () => {
     if (!message.trim()) { toast.error('Please write a message first'); return; }
     if (selectedClients.length === 0) { toast.error('Please select at least one client'); return; }
@@ -262,7 +252,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
         <DialogTitle className="sr-only">{isWhatsApp ? 'Bulk WhatsApp' : 'Bulk Email'}</DialogTitle>
         <DialogDescription className="sr-only">Draft and send bulk messages to selected clients</DialogDescription>
 
-        {/* Header */}
         <div className="flex-shrink-0 px-7 py-5 border-b border-slate-100"
           style={{ background: isWhatsApp ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #eff6ff, #dbeafe)' }}>
           <div className="flex items-center gap-3">
@@ -291,9 +280,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          {/* ── Left: Client selector ── */}
           <div className="w-72 flex-shrink-0 border-r border-slate-100 flex flex-col bg-slate-50/40">
-            {/* Select all bar */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-white flex-shrink-0">
               <button onClick={toggleAll} className="flex items-center gap-2 flex-1 text-left">
                 <span className="flex-shrink-0" style={{ color: accentColor }}>
@@ -312,7 +299,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               </span>
             </div>
 
-            {/* Search */}
             <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
@@ -325,7 +311,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               </div>
             </div>
 
-            {/* Client list */}
             <div className="flex-1 overflow-y-auto">
               {displayedClients.map(client => {
                 const isSelected = selectedIds.has(client.id);
@@ -366,11 +351,8 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
             </div>
           </div>
 
-          {/* ── Right: Composer ── */}
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-
-              {/* Message textarea */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">
                   {isWhatsApp ? 'WhatsApp Message' : 'Email Message'}
@@ -391,7 +373,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                 </div>
               </div>
 
-              {/* ── WhatsApp Broadcast Export Card (only for WA mode) ── */}
               {isWhatsApp && (
                 <div className="rounded-2xl border-2 border-dashed p-5 space-y-3"
                   style={{ borderColor: '#86efac', background: 'linear-gradient(135deg, #f0fdf4, #f7fffe)' }}>
@@ -409,7 +390,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                     </div>
                   </div>
 
-                  {/* Step-by-step */}
                   <div className="bg-white/70 rounded-xl p-4 border border-emerald-100">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 mb-2.5">
                       How to use on WhatsApp Business App (Free)
@@ -453,7 +433,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                 </div>
               )}
 
-              {/* Divider for WA mode */}
               {isWhatsApp && (
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-slate-100" />
@@ -462,7 +441,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                 </div>
               )}
 
-              {/* Summary chip cloud */}
               {selectedClients.length > 0 && (
                 <div className="rounded-xl border p-4"
                   style={isWhatsApp ? { background: '#f0fdf4', borderColor: '#bbf7d0' } : { background: '#eff6ff', borderColor: '#bfdbfe' }}>
@@ -495,7 +473,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                 </div>
               )}
 
-              {/* Email how-it-works (only shown for email mode) */}
               {!isWhatsApp && (
                 <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">How it works</p>
@@ -507,10 +484,8 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                   </ol>
                 </div>
               )}
-
             </div>
 
-            {/* Footer */}
             <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-white">
               <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500">
                 Cancel
@@ -582,9 +557,8 @@ export default function Clients() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
-  // ── Bulk message state ──
   const [bulkMsgOpen, setBulkMsgOpen] = useState(false);
-  const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp'); // 'whatsapp' | 'email'
+  const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp');
 
   const openBulkMsg = (mode) => {
     setBulkMsgMode(mode);
@@ -621,7 +595,6 @@ export default function Clients() {
 
   useEffect(() => {
     fetchClients();
-    // Always fetch users so the assignment dropdown is populated for anyone with the permission
     fetchUsers();
     const params = new URLSearchParams(location.search);
     if (params.get("openAddClient") === "true") {
@@ -1645,44 +1618,47 @@ export default function Clients() {
                         <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
-<div>
-  <label className={labelCls}>Referred By</label>
-  <div className="relative">
-    <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
-    <select
-      className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
-      value={
-        !formData.referred_by || formData.referred_by === ''
-          ? ''
-          : formData.referred_by === 'Our Client'
-          ? 'Our Client'
-          : '__other__'
-      }
-      onChange={e => {
-        const val = e.target.value;
-        if (val === '__other__') {
-          setFormData({ ...formData, referred_by: '' });
-        } else {
-          setFormData({ ...formData, referred_by: val });
-        }
-      }}
-    >
-      <option value="">— Select referral source —</option>
-      <option value="Our Client">Our Client</option>
-      <option value="__other__">Other</option>
-    </select>
-  </div>
-  {/* Free-text input shown only when "Other" is selected */}
-  {formData.referred_by !== '' && formData.referred_by !== 'Our Client' && (
-    <Input
-      className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-      placeholder="Type referrer's name…"
-      value={formData.referred_by}
-      onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
-      autoFocus
-    />
-  )}
-</div>
+
+                      {/* ── REFERRED BY — only 2 options: Our Client / Other ── */}
+                      <div>
+                        <label className={labelCls}>Referred By</label>
+                        <div className="relative">
+                          <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+                          <select
+                            className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
+                            value={
+                              !formData.referred_by || formData.referred_by === ''
+                                ? ''
+                                : formData.referred_by === 'Our Client'
+                                ? 'Our Client'
+                                : '__other__'
+                            }
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '__other__') {
+                                setFormData({ ...formData, referred_by: '' });
+                              } else {
+                                setFormData({ ...formData, referred_by: val });
+                              }
+                            }}
+                          >
+                            <option value="">— Select referral source —</option>
+                            <option value="Our Client">Our Client</option>
+                            <option value="__other__">Other</option>
+                          </select>
+                        </div>
+                        {/* Free-text input shown only when "Other" is selected */}
+                        {formData.referred_by !== '' && formData.referred_by !== 'Our Client' && (
+                          <Input
+                            className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                            placeholder="Type referrer's name…"
+                            value={formData.referred_by}
+                            onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
+                            autoFocus
+                          />
+                        )}
+                      </div>
+
                       <div className="md:col-span-2">
                         <label className={labelCls}>Address</label>
                         <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" placeholder="Street address (optional)"
@@ -1857,7 +1833,7 @@ export default function Clients() {
                       value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                   </div>
 
-                  {/* Staff Assignments */}
+                  {/* Staff Assignments — FIX: single clean .map(), no duplicate */}
                   {canAssignClients && (
                     <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                       <div className="flex items-center justify-between mb-5">
@@ -1883,71 +1859,64 @@ export default function Clients() {
                             </div>
                             <div className="mb-4">
                               <label className={labelCls}>Staff Member</label>
-                              <Select value={assignment.user_id || 'unassigned'}
-                                onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
+                              <Select
+                                value={assignment.user_id || 'unassigned'}
+                                onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}
+                              >
                                 <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
                                   <SelectValue placeholder="Select team member" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
                                   {users
-                                       .filter((u) => {
+                                    .filter(u => {
+                                      // Filter out users already assigned in other slots
+                                      const otherAssignedIds = (formData.assignments || [])
+                                        .filter((_, i) => i !== idx)
+                                        .map(a => a.user_id)
+                                        .filter(Boolean);
+                                      if (otherAssignedIds.includes(u.id)) return false;
 
-    // Filter out already assigned users in other slots
-                                         const otherAssignedIds = (formData.assignments || [])
-                                           .filter((_, i) => i !== idx)
-                                           .map((a) => a.user_id)
-                                           .filter(Boolean);
+                                      // Map services to department codes
+                                      const SERVICE_TO_DEPT = {
+                                        GST: 'GST',
+                                        'Income Tax': 'IT',
+                                        Accounting: 'ACC',
+                                        TDS: 'TDS',
+                                        ROC: 'ROC',
+                                        Trademark: 'TM',
+                                        Audit: 'ACC',
+                                        Compliance: 'ROC',
+                                        'Company Registration': 'ROC',
+                                        'Tax Planning': 'IT',
+                                        Payroll: 'ACC',
+                                      };
 
-                                         if (otherAssignedIds.includes(u.id)) return false;
+                                      const clientDepts = [
+                                        ...new Set(
+                                          (formData.services || [])
+                                            .map(s => SERVICE_TO_DEPT[s])
+                                            .filter(Boolean)
+                                        ),
+                                      ];
 
-    // Only show users who share at least one department
-    // with the client's selected services (mapped to dept codes)
-                                         const SERVICE_TO_DEPT = {
-                                           GST: "GST",
-                                           "Income Tax": "IT",
-                                           Accounting: "ACC",
-                                           TDS: "TDS",
-                                           ROC: "ROC",
-                                           Trademark: "TM",
-                                           Audit: "ACC",
-                                           Compliance: "ROC",
-                                           "Company Registration": "ROC",
-                                           "Tax Planning": "IT",
-                                           Payroll: "ACC",
-                                         };
+                                      // If no services selected yet, show all users
+                                      if (clientDepts.length === 0) return true;
 
-    // Get departments relevant to this client's services
-                                         const clientDepts = [
-                                           ...new Set(
-                                             (formData.services || [])
-                                               .map((s) => SERVICE_TO_DEPT[s])
-                                               .filter(Boolean)
-                                           ),
-                                         ];
-
-    // If no services selected yet, show all users
-                                         if (clientDepts.length === 0) return true;
-
-    // Show user if they belong to at least one matching department
-                                         const userDepts = u.departments || [];
-
-                                         return userDepts.some((d) => clientDepts.includes(d));
-                                       })
-                                       .map((u) => (
-                                         <SelectItem key={u.id} value={u.id}>
-                                           {u.full_name || u.name || u.email}
-
-                                           {u.departments?.length > 0 && (
-                                             <span className="text-xs text-slate-400 ml-1">
-                                               · {u.departments.join(", ")}
-                                             </span>
-                                           )}
-                                         </SelectItem>
-                                       ))}
+                                      const userDepts = u.departments || [];
+                                      return userDepts.some(d => clientDepts.includes(d));
+                                    })
                                     .map(u => (
-                                      <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>
-                                    ))}
+                                      <SelectItem key={u.id} value={u.id}>
+                                        {u.full_name || u.name || u.email}
+                                        {u.departments?.length > 0 && (
+                                          <span className="text-xs text-slate-400 ml-1">
+                                            · {u.departments.join(', ')}
+                                          </span>
+                                        )}
+                                      </SelectItem>
+                                    ))
+                                  }
                                 </SelectContent>
                               </Select>
                             </div>
@@ -2053,7 +2022,6 @@ export default function Clients() {
             value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
         <div className="flex gap-2 flex-shrink-0 flex-wrap items-center">
-          {/* ── BULK MESSAGE BUTTONS ── shown when there are filtered results */}
           {filteredClients.length > 0 && (
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-xl p-1">
               <button
