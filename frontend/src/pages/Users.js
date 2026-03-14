@@ -57,6 +57,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_assign_clients: true,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_view_staff_rankings: true,   // ADD
+    can_delete_data: true,           // ADD
+    can_delete_tasks: true,          // ADD
   },
   manager: {
     can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
@@ -71,6 +74,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_assign_clients: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_view_staff_rankings: true,   // ADD
+    can_delete_data: false,          // ADD
+    can_delete_tasks: false,  
   },
   staff: {
     can_view_all_tasks: false, can_view_all_clients: false, can_view_all_dsc: false,
@@ -85,6 +91,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_assign_clients: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
+    can_view_staff_rankings: true,  // ADD
+    can_delete_data: false,          // ADD
+    can_delete_tasks: false,   
   },
 };
 
@@ -99,6 +108,11 @@ const EMPTY_PERMISSIONS = {
   can_view_todo_dashboard: false, can_edit_clients: false, can_use_chat: false,
   can_view_all_leads: false, can_manage_settings: false,
   can_assign_clients: false,
+  assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
+  view_other_reports: [], view_other_todos: [], view_other_activity: [],
+  can_view_staff_rankings: false,  // ADD
+  can_delete_data: false,          // ADD
+  can_delete_tasks: false,         // ADD
   assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
