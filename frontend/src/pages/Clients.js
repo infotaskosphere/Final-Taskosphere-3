@@ -560,6 +560,11 @@ export default function Clients() {
   const [bulkMsgOpen, setBulkMsgOpen] = useState(false);
   const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp');
 
+  // ── REFERRER STATE ──────────────────────────────────────────────────────
+  const [savedReferrers, setSavedReferrers] = useState([]);
+  const [referrerInput, setReferrerInput] = useState('');
+  const [referrerSelectValue, setReferrerSelectValue] = useState('');
+
   const openBulkMsg = (mode) => {
     setBulkMsgMode(mode);
     setBulkMsgOpen(true);
@@ -593,14 +598,65 @@ export default function Clients() {
     return date.toISOString().split('T')[0];
   };
 
+  // ── FETCH REFERRERS ─────────────────────────────────────────────────────
+  const fetchReferrers = async () => {
+    try {
+      const response = await api.get('/referrers');
+      setSavedReferrers(response.data || []);
+    } catch {
+      // Fallback: load from localStorage if backend endpoint not yet available
+      try {
+        const stored = JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]');
+        setSavedReferrers(stored);
+      } catch {
+        setSavedReferrers([]);
+      }
+    }
+  };
+
+  // ── SAVE REFERRER ───────────────────────────────────────────────────────
+  const saveReferrer = async (name) => {
+    const trimmed = name?.trim();
+    if (!trimmed || savedReferrers.includes(trimmed)) return trimmed;
+    const updated = [...savedReferrers, trimmed];
+    setSavedReferrers(updated);
+    try {
+      await api.post('/referrers', { name: trimmed });
+    } catch {
+      // Fallback: persist in localStorage
+      localStorage.setItem('taskosphere_referrers', JSON.stringify(updated));
+    }
+    return trimmed;
+  };
+
   useEffect(() => {
     fetchClients();
     fetchUsers();
+    fetchReferrers();
     const params = new URLSearchParams(location.search);
     if (params.get("openAddClient") === "true") {
       setDialogOpen(true);
     }
   }, [location]);
+
+  // Sync referrerSelectValue when formData.referred_by changes (e.g. on edit)
+  useEffect(() => {
+    const val = formData.referred_by;
+    if (!val || val === '') {
+      setReferrerSelectValue('');
+      setReferrerInput('');
+    } else if (val === 'Our Client') {
+      setReferrerSelectValue('Our Client');
+      setReferrerInput('');
+    } else if (savedReferrers.includes(val)) {
+      setReferrerSelectValue(val);
+      setReferrerInput('');
+    } else {
+      // It's a custom value not yet in the list — treat as "other"
+      setReferrerSelectValue('__other__');
+      setReferrerInput(val);
+    }
+  }, [formData.referred_by, savedReferrers]);
 
   const fetchClients = async () => {
     try {
@@ -949,6 +1005,16 @@ export default function Clients() {
         .filter(a => a.user_id && a.user_id !== 'unassigned')
         .map(a => ({ user_id: a.user_id, services: a.services || [] }));
 
+      // If referred_by is a new "other" value, save it to the referrer list
+      const finalReferredBy = formData.referred_by?.trim() || null;
+      if (
+        finalReferredBy &&
+        finalReferredBy !== 'Our Client' &&
+        !savedReferrers.includes(finalReferredBy)
+      ) {
+        await saveReferrer(finalReferredBy);
+      }
+
       const payload = {
         company_name: formData.company_name.trim(),
         client_type: formData.client_type,
@@ -963,7 +1029,7 @@ export default function Clients() {
         assigned_to: cleanedAssignments[0]?.user_id || null,
         assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
-        referred_by: formData.referred_by?.trim() || null,
+        referred_by: finalReferredBy,
       };
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
@@ -1016,7 +1082,12 @@ export default function Clients() {
       email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [],
       assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
     });
-    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
+    setOtherService('');
+    setEditingClient(null);
+    setFormErrors({});
+    setContactErrors([]);
+    setReferrerInput('');
+    setReferrerSelectValue('');
   };
 
   useEffect(() => {
@@ -1093,6 +1164,33 @@ export default function Clients() {
     if (client?.assignments && client.assignments.length > 0) return client.assignments;
     if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }];
     return [];
+  };
+
+  // ── REFERRED BY HANDLER ─────────────────────────────────────────────────
+  const handleReferrerSelectChange = (val) => {
+    setReferrerSelectValue(val);
+    if (val === '__other__') {
+      setReferrerInput('');
+      setFormData(prev => ({ ...prev, referred_by: '' }));
+    } else {
+      setReferrerInput('');
+      setFormData(prev => ({ ...prev, referred_by: val === '' ? '' : val }));
+    }
+  };
+
+  const handleReferrerInputChange = (val) => {
+    setReferrerInput(val);
+    setFormData(prev => ({ ...prev, referred_by: val }));
+  };
+
+  const handleSaveReferrer = async () => {
+    const name = referrerInput.trim();
+    if (!name) { toast.error('Please enter a referrer name'); return; }
+    const saved = await saveReferrer(name);
+    setReferrerSelectValue(saved);
+    setReferrerInput('');
+    setFormData(prev => ({ ...prev, referred_by: saved }));
+    toast.success(`"${saved}" saved to referrer list`);
   };
 
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
@@ -1619,43 +1717,65 @@ export default function Clients() {
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
 
-                      {/* ── REFERRED BY — only 2 options: Our Client / Other ── */}
+                      {/* ── REFERRED BY — with saved referrers + "Other" + save ── */}
                       <div>
                         <label className={labelCls}>Referred By</label>
+
+                        {/* Dropdown */}
                         <div className="relative">
                           <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
                           <select
-                            className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
-                            value={
-                              !formData.referred_by || formData.referred_by === ''
-                                ? ''
-                                : formData.referred_by === 'Our Client'
-                                ? 'Our Client'
-                                : '__other__'
-                            }
-                            onChange={e => {
-                              const val = e.target.value;
-                              if (val === '__other__') {
-                                setFormData({ ...formData, referred_by: '' });
-                              } else {
-                                setFormData({ ...formData, referred_by: val });
-                              }
-                            }}
+                            className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer"
+                            value={referrerSelectValue}
+                            onChange={e => handleReferrerSelectChange(e.target.value)}
                           >
                             <option value="">— Select referral source —</option>
                             <option value="Our Client">Our Client</option>
-                            <option value="__other__">Other</option>
+                            {savedReferrers
+                              .filter(r => r !== 'Our Client')
+                              .map(r => (
+                                <option key={r} value={r}>{r}</option>
+                              ))
+                            }
+                            <option value="__other__">+ Other</option>
                           </select>
                         </div>
-                        {/* Free-text input shown only when "Other" is selected */}
-                        {formData.referred_by !== '' && formData.referred_by !== 'Our Client' && (
-                          <Input
-                            className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
-                            placeholder="Type referrer's name…"
-                            value={formData.referred_by}
-                            onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
-                            autoFocus
-                          />
+
+                        {/* Free-text input shown only when "+ Other" is selected */}
+                        {referrerSelectValue === '__other__' && (
+                          <div className="flex gap-2 mt-2">
+                            <Input
+                              className="flex-1 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                              placeholder="Type referrer's name…"
+                              value={referrerInput}
+                              onChange={e => handleReferrerInputChange(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }}
+                              autoFocus
+                            />
+                            <Button
+                              type="button"
+                              onClick={handleSaveReferrer}
+                              className="h-11 px-4 rounded-xl text-white text-sm font-semibold flex-shrink-0 gap-1.5 shadow-sm"
+                              style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                              title="Save to referrer list"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Save
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* Helper text */}
+                        {referrerSelectValue === '__other__' && (
+                          <p className="text-[10px] text-slate-400 mt-1.5">
+                            Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time
+                          </p>
+                        )}
+                        {referrerSelectValue && referrerSelectValue !== '__other__' && referrerSelectValue !== '' && (
+                          <p className="text-[10px] text-emerald-600 mt-1.5 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" />
+                            {referrerSelectValue}
+                          </p>
                         )}
                       </div>
 
@@ -1833,7 +1953,7 @@ export default function Clients() {
                       value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                   </div>
 
-                  {/* Staff Assignments — FIX: single clean .map(), no duplicate */}
+                  {/* Staff Assignments */}
                   {canAssignClients && (
                     <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
                       <div className="flex items-center justify-between mb-5">
@@ -1870,14 +1990,12 @@ export default function Clients() {
                                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
                                   {users
                                     .filter(u => {
-                                      // Filter out users already assigned in other slots
                                       const otherAssignedIds = (formData.assignments || [])
                                         .filter((_, i) => i !== idx)
                                         .map(a => a.user_id)
                                         .filter(Boolean);
                                       if (otherAssignedIds.includes(u.id)) return false;
 
-                                      // Map services to department codes
                                       const SERVICE_TO_DEPT = {
                                         GST: 'GST',
                                         'Income Tax': 'IT',
@@ -1900,7 +2018,6 @@ export default function Clients() {
                                         ),
                                       ];
 
-                                      // If no services selected yet, show all users
                                       if (clientDepts.length === 0) return true;
 
                                       const userDepts = u.departments || [];
