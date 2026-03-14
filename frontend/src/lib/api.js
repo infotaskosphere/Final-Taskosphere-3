@@ -10,7 +10,7 @@ const BACKEND =
   process.env.REACT_APP_BACKEND_URL ||
   "https://final-taskosphere-backend.onrender.com";
 
-const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api`;
+const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api/`;
 
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token");
@@ -35,7 +35,7 @@ api.interceptors.request.use(
     }
 
     if (process.env.NODE_ENV === "development") {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
+      console.log(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url?.replace(/^\/+/, "")}`);
     }
 
     return config;
