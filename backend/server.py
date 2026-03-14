@@ -2873,14 +2873,27 @@ async def parse_mds_excel_for_client_form(
                 key = str(row.iloc[0]).strip()
                 value = str(row.iloc[1]).strip() if len(row) > 1 else ""
                 if key and key not in ("", "nan") and value not in ("", "nan"):
+                    # Skip section-header rows that concatenate multiple fields in one cell
+                    if any(phrase in key for phrase in [
+                        "Accounts and Solvency", "Annual Returns", "Filing Information",
+                        "Interim Resolution", "Sr. No", "Date of filing"
+                    ]):
+                        continue
                     company_info[key] = value
-        elif "director" in sheet_lower or "signatory" in sheet_lower:
+        elif "director" in sheet_lower or "signatory" in sheet_lower or "partner" in sheet_lower:
             rows_list = df.values.tolist()
-            if len(rows_list) < 2:
+            # Find the real header row (contains "Name" or "DIN")
+            header_row_idx = None
+            for idx, row in enumerate(rows_list):
+                row_strs = [str(c).strip() for c in row]
+                if any(h in row_strs for h in ["Name", "DIN/PAN", "DIN"]):
+                    header_row_idx = idx
+                    break
+            if header_row_idx is None:
                 continue
-            headers = [str(h).strip() for h in rows_list[1]]
-            for row in rows_list[2:]:
-                row_dict = {headers[i]: str(row[i]).strip() for i in range(len(headers))}
+            headers = [str(h).strip() for h in rows_list[header_row_idx]]
+            for row in rows_list[header_row_idx + 1:]:
+                row_dict = {headers[i]: str(row[i]).strip() if i < len(row) else "" for i in range(len(headers))}
                 name = row_dict.get("Name", "").strip()
                 if not name or name in ("nan", ""):
                     continue
@@ -2910,45 +2923,92 @@ async def parse_mds_excel_for_client_form(
                             " | ".join(f"{k}: {v}" for k, v in r.items() if v not in ("", "nan", "-"))
                         )
 
-    company_name = (company_info.get("Company Name") or company_info.get("company_name") or "").strip()
-    raw_email = (company_info.get("Email Id") or company_info.get("Email") or company_info.get("email") or "")
+   # Support both Pvt Ltd (MCA) and LLP field naming conventions
+    company_name = (
+        company_info.get("Company Name") or
+        company_info.get("LLP Name") or
+        company_info.get("company_name") or ""
+    ).strip()
+
+    raw_email = (
+        company_info.get("Email Id") or
+        company_info.get("Email") or
+        company_info.get("email") or ""
+    )
     email = clean_email(raw_email)
-    raw_phone = (company_info.get("Phone") or company_info.get("Mobile") or company_info.get("Contact") or "")
+
+    raw_phone = (
+        company_info.get("Phone") or
+        company_info.get("Mobile") or
+        company_info.get("Contact") or ""
+    )
     phone = clean_phone(raw_phone)
-    raw_doi = (company_info.get("Date of Incorporation") or company_info.get("Incorporation Date") or "")
+
+    raw_doi = (
+        company_info.get("Date of Incorporation") or
+        company_info.get("Incorporation Date") or ""
+    )
     birthday = parse_date(raw_doi)
     client_type = detect_type(company_name)
 
+    # Raw address from either Pvt Ltd or LLP key
+    address = (
+        company_info.get("Registered Address") or
+        company_info.get("Registered Office Address") or
+        company_info.get("Address") or ""
+    ).strip()
+    if address in ("-", "nan"):
+        address = ""
+
+    # Parse city & state from address (last 3 comma-parts)
+    city = ""
+    state = ""
+    if address:
+        address_parts = [p.strip() for p in address.split(",") if p.strip()]
+        if len(address_parts) >= 3:
+            state = address_parts[-3]
+            city = address_parts[-4] if len(address_parts) >= 4 else ""
+        elif len(address_parts) == 2:
+            state = address_parts[-1]
+            city = address_parts[-2]
+
     notes_lines = []
-    cin = company_info.get("CIN", "")
+
+    # CIN for Pvt Ltd / LLPIN for LLP
+    cin = company_info.get("CIN", "") or company_info.get("LLPIN", "")
     if cin and cin not in ("-", "nan"):
-        notes_lines.append(f"CIN: {cin}")
+        notes_lines.append(f"CIN/LLPIN: {cin}")
+
+    roc = company_info.get("ROC Name", "") or company_info.get("ROC (name and office)", "")
+    if roc and roc not in ("-", "nan"):
+        notes_lines.append(f"ROC: {roc}")
+
     reg_no = company_info.get("Registration Number", "")
     if reg_no and reg_no not in ("-", "nan"):
         notes_lines.append(f"Reg No: {reg_no}")
-    address = company_info.get("Registered Address", "")
-    if address and address not in ("-", "nan"):
-        notes_lines.append(f"Address: {address}")
-    auth_cap = company_info.get("Authorised Capital (Rs)", "")
+
+    # Only add address to notes once — do NOT add it again below
+    auth_cap = (
+        company_info.get("Authorised Capital (Rs)", "") or
+        company_info.get("Total Obligation of Contribution", "")
+    )
     if auth_cap and auth_cap not in ("-", "nan"):
-        notes_lines.append(f"Authorised Capital: ₹{auth_cap}")
+        notes_lines.append(f"Capital/Contribution: ₹{auth_cap}")
+
     paid_cap = company_info.get("Paid up Capital (Rs)", "")
     if paid_cap and paid_cap not in ("-", "nan"):
         notes_lines.append(f"Paid-up Capital: ₹{paid_cap}")
+
     if extra_notes_parts:
         notes_lines.append("\n".join(extra_notes_parts))
 
     notes = "\n".join(notes_lines)
-    status_raw = company_info.get("Company Status", "Active").lower()
-    status = "active" if "active" in status_raw else "inactive"
-    city = ""
-    state = ""
-    if address and address not in ("-", "nan"):
-        address_parts = [p.strip() for p in address.split(",") if p.strip()]
-        if len(address_parts) >= 2:
-            state = address_parts[-2] if len(address_parts) >= 2 else ""
-            city = address_parts[-3] if len(address_parts) >= 3 else ""
 
+    status_raw = (
+        company_info.get("Company Status", "") or
+        company_info.get("LLP Status", "Active")
+    ).lower()
+    status = "active" if "active" in status_raw else "inactive"
     return {
         "status": "ok",
         "company_name": company_name,
@@ -2956,7 +3016,7 @@ async def parse_mds_excel_for_client_form(
         "email": email,
         "phone": phone,
         "birthday": birthday,
-        "address": address if address not in ("-", "nan") else "",
+        "address": address,
         "city": city,
         "state": state,
         "services": [],
