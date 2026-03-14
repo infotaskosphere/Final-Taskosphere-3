@@ -621,7 +621,8 @@ export default function Clients() {
 
   useEffect(() => {
     fetchClients();
-    if (canAssignClients) fetchUsers();
+    // Always fetch users so the assignment dropdown is populated for anyone with the permission
+    fetchUsers();
     const params = new URLSearchParams(location.search);
     if (params.get("openAddClient") === "true") {
       setDialogOpen(true);
@@ -716,16 +717,12 @@ export default function Clients() {
       errors.company_name = 'Company name must be at least 2 characters';
     }
     const trimmedEmail = formData.email?.trim();
-    if (!trimmedEmail) {
-      errors.email = 'Email address is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       errors.email = 'Please enter a valid email address';
     }
-    const cleanPhone = formData.phone.replace(/\D/g, '');
-    if (!cleanPhone) {
-      errors.phone = 'Phone number is required';
-    } else if (cleanPhone.length !== 10) {
-      errors.phone = 'Phone number must be exactly 10 digits';
+    const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : '';
+    if (cleanPhone && cleanPhone.length !== 10) {
+      errors.phone = 'Phone number must be exactly 10 digits (or leave blank)';
     }
     if (formData.services.length === 0) {
       errors.services = 'At least one service must be selected';
@@ -962,7 +959,7 @@ export default function Clients() {
       if (otherService.trim() && formData.services.includes("Other")) {
         finalServices.push(`Other: ${otherService.trim()}`);
       }
-      const cleanPhone = formData.phone.replace(/\D/g, "");
+      const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, "") : "";
       const cleanedContacts = formData.contact_persons.map(cp => ({
         name: cp.name || "", designation: cp.designation?.trim() || null,
         email: cp.email?.trim() ? cp.email.trim() : null,
@@ -1632,15 +1629,15 @@ export default function Clients() {
                         )}
                       </div>
                       <div>
-                        <label className={labelCls}>Email Address <span className="text-red-400">*</span></label>
+                        <label className={labelCls}>Email Address <span className="text-slate-400 font-normal">(optional)</span></label>
                         <Input className={fieldCls(formErrors.email)} type="email" value={formData.email}
-                          onChange={e => { setFormData({...formData, email: e.target.value}); if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined})); }} required />
+                          onChange={e => { setFormData({...formData, email: e.target.value}); if (formErrors.email) setFormErrors(prev => ({...prev, email: undefined})); }} />
                         {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
                       </div>
                       <div>
-                        <label className={labelCls}>Phone Number <span className="text-red-400">*</span></label>
+                        <label className={labelCls}>Phone Number <span className="text-slate-400 font-normal">(optional)</span></label>
                         <Input className={fieldCls(formErrors.phone)} value={formData.phone}
-                          onChange={e => { setFormData({...formData, phone: e.target.value}); if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined})); }} required />
+                          onChange={e => { setFormData({...formData, phone: e.target.value}); if (formErrors.phone) setFormErrors(prev => ({...prev, phone: undefined})); }} />
                         {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
                       </div>
                       <div>
@@ -1651,11 +1648,47 @@ export default function Clients() {
                       <div>
                         <label className={labelCls}>Referred By</label>
                         <div className="relative">
-                          <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                          <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10"
-                            placeholder="Name or company who referred this client"
-                            value={formData.referred_by} onChange={e => setFormData({...formData, referred_by: e.target.value})} />
+                          <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+                          <select
+                            className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors"
+                            value={
+                              !formData.referred_by || formData.referred_by === ''
+                                ? ''
+                                : formData.referred_by === 'Our Client'
+                                ? 'Our Client'
+                                : clients.some(c => c.company_name === formData.referred_by)
+                                ? formData.referred_by
+                                : '__other__'
+                            }
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '__other__') {
+                                setFormData({ ...formData, referred_by: '' });
+                              } else {
+                                setFormData({ ...formData, referred_by: val });
+                              }
+                            }}
+                          >
+                            <option value="">— Select referral source —</option>
+                            <option value="Our Client">Our Client</option>
+                            {clients.map(c => (
+                              <option key={c.id} value={c.company_name}>{c.company_name}</option>
+                            ))}
+                            <option value="__other__">Other (type below)</option>
+                          </select>
                         </div>
+                        {/* Show free-text input when "Other" is chosen */}
+                        {formData.referred_by !== '' &&
+                          formData.referred_by !== 'Our Client' &&
+                          !clients.some(c => c.company_name === formData.referred_by) && (
+                          <Input
+                            className="mt-2 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                            placeholder="Type referral name…"
+                            value={formData.referred_by}
+                            onChange={e => setFormData({ ...formData, referred_by: e.target.value })}
+                            autoFocus
+                          />
+                        )}
                       </div>
                       <div className="md:col-span-2">
                         <label className={labelCls}>Address</label>
