@@ -801,11 +801,9 @@ export default function Tasks() {
   };
 
   const markAllAsRead = async () => {
-    // Update UI immediately regardless of API support
-    setNotifications(p => p.map(n => ({ ...n, read: true })));
+    setNotifications(p => p.map(n => ({ ...n, is_read: true })));
     toast.success('Marked all as read');
-    // Fire-and-forget — silently ignore if endpoint doesn't exist
-    api.post('/notifications/mark-all-read').catch(() => {});
+    api.put('/notifications/read-all').catch(() => {});
   };
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
