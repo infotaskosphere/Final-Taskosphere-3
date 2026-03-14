@@ -475,6 +475,9 @@ export default function Users() {
     can_view_all_leads: false,
     can_manage_settings: false,
     can_assign_clients: false,
+    can_view_staff_rankings: false,  // ADD
+    can_delete_data: false,          // ADD
+    can_delete_tasks: false, 
   });
 
   const [loading, setLoading] = useState(false);
