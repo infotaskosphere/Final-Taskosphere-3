@@ -10,7 +10,7 @@ const BACKEND =
   process.env.REACT_APP_BACKEND_URL ||
   "https://final-taskosphere-backend.onrender.com";
 
-const BASE_URL = BACKEND.replace(/\/$/, "");
+const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api`;
 
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token");
