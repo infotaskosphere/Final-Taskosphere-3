@@ -1645,7 +1645,7 @@ export default function Clients() {
                         <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
-                      <div>
+<div>
   <label className={labelCls}>Referred By</label>
   <div className="relative">
     <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
