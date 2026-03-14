@@ -1898,13 +1898,60 @@ export default function Clients() {
                                 <SelectContent>
                                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
                                   {users
-                                    .filter(u => {
-                                      const otherAssignedIds = (formData.assignments || [])
-                                        .filter((_, i) => i !== idx)
-                                        .map(a => a.user_id)
-                                        .filter(Boolean);
-                                      return !otherAssignedIds.includes(u.id);
-                                    })
+                                       .filter((u) => {
+
+    // Filter out already assigned users in other slots
+                                         const otherAssignedIds = (formData.assignments || [])
+                                           .filter((_, i) => i !== idx)
+                                           .map((a) => a.user_id)
+                                           .filter(Boolean);
+
+                                         if (otherAssignedIds.includes(u.id)) return false;
+
+    // Only show users who share at least one department
+    // with the client's selected services (mapped to dept codes)
+                                         const SERVICE_TO_DEPT = {
+                                           GST: "GST",
+                                           "Income Tax": "IT",
+                                           Accounting: "ACC",
+                                           TDS: "TDS",
+                                           ROC: "ROC",
+                                           Trademark: "TM",
+                                           Audit: "ACC",
+                                           Compliance: "ROC",
+                                           "Company Registration": "ROC",
+                                           "Tax Planning": "IT",
+                                           Payroll: "ACC",
+                                         };
+
+    // Get departments relevant to this client's services
+                                         const clientDepts = [
+                                           ...new Set(
+                                             (formData.services || [])
+                                               .map((s) => SERVICE_TO_DEPT[s])
+                                               .filter(Boolean)
+                                           ),
+                                         ];
+
+    // If no services selected yet, show all users
+                                         if (clientDepts.length === 0) return true;
+
+    // Show user if they belong to at least one matching department
+                                         const userDepts = u.departments || [];
+
+                                         return userDepts.some((d) => clientDepts.includes(d));
+                                       })
+                                       .map((u) => (
+                                         <SelectItem key={u.id} value={u.id}>
+                                           {u.full_name || u.name || u.email}
+
+                                           {u.departments?.length > 0 && (
+                                             <span className="text-xs text-slate-400 ml-1">
+                                               · {u.departments.join(", ")}
+                                             </span>
+                                           )}
+                                         </SelectItem>
+                                       ))}
                                     .map(u => (
                                       <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>
                                     ))}
