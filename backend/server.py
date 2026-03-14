@@ -100,6 +100,7 @@ async def startup_event():
     await db.due_dates.create_index("department")
     await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
     await db.tasks.create_index("created_at")
+    await db.referrers.create_index("name")
     await db.clients.create_index("assigned_to")
     await db.dsc_register.create_index("expiry_date")
     await db.todos.create_index([("user_id", 1), ("created_at", -1)])
@@ -413,6 +414,40 @@ async def get_system_time():
         "display_time": now.strftime("%I:%M:%S %p"),
         "date": now.strftime("%Y-%m-%d")
     }
+
+
+# =========================
+# REFERRERS ROUTES
+# =========================
+
+@api_router.get("/referrers")
+async def get_referrers(current_user: User = Depends(get_current_user)):
+    referrers = await db.referrers.find({}, {"_id": 0}).to_list(500)
+    return referrers
+
+
+@api_router.post("/referrers")
+async def create_referrer(data: dict, current_user: User = Depends(get_current_user)):
+    name = (data.get("name") or "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Referrer name required")
+
+    existing = await db.referrers.find_one({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+
+    if existing:
+        return existing
+
+    referrer = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    await db.referrers.insert_one(referrer)
+    return referrer
+
 
 # ==========================================================
 # TODO DASHBOARD
