@@ -600,6 +600,9 @@ export default function Attendance() {
   const absentWarningShownRef               = useRef(false);
 
   const [showPunchInModal, setShowPunchInModal]   = useState(false);
+  // modalActionDone: optimistic flag — once user punches in from the modal,
+  // prevent the modal from reappearing during the async fetchData() reload.
+  const [modalActionDone, setModalActionDone]     = useState(false);
   const [showLeaveForm, setShowLeaveForm]         = useState(false);
   const [showHolidayModal, setShowHolidayModal]   = useState(false);
 
@@ -665,20 +668,29 @@ export default function Attendance() {
   // - Suppress if already punched in, on leave, or absent (day already done).
   // - todayIsHoliday is derived from the holidays array (reliable source),
   //   NOT from todayAttendance.status which can be stale/absent on holidays.
-  // ─────────────────────────────────────────────────────────────────────────
+  // Punch-in modal visibility:
+  // Show if not punched in on a working day.
+  // ALWAYS close if punched in, on leave, absent, holiday, or user took action.
   useEffect(() => {
-    if (
-      !isViewingOther &&
-      todayAttendance &&
-      !todayAttendance.punch_in &&
-      !todayIsHoliday                          &&  // suppress popup on holidays
-      todayAttendance.status !== 'leave'       &&
-      todayAttendance.status !== 'absent'
-    ) {
+    if (!isViewingOther && todayAttendance) {
+      const shouldClose =
+        todayAttendance.punch_in            ||
+        todayAttendance.status === 'leave'  ||
+        todayAttendance.status === 'absent' ||
+        todayIsHoliday                      ||
+        modalActionDone;
+
+      if (shouldClose) {
+        // Explicitly close modal whenever conditions are met
+        setShowPunchInModal(false);
+        return;
+      }
+
+      // Open modal with a brief delay on page load
       const timer = setTimeout(() => setShowPunchInModal(true), 800);
       return () => clearTimeout(timer);
     }
-  }, [todayAttendance, isViewingOther, todayIsHoliday]);
+  }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
 
   useEffect(() => {
     setLiveDuration(calculateTodayLiveDuration(todayAttendance));
@@ -929,11 +941,15 @@ export default function Attendance() {
 
       if (action === 'punch_in') {
         toast.success('✓ Punched in successfully!', { duration: 3000 });
+        // Close modal immediately (optimistic) — don't wait for fetchData()
+        setModalActionDone(true);
+        setShowPunchInModal(false);
       } else {
         const duration = response.data?.duration || 0;
         toast.success(`✓ Punched out! (${formatDuration(duration)})`, { duration: 3000 });
       }
 
+      // Full data reload after API succeeds
       await fetchData();
     } catch (error) {
       toast.error(
@@ -968,21 +984,37 @@ export default function Attendance() {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
     if (validRows.length === 0) { toast.error('Add at least one holiday'); return; }
 
-    let added = 0, failed = 0;
+    let added = 0;
+    const errors = [];
+
     for (const row of validRows) {
       try {
-        await api.post('/holidays', { date: row.date, name: row.name.trim() });
+        // Send type:"manual" — HolidayCreate model requires this field.
+        // Without it Pydantic raises 422 which was silently swallowed before.
+        await api.post('/holidays', {
+          date: row.date,
+          name: row.name.trim(),
+          type: 'manual',
+        });
         added++;
-      } catch {
-        failed++;
+      } catch (err) {
+        // Capture the real error so we can show it, not hide it
+        const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
+        errors.push(`${row.name}: ${detail}`);
+        console.error('Holiday save error:', detail, err?.response?.status);
       }
     }
 
-    if (added  > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} added`);
-    if (failed > 0) toast.error(`${failed} failed (may already exist)`);
+    if (added > 0) {
+      toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} saved`);
+    }
+    if (errors.length > 0) {
+      errors.forEach(e => toast.error(e, { duration: 6000 }));
+    }
 
     setShowHolidayModal(false);
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+    // Always refetch so holiday card and calendar update
     await fetchData();
   }, [holidayRows, fetchData]);
 
@@ -1573,10 +1605,7 @@ export default function Attendance() {
                               <motion.button
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
-                                onClick={() => {
-                                  handlePunchAction('punch_in');
-                                  setShowPunchInModal(false);
-                                }}
+                                onClick={() => handlePunchAction('punch_in')}
                                 disabled={loading}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-colors"
                               >
@@ -2472,15 +2501,12 @@ export default function Attendance() {
                   ⚠️ Auto-absent marks at 7:00 PM if you don't punch in
                 </p>
                 <Button
-                  onClick={() => {
-                    handlePunchAction('punch_in');
-                    setShowPunchInModal(false);
-                  }}
+                  onClick={() => handlePunchAction('punch_in')}
                   disabled={loading}
                   className="w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white"
                   style={{ backgroundColor: COLORS.emeraldGreen }}
                 >
-                  Punch In Now
+                  {loading ? 'Punching In…' : 'Punch In Now'}
                 </Button>
                 <button
                   onClick={() => setShowPunchInModal(false)}
