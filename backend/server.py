@@ -1123,13 +1123,9 @@ async def handle_attendance(
 ):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    # FIX: {"_id": 0} projection — ObjectId is not JSON-serializable, causes 500
-    holiday = await db.holidays.find_one({"date": today_str, "status": "confirmed"}, {"_id": 0})
-    if holiday:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Today is a holiday ({holiday.get('name')}). Office is closed."
-        )
+    # Note: We do NOT block punch-in on holidays.
+    # Users who choose to work on holidays can still punch in/out freely.
+    # The frontend suppresses the auto-popup on holidays but keeps the button visible.
     action = data.get("action")
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
@@ -1195,13 +1191,6 @@ async def handle_attendance(
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    # FIX: {"_id": 0} projection — ObjectId is not JSON-serializable
-    holiday = await db.holidays.find_one({"date": today_str}, {"_id": 0})
-    if holiday:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Today is a holiday ({holiday.get('name')}). Leave marking is not allowed."
-        )
     await db.attendance.update_one(
         {"user_id": current_user.id, "date": today_str},
         {
@@ -3930,7 +3919,7 @@ async def get_holidays(current_user: User = Depends(get_current_user)):
 @api_router.post("/holidays", response_model=HolidayResponse)
 async def create_holiday(
     holiday: HolidayCreate,
-    current_user: User = Depends(check_permission("can_manage_settings"))
+    current_user: User = Depends(require_admin)
 ):
     holiday_dict = holiday.model_dump()
     holiday_dict["date"] = holiday.date.isoformat()
@@ -3966,7 +3955,7 @@ async def create_holiday(
 async def update_holiday_status(
     holiday_date: str,
     data: dict,
-    current_user: User = Depends(check_permission("can_manage_settings"))
+    current_user: User = Depends(require_admin)
 ):
     new_status = data.get("status")
     if new_status not in ["confirmed", "rejected", "pending"]:
@@ -3982,7 +3971,7 @@ async def update_holiday_status(
 import traceback
 
 @api_router.delete("/holidays/{holiday_date}")
-async def delete_holiday(holiday_date: str, current_user: User = Depends(check_permission("can_manage_settings"))):
+async def delete_holiday(holiday_date: str, current_user: User = Depends(require_admin)):
     result = await db.holidays.delete_one({"date": holiday_date})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
