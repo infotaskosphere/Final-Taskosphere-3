@@ -121,8 +121,6 @@ async def startup_event():
     scheduler.start()
 
 # === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
-
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -137,6 +135,7 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ====================== HEALTH ======================
 @app.get("/health")
@@ -842,14 +841,9 @@ async def get_users(
             {"_id": 0, "password": 0}
         ).to_list(1000)
     for u in users_raw:
-        ca = u.get("created_at")
-        if ca is None:
-            u["created_at"] = datetime.now(timezone.utc)
-        elif isinstance(ca, datetime):
-            pass  # already a datetime object, leave it
-        elif isinstance(ca, str):
+        if u.get("created_at") and isinstance(u["created_at"], str):
             try:
-                u["created_at"] = datetime.fromisoformat(ca)
+                u["created_at"] = datetime.fromisoformat(u["created_at"])
             except Exception:
                 u["created_at"] = datetime.now(timezone.utc)
         else:
