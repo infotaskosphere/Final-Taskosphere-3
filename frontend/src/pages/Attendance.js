@@ -57,6 +57,7 @@ const COLORS = {
   amber:        '#F59E0B',
   orange:       '#F97316',
   red:          '#EF4444',
+  maroon:       '#800000',
   slate50:      '#F8FAFC',
   slate200:     '#E2E8F0',
   purple:       '#8B5CF6',
@@ -289,19 +290,32 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 
   if (holiday) {
     ringColor = COLORS.amber;
-    bgColor   = '#FEF3C720';
+    bgColor = '#FEF3C720';
     isSpecial = true;
-  } else if (dayRecord?.status === 'leave') {
+  }
+  else if (dayRecord?.status === 'leave') {
     ringColor = COLORS.orange;
-    bgColor   = '#FFF7ED20';
+    bgColor = '#FFF7ED20';
     isSpecial = true;
-  } else if (dayRecord?.punch_in && dayRecord?.is_late) {
+  }
+  else if (dayRecord?.status === 'half_day') {
+    ringColor = COLORS.orange;
+    bgColor = '#FFF7ED30';
+    isSpecial = true;
+  }
+  else if (!dayRecord?.punch_in && dayRecord?.status === 'absent') {
+    ringColor = COLORS.maroon;
+    bgColor = '#80000020';
+    isSpecial = true;
+  }
+  else if (dayRecord?.punch_in && dayRecord?.is_late) {
     ringColor = COLORS.red;
-    bgColor   = '#FEE2E220';
+    bgColor = '#FEE2E220';
     isSpecial = true;
-  } else if (dayRecord?.punch_in) {
+  }
+  else if (dayRecord?.punch_in) {
     ringColor = COLORS.emeraldGreen;
-    bgColor   = '#D1FAE520';
+    bgColor = '#D1FAE520';
   }
 
   const isTodayDate = dateFnsIsToday(date);
@@ -319,9 +333,15 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
                 borderColor:     ringColor,
                 backgroundColor: bgColor,
               }}
-              animate={isSpecial ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+              animate={
+                isSpecial
+                  ? { scale: [1, 1.08, 1] }
+                  : (dayRecord?.status === "absent"
+                      ? { scale: [1, 1.06, 1] }
+                      : { scale: 1 })
+              }
               transition={{
-                duration: 2.2,
+                duration: dayRecord?.status === "absent" ? 3 : 2.2,
                 repeat:   isSpecial ? Infinity : 0,
                 ease:     'easeInOut',
               }}
@@ -362,6 +382,13 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           >
             {date.getDate()}
           </span>
+
+          {dayRecord?.status === "absent" && (
+            <span
+              className="absolute bottom-1 w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: COLORS.maroon }}
+            />
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">
@@ -381,7 +408,10 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
             <p className="font-semibold" style={{ color: COLORS.emeraldGreen }}>
               {formatDuration(dayRecord.duration_minutes)}
             </p>
-            {dayRecord.is_late && (
+            {dayRecord?.status === 'half_day' && (
+              <p className="text-orange-600 font-semibold">Half Day</p>
+            )}
+            {dayRecord?.is_late && dayRecord?.status !== 'half_day' && (
               <p className="text-red-500 font-semibold">Late arrival</p>
             )}
           </>
@@ -391,7 +421,9 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
             <p className="text-slate-400 text-[10px] mt-1">Punch in to mark attendance</p>
           </div>
         ) : (
-          <p className="text-slate-400 font-medium">No record</p>
+          <p style={{color: COLORS.maroon}} className="font-semibold">
+            ❌ Absent
+          </p>
         )}
       </TooltipContent>
     </Tooltip>
@@ -1743,10 +1775,11 @@ export default function Attendance() {
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
-                      { color: COLORS.red,          label: 'Late',    style: 'solid' },
-                      { color: COLORS.red,          label: 'Not in yet', style: 'dashed' },
-                      { color: COLORS.amber,        label: 'Holiday', style: 'solid' },
-                      { color: COLORS.orange,       label: 'Leave',   style: 'solid' },
+                      { color: COLORS.orange, label: 'Half Day', style: 'solid' },
+                      { color: COLORS.red, label: 'Late', style: 'solid' },
+                      { color: COLORS.maroon, label: 'Absent', style: 'solid' },
+                      { color: COLORS.amber, label: 'Holiday', style: 'solid' },
+                      { color: COLORS.orange, label: 'Leave', style: 'solid' },
                     ].map(({ color, label, style }) => (
                       <div key={label} className="flex items-center gap-1.5">
                         <span
@@ -1790,7 +1823,15 @@ export default function Attendance() {
                             </span>
                           </div>
                         )}
-                        {selectedAttendance.is_late && (
+                        {selectedAttendance.status === 'half_day' && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-600 font-medium">Status</span>
+                            <span className="text-xs font-bold text-orange-600 uppercase px-2 py-1 bg-orange-100 rounded">
+                              Half Day
+                            </span>
+                          </div>
+                        )}
+                        {selectedAttendance.is_late && selectedAttendance.status !== 'half_day' && (
                           <div className="flex justify-between items-center">
                             <span className="text-slate-600 font-medium">Status</span>
                             <span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">
@@ -1978,7 +2019,12 @@ export default function Attendance() {
                                   {formatDuration(record.duration_minutes)}
                                 </Badge>
                               )}
-                              {record.is_late && (
+                              {record.status === 'half_day' && (
+                                <span className="text-[10px] font-bold text-orange-600 uppercase px-2 py-1 bg-orange-100 rounded">
+                                  Half Day
+                                </span>
+                              )}
+                              {record.is_late && record.status !== 'half_day' && (
                                 <span className="text-[10px] font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">
                                   Late
                                 </span>
