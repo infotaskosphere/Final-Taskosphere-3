@@ -277,7 +277,7 @@ const reverseGeocode = async (lat, lng) => {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUSTOM CALENDAR DAY
+// CUSTOM CALENDAR DAY — REFINED ANIMATIONS
 // ═════════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dateStr   = format(date, 'yyyy-MM-dd');
@@ -320,54 +320,65 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 
   const isTodayDate = dateFnsIsToday(date);
 
+  // ── Refined ring animation logic ───────────────────────────────────────
+  // Regular present days = very subtle breathing
+  // Special days (holiday/leave/half/late) = gentle 1.08 pulse
+  // Absent days = stronger 1.12 pulse + opacity fade (more noticeable)
+  let ringAnimate = { scale: 1 };
+  let ringDuration = 2.8;
+  let ringRepeat = 0;
+
+  if (ringColor) {
+    if (dayRecord?.status === 'absent') {
+      ringAnimate = { scale: [1, 1.12, 1], opacity: [1, 0.85, 1] };
+      ringDuration = 3.2;
+      ringRepeat = Infinity;
+    } else if (isSpecial) {
+      ringAnimate = { scale: [1, 1.08, 1] };
+      ringDuration = 2.4;
+      ringRepeat = Infinity;
+    } else {
+      // Regular present — ultra-subtle pulse
+      ringAnimate = { scale: [1, 1.03, 1] };
+      ringDuration = 3.5;
+      ringRepeat = Infinity;
+    }
+  } else if (isTodayDate) {
+    ringAnimate = { scale: [1, 1.1, 1], opacity: [1, 0.75, 1] };
+    ringDuration = 1.8;
+    ringRepeat = Infinity;
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95">
-          {ringColor ? (
+        <motion.button
+          className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.94 }}
+          transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        >
+          {/* Ring / Today indicator */}
+          {(ringColor || isTodayDate) && (
             <motion.span
               className="absolute flex items-center justify-center rounded-full border-2"
               style={{
                 width:           30,
                 height:          30,
-                borderColor:     ringColor,
-                backgroundColor: bgColor,
+                borderColor:     ringColor || COLORS.red,
+                backgroundColor: bgColor || `${COLORS.red}12`,
+                borderStyle:     isTodayDate && !ringColor ? 'dashed' : 'solid',
               }}
-              animate={
-                isSpecial
-                  ? { scale: [1, 1.08, 1] }
-                  : (dayRecord?.status === "absent"
-                      ? { scale: [1, 1.06, 1] }
-                      : { scale: 1 })
-              }
+              animate={ringAnimate}
               transition={{
-                duration: dayRecord?.status === "absent" ? 3 : 2.2,
-                repeat:   isSpecial ? Infinity : 0,
-                ease:     'easeInOut',
+                duration: ringDuration,
+                repeat: ringRepeat,
+                ease: "easeInOut",
               }}
             />
-          ) : isTodayDate ? (
-            <motion.span
-              className="absolute rounded-full border-2"
-              style={{
-                width:           30,
-                height:          30,
-                borderColor:     COLORS.red,
-                borderStyle:     'dashed',
-                backgroundColor: `${COLORS.red}12`,
-              }}
-              animate={{
-                scale:  [1, 1.1, 1],
-                opacity:[1, 0.7, 1],
-              }}
-              transition={{
-                duration: 1.8,
-                repeat:   Infinity,
-                ease:     'easeInOut',
-              }}
-            />
-          ) : null}
+          )}
 
+          {/* Date number */}
           <span
             className={`relative z-10 text-[13px] leading-none select-none
               ${isTodayDate ? 'font-black' : 'font-medium'}
@@ -383,13 +394,16 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
             {date.getDate()}
           </span>
 
+          {/* Absent indicator — refined pulsing dot */}
           {dayRecord?.status === "absent" && (
-            <span
+            <motion.span
               className="absolute bottom-1 w-1.5 h-1.5 rounded-full"
               style={{ backgroundColor: COLORS.maroon }}
+              animate={{ scale: [1, 1.45, 1], opacity: [1, 0.6, 1] }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
             />
           )}
-        </button>
+        </motion.button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">
         <p className="font-bold mb-1">{format(date, 'MMM d, yyyy')}</p>
@@ -642,37 +656,25 @@ export default function Attendance() {
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
 
-    // Determine which user's data to fetch
     const rawTargetId = isAdmin
       ? (overrideUserId !== undefined ? overrideUserId : selectedUserId)
       : null;
 
-    // ─────────────────────────────────────────────────────────────────────
-    // KEY FIX: When admin is viewing their OWN data (rawTargetId is null OR
-    // equals their own user ID), we must pass user?.id explicitly to the API
-    // so the backend filters to just their records — not ALL records.
-    // Without this, /attendance/history with no filter returns every user's
-    // records when called by an admin, causing inflated stats & duplicate rows.
-    // ─────────────────────────────────────────────────────────────────────
     const isEveryoneReq = isAdmin && rawTargetId === 'everyone';
     const isOtherReq    = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
-    // For admin's own view: use their own user ID so backend filters correctly
     const resolvedUserId = isEveryoneReq
       ? null
       : isOtherReq
         ? rawTargetId
-        : (isAdmin ? user?.id : null); // <-- THE FIX: admin always sends own id
+        : (isAdmin ? user?.id : null);
 
     try {
       let historyUrl;
       if (isEveryoneReq) {
-        // No user_id param = all records (admin aggregate view)
         historyUrl = '/attendance/history';
       } else if (resolvedUserId) {
-        // Filtered to specific user (either admin's own id or another user's id)
         historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
       } else {
-        // Non-admin: backend infers from auth token
         historyUrl = '/attendance/history';
       }
 
@@ -708,7 +710,6 @@ export default function Attendance() {
       setTodayAttendance(todayRes.data);
 
       if (isOtherReq) {
-        // Build summary from history for the viewed user
         const monthlySummary = {};
         history.forEach(a => {
           const m = a.date?.slice(0, 7);
@@ -730,12 +731,10 @@ export default function Attendance() {
           }),
         });
       } else if (isEveryoneReq) {
-        // Aggregate summary across all users
         const total_minutes = history.reduce((s, a) => s + (a.duration_minutes || 0), 0);
         const total_days    = history.filter(a => a.punch_in).length;
         setMySummary({ total_minutes, total_days, monthly_summary: [] });
       } else {
-        // Own data — use the dedicated summary endpoint response
         setMySummary(summaryRes?.data ?? null);
       }
 
@@ -1136,7 +1135,6 @@ export default function Attendance() {
                 }}
                 disabled={allUsers.length === 0}
               >
-                {/* Admin's own data — show name with (Admin) tag */}
                 <option value="">
                   {allUsers.length === 0
                     ? 'Loading users…'
@@ -1144,9 +1142,7 @@ export default function Attendance() {
                       ? `${user.full_name} (Admin)`
                       : 'My Attendance'}
                 </option>
-                {/* Aggregate view */}
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {/* All other users — admins get "(Admin)" label, others get their role */}
                 {allUsers
                   .filter(u => u.id !== user?.id)
                   .map(u => (
