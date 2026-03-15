@@ -128,7 +128,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 async def _mark_absent_for_date(target_date_str: str) -> dict:
     """Core absent-marking logic. Returns a summary dict."""
     # Skip confirmed holidays
-    holiday = await db.holidays.find_one({"date": target_date_str, "status": "confirmed"})
+    # FIX: {"_id": 0} projection — ObjectId causes issues if doc is returned
+    holiday = await db.holidays.find_one({"date": target_date_str, "status": "confirmed"}, {"_id": 0})
     if holiday:
         return {"skipped": True, "reason": f"Holiday: {holiday.get('name')}", "marked": 0, "date": target_date_str}
 
@@ -148,7 +149,7 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
 
     for u in active_users:
         uid = u["id"]
-        existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str})
+        existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str}, {"_id": 0})
 
         if existing:
             if existing.get("status") in ("present", "leave", "absent"):
@@ -401,7 +402,8 @@ def fetch_indian_holidays_task():
                         h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
                         if h_date_obj.month == month:
                             date_str = h_date_obj.isoformat()
-                            existing = await db.holidays.find_one({"date": date_str})
+                            # FIX: {"_id": 0} projection
+                            existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
                             if not existing:
                                 new_holiday = {
                                     "date": date_str,
@@ -574,7 +576,7 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
     if not name:
         raise HTTPException(status_code=400, detail="Referrer name required")
 
-    existing = await db.referrers.find_one({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+    existing = await db.referrers.find_one({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0})
 
     if existing:
         return existing
@@ -820,7 +822,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email})
+    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user_status = user.get("status")
@@ -843,7 +845,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
 # require_admin is a plain async function — use Depends(require_admin) without ()
 @api_router.post("/users/{user_id}/approve")
 async def approve_user(user_id: str, current_user: User = Depends(require_admin)):
-    existing = await db.users.find_one({"id": user_id})
+    existing = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
     if existing.get("status") != "pending_approval":
@@ -863,7 +865,7 @@ async def approve_user(user_id: str, current_user: User = Depends(require_admin)
 
 @api_router.post("/users/{user_id}/reject")
 async def reject_user(user_id: str, current_user: User = Depends(require_admin)):
-    existing = await db.users.find_one({"id": user_id})
+    existing = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
     update_data = {"status": "rejected", "is_active": False}
@@ -917,7 +919,7 @@ async def update_reminder(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    existing = await db.reminders.find_one({"id": reminder_id})
+    existing = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Reminder not found")
     if existing["user_id"] != current_user.id and current_user.role != "admin":
@@ -935,7 +937,7 @@ async def delete_reminder(
     reminder_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    existing = await db.reminders.find_one({"id": reminder_id})
+    existing = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Reminder not found")
     if existing["user_id"] != current_user.id and current_user.role != "admin":
@@ -1003,7 +1005,7 @@ async def update_user(
     has_edit_users = perms.get("can_edit_users", False)
     if not is_admin and not is_own and not has_edit_users:
         raise HTTPException(status_code=403, detail="You can only update your own profile.")
-    existing = await db.users.find_one({"id": user_id})
+    existing = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found.")
     if is_admin:
@@ -1050,7 +1052,7 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed")
-    user = await db.users.find_one({"id": user_id})
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.get("permissions", {})
@@ -1063,7 +1065,7 @@ async def update_user_permissions(
 ):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    existing = await db.users.find_one({"id": user_id})
+    existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
     old_permissions = existing.get("permissions", {})
@@ -1121,7 +1123,8 @@ async def handle_attendance(
 ):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    holiday = await db.holidays.find_one({"date": today_str, "status": "confirmed"})
+    # FIX: {"_id": 0} projection — ObjectId is not JSON-serializable, causes 500
+    holiday = await db.holidays.find_one({"date": today_str, "status": "confirmed"}, {"_id": 0})
     if holiday:
         raise HTTPException(
             status_code=400,
@@ -1131,7 +1134,8 @@ async def handle_attendance(
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str}
+        {"user_id": current_user.id, "date": today_str},
+        {"_id": 0}
     )
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
@@ -1191,7 +1195,8 @@ async def handle_attendance(
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    holiday = await db.holidays.find_one({"date": today_str})
+    # FIX: {"_id": 0} projection — ObjectId is not JSON-serializable
+    holiday = await db.holidays.find_one({"date": today_str}, {"_id": 0})
     if holiday:
         raise HTTPException(
             status_code=400,
@@ -1215,7 +1220,9 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    holiday = await db.holidays.find_one({"date": today_str})
+    # FIX: Added {"_id": 0} projection — without it ObjectId leaks into JSON response
+    # and causes ValueError: 'ObjectId' object is not iterable (500 error)
+    holiday = await db.holidays.find_one({"date": today_str}, {"_id": 0})
     if holiday:
         return {
             "status": "holiday",
@@ -1910,7 +1917,7 @@ async def add_task_comment(
     comment_data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    task = await db.tasks.find_one({"id": task_id})
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     is_involved = (
@@ -3881,7 +3888,7 @@ async def _run_daily_reminder_job(today_str: str):
     """Background job - never blocks requests."""
     global _last_reminder_date_cache
     try:
-        setting = await db.system_settings.find_one({"key": "last_reminder_date"})
+        setting = await db.system_settings.find_one({"key": "last_reminder_date"}, {"_id": 0})
         db_last_date = setting["value"] if setting else None
         if db_last_date != today_str:
             logger.info("Auto daily reminder triggered at 10:00 AM IST")
@@ -3928,7 +3935,8 @@ async def create_holiday(
     holiday_dict = holiday.model_dump()
     holiday_dict["date"] = holiday.date.isoformat()
     holiday_dict["status"] = "confirmed"
-    existing = await db.holidays.find_one({"date": holiday_dict["date"]})
+    # FIX: {"_id": 0} projection
+    existing = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Holiday already exists for this date")
     await db.holidays.insert_one(holiday_dict)
