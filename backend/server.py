@@ -3781,11 +3781,8 @@ async def auto_daily_reminder(request: Request, call_next):
     # 1. Handle CORS preflight request
     # --------------------------------------
     if request.method == "OPTIONS":
-        return JSONResponse(
-            status_code=200,
-            content={"message": "OK"}
-        )
-
+        return await call_next(request)
+           
     try:
         # --------------------------------------
         # 2. Check if reminder should run today
