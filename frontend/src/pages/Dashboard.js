@@ -229,10 +229,35 @@ export default function Dashboard() {
   const { data: todayAttendance } = useTodayAttendance();
   const updateTaskMutation = useUpdateTask();
 
-  // ── DASHBOARD TODOS — always scoped to the current user only.
-  // We explicitly pass user_id so that even admins only see their own
-  // todos on the dashboard "My To-Do" card. The full Todo Dashboard page
-  // handles cross-user visibility separately via its own dropdown.
+  // ── Fetch holidays to derive todayIsHoliday reliably ────────────────────
+  // We fetch holidays independently here for the same reason as Attendance.jsx:
+  // todayAttendance.status === 'holiday' is unreliable — if an absent record
+  // exists for today, the backend returns that instead of the holiday status.
+  // The holidays array is the single source of truth.
+  const { data: holidaysData = [] } = useQuery({
+    queryKey: ['holidays', 'dashboard'],
+    queryFn: async () => {
+      const res = await api.get('/holidays');
+      return res.data || [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 min cache
+  });
+
+  // ── todayIsHoliday: derived from confirmed holidays array ────────────────
+  // Used to:
+  //   1. Suppress the punch-in gate overlay on holidays
+  //   2. Still allow user to punch in voluntarily if they choose to work
+  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
+  const todayIsHoliday = useMemo(
+    () => holidaysData.some(h => h.date === todayDateStr && h.status === 'confirmed'),
+    [holidaysData, todayDateStr]
+  );
+  const todayHolidayName = useMemo(
+    () => holidaysData.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
+    [holidaysData, todayDateStr]
+  );
+
+  // ── DASHBOARD TODOS — always scoped to the current user only ─────────────
   const { data: todosRaw = [] } = useQuery({
     queryKey: ["todos", "dashboard-card", user?.id],
     queryFn: async () => {
@@ -245,7 +270,7 @@ export default function Dashboard() {
     refetchOnWindowFocus: true,
   });
 
-  // ── Normalise completed flag across both field conventions ─────────────────
+  // ── Normalise completed flag across both field conventions ────────────────
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
@@ -295,9 +320,7 @@ export default function Dashboard() {
   const createTodo = useMutation({
     mutationFn: data => api.post("/todos", data),
     onSuccess: () => {
-      // Invalidate only the dashboard-card cache key
       queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-      // Also invalidate the full todos page cache so it stays in sync
       queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo added");
     },
@@ -531,33 +554,63 @@ export default function Dashboard() {
     if (hour < 21) return "Good Evening 🌆";
     return "Working Late? 🌙";
   };
-useEffect(() => {
+
+  // ── mustPunchIn gate logic ────────────────────────────────────────────────
+  // Rules:
+  //   - NEVER show gate on holidays (todayIsHoliday) — user has the day off.
+  //     BUT if they come to the dashboard, the attendance card still shows a
+  //     Punch In button so they CAN clock in voluntarily.
+  //   - Never show gate on leave days.
+  //   - Never show gate if already punched in.
+  //   - Never show gate if auto-marked absent (day is over).
+  //   - Only show gate if todayAttendance is loaded AND not punched in yet.
+  //
+  // KEY: We use todayIsHoliday (from holidays array) NOT todayAttendance.status
+  // because the backend may return an absent record on a holiday day if the
+  // 7PM auto-mark ran before the holiday was added to the database.
+  // ─────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    // Don't do anything until attendance data has loaded
     if (!todayAttendance) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
-    // Never show punch-in gate on holidays, leave, or if already punched in
-    if (
-      todayAttendance.status === "holiday" ||
-      todayAttendance.status === "leave"   ||
-      todayAttendance.punch_in             ||
-      todayAttendance.status === "absent"  // auto-marked absent = day is over, no gate
-    ) {
+
+    // Rule 1: holidays — no gate, user is on holiday
+    if (todayIsHoliday) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
-    // Only show gate if genuinely not punched in yet (status = null/undefined/pending)
-    if (!todayAttendance.punch_in && todayAttendance.status !== "holiday") {
-      setMustPunchIn(true);
-      document.body.style.overflow = "hidden";
-    } else {
+
+    // Rule 2: leave day — no gate
+    if (todayAttendance.status === "leave") {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
+      return;
     }
+
+    // Rule 3: already punched in — no gate
+    if (todayAttendance.punch_in) {
+      setMustPunchIn(false);
+      document.body.style.overflow = "auto";
+      return;
+    }
+
+    // Rule 4: auto-marked absent — day is already over, no gate
+    if (todayAttendance.status === "absent") {
+      setMustPunchIn(false);
+      document.body.style.overflow = "auto";
+      return;
+    }
+
+    // Genuine case: user is logged in on a working day and hasn't punched in
+    setMustPunchIn(true);
+    document.body.style.overflow = "hidden";
+
     return () => { document.body.style.overflow = "auto"; };
-  }, [todayAttendance]);
+  }, [todayAttendance, todayIsHoliday]);
 
   const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
   const metricCardDefault = isDark
@@ -594,7 +647,9 @@ useEffect(() => {
                 Welcome back, {user?.full_name?.split(' ')[0] || 'User'} 👋
               </h1>
               <p className="text-white/60 text-sm mt-1">
-                Here's your business overview for today.
+                {todayIsHoliday
+                  ? `🎉 Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Have a great day!`
+                  : "Here's your business overview for today."}
               </p>
             </div>
             {nextDeadline && (
@@ -755,7 +810,7 @@ useEffect(() => {
               <div>
                 <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Today</p>
                 <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#fbbf24' : COLORS.deepBlue }}>
-                  {getTodayDuration()}
+                  {todayIsHoliday ? '🎉' : getTodayDuration()}
                 </p>
               </div>
               <div className="p-2 rounded-xl group-hover:scale-110 transition-transform"
@@ -764,7 +819,7 @@ useEffect(() => {
               </div>
             </div>
             <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-amber-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span>View details</span>
+              <span>{todayIsHoliday ? todayHolidayName || 'Holiday today' : 'View details'}</span>
               <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </CardContent>
@@ -878,7 +933,7 @@ useEffect(() => {
           </div>
         </SectionCard>
 
-        {/* Attendance */}
+        {/* Attendance Card */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
@@ -893,58 +948,112 @@ useEffect(() => {
             }
           />
           <div className="p-3">
-            <div className="space-y-2">
-              {todayAttendance?.punch_in ? (
-                <>
-                  <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-green-50 border-green-200'}`}>
-                    <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                      <LogIn className="h-4 w-4 text-green-500" />
-                      <span className="font-medium">Punch In</span>
-                    </div>
-                    <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
-                  </div>
-                  {todayAttendance.punch_out ? (
-                    <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
-                      <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                        <LogOut className="h-4 w-4 text-red-500" />
-                        <span className="font-medium">Punch Out</span>
-                      </div>
-                      <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_out)}</span>
-                    </div>
-                  ) : (
+            {/* Holiday banner inside attendance card */}
+            {todayIsHoliday ? (
+              <div
+                className="rounded-xl px-4 py-4 text-center"
+                style={{
+                  background: isDark
+                    ? 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))'
+                    : 'linear-gradient(135deg, #FFFBEB, #FEF3C7)',
+                  border: isDark ? '1px solid rgba(245,158,11,0.25)' : '1px solid #FDE68A',
+                }}
+              >
+                <p className="text-2xl mb-1">🎉</p>
+                <p className={`font-bold text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+                  {todayHolidayName || 'Holiday Today'}
+                </p>
+                <p className={`text-xs mt-1 ${isDark ? 'text-amber-400/70' : 'text-amber-600'}`}>
+                  Office is closed. Enjoy your day!
+                </p>
+                {/* Still allow punch-in on holidays for those who work */}
+                {!todayAttendance?.punch_in && (
+                  <button
+                    onClick={() => handlePunchAction('punch_in')}
+                    disabled={loading}
+                    className={`mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                      isDark
+                        ? 'text-amber-300 border border-amber-700 hover:bg-amber-900/30'
+                        : 'text-amber-700 border border-amber-300 hover:bg-amber-50'
+                    }`}
+                  >
+                    Working today? Punch In
+                  </button>
+                )}
+                {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
+                  <div className="mt-3 space-y-2">
+                    <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Clocked in at {formatToLocalTime(todayAttendance.punch_in)}
+                    </p>
                     <Button
                       onClick={() => handlePunchAction('punch_out')}
-                      className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold"
+                      className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-8 text-xs font-semibold"
                       disabled={loading}
                     >
                       Punch Out
                     </Button>
-                  )}
-                  <div
-                    className="text-center py-3 rounded-xl"
-                    style={{
-                      background: isDark
-                        ? 'rgba(96,165,250,0.08)'
-                        : `linear-gradient(135deg, ${COLORS.deepBlue}08, ${COLORS.mediumBlue}12)`,
-                      border: isDark ? '1px solid rgba(96,165,250,0.15)' : `1px solid ${COLORS.deepBlue}15`,
-                    }}
-                  >
-                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Today</p>
-                    <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
-                      {getTodayDuration()}
-                    </p>
                   </div>
-                </>
-              ) : (
-                <Button
-                  onClick={() => handlePunchAction('punch_in')}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold"
-                  disabled={loading}
-                >
-                  Punch In
-                </Button>
-              )}
-            </div>
+                )}
+                {todayAttendance?.punch_out && (
+                  <p className={`mt-2 text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Worked {getTodayDuration()} today
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {todayAttendance?.punch_in ? (
+                  <>
+                    <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-green-50 border-green-200'}`}>
+                      <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                        <LogIn className="h-4 w-4 text-green-500" />
+                        <span className="font-medium">Punch In</span>
+                      </div>
+                      <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
+                    </div>
+                    {todayAttendance.punch_out ? (
+                      <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
+                        <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <LogOut className="h-4 w-4 text-red-500" />
+                          <span className="font-medium">Punch Out</span>
+                        </div>
+                        <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_out)}</span>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={() => handlePunchAction('punch_out')}
+                        className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold"
+                        disabled={loading}
+                      >
+                        Punch Out
+                      </Button>
+                    )}
+                    <div
+                      className="text-center py-3 rounded-xl"
+                      style={{
+                        background: isDark
+                          ? 'rgba(96,165,250,0.08)'
+                          : `linear-gradient(135deg, ${COLORS.deepBlue}08, ${COLORS.mediumBlue}12)`,
+                        border: isDark ? '1px solid rgba(96,165,250,0.15)' : `1px solid ${COLORS.deepBlue}15`,
+                      }}
+                    >
+                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Today</p>
+                      <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                        {getTodayDuration()}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <Button
+                    onClick={() => handlePunchAction('punch_in')}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold"
+                    disabled={loading}
+                  >
+                    Punch In
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </SectionCard>
       </motion.div>
@@ -1074,7 +1183,7 @@ useEffect(() => {
           </div>
         </SectionCard>
 
-        {/* My To-Do List — scoped to logged-in user only regardless of role */}
+        {/* My To-Do List */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
@@ -1266,8 +1375,11 @@ useEffect(() => {
       </motion.div>
 
       {/* ── Punch-In Gate Overlay ────────────────────────────────────────── */}
+      {/* Shown only on working days when user hasn't punched in.            */}
+      {/* NEVER shown on holidays — user has day off. todayIsHoliday is the  */}
+      {/* source of truth, not todayAttendance.status.                       */}
       <AnimatePresence>
-        {mustPunchIn && (
+        {mustPunchIn && !todayIsHoliday && (
           <motion.div
             className="fixed inset-0 z-[9999] flex items-center justify-center"
             style={{ background: 'rgba(7,15,30,0.75)', backdropFilter: 'blur(10px)' }}
