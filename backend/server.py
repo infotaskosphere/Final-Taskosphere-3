@@ -16,7 +16,7 @@ from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
 
-# FIX: Single logger definition (removed duplicate)
+# Single logger definition
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -52,11 +52,11 @@ from backend.dependencies import (
     get_current_user,
     create_access_token,
     check_permission,
-    require_admin,           # FIX: now a plain async function, use Depends(require_admin)
+    require_admin,
     require_manager_or_admin,
     verify_record_access,
     verify_client_access,
-    get_team_user_ids        # FIX: imported from dependencies, removed duplicate definition
+    get_team_user_ids
 )
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
@@ -68,7 +68,7 @@ from sendgrid.helpers.mail import Mail
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ====================== CONFIG ======================
-# FIX: Single IST definition (removed duplicate)
+# Single IST definition
 IST = pytz.timezone('Asia/Kolkata')
 india_tz = ZoneInfo("Asia/Kolkata")
 
@@ -81,17 +81,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ====================== SCHEDULER ======================
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 
-# ── IN-MEMORY CACHE for daily reminder (avoids DB query on every request) ──
+# IN-MEMORY CACHE for daily reminder (avoids DB query on every request)
 _last_reminder_date_cache: Optional[str] = None
 
 # ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend")
 
-# === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
+# === CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 # Registered BEFORE startup_event and all other middleware.
 # When the Render free-tier backend is sleeping (cold start), it returns no
 # headers at all — the browser shows "No Access-Control-Allow-Origin". This is
-# NOT a CORS misconfiguration; it's a cold-start timing issue. Keeping CORS
+# NOT a CORS misconfiguration; it is a cold-start timing issue. Keeping CORS
 # registered first ensures that once the server wakes, the headers are correct.
 app.add_middleware(
     CORSMiddleware,
@@ -121,8 +121,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 #   - Skip confirmed holidays
 #   - Skip weekends (Saturday=5, Sunday=6)
 #   - For every active user with no present/leave/absent record
-#     → insert a new absent record with auto_marked=True
-#   - If a record exists but has an unexpected status → update to absent
+#     insert a new absent record with auto_marked=True
+#   - If a record exists but has an unexpected status update to absent
 # =============================================================
 
 async def _mark_absent_for_date(target_date_str: str) -> dict:
@@ -192,55 +192,79 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
 
 
 def mark_absent_users_task():
-    """Sync wrapper called by APScheduler at 19:00 IST every working day."""
-    async def _run():
+    """
+    Sync wrapper called by APScheduler at 19:00 IST every working day.
+    FIX: Uses a dedicated new event loop instead of asyncio.run() to avoid
+    RuntimeError when called from within an already-running event loop context.
+    """
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         today_str = datetime.now(IST).date().isoformat()
-        result = await _mark_absent_for_date(today_str)
+        result = loop.run_until_complete(_mark_absent_for_date(today_str))
         logger.info(f"Scheduled absent job result: {result}")
-    asyncio.run(_run())
+    except Exception as e:
+        logger.error(f"mark_absent_users_task failed: {e}")
+    finally:
+        if loop and not loop.is_closed():
+            loop.close()
 
 
 @app.on_event("startup")
 async def startup_event():
-    await db.tasks.create_index("assigned_to")
-    await db.tasks.create_index("created_by")
-    await db.tasks.create_index("due_date")
-    await db.users.create_index("email")
-    await db.staff_activity.create_index("user_id")
-    await db.staff_activity.create_index("timestamp")
-    await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
-    await db.due_dates.create_index("department")
-    await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
-    await db.tasks.create_index("created_at")
-    await db.referrers.create_index("name")
-    await db.clients.create_index("assigned_to")
-    await db.dsc_register.create_index("expiry_date")
-    await db.todos.create_index([("user_id", 1), ("created_at", -1)])
-    await db.attendance.create_index([("user_id", 1), ("date", -1)])
-    await db.notifications.create_index("user_id")
-    await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
-    await db.notifications.create_index("created_at")
-    await db.attendance.create_index(
-        [("user_id", 1), ("date", 1)],
-        unique=True
-    )
-    await db.clients.create_index(
-        [("created_by", 1), ("company_name", 1)],
-        unique=True
-    )
-    await db.holidays.create_index("date", unique=True)
-    scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
-    # NEW: Absent marking job — fires every working day at 19:00 IST
-    scheduler.add_job(
-        mark_absent_users_task,
-        'cron',
-        hour=19,
-        minute=0,
-        timezone=pytz.timezone("Asia/Kolkata"),
-        id="mark_absent_daily",
-        replace_existing=True,
-    )
-    scheduler.start()
+    try:
+        await db.tasks.create_index("assigned_to")
+        await db.tasks.create_index("created_by")
+        await db.tasks.create_index("due_date")
+        await db.users.create_index("email")
+        await db.staff_activity.create_index("user_id")
+        await db.staff_activity.create_index("timestamp")
+        await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+        await db.due_dates.create_index("department")
+        await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
+        await db.tasks.create_index("created_at")
+        await db.referrers.create_index("name")
+        await db.clients.create_index("assigned_to")
+        await db.dsc_register.create_index("expiry_date")
+        await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+        await db.attendance.create_index([("user_id", 1), ("date", -1)])
+        await db.notifications.create_index("user_id")
+        await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
+        await db.notifications.create_index("created_at")
+        # Unique indexes — use background=True so they don't block startup if they already exist
+        await db.attendance.create_index(
+            [("user_id", 1), ("date", 1)],
+            unique=True,
+            background=True
+        )
+        await db.clients.create_index(
+            [("created_by", 1), ("company_name", 1)],
+            unique=True,
+            background=True
+        )
+        await db.holidays.create_index("date", unique=True, background=True)
+    except Exception as e:
+        # Log index creation errors but do NOT crash the server
+        logger.warning(f"Index creation warning (non-fatal): {e}")
+
+    # Scheduled jobs
+    try:
+        scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+        # Absent marking job — fires every working day at 19:00 IST
+        scheduler.add_job(
+            mark_absent_users_task,
+            'cron',
+            hour=19,
+            minute=0,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="mark_absent_daily",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("APScheduler started successfully.")
+    except Exception as e:
+        logger.error(f"APScheduler startup failed: {e}")
 
 
 # ====================== HEALTH ======================
@@ -250,7 +274,7 @@ async def health():
 
 # ====================== SECURITY & DB ======================
 rankings_cache = {}
-# FIX: Store cache times as timezone-aware UTC datetimes for consistent comparison
+# Store cache times as timezone-aware UTC datetimes for consistent comparison
 rankings_cache_time: Dict[str, datetime] = {}
 
 # ===================== HELPER FUNCTIONS =====================
@@ -353,39 +377,51 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
     return round(total_hours, 2)
 
 def fetch_indian_holidays_task():
-    """Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays for the current month."""
-    import asyncio
+    """
+    Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays for the current month.
+    FIX: Uses a dedicated new event loop instead of asyncio.run() to avoid
+    RuntimeError when an event loop is already running.
+    """
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    async def _async_fetch():
-        try:
-            now = datetime.now(IST)
-            year = now.year
-            month = now.month
-            url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                external_holidays = response.json()
-                count = 0
-                for h in external_holidays:
-                    h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
-                    if h_date_obj.month == month:
-                        date_str = h_date_obj.isoformat()
-                        existing = await db.holidays.find_one({"date": date_str})
-                        if not existing:
-                            new_holiday = {
-                                "date": date_str,
-                                "name": h['localName'],
-                                "status": "pending",
-                                "type": "public",
-                                "created_at": datetime.now(IST).isoformat()
-                            }
-                            await db.holidays.insert_one(new_holiday)
-                            count += 1
-                logger.info(f"Auto-fetched {count} holidays for {now.strftime('%B %Y')}")
-        except Exception as e:
-            logger.error(f"Holiday Autofetch Failed: {str(e)}")
+        async def _async_fetch():
+            try:
+                now = datetime.now(IST)
+                year = now.year
+                month = now.month
+                url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    external_holidays = response.json()
+                    count = 0
+                    for h in external_holidays:
+                        h_date_obj = datetime.strptime(h['date'], '%Y-%m-%d').date()
+                        if h_date_obj.month == month:
+                            date_str = h_date_obj.isoformat()
+                            existing = await db.holidays.find_one({"date": date_str})
+                            if not existing:
+                                new_holiday = {
+                                    "date": date_str,
+                                    "name": h['localName'],
+                                    "status": "pending",
+                                    "type": "public",
+                                    "created_at": datetime.now(IST).isoformat()
+                                }
+                                await db.holidays.insert_one(new_holiday)
+                                count += 1
+                    logger.info(f"Auto-fetched {count} holidays for {now.strftime('%B %Y')}")
+            except Exception as e:
+                logger.error(f"Holiday Autofetch Failed: {str(e)}")
 
-    asyncio.run(_async_fetch())
+        loop.run_until_complete(_async_fetch())
+    except Exception as e:
+        logger.error(f"fetch_indian_holidays_task failed: {e}")
+    finally:
+        if loop and not loop.is_closed():
+            loop.close()
 
 
 # ROUTER
@@ -618,7 +654,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
     if is_admin:
         todos = await db.todos.find().to_list(2000)
-        # FIX: Replaced N+1 user queries with a single batch lookup
+        # Replaced N+1 user queries with a single batch lookup
         user_ids = list({t["user_id"] for t in todos if t.get("user_id")})
         users_raw = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(1000)
         user_name_map = {u["id"]: u.get("full_name", "Unknown User") for u in users_raw}
@@ -778,7 +814,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     }
     await db.users.insert_one(new_user)
     access_token = create_access_token({"sub": user_id})
-    # FIX: Remove password from response dict before returning to prevent leaking hash
+    # Remove password from response dict before returning to prevent leaking hash
     new_user.pop("password", None)
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
@@ -804,7 +840,7 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-# FIX: require_admin is now a plain async function — use Depends(require_admin) without ()
+# require_admin is a plain async function — use Depends(require_admin) without ()
 @api_router.post("/users/{user_id}/approve")
 async def approve_user(user_id: str, current_user: User = Depends(require_admin)):
     existing = await db.users.find_one({"id": user_id})
@@ -1110,7 +1146,7 @@ async def handle_attendance(
             "punch_in": punch_in_utc,
             "is_late": is_late,
             "leave_reason": None,
-            # NEW: Clear auto_absent flag if user punches in manually
+            # Clear auto_absent flag if user punches in manually
             "auto_marked": False,
         }
         if location_data:
@@ -1368,7 +1404,7 @@ async def get_staff_attendance_report(
                 "early_out_days": 0,
                 "records": []
             }
-        # NEW: count absent days separately
+        # count absent days separately
         if attendance.get("status") == "absent":
             staff_report[uid]["days_absent"] += 1
         duration = attendance.get("duration_minutes")
@@ -1463,7 +1499,7 @@ async def export_attendance_pdf(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NEW: MANUAL ABSENT MARKING ENDPOINT (Admin only)
+# MANUAL ABSENT MARKING ENDPOINT (Admin only)
 # POST /api/attendance/mark-absent-bulk
 # Body: { "date": "YYYY-MM-DD" }  (optional — defaults to today IST)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1490,7 +1526,7 @@ async def mark_absent_bulk(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NEW: ABSENT SUMMARY ENDPOINT
+# ABSENT SUMMARY ENDPOINT
 # GET /api/attendance/absent-summary?month=YYYY-MM
 # ─────────────────────────────────────────────────────────────────────────────
 @api_router.get("/attendance/absent-summary")
@@ -1943,7 +1979,7 @@ async def export_task_log_pdf(
         if action == "TASK_STATUS_CHANGED":
             old_status = log.get("old_data", {}).get("status", "-")
             new_status = log.get("new_data", {}).get("status", "-")
-            pdf.multi_cell(0, 6, f" Status changed: {old_status} → {new_status}")
+            pdf.multi_cell(0, 6, f" Status changed: {old_status} -> {new_status}")
         elif action == "TASK_COMPLETED":
             pdf.multi_cell(0, 6, " Task marked as completed.")
         elif action == "DELETE_TASK":
@@ -1959,7 +1995,7 @@ async def export_task_log_pdf(
                 old_val = old_data.get(key)
                 new_val = new_data.get(key)
                 if old_val != new_val:
-                    pdf.multi_cell(0, 6, f" {key.replace('_', ' ').title()}: {old_val} → {new_val}")
+                    pdf.multi_cell(0, 6, f" {key.replace('_', ' ').title()}: {old_val} -> {new_val}")
         pdf.ln(3)
     pdf.ln(5)
     pdf.set_font("Arial", "I", 8)
@@ -2524,7 +2560,7 @@ def parse_compliance_dates(raw_text: str):
     return results
 
 
-# FIX: Route registered BEFORE /{due_date_id} param routes to prevent shadowing
+# Route registered BEFORE /{due_date_id} param routes to prevent shadowing
 @api_router.post("/duedates/extract-from-file")
 async def extract_due_dates_from_file(
     file: UploadFile = File(...),
@@ -2701,7 +2737,7 @@ async def delete_due_date(
     return {"message": "Due date deleted successfully"}
 
 
-# FIX: Registered before /clients/{client_id} to prevent route shadowing
+# Registered before /clients/{client_id} to prevent route shadowing
 @api_router.get("/clients/upcoming-birthdays")
 async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
     clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
@@ -2711,7 +2747,7 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
         if client.get("birthday"):
             try:
                 bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
-                # FIX: Added leap year guard (was missing in original)
+                # Added leap year guard
                 try:
                     this_year_bday = bday.replace(year=today.year)
                 except ValueError:
@@ -2802,7 +2838,7 @@ async def export_reports(
         output = StringIO()
         def sanitize_csv_value(val):
             val_str = str(val)
-            # FIX: Strip newlines to prevent CSV row injection in addition to formula injection
+            # Strip newlines to prevent CSV row injection in addition to formula injection
             val_str = val_str.replace('\r', '').replace('\n', ' ')
             if val_str and val_str[0] in ['=', '+', '-', '@']:
                 return f"'{val_str}"
@@ -2853,7 +2889,7 @@ async def get_performance_rankings(
     if (
         cache_key in rankings_cache and
         cache_key in rankings_cache_time and
-        # FIX: Use timezone-aware UTC datetime for cache comparison to avoid TypeError
+        # Use timezone-aware UTC datetime for cache comparison to avoid TypeError
         (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
     ):
         return rankings_cache[cache_key]
@@ -2939,9 +2975,9 @@ async def get_performance_rankings(
         )
         overall_score = round(min(score, 100), 1)
         if overall_score >= 95:
-            badge = "⭐ Star Performer"
+            badge = "Star Performer"
         elif overall_score >= 85:
-            badge = "🏆 Top Performer"
+            badge = "Top Performer"
         else:
             badge = "Good Performer"
         rankings.append(
@@ -2962,7 +2998,7 @@ async def get_performance_rankings(
     for i, r in enumerate(rankings):
         r.rank = i + 1
     rankings_cache[cache_key] = rankings
-    # FIX: Store as timezone-aware UTC datetime so comparison never throws TypeError
+    # Store as timezone-aware UTC datetime so comparison never throws TypeError
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
     return rankings
 
@@ -3107,7 +3143,6 @@ async def parse_mds_excel_for_client_form(
                 key = str(row.iloc[0]).strip()
                 value = str(row.iloc[1]).strip() if len(row) > 1 else ""
                 if key and key not in ("", "nan") and value not in ("", "nan"):
-                    # Skip section-header rows that concatenate multiple fields in one cell
                     if any(phrase in key for phrase in [
                         "Accounts and Solvency", "Annual Returns", "Filing Information",
                         "Interim Resolution", "Sr. No", "Date of filing"
@@ -3116,7 +3151,6 @@ async def parse_mds_excel_for_client_form(
                     company_info[key] = value
         elif "director" in sheet_lower or "signatory" in sheet_lower or "partner" in sheet_lower:
             rows_list = df.values.tolist()
-            # Find the real header row (contains "Name" or "DIN")
             header_row_idx = None
             for idx, row in enumerate(rows_list):
                 row_strs = [str(c).strip() for c in row]
@@ -3157,7 +3191,7 @@ async def parse_mds_excel_for_client_form(
                             " | ".join(f"{k}: {v}" for k, v in r.items() if v not in ("", "nan", "-"))
                         )
 
-   # Support both Pvt Ltd (MCA) and LLP field naming conventions
+    # Support both Pvt Ltd (MCA) and LLP field naming conventions
     company_name = (
         company_info.get("Company Name") or
         company_info.get("LLP Name") or
@@ -3185,7 +3219,6 @@ async def parse_mds_excel_for_client_form(
     birthday = parse_date(raw_doi)
     client_type = detect_type(company_name)
 
-    # Raw address from either Pvt Ltd or LLP key
     address = (
         company_info.get("Registered Address") or
         company_info.get("Registered Office Address") or
@@ -3194,7 +3227,6 @@ async def parse_mds_excel_for_client_form(
     if address in ("-", "nan"):
         address = ""
 
-    # Parse city & state from address (last 3 comma-parts)
     city = ""
     state = ""
     if address:
@@ -3208,7 +3240,6 @@ async def parse_mds_excel_for_client_form(
 
     notes_lines = []
 
-    # CIN for Pvt Ltd / LLPIN for LLP
     cin = company_info.get("CIN", "") or company_info.get("LLPIN", "")
     if cin and cin not in ("-", "nan"):
         notes_lines.append(f"CIN/LLPIN: {cin}")
@@ -3221,17 +3252,16 @@ async def parse_mds_excel_for_client_form(
     if reg_no and reg_no not in ("-", "nan"):
         notes_lines.append(f"Reg No: {reg_no}")
 
-    # Only add address to notes once — do NOT add it again below
     auth_cap = (
         company_info.get("Authorised Capital (Rs)", "") or
         company_info.get("Total Obligation of Contribution", "")
     )
     if auth_cap and auth_cap not in ("-", "nan"):
-        notes_lines.append(f"Capital/Contribution: ₹{auth_cap}")
+        notes_lines.append(f"Capital/Contribution: Rs{auth_cap}")
 
     paid_cap = company_info.get("Paid up Capital (Rs)", "")
     if paid_cap and paid_cap not in ("-", "nan"):
-        notes_lines.append(f"Paid-up Capital: ₹{paid_cap}")
+        notes_lines.append(f"Paid-up Capital: Rs{paid_cap}")
 
     if extra_notes_parts:
         notes_lines.append("\n".join(extra_notes_parts))
@@ -3635,7 +3665,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         upcoming_due_dates=upcoming_due_dates_count,
         team_workload=team_workload,
         compliance_status=compliance_status,
-        # FIX: expired_dsc_count was never populated — now correctly calculated above
         expired_dsc_count=expired_dsc_count
     )
 
