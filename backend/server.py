@@ -9,7 +9,6 @@ import calendar
 import requests
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
-from flask_cors import CORS
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
@@ -3791,7 +3790,7 @@ async def auto_daily_reminder(request: Request, call_next):
         # --------------------------------------
         # 2. Check if reminder should run today
         # --------------------------------------
-        india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
+        india_time = datetime.now(IST)
         today_str = india_time.date().isoformat()
 
         should_run_reminder = (
