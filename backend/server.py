@@ -9,6 +9,7 @@ import calendar
 import requests
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from flask_cors import CORS
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
