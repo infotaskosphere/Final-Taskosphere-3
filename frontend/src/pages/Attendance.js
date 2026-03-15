@@ -693,9 +693,9 @@ export default function Attendance() {
       }
 
       const requests = [
-        api.get(historyUrl),
-        (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary'),
-        api.get('/attendance/today'),
+        api.get(historyUrl).catch(() => ({ data: [] })),
+        (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary').catch(() => ({ data: null })),
+        api.get('/attendance/today').catch(() => ({ data: null })),
         api.get('/tasks').catch(() => ({ data: [] })),
         api.get('/holidays').catch(() => ({ data: [] })),
         canViewRankings
@@ -722,7 +722,16 @@ export default function Attendance() {
 
       const history = historyRes.data || [];
       setAttendanceHistory(history);
-      setTodayAttendance(todayRes.data);
+      // Only update todayAttendance if we got a real response (not a caught error)
+      // todayRes.data === null means the /attendance/today call failed (backend down)
+      // In that case keep todayAttendance as null so absent warning doesn't fire falsely
+      if (todayRes.data !== null && todayRes.data !== undefined) {
+        setTodayAttendance(todayRes.data);
+        setDataError(null); // Clear any previous error — backend is responding
+      } else {
+        // Backend failed to respond — show connection error banner
+        setDataError('Backend unreachable — it may be waking up (Render free tier). Please wait 30s and retry.');
+      }
 
       if (isOtherReq) {
         // Build summary from history for the viewed user
@@ -780,9 +789,8 @@ export default function Attendance() {
       }
 
     } catch (error) {
-      const msg = error?.response?.data?.detail || error?.message || 'Network error — check backend status';
+      const msg = error?.response?.data?.detail || error?.message || 'Network error';
       setDataError(msg);
-      toast.error(`Failed to fetch attendance data: ${msg}`, { id: 'att-fetch-error', duration: 6000 });
       console.error('Attendance fetch error:', error);
     } finally {
       setLoading(false);
@@ -1139,6 +1147,9 @@ export default function Attendance() {
   // NEW: Absent countdown — shown after 5 PM if user hasn't punched in
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView) return null;
+    // CRITICAL: todayAttendance===null means data hasn't loaded (fetch failed/backend down)
+    // Never show the absent warning when we don't have real data yet
+    if (todayAttendance === null) return null;
     if (todayAttendance?.punch_in || todayAttendance?.status === 'leave' || todayAttendance?.status === 'absent') return null;
     const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
     const hour   = nowIST.getHours();
