@@ -210,6 +210,9 @@ export default function Dashboard() {
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate, setSelectedDueDate] = useState(undefined);
   const [mustPunchIn, setMustPunchIn] = useState(false);
+  // actionDone: optimistic flag set immediately when user punches in or marks leave.
+  // Prevents the gate from flickering back open during the async query refetch.
+  const [actionDone, setActionDone] = useState(false);
 
   // Observe dark mode class so cards re-render when theme switches
   const [isDark, setIsDark] = useState(() =>
@@ -234,28 +237,37 @@ export default function Dashboard() {
   // todayAttendance.status === 'holiday' is unreliable — if an absent record
   // exists for today, the backend returns that instead of the holiday status.
   // The holidays array is the single source of truth.
-  const { data: holidaysData = [] } = useQuery({
-    queryKey: ['holidays', 'dashboard'],
+  // Holidays query — no staleTime so it always reflects latest additions.
+  // refetchOnWindowFocus ensures that if admin adds a holiday on the Attendance
+  // page and comes back to Dashboard, it picks up the new holiday immediately.
+  const { data: holidaysData = [], refetch: refetchHolidays } = useQuery({
+    queryKey: ['holidays'],          // shared key — same as any other holidays fetch
     queryFn: async () => {
       const res = await api.get('/holidays');
       return res.data || [];
     },
-    staleTime: 5 * 60 * 1000, // 5 min cache
+    staleTime: 0,                    // always re-fetch when component mounts
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // ── todayIsHoliday: derived from confirmed holidays array ────────────────
   // Used to:
   //   1. Suppress the punch-in gate overlay on holidays
   //   2. Still allow user to punch in voluntarily if they choose to work
+  // todayDateStr recomputed inside useMemo so it never stays stale across midnight
+  const todayIsHoliday = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return holidaysData.some(h => h.date === today && h.status === 'confirmed');
+  }, [holidaysData]);
+
+  const todayHolidayName = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return holidaysData.find(h => h.date === today && h.status === 'confirmed')?.name || '';
+  }, [holidaysData]);
+
+  // Keep todayDateStr for other uses
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
-  const todayIsHoliday = useMemo(
-    () => holidaysData.some(h => h.date === todayDateStr && h.status === 'confirmed'),
-    [holidaysData, todayDateStr]
-  );
-  const todayHolidayName = useMemo(
-    () => holidaysData.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
-    [holidaysData, todayDateStr]
-  );
 
   // ── DASHBOARD TODOS — always scoped to the current user only ─────────────
   const { data: todosRaw = [] } = useQuery({
@@ -399,7 +411,15 @@ export default function Dashboard() {
     try {
       await api.post('/attendance', { action });
       toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-      queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
+      // Close gate immediately (optimistic) before refetch completes
+      if (action === 'punch_in') {
+        setActionDone(true);
+        setMustPunchIn(false);
+        document.body.style.overflow = "auto";
+      }
+      // Refetch attendance AND holidays so both are fresh
+      await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
+      await queryClient.refetchQueries({ queryKey: ['holidays'] });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Attendance action failed');
     } finally {
@@ -577,6 +597,14 @@ export default function Dashboard() {
       return;
     }
 
+    // Rule 0: user already took action this session — don't show gate
+    // This is an optimistic guard while the query refetches in the background
+    if (actionDone) {
+      setMustPunchIn(false);
+      document.body.style.overflow = "auto";
+      return;
+    }
+
     // Rule 1: holidays — no gate, user is on holiday
     if (todayIsHoliday) {
       setMustPunchIn(false);
@@ -610,7 +638,7 @@ export default function Dashboard() {
     document.body.style.overflow = "hidden";
 
     return () => { document.body.style.overflow = "auto"; };
-  }, [todayAttendance, todayIsHoliday]);
+  }, [todayAttendance, todayIsHoliday, actionDone]);
 
   const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
   const metricCardDefault = isDark
@@ -1425,11 +1453,7 @@ export default function Dashboard() {
                   whileHover={{ y: 0 }}
                 >
                   <Button
-                    onClick={async () => {
-                      await handlePunchAction('punch_in');
-                      setMustPunchIn(false);
-                      document.body.style.overflow = "auto";
-                    }}
+                    onClick={() => handlePunchAction('punch_in')}
                     disabled={loading}
                     className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-200 transition-all"
                   >
@@ -1444,11 +1468,15 @@ export default function Dashboard() {
                     try {
                       await api.post("/attendance/mark-leave-today");
                       toast.success("Marked on leave today");
-                      queryClient.invalidateQueries({ queryKey: ['todayAttendance'] });
+                      // Close gate immediately (optimistic) before refetch
+                      setActionDone(true);
                       setMustPunchIn(false);
                       document.body.style.overflow = "auto";
+                      // Refetch attendance and holidays so both are fresh
+                      await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
+                      await queryClient.refetchQueries({ queryKey: ['holidays'] });
                     } catch (err) {
-                      toast.error("Failed to mark leave");
+                      toast.error(err.response?.data?.detail || "Failed to mark leave");
                     } finally {
                       setLoading(false);
                     }
