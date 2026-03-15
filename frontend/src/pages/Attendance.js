@@ -91,7 +91,7 @@ const pulseVariants = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// LIVE DIGITAL CLOCK
+// LIVE DIGITAL CLOCK — clean business design
 // ═════════════════════════════════════════════════════════════════════════════
 function DigitalClock() {
   const [time, setTime] = useState(new Date());
@@ -101,41 +101,86 @@ function DigitalClock() {
     return () => clearInterval(interval);
   }, []);
 
-  const timeString = time.toLocaleTimeString('en-IN', {
-    hour12:  true,
-    hour:    '2-digit',
-    minute:  '2-digit',
-    second:  '2-digit',
-  });
+  const hours   = time.toLocaleString('en-IN', { hour: '2-digit', hour12: true, timeZone: IST_TIMEZONE }).replace(' AM','').replace(' PM','');
+  const minutes = time.toLocaleString('en-IN', { minute: '2-digit', timeZone: IST_TIMEZONE }).padStart(2,'0');
+  const seconds = time.toLocaleString('en-IN', { second: '2-digit', timeZone: IST_TIMEZONE }).padStart(2,'0');
+  const period  = time.toLocaleString('en-IN', { hour: '2-digit', hour12: true, timeZone: IST_TIMEZONE }).slice(-2);
+  const dayDate = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMMM d, yyyy');
 
   return (
-    <motion.div
-      className="flex flex-col items-center justify-center px-8 py-5 rounded-2xl text-white font-mono"
+    <div
+      className="flex flex-col justify-between rounded-2xl overflow-hidden"
       style={{
-        background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`,
-        boxShadow:  '0 20px 40px rgba(13, 59, 102, 0.3)',
+        background: 'linear-gradient(160deg, #0a2540 0%, #0D3B66 55%, #1F6FB2 100%)',
+        boxShadow:  '0 8px 32px rgba(13, 59, 102, 0.45), inset 0 1px 0 rgba(255,255,255,0.06)',
+        minHeight:  172,
       }}
-      animate={{
-        boxShadow: [
-          '0 20px 40px rgba(13, 59, 102, 0.3)',
-          '0 20px 60px rgba(13, 59, 102, 0.5)',
-          '0 20px 40px rgba(13, 59, 102, 0.3)',
-        ],
-      }}
-      transition={{ duration: 2, repeat: Infinity }}
     >
-      <motion.span
-        className="text-5xl font-black tracking-widest"
-        variants={pulseVariants}
-        initial="initial"
-        animate="animate"
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-6 pt-5 pb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[10px] font-semibold tracking-[0.18em] uppercase text-blue-300/70">Live Clock · IST</span>
+        </div>
+        <span className="text-[10px] font-medium text-blue-300/50 tracking-wide">UTC +5:30</span>
+      </div>
+
+      {/* Time display */}
+      <div className="flex items-end justify-center gap-1 px-6 py-4">
+        <div className="flex items-baseline gap-0.5">
+          <span
+            className="font-black text-white tabular-nums leading-none"
+            style={{ fontSize: 52, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}
+          >
+            {hours.padStart(2,'0')}
+          </span>
+          <motion.span
+            className="font-black text-blue-300 self-start mt-2"
+            style={{ fontSize: 40 }}
+            animate={{ opacity: [1, 0.2, 1] }}
+            transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            :
+          </motion.span>
+          <span
+            className="font-black text-white tabular-nums leading-none"
+            style={{ fontSize: 52, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}
+          >
+            {minutes}
+          </span>
+          <motion.span
+            className="font-black text-blue-300 self-start mt-2"
+            style={{ fontSize: 40 }}
+            animate={{ opacity: [1, 0.2, 1] }}
+            transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            :
+          </motion.span>
+          <span
+            className="font-semibold text-blue-300/80 tabular-nums leading-none"
+            style={{ fontSize: 28, letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums' }}
+          >
+            {seconds}
+          </span>
+        </div>
+        <span
+          className="mb-1.5 ml-1 font-bold text-blue-200/70 uppercase tracking-widest"
+          style={{ fontSize: 13 }}
+        >
+          {period}
+        </span>
+      </div>
+
+      {/* Bottom date bar */}
+      <div
+        className="px-6 py-3 text-center"
+        style={{ background: 'rgba(0,0,0,0.18)', borderTop: '1px solid rgba(255,255,255,0.06)' }}
       >
-        {timeString}
-      </motion.span>
-      <span className="text-xs uppercase tracking-widest text-blue-200 mt-2 font-bold">
-        {format(time, 'EEEE, MMMM d, yyyy')} • IST
-      </span>
-    </motion.div>
+        <p className="text-[11px] font-semibold text-blue-200/80 tracking-widest uppercase">
+          {dayDate}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -537,6 +582,20 @@ export default function Attendance() {
   const isEveryoneView  = isAdmin && selectedUserId === 'everyone';
   const isViewingOther  = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // todayIsHoliday: derived from the confirmed holidays array by date match.
+  // This is the single source of truth for all holiday-suppression logic.
+  // We do NOT rely on todayAttendance.status === 'holiday' because that
+  // response is only returned when no attendance record exists. If an absent
+  // record was auto-marked before a holiday was added to the DB, the backend
+  // returns the absent record, not the holiday status.
+  // ─────────────────────────────────────────────────────────────────────────
+  const todayDateStr   = format(new Date(), 'yyyy-MM-dd');
+  const todayIsHoliday = useMemo(
+    () => holidays.some(h => h.date === todayDateStr && h.status === 'confirmed'),
+    [holidays, todayDateStr]
+  );
+
   // ── Derived: display today attendance ───────────────────────────────────
   const displayTodayAttendance = useMemo(() => {
     if (isViewingOther) {
@@ -558,24 +617,26 @@ export default function Attendance() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─────────────────────────────────────────────────────────────────────────
-  // FIX 1: Punch-in modal suppression
-  // Added todayAttendance.status !== 'holiday' check so the modal never
-  // appears on confirmed holiday days, even if punch_in is null.
-  // Also added todayAttendance.status !== 'absent' (already existed) for clarity.
+  // Punch-in modal logic:
+  // - Suppress popup on holidays (todayIsHoliday) — no auto-popup, but the
+  //   Punch In button is still visible in the hero card so user CAN work.
+  // - Suppress if already punched in, on leave, or absent (day already done).
+  // - todayIsHoliday is derived from the holidays array (reliable source),
+  //   NOT from todayAttendance.status which can be stale/absent on holidays.
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (
       !isViewingOther &&
       todayAttendance &&
       !todayAttendance.punch_in &&
-      todayAttendance.status !== 'leave'   &&
-      todayAttendance.status !== 'absent'  &&
-      todayAttendance.status !== 'holiday'    // ← FIX: suppress on holidays
+      !todayIsHoliday                          &&  // suppress popup on holidays
+      todayAttendance.status !== 'leave'       &&
+      todayAttendance.status !== 'absent'
     ) {
       const timer = setTimeout(() => setShowPunchInModal(true), 800);
       return () => clearTimeout(timer);
     }
-  }, [todayAttendance, isViewingOther]);
+  }, [todayAttendance, isViewingOther, todayIsHoliday]);
 
   useEffect(() => {
     setLiveDuration(calculateTodayLiveDuration(todayAttendance));
@@ -650,7 +711,7 @@ export default function Attendance() {
         if (
           !todayAttendance?.punch_in &&
           todayAttendance?.status !== 'leave' &&
-          todayAttendance?.status !== 'holiday'  // ← FIX: no warning on holidays
+          !todayIsHoliday
         ) {
           toast.warning(
             '⚠️ You have not punched in today! Auto-absent will be marked at 7:00 PM IST.',
@@ -1134,21 +1195,19 @@ export default function Attendance() {
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // FIX 2: absentCountdown — suppress on holidays
-  // Added todayAttendance?.status === 'holiday' to the early-return null check
-  // so the red countdown banner never appears on confirmed holiday days.
-  // ─────────────────────────────────────────────────────────────────────────
+  // absentCountdown: red banner shown after 5 PM if user hasn't punched in.
+  // Suppressed on holidays (todayIsHoliday), leave, already punched, or absent.
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView) return null;
-    // null means data hasn't loaded — never show warning without real data
+    // null means data hasn't loaded yet — never show warning without real data
     if (todayAttendance === null) return null;
-    // Suppress on holidays, leave, already punched in, or already absent
+    // Suppress on holidays — user has the day off, no absent warning needed
+    if (todayIsHoliday) return null;
+    // Suppress if already handled
     if (
-      todayAttendance?.punch_in                    ||
-      todayAttendance?.status === 'leave'          ||
-      todayAttendance?.status === 'absent'         ||
-      todayAttendance?.status === 'holiday'           // ← FIX: no countdown on holidays
+      todayAttendance?.punch_in             ||
+      todayAttendance?.status === 'leave'   ||
+      todayAttendance?.status === 'absent'
     ) return null;
     const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
     const hour   = nowIST.getHours();
@@ -1395,7 +1454,7 @@ export default function Attendance() {
                     </div>
 
                     {/* Holiday chip — shown instead of absent/punch-in UI on holidays */}
-                    {displayTodayAttendance?.status === 'holiday' && (
+                    {todayIsHoliday && (
                       <div
                         className="backdrop-blur rounded-xl p-4"
                         style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}
@@ -1463,7 +1522,8 @@ export default function Attendance() {
                         FIX: Hide punch-in/out buttons on holidays entirely.
                         Previously the buttons showed even on holiday days.
                     ───────────────────────────────────────────────────── */}
-                    {!isViewingOther && displayTodayAttendance?.status !== 'holiday' && (
+                    {/* On holidays popup is suppressed but user can still punch in */}
+                    {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
                           <>
@@ -1694,7 +1754,7 @@ export default function Attendance() {
                       style={{
                         color: displayTodayAttendance?.status === 'absent'
                           ? COLORS.red
-                          : displayTodayAttendance?.status === 'holiday'
+                          : todayIsHoliday
                             ? COLORS.amber
                             : COLORS.emeraldGreen,
                         fontVariantNumeric: 'tabular-nums'
@@ -1702,7 +1762,7 @@ export default function Attendance() {
                     >
                       {displayTodayAttendance?.status === 'absent'
                         ? 'Absent'
-                        : displayTodayAttendance?.status === 'holiday'
+                        : todayIsHoliday
                           ? 'Holiday'
                           : displayLiveDuration}
                     </p>
@@ -1711,14 +1771,14 @@ export default function Attendance() {
                       style={{
                         color: displayTodayAttendance?.status === 'absent'
                           ? COLORS.red
-                          : displayTodayAttendance?.status === 'holiday'
+                          : todayIsHoliday
                             ? COLORS.amber
                             : COLORS.emeraldGreen
                       }}
                     >
                       {displayTodayAttendance?.status === 'absent'
                         ? `❌ Auto-marked absent${displayTodayAttendance.auto_marked ? ' at 7:00 PM' : ''}`
-                        : displayTodayAttendance?.status === 'holiday'
+                        : todayIsHoliday
                           ? `🎉 Office closed today`
                           : (!isViewingOther &&
                              displayTodayAttendance?.punch_in &&
@@ -1737,7 +1797,7 @@ export default function Attendance() {
                       <p className="text-2xl font-bold text-emerald-600">
                         {displayTodayAttendance?.status === 'absent'
                           ? '0%'
-                          : displayTodayAttendance?.status === 'holiday'
+                          : todayIsHoliday
                             ? '—'
                             : `${progressPct}%`}
                       </p>
@@ -1750,7 +1810,7 @@ export default function Attendance() {
                     style={{
                       background: displayTodayAttendance?.status === 'absent'
                         ? `linear-gradient(90deg, ${COLORS.red}, #FCA5A5)`
-                        : displayTodayAttendance?.status === 'holiday'
+                        : todayIsHoliday
                           ? `linear-gradient(90deg, ${COLORS.amber}, #FCD34D)`
                           : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
                     }}
@@ -1758,7 +1818,7 @@ export default function Attendance() {
                     animate={{
                       width: displayTodayAttendance?.status === 'absent'
                         ? '100%'
-                        : displayTodayAttendance?.status === 'holiday'
+                        : todayIsHoliday
                           ? '100%'
                           : `${progressPct}%`
                     }}
