@@ -3935,11 +3935,31 @@ async def create_holiday(
     holiday_dict = holiday.model_dump()
     holiday_dict["date"] = holiday.date.isoformat()
     holiday_dict["status"] = "confirmed"
-    # FIX: {"_id": 0} projection
+
+    # FIX: Instead of hard-rejecting duplicates, upsert the record.
+    # The auto-fetch job pre-populates holidays with status="pending".
+    # When admin manually adds the same date we should confirm it, not error.
     existing = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
     if existing:
-        raise HTTPException(status_code=400, detail="Holiday already exists for this date")
+        if existing.get("status") == "confirmed":
+            # Truly a duplicate confirmed holiday — return existing instead of erroring
+            return existing
+        # Exists but not confirmed (pending/rejected from auto-fetch) -> confirm it
+        await db.holidays.update_one(
+            {"date": holiday_dict["date"]},
+            {"$set": {
+                "name": holiday_dict.get("name", existing.get("name")),
+                "status": "confirmed",
+                "type": holiday_dict.get("type", existing.get("type", "public")),
+                "updated_by": current_user.id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+        updated = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+        return updated
+
     await db.holidays.insert_one(holiday_dict)
+    holiday_dict.pop("_id", None)
     return holiday_dict
 
 @api_router.patch("/holidays/{holiday_date}/status")
