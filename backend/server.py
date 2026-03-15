@@ -87,6 +87,118 @@ _last_reminder_date_cache: Optional[str] = None
 # ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend")
 
+# === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
+# Registered BEFORE startup_event and all other middleware.
+# When the Render free-tier backend is sleeping (cold start), it returns no
+# headers at all — the browser shows "No Access-Control-Allow-Origin". This is
+# NOT a CORS misconfiguration; it's a cold-start timing issue. Keeping CORS
+# registered first ensures that once the server wakes, the headers are correct.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://final-taskosphere-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    expose_headers=["*"],
+    max_age=3600,
+)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# =============================================================
+# ABSENT MARKING CORE LOGIC
+# Runs via APScheduler at 19:00 IST every working day.
+# Also exposed as POST /api/attendance/mark-absent-bulk for
+# manual admin triggering.
+#
+# Rules:
+#   - Skip confirmed holidays
+#   - Skip weekends (Saturday=5, Sunday=6)
+#   - For every active user with no present/leave/absent record
+#     → insert a new absent record with auto_marked=True
+#   - If a record exists but has an unexpected status → update to absent
+# =============================================================
+
+async def _mark_absent_for_date(target_date_str: str) -> dict:
+    """Core absent-marking logic. Returns a summary dict."""
+    # Skip confirmed holidays
+    holiday = await db.holidays.find_one({"date": target_date_str, "status": "confirmed"})
+    if holiday:
+        return {"skipped": True, "reason": f"Holiday: {holiday.get('name')}", "marked": 0, "date": target_date_str}
+
+    # Skip weekends
+    target_date_obj = date.fromisoformat(target_date_str)
+    if target_date_obj.weekday() >= 5:
+        return {"skipped": True, "reason": "Weekend", "marked": 0, "date": target_date_str}
+
+    # Fetch all active users
+    active_users = await db.users.find(
+        {"is_active": True, "status": "active"},
+        {"_id": 0, "id": 1, "full_name": 1}
+    ).to_list(1000)
+
+    marked_count = 0
+    already_recorded = 0
+
+    for u in active_users:
+        uid = u["id"]
+        existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str})
+
+        if existing:
+            if existing.get("status") in ("present", "leave", "absent"):
+                already_recorded += 1
+                continue
+            # Record exists but status is unexpected → update to absent
+            await db.attendance.update_one(
+                {"user_id": uid, "date": target_date_str},
+                {"$set": {
+                    "status": "absent",
+                    "auto_marked": True,
+                    "auto_marked_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            marked_count += 1
+        else:
+            # No record at all → insert absent
+            await db.attendance.insert_one({
+                "user_id": uid,
+                "date": target_date_str,
+                "status": "absent",
+                "punch_in": None,
+                "punch_out": None,
+                "duration_minutes": 0,
+                "is_late": False,
+                "punched_out_early": False,
+                "leave_reason": None,
+                "auto_marked": True,
+                "auto_marked_at": datetime.now(timezone.utc).isoformat(),
+            })
+            marked_count += 1
+
+    logger.info(f"Absent marking for {target_date_str}: marked={marked_count}, skipped={already_recorded}")
+    return {
+        "skipped": False,
+        "date": target_date_str,
+        "marked": marked_count,
+        "total_active_users": len(active_users),
+        "already_recorded": already_recorded,
+    }
+
+
+def mark_absent_users_task():
+    """Sync wrapper called by APScheduler at 19:00 IST every working day."""
+    async def _run():
+        today_str = datetime.now(IST).date().isoformat()
+        result = await _mark_absent_for_date(today_str)
+        logger.info(f"Scheduled absent job result: {result}")
+    asyncio.run(_run())
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -118,24 +230,18 @@ async def startup_event():
     )
     await db.holidays.create_index("date", unique=True)
     scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+    # NEW: Absent marking job — fires every working day at 19:00 IST
+    scheduler.add_job(
+        mark_absent_users_task,
+        'cron',
+        hour=19,
+        minute=0,
+        timezone=pytz.timezone("Asia/Kolkata"),
+        id="mark_absent_daily",
+        replace_existing=True,
+    )
     scheduler.start()
 
-# === CRITICAL FIX: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://final-taskosphere-frontend.onrender.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-    expose_headers=["*"],
-    max_age=3600,
-)
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ====================== HEALTH ======================
 @app.get("/health")
@@ -280,7 +386,6 @@ def fetch_indian_holidays_task():
             logger.error(f"Holiday Autofetch Failed: {str(e)}")
 
     asyncio.run(_async_fetch())
-
 
 
 # ROUTER
@@ -999,16 +1104,20 @@ async def handle_attendance(
         punch_in_utc = datetime.now(timezone.utc)
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
         is_late = check_is_late(user_doc or {}, punch_in_ist)
+        location_data = data.get("location")
+        update_fields = {
+            "status": "present",
+            "punch_in": punch_in_utc,
+            "is_late": is_late,
+            "leave_reason": None,
+            # NEW: Clear auto_absent flag if user punches in manually
+            "auto_marked": False,
+        }
+        if location_data:
+            update_fields["location"] = location_data
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
-            {
-                "$set": {
-                    "status": "present",
-                    "punch_in": punch_in_utc,
-                    "is_late": is_late,
-                    "leave_reason": None
-                }
-            },
+            {"$set": update_fields},
             upsert=True
         )
         return {"message": "Punched in successfully", "is_late": is_late}
@@ -1025,15 +1134,16 @@ async def handle_attendance(
         punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
         delta = punch_out_utc.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc)
         duration_minutes = int(delta.total_seconds() / 60)
+        update_fields = {
+            "punch_out": punch_out_utc,
+            "punched_out_early": punched_out_early,
+            "duration_minutes": max(0, duration_minutes)
+        }
+        if data.get("location"):
+            update_fields["punch_out_location"] = data.get("location")
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
-            {
-                "$set": {
-                    "punch_out": punch_out_utc,
-                    "punched_out_early": punched_out_early,
-                    "duration_minutes": max(0, duration_minutes)
-                }
-            }
+            {"$set": update_fields}
         )
         return {
             "message": "Punched out successfully",
@@ -1137,6 +1247,7 @@ async def get_attendance_history(
     if current_user.role == "admin":
         if user_id:
             query["user_id"] = user_id
+        # No user_id from admin = return ALL records (aggregate view)
     elif current_user.role == "manager":
         permissions_mgr = get_user_permissions(current_user)
         allowed_users = permissions_mgr.get("view_other_attendance", [])
@@ -1252,20 +1363,25 @@ async def get_staff_attendance_report(
                 "role": user_info.get("role", "staff"),
                 "total_minutes": 0,
                 "days_present": 0,
+                "days_absent": 0,
                 "late_days": 0,
                 "early_out_days": 0,
                 "records": []
             }
+        # NEW: count absent days separately
+        if attendance.get("status") == "absent":
+            staff_report[uid]["days_absent"] += 1
         duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)):
+        if isinstance(duration, (int, float)) and attendance.get("status") == "present":
             staff_report[uid]["total_minutes"] += duration
-        staff_report[uid]["days_present"] += 1
+            staff_report[uid]["days_present"] += 1
         if attendance.get("is_late"):
             staff_report[uid]["late_days"] += 1
         if attendance.get("punched_out_early"):
             staff_report[uid]["early_out_days"] += 1
         staff_report[uid]["records"].append({
             "date": attendance["date"],
+            "status": attendance.get("status", "absent"),
             "punch_in": attendance.get("punch_in"),
             "punch_out": attendance.get("punch_out"),
             "duration_minutes": duration,
@@ -1318,15 +1434,23 @@ async def export_attendance_pdf(
     pdf.ln(5)
     pdf.set_font("Arial", size=10)
     for rec in records:
+        status = rec.get("status", "unknown")
         late_flag = " [LATE]" if rec.get("is_late") else ""
         early_flag = " [EARLY OUT]" if rec.get("punched_out_early") else ""
-        pdf.multi_cell(
-            0,
-            8,
-            f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
-            f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
-            f"{late_flag}{early_flag}"
-        )
+        if status == "absent":
+            pdf.multi_cell(
+                0, 8,
+                f"Date: {rec.get('date')} | Status: ABSENT"
+                f"{' [AUTO-MARKED 7PM]' if rec.get('auto_marked') else ''}"
+            )
+        else:
+            pdf.multi_cell(
+                0,
+                8,
+                f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
+                f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
+                f"{late_flag}{early_flag}"
+            )
         pdf.ln(2)
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
@@ -1336,6 +1460,81 @@ async def export_attendance_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW: MANUAL ABSENT MARKING ENDPOINT (Admin only)
+# POST /api/attendance/mark-absent-bulk
+# Body: { "date": "YYYY-MM-DD" }  (optional — defaults to today IST)
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.post("/attendance/mark-absent-bulk")
+async def mark_absent_bulk(
+    data: dict = {},
+    current_user: User = Depends(require_admin)
+):
+    """
+    Manually trigger absent-marking for a given date.
+    If no date is provided, defaults to today (IST).
+    Respects the same rules as the scheduled job:
+      - Skips confirmed holidays
+      - Skips weekends
+      - Only marks users who have no present/leave/absent record
+    """
+    target_date_str = (data or {}).get("date") or datetime.now(IST).date().isoformat()
+    try:
+        datetime.strptime(target_date_str, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+    result = await _mark_absent_for_date(target_date_str)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW: ABSENT SUMMARY ENDPOINT
+# GET /api/attendance/absent-summary?month=YYYY-MM
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.get("/attendance/absent-summary")
+async def get_absent_summary(
+    month: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns per-user absent day counts for the given month.
+    Admin sees all users; others see only their own data.
+    """
+    now = datetime.now(IST)
+    target_month = month or now.strftime("%Y-%m")
+
+    if current_user.role == "admin":
+        query = {"date": {"$regex": f"^{target_month}"}, "status": "absent"}
+    else:
+        query = {
+            "user_id": current_user.id,
+            "date": {"$regex": f"^{target_month}"},
+            "status": "absent"
+        }
+
+    absent_records = await db.attendance.find(query, {"_id": 0}).to_list(5000)
+    summary: dict = {}
+    for rec in absent_records:
+        uid = rec["user_id"]
+        if uid not in summary:
+            summary[uid] = {"user_id": uid, "absent_days": 0, "dates": []}
+        summary[uid]["absent_days"] += 1
+        summary[uid]["dates"].append(rec["date"])
+
+    if current_user.role == "admin":
+        user_ids = list(summary.keys())
+        users = await db.users.find(
+            {"id": {"$in": user_ids}},
+            {"_id": 0, "id": 1, "full_name": 1}
+        ).to_list(1000)
+        name_map = {u["id"]: u["full_name"] for u in users}
+        for uid in summary:
+            summary[uid]["user_name"] = name_map.get(uid, "Unknown")
+
+    return {"month": target_month, "data": list(summary.values())}
+
 
 # ====================== SHARED TOP / STAR PERFORMERS HELPER ======================
 async def get_top_performers_data(
