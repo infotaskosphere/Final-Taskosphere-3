@@ -3924,14 +3924,18 @@ async def create_holiday(
     holiday_dict = holiday.model_dump()
     holiday_dict["date"] = holiday.date.isoformat()
     holiday_dict["status"] = "confirmed"
+    # Ensure type always has a value — HolidayCreate may require it
+    if not holiday_dict.get("type"):
+        holiday_dict["type"] = "manual"
 
-    # FIX: Instead of hard-rejecting duplicates, upsert the record.
-    # The auto-fetch job pre-populates holidays with status="pending".
-    # When admin manually adds the same date we should confirm it, not error.
+    logger.info(f"Creating holiday: date={holiday_dict['date']}, name={holiday_dict.get('name')}, by={current_user.id}")
+
+    # Upsert: if a record exists (auto-fetched with pending status), confirm it.
+    # If it's already confirmed, return it silently (no 400 error on duplicates).
     existing = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
     if existing:
         if existing.get("status") == "confirmed":
-            # Truly a duplicate confirmed holiday — return existing instead of erroring
+            logger.info(f"Holiday already confirmed for {holiday_dict['date']}")
             return existing
         # Exists but not confirmed (pending/rejected from auto-fetch) -> confirm it
         await db.holidays.update_one(
@@ -3945,11 +3949,27 @@ async def create_holiday(
             }}
         )
         updated = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+        logger.info(f"Holiday upserted to confirmed: {holiday_dict['date']}")
         return updated
 
-    await db.holidays.insert_one(holiday_dict)
-    holiday_dict.pop("_id", None)
-    return holiday_dict
+    try:
+        await db.holidays.insert_one(holiday_dict)
+        holiday_dict.pop("_id", None)
+        logger.info(f"Holiday inserted: {holiday_dict['date']}")
+        return holiday_dict
+    except Exception as e:
+        # Handle duplicate key error from unique index (race condition)
+        logger.error(f"Holiday insert failed for {holiday_dict['date']}: {e}")
+        existing2 = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+        if existing2:
+            # A concurrent insert created it — just confirm and return it
+            await db.holidays.update_one(
+                {"date": holiday_dict["date"]},
+                {"$set": {"status": "confirmed", "name": holiday_dict.get("name", existing2.get("name"))}}
+            )
+            final = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+            return final
+        raise HTTPException(status_code=500, detail=f"Failed to save holiday: {str(e)}")
 
 @api_router.patch("/holidays/{holiday_date}/status")
 async def update_holiday_status(
