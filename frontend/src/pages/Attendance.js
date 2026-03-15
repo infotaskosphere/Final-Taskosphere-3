@@ -44,6 +44,8 @@ import {
   CalendarPlus,
   AlarmClock,
   MapPin,
+  UserX,
+  ShieldAlert,
 } from 'lucide-react';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -63,6 +65,10 @@ const COLORS = {
 };
 
 const IST_TIMEZONE = 'Asia/Kolkata';
+
+// NEW: Cutoff hour in IST after which the backend auto-marks absent.
+// Used by the frontend warning banner and countdown.
+const ABSENT_CUTOFF_HOUR_IST = 19; // 7:00 PM
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ANIMATION VARIANTS
@@ -295,6 +301,11 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     ringColor = COLORS.orange;
     bgColor   = '#FFF7ED20';
     isSpecial = true;
+  } else if (dayRecord?.status === 'absent') {
+    // NEW: Red solid ring for auto-marked absent days
+    ringColor = COLORS.red;
+    bgColor   = '#FEE2E240';
+    isSpecial = true;
   } else if (dayRecord?.punch_in && dayRecord?.is_late) {
     ringColor = COLORS.red;
     bgColor   = '#FEE2E220';
@@ -372,6 +383,11 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           <p className="font-medium" style={{ color: COLORS.orange }}>
             🟠 On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}
           </p>
+        ) : dayRecord?.status === 'absent' ? (
+          // NEW: Absent tooltip
+          <p className="font-medium text-red-600">
+            ❌ Absent{dayRecord.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}
+          </p>
         ) : dayRecord?.punch_in ? (
           <>
             <p>In:  {formatAttendanceTime(dayRecord.punch_in)}</p>
@@ -388,7 +404,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
         ) : dateFnsIsToday(date) ? (
           <div>
             <p className="text-red-600 font-bold">⚠️ Not punched in yet</p>
-            <p className="text-slate-400 text-[10px] mt-1">Punch in to mark attendance</p>
+            <p className="text-slate-400 text-[10px] mt-1">Auto-absent marks at 7:00 PM IST</p>
           </div>
         ) : (
           <p className="text-slate-400 font-medium">No record</p>
@@ -495,6 +511,13 @@ export default function Attendance() {
   const [myRank, setMyRank]                       = useState('—');
   const [locationCache, setLocationCache]         = useState({});
 
+  // NEW: absent-related state
+  const [absentLoading, setAbsentLoading]   = useState(false);
+  const [absentSummary, setAbsentSummary]   = useState([]);
+  const [dataError, setDataError]           = useState(null);
+  // NEW: tracks whether we've already shown the 6:30 PM absent warning today
+  const absentWarningShownRef = useRef(false);
+
   const [showPunchInModal, setShowPunchInModal]   = useState(false);
   const [showLeaveForm, setShowLeaveForm]         = useState(false);
   const [showHolidayModal, setShowHolidayModal]   = useState(false);
@@ -541,7 +564,8 @@ export default function Attendance() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!isViewingOther && todayAttendance && !todayAttendance.punch_in) {
+    if (!isViewingOther && todayAttendance && !todayAttendance.punch_in
+        && todayAttendance.status !== 'leave' && todayAttendance.status !== 'absent') {
       const timer = setTimeout(() => setShowPunchInModal(true), 800);
       return () => clearTimeout(timer);
     }
@@ -606,9 +630,33 @@ export default function Attendance() {
     resolveLocations();
   }, [attendanceHistory]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // NEW: Absent warning banner — checks every minute after 5 PM
+  useEffect(() => {
+    if (isViewingOther || isEveryoneView) return;
+    const checkAbsentWarning = () => {
+      const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+      const hour   = nowIST.getHours();
+      const minute = nowIST.getMinutes();
+      // Show warning at 18:30 (6:30 PM IST) if user hasn't punched in
+      if (hour === 18 && minute >= 30 && !absentWarningShownRef.current) {
+        if (!todayAttendance?.punch_in && todayAttendance?.status !== 'leave') {
+          toast.warning(
+            '⚠️ You have not punched in today! Auto-absent will be marked at 7:00 PM IST.',
+            { duration: 10000, id: 'absent-warning' }
+          );
+          absentWarningShownRef.current = true;
+        }
+      }
+    };
+    checkAbsentWarning();
+    const id = setInterval(checkAbsentWarning, 60000);
+    return () => clearInterval(id);
+  }, [todayAttendance, isViewingOther, isEveryoneView]);
+
   // ── Data Fetching ────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
+    setDataError(null);
 
     // Determine which user's data to fetch
     const rawTargetId = isAdmin
@@ -648,10 +696,10 @@ export default function Attendance() {
         api.get(historyUrl),
         (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary'),
         api.get('/attendance/today'),
-        api.get('/tasks'),
-        api.get('/holidays'),
+        api.get('/tasks').catch(() => ({ data: [] })),
+        api.get('/holidays').catch(() => ({ data: [] })),
         canViewRankings
-          ? api.get('/reports/performance-rankings?period=monthly')
+          ? api.get('/reports/performance-rankings?period=monthly').catch(() => ({ data: [] }))
           : Promise.resolve({ data: [] }),
       ];
 
@@ -662,6 +710,7 @@ export default function Attendance() {
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
 
+      // NEW: Fetch users separately so dropdown doesn't block attendance data
       if (isAdmin && allUsers.length === 0) {
         try {
           const usersRes = await api.get('/users');
@@ -683,14 +732,14 @@ export default function Attendance() {
           if (!m) return;
           if (!monthlySummary[m])
             monthlySummary[m] = { total_minutes: 0, days_present: 0 };
-          if (a.punch_in) {
+          if (a.punch_in && a.status === 'present') {
             monthlySummary[m].total_minutes += a.duration_minutes || 0;
             monthlySummary[m].days_present  += 1;
           }
         });
         setMySummary({
-          total_minutes: history.reduce((s, a) => s + (a.duration_minutes || 0), 0),
-          total_days:    history.filter(a => a.punch_in).length,
+          total_minutes: history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0),
+          total_days:    history.filter(a => a.punch_in && a.status === 'present').length,
           monthly_summary: Object.entries(monthlySummary).map(([month, d]) => {
             const h = Math.floor(d.total_minutes / 60);
             const m = d.total_minutes % 60;
@@ -699,8 +748,8 @@ export default function Attendance() {
         });
       } else if (isEveryoneReq) {
         // Aggregate summary across all users
-        const total_minutes = history.reduce((s, a) => s + (a.duration_minutes || 0), 0);
-        const total_days    = history.filter(a => a.punch_in).length;
+        const total_minutes = history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0);
+        const total_days    = history.filter(a => a.punch_in && a.status === 'present').length;
         setMySummary({ total_minutes, total_days, monthly_summary: [] });
       } else {
         // Own data — use the dedicated summary endpoint response
@@ -720,8 +769,20 @@ export default function Attendance() {
       const myEntry    = rankingList.find(r => r.user_id === rankUserId);
       setMyRank(myEntry ? `#${myEntry.rank}` : '—');
 
+      // NEW: Fetch absent summary for admin
+      if (isAdmin) {
+        try {
+          const absentRes = await api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`);
+          setAbsentSummary(absentRes.data?.data || []);
+        } catch {
+          setAbsentSummary([]);
+        }
+      }
+
     } catch (error) {
-      toast.error('Failed to fetch attendance data');
+      const msg = error?.response?.data?.detail || error?.message || 'Network error — check backend status';
+      setDataError(msg);
+      toast.error(`Failed to fetch attendance data: ${msg}`, { id: 'att-fetch-error', duration: 6000 });
       console.error('Attendance fetch error:', error);
     } finally {
       setLoading(false);
@@ -832,6 +893,26 @@ export default function Attendance() {
     }
   }, [fetchData]);
 
+  // NEW: Manual absent marking (admin only)
+  const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
+    setAbsentLoading(true);
+    try {
+      const body = targetDate ? { date: targetDate } : {};
+      const res  = await api.post('/attendance/mark-absent-bulk', body);
+      const { marked, skipped, reason, date: markedDate } = res.data;
+      if (skipped) {
+        toast.info(`Skipped: ${reason}`);
+      } else {
+        toast.success(`✓ Absent marked for ${markedDate}: ${marked} user(s) marked absent`);
+        await fetchData();
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to mark absent');
+    } finally {
+      setAbsentLoading(false);
+    }
+  }, [fetchData]);
+
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) {
       toast.error('Title and date/time are required');
@@ -911,29 +992,35 @@ export default function Attendance() {
     const monthlyHours = mySummary?.monthly_summary
       ?.find(s => s.month === format(selectedDate, 'yyyy-MM'))?.total_hours || '0h 0m';
 
+    // NEW: include absent count in PDF
+    const absentCount = attendanceHistory.filter(
+      a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))
+    ).length;
+
     doc.setFontSize(11);
     doc.text(`Total Monthly Hours : ${monthlyHours}`, 10, 56);
-    doc.text(`Days Present        : ${attendanceHistory.filter(a => a.punch_in).length}`, 10, 64);
-    doc.text(`Late Arrivals       : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 72);
-    doc.line(10, 80, 200, 80);
+    doc.text(`Days Present        : ${attendanceHistory.filter(a => a.punch_in && a.status === 'present').length}`, 10, 64);
+    doc.text(`Days Absent         : ${absentCount}`, 10, 72);
+    doc.text(`Late Arrivals       : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 80);
+    doc.line(10, 88, 200, 88);
 
     doc.setFont(undefined, 'bold');
     doc.setFontSize(11);
-    doc.text('Attendance Log (Last 15 Records):', 10, 89);
+    doc.text('Attendance Log (Last 15 Records):', 10, 97);
     doc.setFont(undefined, 'normal');
 
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
-    doc.text('DATE', 10, 98);
-    doc.text('PUNCH IN', 55, 98);
-    doc.text('PUNCH OUT', 95, 98);
-    doc.text('DURATION', 140, 98);
-    doc.text('LOCATION', 168, 98);
+    doc.text('DATE', 10, 106);
+    doc.text('STATUS', 48, 106);
+    doc.text('PUNCH IN', 82, 106);
+    doc.text('PUNCH OUT', 118, 106);
+    doc.text('DURATION', 158, 106);
     doc.setDrawColor(180, 180, 180);
-    doc.line(10, 100, 200, 100);
+    doc.line(10, 108, 200, 108);
 
     doc.setTextColor(0, 0, 0);
-    let y = 108;
+    let y = 116;
     attendanceHistory.slice(0, 15).forEach((record, index) => {
       if (y > 270) { doc.addPage(); y = 20; }
       if (index % 2 === 0) {
@@ -942,19 +1029,17 @@ export default function Attendance() {
       }
       doc.setFontSize(9);
       doc.text(format(parseISO(record.date), 'dd MMM yyyy'), 10, y);
-      doc.text(formatAttendanceTime(record.punch_in), 55, y);
+      const statusLabel = record.status === 'absent' ? 'ABSENT'
+        : record.status === 'leave' ? 'LEAVE'
+        : record.punch_in ? 'PRESENT' : '—';
+      doc.text(statusLabel, 48, y);
+      doc.text(record.status === 'absent' ? '—' : formatAttendanceTime(record.punch_in), 82, y);
       doc.text(
-        record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing',
-        95, y
+        record.status === 'absent' ? '—'
+          : record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing',
+        118, y
       );
-      doc.text(formatDuration(record.duration_minutes), 140, y);
-      const locKey = record.location?.latitude
-        ? `${record.location.latitude},${record.location.longitude}`
-        : null;
-      const locLabel = locKey
-        ? (locationCache[locKey] || `${record.location.latitude?.toFixed(2)}, ${record.location.longitude?.toFixed(2)}`)
-        : '—';
-      doc.text(locLabel.substring(0, 25), 168, y);
+      doc.text(record.status === 'absent' ? '—' : formatDuration(record.duration_minutes), 158, y);
       y += 10;
     });
 
@@ -965,32 +1050,37 @@ export default function Attendance() {
     doc.save(
       `Attendance_${employeeName.replace(/\s+/g, '_')}_${format(selectedDate, 'MMM_yyyy')}.pdf`
     );
-  }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary, locationCache]);
+  }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
 
   // ── Computed values ───────────────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate);
     const end   = endOfMonth(selectedDate);
     let atts    = attendanceHistory.filter(a => {
-      const d = parseISO(a.date);
-      return d >= start && d <= end;
+      try {
+        const d = parseISO(a.date);
+        return d >= start && d <= end;
+      } catch { return false; }
     });
 
     if (displayTodayAttendance) {
       const todayStr = displayTodayAttendance.date;
       if (!atts.some(a => a.date === todayStr)) {
-        const todayD = parseISO(todayStr);
-        if (todayD >= start && todayD <= end) {
-          atts = [...atts, displayTodayAttendance];
-        }
+        try {
+          const todayD = parseISO(todayStr);
+          if (todayD >= start && todayD <= end) {
+            atts = [...atts, displayTodayAttendance];
+          }
+        } catch {}
       }
     }
 
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
 
-  const monthTotalMinutes      = useMemo(() => monthAttendance.reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
-  const monthDaysPresent       = useMemo(() => monthAttendance.filter(a => a.punch_in).length, [monthAttendance]);
+  const monthTotalMinutes      = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
+  const monthDaysPresent       = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
+  const monthDaysAbsent        = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);  // NEW
   const totalDaysLateThisMonth = useMemo(() => monthAttendance.filter(a => a.punch_in && a.is_late).length, [monthAttendance]);
 
   const isTodaySelected = dateFnsIsToday(selectedDate);
@@ -1046,6 +1136,24 @@ export default function Attendance() {
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
 
+  // NEW: Absent countdown — shown after 5 PM if user hasn't punched in
+  const absentCountdown = useMemo(() => {
+    if (isViewingOther || isEveryoneView) return null;
+    if (todayAttendance?.punch_in || todayAttendance?.status === 'leave' || todayAttendance?.status === 'absent') return null;
+    const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+    const hour   = nowIST.getHours();
+    if (hour < 17) return null; // Only show after 5 PM
+    const cutoff = new Date(nowIST);
+    cutoff.setHours(ABSENT_CUTOFF_HOUR_IST, 0, 0, 0);
+    const msLeft = cutoff.getTime() - nowIST.getTime();
+    if (msLeft <= 0) return 'You have been marked as absent for today.';
+    const hLeft = Math.floor(msLeft / 3600000);
+    const mLeft = Math.floor((msLeft % 3600000) / 60000);
+    return hLeft > 0
+      ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM`
+      : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
+  }, [todayAttendance, isViewingOther, isEveryoneView]);
+
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1085,8 +1193,8 @@ export default function Attendance() {
             </h1>
             <p className="text-slate-500 mt-2 text-sm font-medium">
               {isAdmin
-                ? 'Manage team attendance across all departments'
-                : 'Track your daily hours and attendance'}
+                ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
+                : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
             </p>
           </div>
 
@@ -1102,7 +1210,6 @@ export default function Attendance() {
                   fetchData(val);
                   fetchReminders(val);
                 }}
-                disabled={allUsers.length === 0}
               >
                 {/* Admin's own data — show name with (Admin) tag */}
                 <option value="">
@@ -1114,7 +1221,7 @@ export default function Attendance() {
                 </option>
                 {/* Aggregate view */}
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {/* All other users — admins get "(Admin)" label, others get their role */}
+                {/* All other users */}
                 {allUsers
                   .filter(u => u.id !== user?.id)
                   .map(u => (
@@ -1123,6 +1230,22 @@ export default function Attendance() {
                     </option>
                   ))}
               </motion.select>
+            )}
+
+            {/* NEW: Admin manual absent trigger button */}
+            {isAdmin && (
+              <motion.div variants={itemVariants}>
+                <Button
+                  onClick={() => handleMarkAbsentBulk()}
+                  disabled={absentLoading}
+                  variant="outline"
+                  className="border-2 border-red-200 text-red-700 hover:bg-red-50 font-semibold rounded-xl px-4 py-2.5"
+                  title="Mark all users who haven't punched in today as Absent"
+                >
+                  <UserX className="w-4 h-4 mr-2" />
+                  {absentLoading ? 'Marking…' : 'Mark Absent Now'}
+                </Button>
+              </motion.div>
             )}
 
             {isAdmin && (
@@ -1151,6 +1274,56 @@ export default function Attendance() {
             </motion.div>
           </div>
         </motion.div>
+
+        {/* NEW: Error banner */}
+        {dataError && (
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50"
+          >
+            <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <div className="flex-1">
+              <span className="text-sm font-bold text-red-800">Connection error: </span>
+              <span className="text-sm text-red-700">{dataError}</span>
+              <span className="text-xs text-red-500 ml-2">
+                — If backend is on Render free tier, it may be waking up. Try again in 30s.
+              </span>
+            </div>
+            <button
+              onClick={() => fetchData()}
+              className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800"
+            >
+              Retry
+            </button>
+          </motion.div>
+        )}
+
+        {/* NEW: Absent countdown warning banner */}
+        {absentCountdown && !isViewingOther && !isEveryoneView && (
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-300"
+            style={{ backgroundColor: '#FFF1F2' }}
+          >
+            <motion.div
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 1, repeat: Infinity }}
+            >
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </motion.div>
+            <span className="text-sm font-bold text-red-800 flex-1">
+              ⚠️ You haven't punched in today! {absentCountdown}
+            </span>
+            <Button
+              size="sm"
+              onClick={() => { handlePunchAction('punch_in'); }}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4"
+            >
+              <LogIn className="w-4 h-4 mr-1" />
+              Punch In Now
+            </Button>
+          </motion.div>
+        )}
 
         {/* ═══════ VIEWING-AS BANNER ═══════ */}
         {(isViewingOther || isEveryoneView) && (
@@ -1210,10 +1383,23 @@ export default function Attendance() {
                         <p className="text-blue-100 text-sm mt-0.5">
                           {isViewingOther
                             ? 'Read-only view — use the dropdown to switch users'
-                            : 'Real-time attendance tracking'}
+                            : 'Real-time attendance • Auto-absent at 7:00 PM IST'}
                         </p>
                       </div>
                     </div>
+
+                    {/* NEW: Absent status chip */}
+                    {displayTodayAttendance?.status === 'absent' && (
+                      <div
+                        className="backdrop-blur rounded-xl p-4"
+                        style={{ backgroundColor: 'rgba(239,68,68,0.25)' }}
+                      >
+                        <p className="text-sm font-bold text-red-200">
+                          ❌ Marked as Absent today
+                          {displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}
+                        </p>
+                      </div>
+                    )}
 
                     {displayTodayAttendance?.punch_in && (
                       <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
@@ -1254,7 +1440,7 @@ export default function Attendance() {
 
                     {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
-                        {!todayAttendance?.punch_in ? (
+                        {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
                           <>
                             {isTodaySelected && (
                               <motion.button
@@ -1280,7 +1466,7 @@ export default function Attendance() {
                               Apply Leave
                             </motion.button>
                           </>
-                        ) : !todayAttendance?.punch_out && isTodaySelected ? (
+                        ) : !todayAttendance?.punch_out && todayAttendance?.punch_in && isTodaySelected ? (
                           <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
@@ -1364,12 +1550,56 @@ export default function Attendance() {
           </motion.div>
         )}
 
+        {/* NEW: Admin absent summary card */}
+        {isAdmin && absentSummary.length > 0 && (
+          <motion.div variants={itemVariants} className="mb-8">
+            <Card className="border-2 border-red-100 shadow-md">
+              <div
+                className="px-6 py-4 flex items-center gap-3 border-b border-red-100"
+                style={{ backgroundColor: '#FFF1F2' }}
+              >
+                <UserX className="w-5 h-5 text-red-600" />
+                <span className="text-sm font-black uppercase text-red-800">
+                  Absent This Month — {absentSummary.length} Staff Member(s)
+                </span>
+                <span className="ml-auto text-xs text-red-500 font-medium">
+                  Auto-marked at 7:00 PM IST
+                </span>
+              </div>
+              <CardContent className="p-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {absentSummary.map(item => (
+                    <div
+                      key={item.user_id}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-red-200 flex items-center justify-center flex-shrink-0">
+                        <span className="text-red-700 font-bold text-sm">
+                          {(item.user_name || '?')[0]}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">
+                          {item.user_name || 'Unknown'}
+                        </p>
+                        <p className="text-xs text-red-600 font-semibold">
+                          {item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
         {/* ═══════ STATS GRID ═══════ */}
         <motion.div
           className={`grid gap-4 mb-8 items-stretch ${
             canViewRankings
-              ? 'grid-cols-2 lg:grid-cols-4'
-              : 'grid-cols-2 lg:grid-cols-3'
+              ? 'grid-cols-2 lg:grid-cols-5'
+              : 'grid-cols-2 lg:grid-cols-4'
           }`}
         >
           <StatCard
@@ -1399,8 +1629,17 @@ export default function Attendance() {
             label="Days Late"
             value={totalDaysLateThisMonth}
             unit="this month"
-            color={COLORS.red}
+            color={COLORS.orange}
             trend=" "
+          />
+          {/* NEW: Days Absent stat card */}
+          <StatCard
+            icon={UserX}
+            label="Days Absent"
+            value={monthDaysAbsent}
+            unit="this month"
+            color={COLORS.red}
+            trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'}
           />
           {canViewRankings && !isEveryoneView && (
             <StatCard
@@ -1426,18 +1665,33 @@ export default function Attendance() {
                         ? `${viewedUserName?.split(' ')[0]}'s Daily Progress`
                         : 'Daily Progress'}
                     </p>
+                    {/* NEW: Show "Absent" text if marked absent */}
                     <p
                       className="text-5xl font-black tracking-tight mb-1"
-                      style={{ color: COLORS.emeraldGreen, fontVariantNumeric: 'tabular-nums' }}
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent'
+                          ? COLORS.red
+                          : COLORS.emeraldGreen,
+                        fontVariantNumeric: 'tabular-nums'
+                      }}
                     >
-                      {displayLiveDuration}
+                      {displayTodayAttendance?.status === 'absent' ? 'Absent' : displayLiveDuration}
                     </p>
-                    <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider">
-                      {!isViewingOther &&
-                       displayTodayAttendance?.punch_in &&
-                       !displayTodayAttendance?.punch_out
-                        ? '● Live • updating every minute'
-                        : 'Total for today'}
+                    <p
+                      className="text-xs font-bold uppercase tracking-wider"
+                      style={{
+                        color: displayTodayAttendance?.status === 'absent'
+                          ? COLORS.red
+                          : COLORS.emeraldGreen
+                      }}
+                    >
+                      {displayTodayAttendance?.status === 'absent'
+                        ? `❌ Auto-marked absent${displayTodayAttendance.auto_marked ? ' at 7:00 PM' : ''}`
+                        : (!isViewingOther &&
+                           displayTodayAttendance?.punch_in &&
+                           !displayTodayAttendance?.punch_out
+                            ? '● Live • updating every minute'
+                            : 'Total for today')}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1447,7 +1701,9 @@ export default function Attendance() {
                     </div>
                     <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
                       <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
-                      <p className="text-2xl font-bold text-emerald-600">{progressPct}%</p>
+                      <p className="text-2xl font-bold text-emerald-600">
+                        {displayTodayAttendance?.status === 'absent' ? '0%' : `${progressPct}%`}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1455,10 +1711,14 @@ export default function Attendance() {
                   <motion.div
                     className="h-full rounded-full"
                     style={{
-                      background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                      background: displayTodayAttendance?.status === 'absent'
+                        ? `linear-gradient(90deg, ${COLORS.red}, #FCA5A5)`
+                        : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
                     }}
                     initial={{ width: 0 }}
-                    animate={{ width: `${progressPct}%` }}
+                    animate={{
+                      width: displayTodayAttendance?.status === 'absent' ? '100%' : `${progressPct}%`
+                    }}
                     transition={{ duration: 1, ease: 'easeOut' }}
                   />
                 </div>
@@ -1739,22 +1999,23 @@ export default function Attendance() {
                     }}
                   />
 
-                  {/* Legend */}
+                  {/* Legend — NEW: Absent added */}
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
-                      { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
-                      { color: COLORS.red,          label: 'Late',    style: 'solid' },
+                      { color: COLORS.emeraldGreen, label: 'Present',    style: 'solid' },
+                      { color: COLORS.red,          label: 'Late',       style: 'solid' },
+                      { color: COLORS.red,          label: 'Absent',     style: 'solid',  bg: '#FEE2E240' },
                       { color: COLORS.red,          label: 'Not in yet', style: 'dashed' },
-                      { color: COLORS.amber,        label: 'Holiday', style: 'solid' },
-                      { color: COLORS.orange,       label: 'Leave',   style: 'solid' },
-                    ].map(({ color, label, style }) => (
+                      { color: COLORS.amber,        label: 'Holiday',    style: 'solid' },
+                      { color: COLORS.orange,       label: 'Leave',      style: 'solid' },
+                    ].map(({ color, label, style, bg }) => (
                       <div key={label} className="flex items-center gap-1.5">
                         <span
                           className="w-4 h-4 rounded-full border-2 flex-shrink-0"
                           style={{
                             borderColor:     color,
                             borderStyle:     style,
-                            backgroundColor: `${color}25`,
+                            backgroundColor: bg || `${color}25`,
                           }}
                         />
                         <span className="text-slate-600">{label}</span>
@@ -1767,7 +2028,22 @@ export default function Attendance() {
               {/* Selected Day Details */}
               <Card className="border-0 shadow-md overflow-hidden">
                 <CardContent className="p-0">
-                  {selectedAttendance?.punch_in ? (
+                  {/* NEW: Absent day detail */}
+                  {selectedAttendance?.status === 'absent' ? (
+                    <div
+                      className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500"
+                    >
+                      <p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p>
+                      <p className="text-sm text-slate-600">
+                        {format(selectedDate, 'EEEE, MMM d, yyyy')}
+                      </p>
+                      {selectedAttendance.auto_marked && (
+                        <p className="text-xs text-red-500 mt-2 font-medium">
+                          Auto-marked absent at 7:00 PM IST
+                        </p>
+                      )}
+                    </div>
+                  ) : selectedAttendance?.punch_in ? (
                     <div
                       className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4"
                       style={{ borderColor: COLORS.emeraldGreen }}
@@ -1882,7 +2158,16 @@ export default function Attendance() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                {recentAttendance.length === 0 ? (
+                {loading && attendanceHistory.length === 0 ? (
+                  <div className="flex items-center justify-center py-16">
+                    <motion.div
+                      className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                    />
+                    <span className="ml-3 text-slate-500 font-medium">Loading attendance data…</span>
+                  </div>
+                ) : recentAttendance.length === 0 ? (
                   <p className="text-center py-12 text-slate-500 font-medium">
                     No records yet
                   </p>
@@ -1892,12 +2177,18 @@ export default function Attendance() {
                       const inLocLabel  = getLocationLabel(record, 'in');
                       const outLocLabel = getLocationLabel(record, 'out');
                       const recordUserName = isEveryoneView ? (userMap[record.user_id] || record.user_id) : null;
+                      const isAbsent = record.status === 'absent';
+                      const isLeave  = record.status === 'leave';
 
                       return (
                         <motion.div
                           key={`${record.date}-${record.user_id || idx}`}
                           variants={itemVariants}
-                          className="p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors border border-slate-200"
+                          className="p-4 rounded-lg hover:bg-slate-50 transition-colors border"
+                          style={{
+                            backgroundColor: isAbsent ? '#FFF1F2' : '#F8FAFC',
+                            borderColor:     isAbsent ? '#FEE2E2' : '#E2E8F0',
+                          }}
                         >
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
@@ -1911,17 +2202,19 @@ export default function Attendance() {
                                 {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
                               </p>
                               <p className="text-xs text-slate-500 mt-1 font-mono">
-                                {record.status === 'leave'
-                                  ? `🟠 On Leave${record.leave_reason ? ` — ${record.leave_reason}` : ''}`
-                                  : record.punch_in
-                                    ? `${formatAttendanceTime(record.punch_in)} → ${
-                                        record.punch_out
-                                          ? formatAttendanceTime(record.punch_out)
-                                          : 'Ongoing'
-                                      }`
-                                    : '—'}
+                                {isAbsent
+                                  ? `❌ Absent${record.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}`
+                                  : isLeave
+                                    ? `🟠 On Leave${record.leave_reason ? ` — ${record.leave_reason}` : ''}`
+                                    : record.punch_in
+                                      ? `${formatAttendanceTime(record.punch_in)} → ${
+                                          record.punch_out
+                                            ? formatAttendanceTime(record.punch_out)
+                                            : 'Ongoing'
+                                        }`
+                                      : '—'}
                               </p>
-                              {inLocLabel && (
+                              {inLocLabel && !isAbsent && (
                                 <p className="text-[11px] text-slate-500 mt-1.5 flex items-start gap-1">
                                   <MapPin
                                     className="w-3 h-3 flex-shrink-0 mt-0.5"
@@ -1933,7 +2226,7 @@ export default function Attendance() {
                                   </span>
                                 </p>
                               )}
-                              {outLocLabel && (
+                              {outLocLabel && !isAbsent && (
                                 <p className="text-[11px] text-slate-500 mt-0.5 flex items-start gap-1">
                                   <MapPin
                                     className="w-3 h-3 flex-shrink-0 mt-0.5"
@@ -1948,7 +2241,11 @@ export default function Attendance() {
                             </div>
 
                             <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                              {record.status === 'leave' ? (
+                              {isAbsent ? (
+                                <span className="text-[10px] font-black uppercase px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200">
+                                  Absent
+                                </span>
+                              ) : isLeave ? (
                                 <span
                                   className="text-[10px] font-bold uppercase px-2 py-1 rounded"
                                   style={{
@@ -1978,7 +2275,7 @@ export default function Attendance() {
                                   {formatDuration(record.duration_minutes)}
                                 </Badge>
                               )}
-                              {record.is_late && (
+                              {record.is_late && !isAbsent && (
                                 <span className="text-[10px] font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">
                                   Late
                                 </span>
@@ -2026,8 +2323,12 @@ export default function Attendance() {
                 <h2 className="text-3xl font-black mb-3" style={{ color: COLORS.deepBlue }}>
                   Good Morning! 👋
                 </h2>
-                <p className="text-slate-600 text-lg mb-8">
+                <p className="text-slate-600 text-lg mb-2">
                   Let's punch in and start your day
+                </p>
+                {/* NEW: Absent warning in modal */}
+                <p className="text-xs text-red-500 font-semibold mb-8">
+                  ⚠️ Auto-absent marks at 7:00 PM if you don't punch in
                 </p>
                 <Button
                   onClick={() => {
