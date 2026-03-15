@@ -66,8 +66,7 @@ const COLORS = {
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 
-// NEW: Cutoff hour in IST after which the backend auto-marks absent.
-// Used by the frontend warning banner and countdown.
+// Cutoff hour in IST after which the backend auto-marks absent.
 const ABSENT_CUTOFF_HOUR_IST = 19; // 7:00 PM
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -302,7 +301,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     bgColor   = '#FFF7ED20';
     isSpecial = true;
   } else if (dayRecord?.status === 'absent') {
-    // NEW: Red solid ring for auto-marked absent days
     ringColor = COLORS.red;
     bgColor   = '#FEE2E240';
     isSpecial = true;
@@ -384,7 +382,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
             🟠 On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}
           </p>
         ) : dayRecord?.status === 'absent' ? (
-          // NEW: Absent tooltip
           <p className="font-medium text-red-600">
             ❌ Absent{dayRecord.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}
           </p>
@@ -498,7 +495,6 @@ export default function Attendance() {
 
   const [loading, setLoading]               = useState(false);
   const [selectedDate, setSelectedDate]     = useState(new Date());
-  // null = own data, "everyone" = all users aggregate, <uuid> = specific other user
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [attendanceHistory, setAttendanceHistory] = useState([]);
@@ -511,12 +507,10 @@ export default function Attendance() {
   const [myRank, setMyRank]                       = useState('—');
   const [locationCache, setLocationCache]         = useState({});
 
-  // NEW: absent-related state
   const [absentLoading, setAbsentLoading]   = useState(false);
   const [absentSummary, setAbsentSummary]   = useState([]);
   const [dataError, setDataError]           = useState(null);
-  // NEW: tracks whether we've already shown the 6:30 PM absent warning today
-  const absentWarningShownRef = useRef(false);
+  const absentWarningShownRef               = useRef(false);
 
   const [showPunchInModal, setShowPunchInModal]   = useState(false);
   const [showLeaveForm, setShowLeaveForm]         = useState(false);
@@ -563,9 +557,21 @@ export default function Attendance() {
     fetchReminders();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // FIX 1: Punch-in modal suppression
+  // Added todayAttendance.status !== 'holiday' check so the modal never
+  // appears on confirmed holiday days, even if punch_in is null.
+  // Also added todayAttendance.status !== 'absent' (already existed) for clarity.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isViewingOther && todayAttendance && !todayAttendance.punch_in
-        && todayAttendance.status !== 'leave' && todayAttendance.status !== 'absent') {
+    if (
+      !isViewingOther &&
+      todayAttendance &&
+      !todayAttendance.punch_in &&
+      todayAttendance.status !== 'leave'   &&
+      todayAttendance.status !== 'absent'  &&
+      todayAttendance.status !== 'holiday'    // ← FIX: suppress on holidays
+    ) {
       const timer = setTimeout(() => setShowPunchInModal(true), 800);
       return () => clearTimeout(timer);
     }
@@ -630,16 +636,22 @@ export default function Attendance() {
     resolveLocations();
   }, [attendanceHistory]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // NEW: Absent warning banner — checks every minute after 5 PM
+  // Absent warning banner — checks every minute after 5 PM
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
       const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
       const hour   = nowIST.getHours();
       const minute = nowIST.getMinutes();
-      // Show warning at 18:30 (6:30 PM IST) if user hasn't punched in
       if (hour === 18 && minute >= 30 && !absentWarningShownRef.current) {
-        if (!todayAttendance?.punch_in && todayAttendance?.status !== 'leave') {
+        // ─────────────────────────────────────────────────────────────────
+        // FIX: also suppress the 6:30 PM toast on holidays
+        // ─────────────────────────────────────────────────────────────────
+        if (
+          !todayAttendance?.punch_in &&
+          todayAttendance?.status !== 'leave' &&
+          todayAttendance?.status !== 'holiday'  // ← FIX: no warning on holidays
+        ) {
           toast.warning(
             '⚠️ You have not punched in today! Auto-absent will be marked at 7:00 PM IST.',
             { duration: 10000, id: 'absent-warning' }
@@ -658,37 +670,25 @@ export default function Attendance() {
     setLoading(true);
     setDataError(null);
 
-    // Determine which user's data to fetch
     const rawTargetId = isAdmin
       ? (overrideUserId !== undefined ? overrideUserId : selectedUserId)
       : null;
 
-    // ─────────────────────────────────────────────────────────────────────
-    // KEY FIX: When admin is viewing their OWN data (rawTargetId is null OR
-    // equals their own user ID), we must pass user?.id explicitly to the API
-    // so the backend filters to just their records — not ALL records.
-    // Without this, /attendance/history with no filter returns every user's
-    // records when called by an admin, causing inflated stats & duplicate rows.
-    // ─────────────────────────────────────────────────────────────────────
     const isEveryoneReq = isAdmin && rawTargetId === 'everyone';
     const isOtherReq    = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
-    // For admin's own view: use their own user ID so backend filters correctly
     const resolvedUserId = isEveryoneReq
       ? null
       : isOtherReq
         ? rawTargetId
-        : (isAdmin ? user?.id : null); // <-- THE FIX: admin always sends own id
+        : (isAdmin ? user?.id : null);
 
     try {
       let historyUrl;
       if (isEveryoneReq) {
-        // No user_id param = all records (admin aggregate view)
         historyUrl = '/attendance/history';
       } else if (resolvedUserId) {
-        // Filtered to specific user (either admin's own id or another user's id)
         historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
       } else {
-        // Non-admin: backend infers from auth token
         historyUrl = '/attendance/history';
       }
 
@@ -710,7 +710,6 @@ export default function Attendance() {
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
 
-      // NEW: Fetch users separately so dropdown doesn't block attendance data
       if (isAdmin && allUsers.length === 0) {
         try {
           const usersRes = await api.get('/users');
@@ -722,19 +721,15 @@ export default function Attendance() {
 
       const history = historyRes.data || [];
       setAttendanceHistory(history);
-      // Only update todayAttendance if we got a real response (not a caught error)
-      // todayRes.data === null means the /attendance/today call failed (backend down)
-      // In that case keep todayAttendance as null so absent warning doesn't fire falsely
+
       if (todayRes.data !== null && todayRes.data !== undefined) {
         setTodayAttendance(todayRes.data);
-        setDataError(null); // Clear any previous error — backend is responding
+        setDataError(null);
       } else {
-        // Backend failed to respond — show connection error banner
         setDataError('Backend unreachable — it may be waking up (Render free tier). Please wait 30s and retry.');
       }
 
       if (isOtherReq) {
-        // Build summary from history for the viewed user
         const monthlySummary = {};
         history.forEach(a => {
           const m = a.date?.slice(0, 7);
@@ -756,12 +751,10 @@ export default function Attendance() {
           }),
         });
       } else if (isEveryoneReq) {
-        // Aggregate summary across all users
         const total_minutes = history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0);
         const total_days    = history.filter(a => a.punch_in && a.status === 'present').length;
         setMySummary({ total_minutes, total_days, monthly_summary: [] });
       } else {
-        // Own data — use the dedicated summary endpoint response
         setMySummary(summaryRes?.data ?? null);
       }
 
@@ -778,7 +771,6 @@ export default function Attendance() {
       const myEntry    = rankingList.find(r => r.user_id === rankUserId);
       setMyRank(myEntry ? `#${myEntry.rank}` : '—');
 
-      // NEW: Fetch absent summary for admin
       if (isAdmin) {
         try {
           const absentRes = await api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`);
@@ -901,7 +893,6 @@ export default function Attendance() {
     }
   }, [fetchData]);
 
-  // NEW: Manual absent marking (admin only)
   const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
     setAbsentLoading(true);
     try {
@@ -1000,7 +991,6 @@ export default function Attendance() {
     const monthlyHours = mySummary?.monthly_summary
       ?.find(s => s.month === format(selectedDate, 'yyyy-MM'))?.total_hours || '0h 0m';
 
-    // NEW: include absent count in PDF
     const absentCount = attendanceHistory.filter(
       a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))
     ).length;
@@ -1088,7 +1078,7 @@ export default function Attendance() {
 
   const monthTotalMinutes      = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
   const monthDaysPresent       = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
-  const monthDaysAbsent        = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);  // NEW
+  const monthDaysAbsent        = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
   const totalDaysLateThisMonth = useMemo(() => monthAttendance.filter(a => a.punch_in && a.is_late).length, [monthAttendance]);
 
   const isTodaySelected = dateFnsIsToday(selectedDate);
@@ -1144,13 +1134,22 @@ export default function Attendance() {
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
 
-  // NEW: Absent countdown — shown after 5 PM if user hasn't punched in
+  // ─────────────────────────────────────────────────────────────────────────
+  // FIX 2: absentCountdown — suppress on holidays
+  // Added todayAttendance?.status === 'holiday' to the early-return null check
+  // so the red countdown banner never appears on confirmed holiday days.
+  // ─────────────────────────────────────────────────────────────────────────
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView) return null;
-    // CRITICAL: todayAttendance===null means data hasn't loaded (fetch failed/backend down)
-    // Never show the absent warning when we don't have real data yet
+    // null means data hasn't loaded — never show warning without real data
     if (todayAttendance === null) return null;
-    if (todayAttendance?.punch_in || todayAttendance?.status === 'leave' || todayAttendance?.status === 'absent') return null;
+    // Suppress on holidays, leave, already punched in, or already absent
+    if (
+      todayAttendance?.punch_in                    ||
+      todayAttendance?.status === 'leave'          ||
+      todayAttendance?.status === 'absent'         ||
+      todayAttendance?.status === 'holiday'           // ← FIX: no countdown on holidays
+    ) return null;
     const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
     const hour   = nowIST.getHours();
     if (hour < 17) return null; // Only show after 5 PM
@@ -1222,7 +1221,6 @@ export default function Attendance() {
                   fetchReminders(val);
                 }}
               >
-                {/* Admin's own data — show name with (Admin) tag */}
                 <option value="">
                   {allUsers.length === 0
                     ? 'Loading users…'
@@ -1230,9 +1228,7 @@ export default function Attendance() {
                       ? `${user.full_name} (Admin)`
                       : 'My Attendance'}
                 </option>
-                {/* Aggregate view */}
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {/* All other users */}
                 {allUsers
                   .filter(u => u.id !== user?.id)
                   .map(u => (
@@ -1243,7 +1239,6 @@ export default function Attendance() {
               </motion.select>
             )}
 
-            {/* NEW: Admin manual absent trigger button */}
             {isAdmin && (
               <motion.div variants={itemVariants}>
                 <Button
@@ -1286,7 +1281,7 @@ export default function Attendance() {
           </div>
         </motion.div>
 
-        {/* NEW: Error banner */}
+        {/* Error banner */}
         {dataError && (
           <motion.div
             variants={itemVariants}
@@ -1309,7 +1304,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* NEW: Absent countdown warning banner */}
+        {/* Absent countdown warning banner */}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
           <motion.div
             variants={itemVariants}
@@ -1399,7 +1394,22 @@ export default function Attendance() {
                       </div>
                     </div>
 
-                    {/* NEW: Absent status chip */}
+                    {/* Holiday chip — shown instead of absent/punch-in UI on holidays */}
+                    {displayTodayAttendance?.status === 'holiday' && (
+                      <div
+                        className="backdrop-blur rounded-xl p-4"
+                        style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}
+                      >
+                        <p className="text-sm font-bold text-amber-200">
+                          🎉 Today is a holiday
+                          {displayTodayAttendance.holiday?.name
+                            ? ` — ${displayTodayAttendance.holiday.name}`
+                            : ''}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Absent status chip */}
                     {displayTodayAttendance?.status === 'absent' && (
                       <div
                         className="backdrop-blur rounded-xl p-4"
@@ -1449,7 +1459,11 @@ export default function Attendance() {
                       </div>
                     )}
 
-                    {!isViewingOther && (
+                    {/* ─────────────────────────────────────────────────────
+                        FIX: Hide punch-in/out buttons on holidays entirely.
+                        Previously the buttons showed even on holiday days.
+                    ───────────────────────────────────────────────────── */}
+                    {!isViewingOther && displayTodayAttendance?.status !== 'holiday' && (
                       <div className="flex gap-3 flex-wrap pt-2">
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
                           <>
@@ -1561,7 +1575,7 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* NEW: Admin absent summary card */}
+        {/* Admin absent summary card */}
         {isAdmin && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-red-100 shadow-md">
@@ -1643,7 +1657,6 @@ export default function Attendance() {
             color={COLORS.orange}
             trend=" "
           />
-          {/* NEW: Days Absent stat card */}
           <StatCard
             icon={UserX}
             label="Days Absent"
@@ -1676,33 +1689,42 @@ export default function Attendance() {
                         ? `${viewedUserName?.split(' ')[0]}'s Daily Progress`
                         : 'Daily Progress'}
                     </p>
-                    {/* NEW: Show "Absent" text if marked absent */}
                     <p
                       className="text-5xl font-black tracking-tight mb-1"
                       style={{
                         color: displayTodayAttendance?.status === 'absent'
                           ? COLORS.red
-                          : COLORS.emeraldGreen,
+                          : displayTodayAttendance?.status === 'holiday'
+                            ? COLORS.amber
+                            : COLORS.emeraldGreen,
                         fontVariantNumeric: 'tabular-nums'
                       }}
                     >
-                      {displayTodayAttendance?.status === 'absent' ? 'Absent' : displayLiveDuration}
+                      {displayTodayAttendance?.status === 'absent'
+                        ? 'Absent'
+                        : displayTodayAttendance?.status === 'holiday'
+                          ? 'Holiday'
+                          : displayLiveDuration}
                     </p>
                     <p
                       className="text-xs font-bold uppercase tracking-wider"
                       style={{
                         color: displayTodayAttendance?.status === 'absent'
                           ? COLORS.red
-                          : COLORS.emeraldGreen
+                          : displayTodayAttendance?.status === 'holiday'
+                            ? COLORS.amber
+                            : COLORS.emeraldGreen
                       }}
                     >
                       {displayTodayAttendance?.status === 'absent'
                         ? `❌ Auto-marked absent${displayTodayAttendance.auto_marked ? ' at 7:00 PM' : ''}`
-                        : (!isViewingOther &&
-                           displayTodayAttendance?.punch_in &&
-                           !displayTodayAttendance?.punch_out
-                            ? '● Live • updating every minute'
-                            : 'Total for today')}
+                        : displayTodayAttendance?.status === 'holiday'
+                          ? `🎉 Office closed today`
+                          : (!isViewingOther &&
+                             displayTodayAttendance?.punch_in &&
+                             !displayTodayAttendance?.punch_out
+                              ? '● Live • updating every minute'
+                              : 'Total for today')}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1713,7 +1735,11 @@ export default function Attendance() {
                     <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
                       <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
                       <p className="text-2xl font-bold text-emerald-600">
-                        {displayTodayAttendance?.status === 'absent' ? '0%' : `${progressPct}%`}
+                        {displayTodayAttendance?.status === 'absent'
+                          ? '0%'
+                          : displayTodayAttendance?.status === 'holiday'
+                            ? '—'
+                            : `${progressPct}%`}
                       </p>
                     </div>
                   </div>
@@ -1724,11 +1750,17 @@ export default function Attendance() {
                     style={{
                       background: displayTodayAttendance?.status === 'absent'
                         ? `linear-gradient(90deg, ${COLORS.red}, #FCA5A5)`
-                        : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
+                        : displayTodayAttendance?.status === 'holiday'
+                          ? `linear-gradient(90deg, ${COLORS.amber}, #FCD34D)`
+                          : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
                     }}
                     initial={{ width: 0 }}
                     animate={{
-                      width: displayTodayAttendance?.status === 'absent' ? '100%' : `${progressPct}%`
+                      width: displayTodayAttendance?.status === 'absent'
+                        ? '100%'
+                        : displayTodayAttendance?.status === 'holiday'
+                          ? '100%'
+                          : `${progressPct}%`
                     }}
                     transition={{ duration: 1, ease: 'easeOut' }}
                   />
@@ -2010,7 +2042,7 @@ export default function Attendance() {
                     }}
                   />
 
-                  {/* Legend — NEW: Absent added */}
+                  {/* Legend */}
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present',    style: 'solid' },
@@ -2039,11 +2071,8 @@ export default function Attendance() {
               {/* Selected Day Details */}
               <Card className="border-0 shadow-md overflow-hidden">
                 <CardContent className="p-0">
-                  {/* NEW: Absent day detail */}
                   {selectedAttendance?.status === 'absent' ? (
-                    <div
-                      className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500"
-                    >
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500">
                       <p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p>
                       <p className="text-sm text-slate-600">
                         {format(selectedDate, 'EEEE, MMM d, yyyy')}
@@ -2337,7 +2366,6 @@ export default function Attendance() {
                 <p className="text-slate-600 text-lg mb-2">
                   Let's punch in and start your day
                 </p>
-                {/* NEW: Absent warning in modal */}
                 <p className="text-xs text-red-500 font-semibold mb-8">
                   ⚠️ Auto-absent marks at 7:00 PM if you don't punch in
                 </p>
