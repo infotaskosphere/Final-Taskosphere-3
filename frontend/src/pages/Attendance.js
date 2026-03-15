@@ -91,8 +91,19 @@ const pulseVariants = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// LIVE DIGITAL CLOCK — clean business design
+// LIVE DIGITAL CLOCK — refined business design
+// Uses Google Fonts: Roboto Mono for digits (loaded in index.html or via @import)
 // ═════════════════════════════════════════════════════════════════════════════
+
+// Inject Roboto Mono font once
+if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
+  const link = document.createElement('link');
+  link.id   = 'roboto-mono-font';
+  link.rel  = 'stylesheet';
+  link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
+  document.head.appendChild(link);
+}
+
 function DigitalClock() {
   const [time, setTime] = useState(new Date());
 
@@ -101,84 +112,115 @@ function DigitalClock() {
     return () => clearInterval(interval);
   }, []);
 
-  const hours   = time.toLocaleString('en-IN', { hour: '2-digit', hour12: true, timeZone: IST_TIMEZONE }).replace(' AM','').replace(' PM','');
-  const minutes = time.toLocaleString('en-IN', { minute: '2-digit', timeZone: IST_TIMEZONE }).padStart(2,'0');
-  const seconds = time.toLocaleString('en-IN', { second: '2-digit', timeZone: IST_TIMEZONE }).padStart(2,'0');
-  const period  = time.toLocaleString('en-IN', { hour: '2-digit', hour12: true, timeZone: IST_TIMEZONE }).slice(-2);
-  const dayDate = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMMM d, yyyy');
+  // Parse time in IST
+  const istString = time.toLocaleString('en-US', {
+    timeZone:  IST_TIMEZONE,
+    hour12:    true,
+    hour:      '2-digit',
+    minute:    '2-digit',
+    second:    '2-digit',
+  });
+  // "10:37:33 PM" → parts
+  const [timePart, rawPeriod] = istString.split(' ');
+  const [hh, mm, ss]          = timePart.split(':');
+  const period                 = rawPeriod || 'AM';
+  const dayDate                = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMMM d, yyyy');
+
+  const MONO = { fontFamily: "'Roboto Mono', 'Courier New', monospace" };
 
   return (
     <div
-      className="flex flex-col justify-between rounded-2xl overflow-hidden"
+      className="flex flex-col justify-between rounded-2xl overflow-hidden select-none"
       style={{
-        background: 'linear-gradient(160deg, #0a2540 0%, #0D3B66 55%, #1F6FB2 100%)',
-        boxShadow:  '0 8px 32px rgba(13, 59, 102, 0.45), inset 0 1px 0 rgba(255,255,255,0.06)',
-        minHeight:  172,
+        background:   'linear-gradient(170deg, #071a2e 0%, #0c2d52 40%, #0D3B66 70%, #1a4f82 100%)',
+        boxShadow:    '0 12px 40px rgba(7,26,46,0.6), inset 0 1px 0 rgba(255,255,255,0.05)',
+        minHeight:    180,
+        border:       '1px solid rgba(255,255,255,0.06)',
       }}
     >
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-6 pt-5 pb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      {/* ── Header strip ── */}
+      <div
+        className="flex items-center justify-between px-5 py-2.5"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}
+      >
         <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[10px] font-semibold tracking-[0.18em] uppercase text-blue-300/70">Live Clock · IST</span>
-        </div>
-        <span className="text-[10px] font-medium text-blue-300/50 tracking-wide">UTC +5:30</span>
-      </div>
-
-      {/* Time display */}
-      <div className="flex items-end justify-center gap-1 px-6 py-4">
-        <div className="flex items-baseline gap-0.5">
+          <motion.div
+            className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+            animate={{ opacity: [1, 0.4, 1] }}
+            transition={{ duration: 2, repeat: Infinity }}
+          />
           <span
-            className="font-black text-white tabular-nums leading-none"
-            style={{ fontSize: 52, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}
+            className="text-[9px] font-medium tracking-[0.22em] uppercase text-slate-400"
+            style={MONO}
           >
-            {hours.padStart(2,'0')}
-          </span>
-          <motion.span
-            className="font-black text-blue-300 self-start mt-2"
-            style={{ fontSize: 40 }}
-            animate={{ opacity: [1, 0.2, 1] }}
-            transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            :
-          </motion.span>
-          <span
-            className="font-black text-white tabular-nums leading-none"
-            style={{ fontSize: 52, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}
-          >
-            {minutes}
-          </span>
-          <motion.span
-            className="font-black text-blue-300 self-start mt-2"
-            style={{ fontSize: 40 }}
-            animate={{ opacity: [1, 0.2, 1] }}
-            transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            :
-          </motion.span>
-          <span
-            className="font-semibold text-blue-300/80 tabular-nums leading-none"
-            style={{ fontSize: 28, letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums' }}
-          >
-            {seconds}
+            LIVE · IST
           </span>
         </div>
         <span
-          className="mb-1.5 ml-1 font-bold text-blue-200/70 uppercase tracking-widest"
-          style={{ fontSize: 13 }}
+          className="text-[9px] font-medium text-slate-500 tracking-widest"
+          style={MONO}
         >
-          {period}
+          UTC +5:30
         </span>
       </div>
 
-      {/* Bottom date bar */}
+      {/* ── Main time display ── */}
+      <div className="flex items-center justify-center px-5 py-5 gap-0">
+
+        {/* Hours */}
+        <span
+          className="text-white leading-none"
+          style={{ ...MONO, fontSize: 58, fontWeight: 700, letterSpacing: '0.02em' }}
+        >
+          {hh}
+        </span>
+
+        {/* Blinking colon */}
+        <motion.span
+          className="text-blue-400/80 leading-none mx-1"
+          style={{ ...MONO, fontSize: 48, fontWeight: 300, marginBottom: 2 }}
+          animate={{ opacity: [1, 0, 1] }}
+          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+        >
+          :
+        </motion.span>
+
+        {/* Minutes */}
+        <span
+          className="text-white leading-none"
+          style={{ ...MONO, fontSize: 58, fontWeight: 700, letterSpacing: '0.02em' }}
+        >
+          {mm}
+        </span>
+
+        {/* Seconds + AM/PM stacked */}
+        <div className="flex flex-col items-start justify-center ml-2 gap-0.5" style={{ marginBottom: 2 }}>
+          <span
+            className="text-slate-300/60 leading-none"
+            style={{ ...MONO, fontSize: 20, fontWeight: 400 }}
+          >
+            {ss}
+          </span>
+          <span
+            className="leading-none font-semibold tracking-widest"
+            style={{ ...MONO, fontSize: 11, color: '#60a5fa' }}
+          >
+            {period}
+          </span>
+        </div>
+      </div>
+
+      {/* ── Date footer ── */}
       <div
-        className="px-6 py-3 text-center"
-        style={{ background: 'rgba(0,0,0,0.18)', borderTop: '1px solid rgba(255,255,255,0.06)' }}
+        className="px-5 py-2.5 text-center"
+        style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.22)' }}
       >
-        <p className="text-[11px] font-semibold text-blue-200/80 tracking-widest uppercase">
+        <span
+          className="text-[10px] font-medium tracking-[0.16em] uppercase text-slate-400"
+          style={MONO}
+        >
           {dayDate}
-        </p>
+        </span>
       </div>
     </div>
   );
