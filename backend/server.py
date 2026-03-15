@@ -3770,18 +3770,58 @@ async def _run_daily_reminder_job(today_str: str):
 
 @app.middleware("http")
 async def auto_daily_reminder(request: Request, call_next):
+    """
+    Global middleware that:
+    1. Handles CORS preflight OPTIONS requests
+    2. Triggers the daily pending-task reminder after 10:00 AM IST
+    """
+
     global _last_reminder_date_cache
+
+    # --------------------------------------
+    # 1. Handle CORS preflight request
+    # --------------------------------------
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            status_code=200,
+            content={"message": "OK"}
+        )
+
     try:
+        # --------------------------------------
+        # 2. Check if reminder should run today
+        # --------------------------------------
         india_time = datetime.now(pytz.timezone("Asia/Kolkata"))
         today_str = india_time.date().isoformat()
-        if india_time.hour >= 10 and _last_reminder_date_cache != today_str:
-            _last_reminder_date_cache = today_str  # optimistic lock
-            asyncio.ensure_future(_run_daily_reminder_job(today_str))  # fire-and-forget
-    except Exception as e:
-        logger.error(f"Auto reminder middleware error: {e}")
-    response = await call_next(request)
-    return response
 
+        should_run_reminder = (
+            india_time.hour >= 10 and
+            _last_reminder_date_cache != today_str
+        )
+
+        if should_run_reminder:
+            # optimistic lock so multiple requests don't trigger it
+            _last_reminder_date_cache = today_str
+
+            logger.info(
+                f"Daily reminder triggered at {india_time.strftime('%H:%M:%S')} IST"
+            )
+
+            # fire-and-forget background task
+            asyncio.create_task(
+                _run_daily_reminder_job(today_str)
+            )
+
+    except Exception as e:
+        logger.error(f"Auto reminder middleware error: {str(e)}")
+
+    # --------------------------------------
+    # 3. Continue normal request processing
+    # --------------------------------------
+    response = await call_next(request)
+
+    return response
+    
 # ==================== HOLIDAY ROUTES ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
