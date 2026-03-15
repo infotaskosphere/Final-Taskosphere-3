@@ -947,63 +947,116 @@ def get_real_client_ip(request: Request):
         return request.client.host
     return None
 
+
 def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
     try:
         pit = datetime.strptime(user.get("punch_in_time", "10:30"), "%H:%M")
+
         if user.get("late_grace_minutes") is not None:
             grace_minutes = int(user["late_grace_minutes"])
         else:
             raw = str(user.get("grace_time", "00:15"))
             gt = datetime.strptime(raw, "%H:%M")
             grace_minutes = gt.hour * 60 + gt.minute
+
         deadline = punch_in_ist.replace(
-            hour=pit.hour, minute=pit.minute, second=0, microsecond=0
+            hour=pit.hour,
+            minute=pit.minute,
+            second=0,
+            microsecond=0
         ) + timedelta(minutes=grace_minutes)
+
         return punch_in_ist > deadline
+
     except Exception:
         return False
+
 
 def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
     try:
         pot = datetime.strptime(user.get("punch_out_time", "19:00"), "%H:%M")
+
         expected_out = punch_out_ist.replace(
-            hour=pot.hour, minute=pot.minute, second=0, microsecond=0
+            hour=pot.hour,
+            minute=pot.minute,
+            second=0,
+            microsecond=0
         )
+
         return punch_out_ist < expected_out
+
     except Exception:
         return False
+
 
 @api_router.post("/attendance")
 async def handle_attendance(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
+
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
-    holiday = await db.holidays.find_one({"date": today_str, "status": "confirmed"})
+
+    holiday = await db.holidays.find_one(
+        {"date": today_str, "status": "confirmed"}
+    )
+
     if holiday:
         raise HTTPException(
             status_code=400,
             detail=f"Today is a holiday ({holiday.get('name')}). Office is closed."
         )
+
     action = data.get("action")
+
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
+
     attendance = await db.attendance.find_one(
         {"user_id": current_user.id, "date": today_str}
     )
+
+    user_doc = await db.users.find_one(
+        {"id": current_user.id},
+        {"_id": 0}
+    )
+
+    # =========================
+    # PUNCH IN
+    # =========================
     if action == "punch_in":
+
         if attendance and attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Already punched in")
-        user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+
+        cutoff_str = user_doc.get("punch_out_time", "19:00")
+        cutoff_time = datetime.strptime(cutoff_str, "%H:%M").time()
+
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata")).time()
+
+        # Prevent punch in after office closing time
+        if now_ist >= cutoff_time:
+            raise HTTPException(
+                status_code=400,
+                detail="Punch-in not allowed after office cutoff time"
+            )
+
         punch_in_utc = datetime.now(timezone.utc)
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
         is_late = check_is_late(user_doc or {}, punch_in_ist)
+
+        # Half day rule
+        status_value = "present"
+        if is_late:
+            status_value = "half_day"
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
                 "$set": {
-                    "status": "present",
+                    "status": status_value,
                     "punch_in": punch_in_utc,
                     "is_late": is_late,
                     "leave_reason": None
@@ -1011,20 +1064,38 @@ async def handle_attendance(
             },
             upsert=True
         )
-        return {"message": "Punched in successfully", "is_late": is_late}
 
+        return {
+            "message": "Punched in successfully",
+            "status": status_value,
+            "is_late": is_late
+        }
+
+    # =========================
+    # PUNCH OUT
+    # =========================
     if action == "punch_out":
+
         if not attendance or not attendance.get("punch_in"):
             raise HTTPException(status_code=400, detail="Not punched in yet")
+
         if attendance.get("punch_out"):
             raise HTTPException(status_code=400, detail="Already punched out")
+
         punch_in_dt = attendance.get("punch_in")
+
         punch_out_utc = datetime.now(timezone.utc)
         punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
-        user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+
         punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
-        delta = punch_out_utc.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc)
+
+        delta = (
+            punch_out_utc.astimezone(timezone.utc)
+            - punch_in_dt.astimezone(timezone.utc)
+        )
+
         duration_minutes = int(delta.total_seconds() / 60)
+
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {
@@ -1035,22 +1106,28 @@ async def handle_attendance(
                 }
             }
         )
+
         return {
             "message": "Punched out successfully",
             "duration": duration_minutes,
             "punched_out_early": punched_out_early
         }
 
+
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
+
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
+
     holiday = await db.holidays.find_one({"date": today_str})
+
     if holiday:
         raise HTTPException(
             status_code=400,
             detail=f"Today is a holiday ({holiday.get('name')}). Leave marking is not allowed."
         )
+
     await db.attendance.update_one(
         {"user_id": current_user.id, "date": today_str},
         {
@@ -1063,13 +1140,18 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
         },
         upsert=True
     )
+
     return {"message": "Marked on leave today"}
+
 
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
+
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
+
     holiday = await db.holidays.find_one({"date": today_str})
+
     if holiday:
         return {
             "status": "holiday",
@@ -1078,10 +1160,12 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
+
     attendance = await db.attendance.find_one(
         {"user_id": current_user.id, "date": today_str},
         {"_id": 0}
     )
+
     if not attendance:
         return {
             "status": "absent",
@@ -1089,25 +1173,37 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None
         }
+
     if "status" not in attendance:
         attendance["status"] = (
             "present" if attendance.get("punch_in") else "absent"
         )
+
     return attendance
+
 
 @api_router.post("/attendance/apply-leave")
 async def apply_leave(
     data: dict,
     current_user: User = Depends(get_current_user)
 ):
+
     try:
+
         from_date = datetime.fromisoformat(data["from_date"]).date()
-        to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
+        to_date = datetime.fromisoformat(
+            data.get("to_date", data["from_date"])
+        ).date()
+
         reason = data.get("reason", "Leave Applied")
+
         if to_date < from_date:
             raise HTTPException(status_code=400, detail="Invalid date range")
+
         current = from_date
+
         while current <= to_date:
+
             await db.attendance.update_one(
                 {
                     "user_id": current_user.id,
@@ -1123,8 +1219,11 @@ async def apply_leave(
                 },
                 upsert=True
             )
+
             current += timedelta(days=1)
+
         return {"message": "Leave applied successfully"}
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
