@@ -531,19 +531,25 @@ export default function Dashboard() {
     if (hour < 21) return "Good Evening 🌆";
     return "Working Late? 🌙";
   };
-
-  useEffect(() => {
+useEffect(() => {
     if (!todayAttendance) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
-    if (todayAttendance.status === "leave" || todayAttendance.status === "holiday") {
+    // Never show punch-in gate on holidays, leave, or if already punched in
+    if (
+      todayAttendance.status === "holiday" ||
+      todayAttendance.status === "leave"   ||
+      todayAttendance.punch_in             ||
+      todayAttendance.status === "absent"  // auto-marked absent = day is over, no gate
+    ) {
       setMustPunchIn(false);
       document.body.style.overflow = "auto";
       return;
     }
-    if (todayAttendance.status === "absent" && !todayAttendance.punch_in) {
+    // Only show gate if genuinely not punched in yet (status = null/undefined/pending)
+    if (!todayAttendance.punch_in && todayAttendance.status !== "holiday") {
       setMustPunchIn(true);
       document.body.style.overflow = "hidden";
     } else {
