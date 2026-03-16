@@ -50,7 +50,6 @@ import {
   FileUp,
   Loader2,
 } from 'lucide-react';
-
 // ═══════════════════════════════════════════════════════════════════════════
 // INTERACTION STYLES — injected once
 // ═══════════════════════════════════════════════════════════════════════════
@@ -92,7 +91,6 @@ if (typeof document !== 'undefined' && !document.getElementById('att-interaction
   s.textContent = ATTENDANCE_INTERACTION_STYLES;
   document.head.appendChild(s);
 }
-
 function addAttRipple(e) {
   const btn = e.currentTarget;
   const circle = document.createElement('span');
@@ -106,7 +104,6 @@ function addAttRipple(e) {
   btn.appendChild(circle);
   setTimeout(() => circle.remove(), 600);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // BRAND COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -124,7 +121,6 @@ const COLORS = {
 };
 const IST_TIMEZONE = 'Asia/Kolkata';
 const ABSENT_CUTOFF_HOUR_IST = 19;
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } },
@@ -133,7 +129,6 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
-
 if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
   const link = document.createElement('link');
   link.id = 'roboto-mono-font';
@@ -141,7 +136,6 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
   link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
   document.head.appendChild(link);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // DIGITAL CLOCK
 // ═══════════════════════════════════════════════════════════════════════════
@@ -195,7 +189,6 @@ function DigitalClock() {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // STAT CARD
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,7 +224,6 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -323,7 +315,6 @@ const extractHolidaysFromPDF = async (file) => {
   if (holidays.length === 0) throw new Error('No holidays found in the PDF');
   return holidays;
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY
 // ═══════════════════════════════════════════════════════════════════════════
@@ -404,7 +395,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     </Tooltip>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER POPUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -453,7 +443,6 @@ function ReminderPopup({ reminder, onDismiss }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -503,7 +492,6 @@ export default function Attendance() {
   const [trademarkData, setTrademarkData] = useState(null);
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
-
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
@@ -521,7 +509,6 @@ export default function Attendance() {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
-
   useEffect(() => { fetchData(); fetchReminders(); }, []);
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
@@ -558,10 +545,14 @@ export default function Attendance() {
     const id = setInterval(check, 30000);
     return () => clearInterval(id);
   }, [reminders]);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PATCH A — Updated resolveLocations useEffect
+  // ═══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
-      for (const record of attendanceHistory.slice(0, 15)) {
+      // Increased slice to 50 so admin "everyone" view (25 rows) is fully covered
+      for (const record of attendanceHistory.slice(0, 50)) {
         if (record.location?.latitude && record.location?.longitude) {
           const key = `${record.location.latitude},${record.location.longitude}`;
           if (!locationCache[key]) toResolve.push({ key, lat: record.location.latitude, lng: record.location.longitude });
@@ -571,13 +562,19 @@ export default function Attendance() {
           if (!locationCache[key]) toResolve.push({ key, lat: record.punch_out_location.latitude, lng: record.punch_out_location.longitude });
         }
       }
+      // Also resolve today's punch-out location (visible in hero card)
+      if (displayTodayAttendance?.punch_out_location?.latitude && displayTodayAttendance?.punch_out_location?.longitude) {
+        const loc = displayTodayAttendance.punch_out_location;
+        const key = `${loc.latitude},${loc.longitude}`;
+        if (!locationCache[key]) toResolve.push({ key, lat: loc.latitude, lng: loc.longitude });
+      }
       if (toResolve.length === 0) return;
       const results = {};
       for (const item of toResolve) results[item.key] = await reverseGeocode(item.lat, item.lng);
       setLocationCache(prev => ({ ...prev, ...results }));
     };
     resolveLocations();
-  }, [attendanceHistory]);
+  }, [attendanceHistory, displayTodayAttendance]); // <-- added displayTodayAttendance
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
@@ -595,7 +592,6 @@ export default function Attendance() {
     const id = setInterval(checkAbsentWarning, 60000);
     return () => clearInterval(id);
   }, [todayAttendance, isViewingOther, isEveryoneView]);
-
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
     setDataError(null);
@@ -677,7 +673,6 @@ export default function Attendance() {
       setLoading(false);
     }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
-
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
@@ -687,7 +682,6 @@ export default function Attendance() {
       setReminders(res.data || []);
     } catch {}
   }, [isViewingOther, selectedUserId]);
-
   const handlePunchAction = useCallback(async (action, e) => {
     if (e) addAttRipple(e);
     setLoading(true);
@@ -715,7 +709,6 @@ export default function Attendance() {
       toast.error(error.response?.data?.detail || 'Failed to record attendance', { duration: 4000 });
     } finally { setLoading(false); }
   }, [fetchData]);
-
   const handleApplyLeave = useCallback(async () => {
     if (!leaveFrom) { toast.error('Select a leave start date'); return; }
     try {
@@ -729,7 +722,6 @@ export default function Attendance() {
       await fetchData();
     } catch { toast.error('Failed to submit leave request'); }
   }, [leaveFrom, leaveTo, leaveReason, fetchData]);
-
   const handleAddHolidays = useCallback(async () => {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
     if (validRows.length === 0) { toast.error('Add at least one holiday'); return; }
@@ -751,7 +743,6 @@ export default function Attendance() {
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
     await fetchData();
   }, [holidayRows, fetchData]);
-
   const handlePdfImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -765,7 +756,6 @@ export default function Attendance() {
     } catch (err) { toast.error(`PDF extraction failed: ${err.message}`); }
     finally { setPdfImporting(false); }
   }, []);
-
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
     setEditLoading(true);
@@ -778,13 +768,11 @@ export default function Attendance() {
     } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to update holiday'); }
     finally { setEditLoading(false); }
   }, [editingHoliday, editName, editDate, fetchData]);
-
   const handleDeleteHoliday = useCallback(async (date, name) => {
     if (!confirm(`Delete "${name}"?`)) return;
     try { await api.delete(`/holidays/${date}`); toast.success(`✓ "${name}" deleted`); await fetchData(); }
     catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete holiday'); }
   }, [fetchData]);
-
   const handleHolidayDecision = useCallback(async (holidayDate, decision) => {
     try {
       await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
@@ -792,7 +780,6 @@ export default function Attendance() {
       await fetchData();
     } catch { toast.error('Failed to update holiday'); }
   }, [fetchData]);
-
   const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
     setAbsentLoading(true);
     try {
@@ -808,7 +795,6 @@ export default function Attendance() {
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to mark absent'); }
     finally { setAbsentLoading(false); }
   }, [fetchData]);
-
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
@@ -823,7 +809,6 @@ export default function Attendance() {
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
-
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -866,7 +851,6 @@ export default function Attendance() {
       setTrademarkLoading(false);
     }
   }, []);
-
   const handleDeleteReminder = useCallback(async (id) => {
     try {
       await api.delete(`/reminders/${id}`);
@@ -874,14 +858,12 @@ export default function Attendance() {
       toast.success('Reminder deleted');
     } catch { toast.error('Failed to delete reminder'); }
   }, []);
-
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
     try { await api.patch(`/reminders/${firedReminder.id}`, { is_dismissed: true }); } catch {}
     setReminders(prev => prev.map(r => r.id === firedReminder.id ? { ...r, is_dismissed: true } : r));
     setFiredReminder(null);
   }, [firedReminder]);
-
   const handleExportPDF = useCallback(async () => {
     setExportingPDF(true);
     try {
@@ -939,7 +921,6 @@ export default function Attendance() {
     } catch { toast.error('Failed to export PDF'); }
     finally { setExportingPDF(false); }
   }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
-
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
     let atts = attendanceHistory.filter(a => {
@@ -954,7 +935,6 @@ export default function Attendance() {
     }
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
-
   const monthTotalMinutes = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
   const monthDaysPresent = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
   const monthDaysAbsent = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
@@ -1015,7 +995,6 @@ export default function Attendance() {
     () => holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
     [holidays, todayDateStr]
   );
-
   return (
     <TooltipProvider>
       <AnimatePresence>
@@ -1079,7 +1058,6 @@ export default function Attendance() {
             </motion.div>
           </div>
         </motion.div>
-
         {/* ── ALERTS ── */}
         {dataError && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
@@ -1121,7 +1099,6 @@ export default function Attendance() {
             </button>
           </motion.div>
         )}
-
         {/* ── TODAY STATUS HERO ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1231,7 +1208,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── PENDING HOLIDAY REVIEW ── */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1264,7 +1240,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── ABSENT SUMMARY ── */}
         {isAdmin && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1293,7 +1268,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── STAT CARDS ── */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
           <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Month` : 'This Month'}
@@ -1307,7 +1281,6 @@ export default function Attendance() {
             <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
         </motion.div>
-
         {/* ── DAILY PROGRESS ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1368,11 +1341,9 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── HOLIDAY + REMINDER CARDS (redesigned) ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
-
             {/* ══ HOLIDAY CARD — styled like Reminder card ══ */}
             {(() => {
               const monthHolidaysGrid = holidays.filter(h => {
@@ -1408,7 +1379,6 @@ export default function Attendance() {
                       </Button>
                     )}
                   </div>
-
                   {/* Body */}
                   <CardContent className="p-4 flex-1">
                     {monthHolidaysGrid.length === 0 ? (
@@ -1467,7 +1437,6 @@ export default function Attendance() {
                 </Card>
               );
             })()}
-
             {/* ══ REMINDER CARD — compact stripe items ══ */}
             <Card className="border-0 shadow-md overflow-hidden flex flex-col">
               <div className="px-6 py-3 flex items-center justify-between"
@@ -1562,12 +1531,15 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── CALENDAR + RECENT ATTENDANCE ── */}
         <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
+          {/* ═══════════════════════════════════════════════════════════════════════════
+              PATCH B — Calendar + detail card section (updated layout)
+              ═══════════════════════════════════════════════════════════════════════════ */}
           {!isEveryoneView && (
             <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
-              <Card className="border-0 shadow-md">
+              {/* ── CALENDAR CARD — fixed height, does not grow ── */}
+              <Card className="border-0 shadow-md flex-shrink-0">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
@@ -1615,16 +1587,17 @@ export default function Attendance() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-0 shadow-md overflow-hidden">
-                <CardContent className="p-0">
+              {/* ── DETAIL CARD — grows to fill remaining height matching history card ── */}
+              <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
+                <CardContent className="p-0 h-full overflow-y-auto">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500">
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full">
                       <p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p>
                       <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       {selectedAttendance.auto_marked && <p className="text-xs text-red-500 mt-2 font-medium">Auto-marked absent at 7:00 PM IST</p>}
                     </div>
                   ) : selectedAttendance?.punch_in ? (
-                    <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4" style={{ borderColor: COLORS.emeraldGreen }}>
+                    <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4 h-full" style={{ borderColor: COLORS.emeraldGreen }}>
                       <p className="font-bold text-slate-800 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       <div className="space-y-3 text-sm">
                         <div className="flex justify-between items-center">
@@ -1664,18 +1637,18 @@ export default function Attendance() {
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="p-6 border-l-4" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}>
+                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}>
                       <p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p>
                       <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       {selectedAttendance.leave_reason && <p className="text-xs text-slate-500 mt-2 font-medium">Reason: {selectedAttendance.leave_reason}</p>}
                     </div>
                   ) : selectedHoliday ? (
-                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400">
+                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full">
                       <p className="text-sm font-bold text-amber-900">🎉 Holiday: {selectedHoliday.name}</p>
                       <p className="text-xs text-amber-700 mt-1">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
                     </div>
                   ) : (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400">
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400 h-full">
                       <p className="text-sm font-bold text-red-900">No record for {format(selectedDate, 'MMM d')}</p>
                     </div>
                   )}
@@ -1683,7 +1656,6 @@ export default function Attendance() {
               </Card>
             </motion.div>
           )}
-
           {/* ── RECENT ATTENDANCE TABLE ── */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
             <Card className="border-0 shadow-md h-full">
@@ -1783,9 +1755,7 @@ export default function Attendance() {
             </Card>
           </motion.div>
         </motion.div>
-
         {/* ══════════════════════ MODALS ══════════════════════ */}
-
         {/* Punch-In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
@@ -1817,7 +1787,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
@@ -1889,7 +1858,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Add Holiday Modal */}
         <AnimatePresence>
           {showHolidayModal && (
@@ -1960,7 +1928,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
@@ -2014,7 +1981,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
@@ -2176,7 +2142,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
       </motion.div>
     </TooltipProvider>
   );
