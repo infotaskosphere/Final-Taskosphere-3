@@ -4010,95 +4010,198 @@ async def delete_holiday(holiday_date: str, current_user: User = Depends(require
     return {"message": "Holiday removed"}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF HOLIDAY EXTRACTOR — proxy to Anthropic API to avoid browser CORS block
+# PDF HOLIDAY EXTRACTOR — 100% FREE using pdfplumber + regex (no API key)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Month name → number map (reused from compliance parser above)
+_HOLIDAY_MONTH_MAP = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2,
+    "march": 3, "mar": 3, "april": 4, "apr": 4,
+    "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
+
+def _parse_holiday_date(text: str, default_year: int) -> Optional[str]:
+    """Try every common date format found in Indian holiday PDFs. Returns YYYY-MM-DD or None."""
+    text = text.strip()
+
+    # YYYY-MM-DD or YYYY/MM/DD
+    m = re.search(r'\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b', text)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except ValueError:
+            pass
+
+    # DD-MM-YYYY or DD/MM/YYYY
+    m = re.search(r'\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b', text)
+    if m:
+        try:
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
+        except ValueError:
+            pass
+
+    # "15 August 2026" or "15th August 2026"
+    m = re.search(
+        r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
+        r'(january|february|march|april|may|june|july|august|september|october|november|december|'
+        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)'
+        r'(?:\s+(\d{4}))?\b',
+        text, re.IGNORECASE
+    )
+    if m:
+        try:
+            yr = int(m.group(3)) if m.group(3) else default_year
+            mo = _HOLIDAY_MONTH_MAP[m.group(2).lower()]
+            return date(yr, mo, int(m.group(1))).isoformat()
+        except ValueError:
+            pass
+
+    # "August 15" or "August 15, 2026"
+    m = re.search(
+        r'\b(january|february|march|april|may|june|july|august|september|october|november|december|'
+        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+'
+        r'(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b',
+        text, re.IGNORECASE
+    )
+    if m:
+        try:
+            yr = int(m.group(3)) if m.group(3) else default_year
+            mo = _HOLIDAY_MONTH_MAP[m.group(1).lower()]
+            return date(yr, mo, int(m.group(2))).isoformat()
+        except ValueError:
+            pass
+
+    return None
+
+
+def _extract_holidays_from_text(raw_text: str) -> list:
+    """
+    Parse raw PDF text and extract holiday name + date pairs.
+    Handles:
+      - Table rows:  "Diwali | 20 October 2026"
+      - Inline rows: "20-10-2026  Diwali"
+      - Mixed:       "Diwali (20 Oct)"
+    """
+    results = []
+    seen_dates = set()
+
+    # Detect dominant year in the document (use current year as fallback)
+    year_matches = re.findall(r'\b(20\d{2})\b', raw_text)
+    if year_matches:
+        from collections import Counter
+        default_year = int(Counter(year_matches).most_common(1)[0][0])
+    else:
+        default_year = datetime.now().year
+
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+
+    # --- Pass 1: pipe/tab separated table rows ---
+    for line in lines:
+        if "|" in line or "\t" in line:
+            sep = "|" if "|" in line else "\t"
+            cols = [c.strip() for c in line.split(sep) if c.strip()]
+            date_val = None
+            name_col = None
+            for col in cols:
+                d = _parse_holiday_date(col, default_year)
+                if d and d not in seen_dates:
+                    date_val = d
+                else:
+                    if col and not re.match(r'^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name)$', col, re.IGNORECASE):
+                        name_col = col
+            if date_val and name_col and len(name_col) > 2:
+                seen_dates.add(date_val)
+                results.append({"name": name_col[:80].strip(), "date": date_val})
+
+    # --- Pass 2: lines where date and name appear together ---
+    for line in lines:
+        # Skip header-like lines
+        if re.match(r'^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name|month)', line, re.IGNORECASE):
+            continue
+        if len(line) < 5:
+            continue
+
+        date_val = _parse_holiday_date(line, default_year)
+        if not date_val or date_val in seen_dates:
+            continue
+
+        # Remove the date portion to get the name
+        name = re.sub(
+            r'\b\d{1,2}(?:st|nd|rd|th)?[\s\-/]*'
+            r'(?:january|february|march|april|may|june|july|august|september|october|november|december|'
+            r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[\s,]*\d{0,4}\b',
+            '', line, flags=re.IGNORECASE
+        )
+        name = re.sub(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b', '', name)
+        name = re.sub(r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b', '', name)
+        name = re.sub(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'[\|\-–—,;:()\[\]]+', ' ', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        if len(name) < 3:
+            continue
+
+        seen_dates.add(date_val)
+        results.append({"name": name[:80], "date": date_val})
+
+    # Sort by date
+    results.sort(key=lambda x: x["date"])
+    return results
+
+
 @api_router.post("/holidays/extract-from-pdf")
 async def extract_holidays_from_pdf(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Accepts a PDF upload, sends it to Claude via the Anthropic API server-side
-    (avoids browser CORS restrictions), and returns extracted holidays as JSON.
-    Requires ANTHROPIC_API_KEY environment variable.
+    100% FREE holiday extractor.
+    Uses pdfplumber (already installed) + regex to parse holiday PDFs.
+    No API key, no external calls.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not anthropic_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured on the server")
-
     content = await file.read()
-    base64_data = base64.b64encode(content).decode("utf-8")
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    payload = {
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 1000,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": base64_data
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "Extract ALL holidays from this document. "
-                        "Return ONLY a JSON array with no markdown fences.\n"
-                        "Format: [{\"name\": \"Holiday Name\", \"date\": \"YYYY-MM-DD\"}, ...]\n"
-                        "Use the year shown in the document. Include every holiday row found."
-                    )
-                }
-            ]
-        }]
-    }
-
+    # Extract all text from the PDF using pdfplumber (already in requirements)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": anthropic_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json=payload,
-            )
-    except httpx.RequestError as exc:
-        logger.error(f"Anthropic API request failed: {exc}")
-        raise HTTPException(status_code=502, detail=f"Could not reach Anthropic API: {str(exc)}")
+        import pdfplumber
+        parts = []
+        with pdfplumber.open(BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                # Extract plain text
+                text = page.extract_text()
+                if text:
+                    parts.append(text)
+                # Also extract tables so pipe-separated logic fires
+                for table in page.extract_tables():
+                    for row in table:
+                        if row:
+                            parts.append("  |  ".join(str(c or "").strip() for c in row))
+        raw_text = "\n".join(parts)
+    except Exception as exc:
+        logger.error(f"pdfplumber failed: {exc}")
+        raise HTTPException(status_code=422, detail=f"Could not read PDF: {str(exc)}")
 
-    if response.status_code != 200:
-        logger.error(f"Anthropic API error {response.status_code}: {response.text}")
-        raise HTTPException(status_code=502, detail=f"AI extraction failed (HTTP {response.status_code})")
+    if not raw_text or len(raw_text.strip()) < 10:
+        raise HTTPException(status_code=422, detail="No readable text found in PDF. Try a text-based (non-scanned) PDF.")
 
-    data = response.json()
-    raw_text = next(
-        (block["text"] for block in data.get("content", []) if block.get("type") == "text"),
-        ""
-    )
+    holidays = _extract_holidays_from_text(raw_text)
 
-    # Strip any accidental markdown fences the model may add
-    clean_text = re.sub(r"```json|```", "", raw_text).strip()
+    if not holidays:
+        raise HTTPException(
+            status_code=404,
+            detail="No holidays detected. Make sure the PDF contains dates alongside holiday names."
+        )
 
-    try:
-        holidays = json.loads(clean_text)
-    except json.JSONDecodeError as exc:
-        logger.error(f"JSON parse failed for AI response: {exc}\nRaw: {clean_text}")
-        raise HTTPException(status_code=500, detail="AI returned an unparseable response")
-
-    if not isinstance(holidays, list):
-        raise HTTPException(status_code=500, detail="Unexpected AI response format (expected a list)")
-
-    valid = [h for h in holidays if h.get("name") and h.get("date")]
-    logger.info(f"PDF holiday extraction: {len(valid)} holidays found by {current_user.email}")
-    return {"holidays": valid}
+    logger.info(f"PDF holiday extraction (free): {len(holidays)} holidays found by {current_user.email}")
+    return {"holidays": holidays}
 
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
