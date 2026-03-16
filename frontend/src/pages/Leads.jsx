@@ -697,7 +697,11 @@ export default function LeadsPage() {
     const q = searchQuery.toLowerCase();
     return leads
       .filter(l => !q || l.company_name?.toLowerCase().includes(q) || l.contact_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.referred_by?.toLowerCase().includes(q))
-      .filter(l => statusFilter === 'all' || l.status === statusFilter)
+      .filter(l => {
+        if (statusFilter === 'all') return true;
+        if (statusFilter === 'active') return ACTIVE_STAGES.includes(l.status);
+        return l.status === statusFilter;
+      })
       .filter(l => serviceFilter === 'all' || (l.services||[]).includes(serviceFilter));
   }, [leads, searchQuery, statusFilter, serviceFilter]);
 
@@ -798,7 +802,12 @@ export default function LeadsPage() {
   useEffect(() => {
     const pills = [];
     if (searchQuery)            pills.push({ key: 'search',  label: `Search: ${searchQuery}` });
-    if (statusFilter !== 'all') pills.push({ key: 'status',  label: `Stage: ${stageOf(statusFilter).label}` });
+    if (statusFilter !== 'all') {
+      const stageLabel = statusFilter === 'active'
+        ? 'Active Leads'
+        : `Stage: ${stageOf(statusFilter).label}`;
+      pills.push({ key: 'status', label: stageLabel });
+    }
     if (serviceFilter !== 'all') pills.push({ key: 'service', label: `Service: ${serviceFilter}` });
     setActiveFilters(pills);
   }, [searchQuery, statusFilter, serviceFilter]);
@@ -861,11 +870,11 @@ export default function LeadsPage() {
 
       {/* ── Stats ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Total"   value={stats.total}   color="text-slate-800"   onClick={() => setStatusFilter('all')}  active={statusFilter === 'all'} />
-        <StatCard label="Active"  value={stats.active}  color="text-blue-600"    onClick={() => setStatusFilter('all')}  active={false} />
-        <StatCard label="Won"     value={stats.won}     color="text-emerald-600" onClick={() => setStatusFilter('won')}  active={statusFilter === 'won'} />
-        <StatCard label="Lost"    value={stats.lost}    color="text-red-600"     onClick={() => setStatusFilter('lost')} active={statusFilter === 'lost'} />
-        <StatCard label="Overdue" value={stats.overdue} color="text-orange-600"  onClick={() => setStatusFilter('all')}  active={false} />
+        <StatCard label="Total"   value={stats.total}   color="text-slate-800"   onClick={() => setStatusFilter('all')}    active={statusFilter === 'all'} />
+        <StatCard label="Active"  value={stats.active}  color="text-blue-600"    onClick={() => setStatusFilter('active')} active={statusFilter === 'active'} />
+        <StatCard label="Won"     value={stats.won}     color="text-emerald-600" onClick={() => setStatusFilter('won')}    active={statusFilter === 'won'} />
+        <StatCard label="Lost"    value={stats.lost}    color="text-red-600"     onClick={() => setStatusFilter('lost')}   active={statusFilter === 'lost'} />
+        <StatCard label="Overdue" value={stats.overdue} color="text-orange-600"  onClick={() => setStatusFilter('all')}    active={false} />
       </motion.div>
 
       {/* ── Revenue ── */}
@@ -942,6 +951,7 @@ export default function LeadsPage() {
             <SelectTrigger className="w-40 bg-white rounded-2xl text-sm"><SelectValue placeholder="All Stages" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Stages</SelectItem>
+              <SelectItem value="active">Active Leads</SelectItem>
               {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
