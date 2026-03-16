@@ -342,12 +342,13 @@ const reverseGeocode = async (lat, lng) => {
 
 // ── PDF Holiday Extractor (AI-powered) ───────────────────────────────────────
 const extractHolidaysFromPDF = async (file) => {
-  const base64Data = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/holidays/extract-from-pdf', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   });
+  return response.data.holidays;
+};
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
