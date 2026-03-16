@@ -50,25 +50,24 @@ import {
   FileUp,
   Loader2,
 } from 'lucide-react';
-
 // ═══════════════════════════════════════════════════════════════════════════
 // INTERACTION STYLES — injected once
 // ═══════════════════════════════════════════════════════════════════════════
 const ATTENDANCE_INTERACTION_STYLES = `
   @keyframes att-ripple {
-    0%   { transform: scale(0); opacity: 0.5; }
+    0% { transform: scale(0); opacity: 0.5; }
     100% { transform: scale(4); opacity: 0; }
   }
   @keyframes att-pulse-green {
     0%, 100% { box-shadow: 0 0 0 0 rgba(31,175,90,0.5); }
-    50%       { box-shadow: 0 0 0 8px rgba(31,175,90,0); }
+    50% { box-shadow: 0 0 0 8px rgba(31,175,90,0); }
   }
   @keyframes att-pulse-red {
     0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-    50%       { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+    50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
   }
   @keyframes att-shimmer {
-    0%   { background-position: -200% center; }
+    0% { background-position: -200% center; }
     100% { background-position: 200% center; }
   }
   .att-ripple-btn {
@@ -90,14 +89,12 @@ const ATTENDANCE_INTERACTION_STYLES = `
     animation: att-pulse-red 1.5s ease-in-out infinite;
   }
 `;
-
 if (typeof document !== 'undefined' && !document.getElementById('att-interaction-styles')) {
   const s = document.createElement('style');
   s.id = 'att-interaction-styles';
   s.textContent = ATTENDANCE_INTERACTION_STYLES;
   document.head.appendChild(s);
 }
-
 // Ripple helper
 function addAttRipple(e) {
   const btn = e.currentTarget;
@@ -112,49 +109,44 @@ function addAttRipple(e) {
   btn.appendChild(circle);
   setTimeout(() => circle.remove(), 600);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // BRAND COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════
 const COLORS = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
-  amber:        '#F59E0B',
-  orange:       '#F97316',
-  red:          '#EF4444',
-  slate50:      '#F8FAFC',
-  slate200:     '#E2E8F0',
-  purple:       '#8B5CF6',
+  lightGreen: '#5CCB5F',
+  amber: '#F59E0B',
+  orange: '#F97316',
+  red: '#EF4444',
+  slate50: '#F8FAFC',
+  slate200: '#E2E8F0',
+  purple: '#8B5CF6',
 };
-
-const IST_TIMEZONE          = 'Asia/Kolkata';
+const IST_TIMEZONE = 'Asia/Kolkata';
 const ABSENT_CUTOFF_HOUR_IST = 19;
-
 // ═══════════════════════════════════════════════════════════════════════════
 // ANIMATION VARIANTS
 // ═══════════════════════════════════════════════════════════════════════════
 const containerVariants = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } },
 };
 const itemVariants = {
-  hidden:  { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // ROBOTO MONO FONT
 // ═══════════════════════════════════════════════════════════════════════════
 if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
   const link = document.createElement('link');
-  link.id   = 'roboto-mono-font';
-  link.rel  = 'stylesheet';
+  link.id = 'roboto-mono-font';
+  link.rel = 'stylesheet';
   link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
   document.head.appendChild(link);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // DIGITAL CLOCK
 // ═══════════════════════════════════════════════════════════════════════════
@@ -164,17 +156,15 @@ function DigitalClock() {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
-
   const istString = time.toLocaleString('en-US', {
     timeZone: IST_TIMEZONE, hour12: true,
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
   const [timePart, rawPeriod] = istString.split(' ');
   const [hh, mm, ss] = timePart.split(':');
-  const period  = rawPeriod || 'AM';
+  const period = rawPeriod || 'AM';
   const dayDate = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMMM d, yyyy');
-  const MONO    = { fontFamily: "'Roboto Mono', 'Courier New', monospace" };
-
+  const MONO = { fontFamily: "'Roboto Mono', 'Courier New', monospace" };
   return (
     <div className="flex flex-col justify-between rounded-2xl overflow-hidden select-none"
       style={{
@@ -213,7 +203,6 @@ function DigitalClock() {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // STAT CARD — enhanced with gradient bg + hover lift
 // ═══════════════════════════════════════════════════════════════════════════
@@ -249,7 +238,6 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -259,14 +247,12 @@ const formatDuration = (minutes) => {
   if (isNaN(mins)) return '0h 0m';
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 };
-
 const parseDurationToHours = (str) => {
   if (!str) return 0;
   const match = String(str).match(/^(\d+)h\s*(\d+)m$/);
   if (!match) return 0;
   return parseInt(match[1], 10) + parseInt(match[2], 10) / 60;
 };
-
 const formatAttendanceTime = (isoStringOrDate) => {
   if (!isoStringOrDate) return '—';
   try {
@@ -274,15 +260,14 @@ const formatAttendanceTime = (isoStringOrDate) => {
     if (isoStringOrDate instanceof Date) {
       date = isoStringOrDate;
     } else {
-      const str    = String(isoStringOrDate).trim();
-      const hasTZ  = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
+      const str = String(isoStringOrDate).trim();
+      const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
       date = new Date(hasTZ ? str : str + 'Z');
     }
     if (isNaN(date.getTime())) return '—';
     return formatInTimeZone(date, IST_TIMEZONE, 'hh:mm a');
   } catch { return '—'; }
 };
-
 const calculateTodayLiveDuration = (todayAtt) => {
   if (!todayAtt?.punch_in) return '0h 0m';
   if (todayAtt.punch_out) return formatDuration(todayAtt.duration_minutes);
@@ -290,7 +275,7 @@ const calculateTodayLiveDuration = (todayAtt) => {
   if (todayAtt.punch_in instanceof Date) {
     start = todayAtt.punch_in;
   } else {
-    const str   = String(todayAtt.punch_in).trim();
+    const str = String(todayAtt.punch_in).trim();
     const hasTZ = /Z$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(str);
     start = new Date(hasTZ ? str : str + 'Z');
   }
@@ -299,7 +284,6 @@ const calculateTodayLiveDuration = (todayAtt) => {
   if (diffMs < 0) return '0h 0m';
   return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
 };
-
 const formatReminderTime = (isoStr) => {
   if (!isoStr) return '—';
   try {
@@ -308,12 +292,11 @@ const formatReminderTime = (isoStr) => {
     return format(d, 'MMM d, yyyy • hh:mm a');
   } catch { return '—'; }
 };
-
 const buildGCalURL = (reminder) => {
   try {
     const start = new Date(reminder.remind_at);
-    const end   = addMinutes(start, 30);
-    const fmt   = (d) => format(d, "yyyyMMdd'T'HHmmss");
+    const end = addMinutes(start, 30);
+    const fmt = (d) => format(d, "yyyyMMdd'T'HHmmss");
     return (
       'https://calendar.google.com/calendar/render?action=TEMPLATE' +
       `&text=${encodeURIComponent(reminder.title)}` +
@@ -322,13 +305,12 @@ const buildGCalURL = (reminder) => {
     );
   } catch { return 'https://calendar.google.com'; }
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REVERSE GEOCODE
 // ═══════════════════════════════════════════════════════════════════════════
 const reverseGeocode = async (lat, lng) => {
   try {
-    const res  = await fetch(
+    const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
       { headers: { 'Accept-Language': 'en' } }
     );
@@ -339,7 +321,6 @@ const reverseGeocode = async (lat, lng) => {
   } catch {}
   return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // extractHolidaysFromPDF — calls YOUR backend (POST /api/holidays/extract-from-pdf)
 // Uses pdfplumber + regex on the server. NO Anthropic API, NO CORS issues.
@@ -355,15 +336,13 @@ const extractHolidaysFromPDF = async (file) => {
   if (holidays.length === 0) throw new Error('No holidays found in the PDF');
   return holidays; // [{ name, date }]
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY
 // ═══════════════════════════════════════════════════════════════════════════
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
-  const dateStr  = format(date, 'yyyy-MM-dd');
+  const dateStr = format(date, 'yyyy-MM-dd');
   const dayRecord = attendance[dateStr];
-  const holiday   = holidays.find(h => h.date === dateStr);
-
+  const holiday = holidays.find(h => h.date === dateStr);
   let ringColor = null, bgColor = null, isSpecial = false;
   if (holiday) {
     ringColor = COLORS.amber; bgColor = '#FEF3C720'; isSpecial = true;
@@ -376,9 +355,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   } else if (dayRecord?.punch_in) {
     ringColor = COLORS.emeraldGreen; bgColor = '#D1FAE520';
   }
-
   const isTodayDate = dateFnsIsToday(date);
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -400,7 +377,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           ) : null}
           <span className={`relative z-10 text-[13px] leading-none select-none ${isTodayDate ? 'font-black' : 'font-medium'}`}
             style={
-              isTodayDate && ringColor  ? { color: COLORS.deepBlue }
+              isTodayDate && ringColor ? { color: COLORS.deepBlue }
               : isTodayDate && !ringColor ? { color: COLORS.red }
               : undefined
             }>
@@ -439,7 +416,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     </Tooltip>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER POPUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -488,89 +464,77 @@ function ReminderPopup({ reminder, onDismiss }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
-  const isAdmin        = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
-
-  const [loading,            setLoading]            = useState(false);
-  const [selectedDate,       setSelectedDate]       = useState(new Date());
-  const [selectedUserId,     setSelectedUserId]     = useState(null);
-  const [attendanceHistory,  setAttendanceHistory]  = useState([]);
-  const [todayAttendance,    setTodayAttendance]    = useState(null);
-  const [mySummary,          setMySummary]          = useState(null);
-  const [holidays,           setHolidays]           = useState([]);
-  const [pendingHolidays,    setPendingHolidays]    = useState([]);
-  const [allUsers,           setAllUsers]           = useState([]);
-  const [tasksCompleted,     setTasksCompleted]     = useState(0);
-  const [myRank,             setMyRank]             = useState('—');
-  const [locationCache,      setLocationCache]      = useState({});
-  const [absentLoading,      setAbsentLoading]      = useState(false);
-  const [absentSummary,      setAbsentSummary]      = useState([]);
-  const [dataError,          setDataError]          = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [mySummary, setMySummary] = useState(null);
+  const [holidays, setHolidays] = useState([]);
+  const [pendingHolidays, setPendingHolidays] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [tasksCompleted, setTasksCompleted] = useState(0);
+  const [myRank, setMyRank] = useState('—');
+  const [locationCache, setLocationCache] = useState({});
+  const [absentLoading, setAbsentLoading] = useState(false);
+  const [absentSummary, setAbsentSummary] = useState([]);
+  const [dataError, setDataError] = useState(null);
   const absentWarningShownRef = useRef(false);
-
   const [showPunchInModal, setShowPunchInModal] = useState(false);
-  const [modalActionDone,  setModalActionDone]  = useState(false);
-  const [showLeaveForm,    setShowLeaveForm]    = useState(false);
+  const [modalActionDone, setModalActionDone] = useState(false);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
-  const [leaveFrom,        setLeaveFrom]        = useState(null);
-  const [leaveTo,          setLeaveTo]          = useState(null);
-  const [leaveReason,      setLeaveReason]      = useState('');
-  const [holidayRows,      setHolidayRows]      = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-  const [liveDuration,     setLiveDuration]     = useState('0h 0m');
-  const [reminders,        setReminders]        = useState([]);
-  const [firedReminder,    setFiredReminder]    = useState(null);
+  const [leaveFrom, setLeaveFrom] = useState(null);
+  const [leaveTo, setLeaveTo] = useState(null);
+  const [leaveReason, setLeaveReason] = useState('');
+  const [holidayRows, setHolidayRows] = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
+  const [liveDuration, setLiveDuration] = useState('0h 0m');
+  const [reminders, setReminders] = useState([]);
+  const [firedReminder, setFiredReminder] = useState(null);
   const [showReminderForm, setShowReminderForm] = useState(false);
-  const [reminderTitle,    setReminderTitle]    = useState('');
-  const [reminderDesc,     setReminderDesc]     = useState('');
+  const [reminderTitle, setReminderTitle] = useState('');
+  const [reminderDesc, setReminderDesc] = useState('');
   const [reminderDatetime, setReminderDatetime] = useState('');
   const firedIdsRef = useRef(new Set());
-
   // PDF import + edit/delete
-  const [pdfImporting,   setPdfImporting]   = useState(false);
+  const [pdfImporting, setPdfImporting] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
-  const [editName,       setEditName]       = useState('');
-  const [editDate,       setEditDate]       = useState('');
-  const [editLoading,    setEditLoading]    = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
   const pdfInputRef = useRef(null);
-
   // Export PDF loading state
   const [exportingPDF, setExportingPDF] = useState(false);
-
   // ── Trademark / IP notice PDF extractor (for Reminder modal) ─────────────
-  const [trademarkData,    setTrademarkData]    = useState(null);  // extracted fields
+  const [trademarkData, setTrademarkData] = useState(null); // extracted fields
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
-
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
-
-  const todayDateStr  = format(new Date(), 'yyyy-MM-dd');
+  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
   const todayIsHoliday = useMemo(
     () => holidays.some(h => h.date === todayDateStr && h.status === 'confirmed'),
     [holidays, todayDateStr]
   );
-
   const displayTodayAttendance = useMemo(() => {
     if (isViewingOther) {
       return attendanceHistory.find(a => a.date === format(new Date(), 'yyyy-MM-dd')) || null;
     }
     return todayAttendance;
   }, [isViewingOther, attendanceHistory, todayAttendance]);
-
   const displayLiveDuration = useMemo(() => {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
-
   // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => { fetchData(); fetchReminders(); }, []); // eslint-disable-line
-
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
       const shouldClose =
@@ -584,7 +548,6 @@ export default function Attendance() {
       return () => clearTimeout(timer);
     }
   }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
-
   useEffect(() => {
     setLiveDuration(calculateTodayLiveDuration(todayAttendance));
     if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
@@ -592,13 +555,12 @@ export default function Attendance() {
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
-
   useEffect(() => {
     const check = () => {
       const now = new Date();
       for (const r of reminders) {
         if (r.is_dismissed || firedIdsRef.current.has(r.id)) continue;
-        const due  = new Date(r.remind_at);
+        const due = new Date(r.remind_at);
         if (isNaN(due.getTime())) continue;
         const diff = differenceInMinutes(due, now);
         if (diff <= 0 && diff >= -2) { firedIdsRef.current.add(r.id); setFiredReminder(r); break; }
@@ -608,7 +570,6 @@ export default function Attendance() {
     const id = setInterval(check, 30000);
     return () => clearInterval(id);
   }, [reminders]);
-
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
@@ -629,13 +590,12 @@ export default function Attendance() {
     };
     resolveLocations();
   }, [attendanceHistory]); // eslint-disable-line
-
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
-      const nowIST  = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
-      const hour    = nowIST.getHours();
-      const minute  = nowIST.getMinutes();
+      const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+      const hour = nowIST.getHours();
+      const minute = nowIST.getMinutes();
       if (hour === 18 && minute >= 30 && !absentWarningShownRef.current) {
         if (!todayAttendance?.punch_in && todayAttendance?.status !== 'leave' && !todayIsHoliday) {
           toast.warning('⚠️ You have not punched in today! Auto-absent will be marked at 7:00 PM IST.', { duration: 10000, id: 'absent-warning' });
@@ -647,22 +607,19 @@ export default function Attendance() {
     const id = setInterval(checkAbsentWarning, 60000);
     return () => clearInterval(id);
   }, [todayAttendance, isViewingOther, isEveryoneView]); // eslint-disable-line
-
   // ── Data Fetching ─────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
     setDataError(null);
-    const rawTargetId   = isAdmin ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
+    const rawTargetId = isAdmin ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
     const isEveryoneReq = isAdmin && rawTargetId === 'everyone';
-    const isOtherReq    = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
+    const isOtherReq = isAdmin && !!rawTargetId && rawTargetId !== 'everyone';
     const resolvedUserId = isEveryoneReq ? null : isOtherReq ? rawTargetId : (isAdmin ? user?.id : null);
-
     try {
       let historyUrl;
-      if (isEveryoneReq)       historyUrl = '/attendance/history';
+      if (isEveryoneReq) historyUrl = '/attendance/history';
       else if (resolvedUserId) historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
-      else                     historyUrl = '/attendance/history';
-
+      else historyUrl = '/attendance/history';
       const requests = [
         api.get(historyUrl).catch(() => ({ data: [] })),
         (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary').catch(() => ({ data: null })),
@@ -672,25 +629,20 @@ export default function Attendance() {
         canViewRankings ? api.get('/reports/performance-rankings?period=monthly').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ];
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
-
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
-
       if (isAdmin && allUsers.length === 0) {
         try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); }
         catch (e) { console.error('Failed to fetch users:', e); }
       }
-
       const history = historyRes.data || [];
       setAttendanceHistory(history);
-
       if (todayRes.data !== null && todayRes.data !== undefined) {
         setTodayAttendance(todayRes.data); setDataError(null);
       } else {
         setDataError('Backend unreachable — it may be waking up (Render free tier). Please wait 30s and retry.');
       }
-
       if (isOtherReq) {
         const monthlySummary = {};
         history.forEach(a => {
@@ -699,12 +651,12 @@ export default function Attendance() {
           if (!monthlySummary[m]) monthlySummary[m] = { total_minutes: 0, days_present: 0 };
           if (a.punch_in && a.status === 'present') {
             monthlySummary[m].total_minutes += a.duration_minutes || 0;
-            monthlySummary[m].days_present  += 1;
+            monthlySummary[m].days_present += 1;
           }
         });
         setMySummary({
-          total_minutes:   history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0),
-          total_days:      history.filter(a => a.punch_in && a.status === 'present').length,
+          total_minutes: history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0),
+          total_days: history.filter(a => a.punch_in && a.status === 'present').length,
           monthly_summary: Object.entries(monthlySummary).map(([month, d]) => {
             const h = Math.floor(d.total_minutes / 60), m = d.total_minutes % 60;
             return { month, ...d, total_hours: `${h}h ${m}m` };
@@ -716,16 +668,13 @@ export default function Attendance() {
       } else {
         setMySummary(summaryRes?.data ?? null);
       }
-
-      const allTasksData  = tasksRes.data || [];
+      const allTasksData = tasksRes.data || [];
       const relevantTasks = isOtherReq ? allTasksData.filter(t => t.assigned_to === rawTargetId) : allTasksData;
       setTasksCompleted(relevantTasks.filter(t => t.status === 'completed').length);
-
       const rankingList = Array.isArray(rankingRes.data) ? rankingRes.data : (rankingRes.data?.rankings || rankingRes.data?.data || []);
-      const rankUserId  = isOtherReq ? rawTargetId : user?.id;
-      const myEntry     = rankingList.find(r => r.user_id === rankUserId);
+      const rankUserId = isOtherReq ? rawTargetId : user?.id;
+      const myEntry = rankingList.find(r => r.user_id === rankUserId);
       setMyRank(myEntry ? `#${myEntry.rank}` : '—');
-
       if (isAdmin) {
         try {
           const absentRes = await api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`);
@@ -740,7 +689,6 @@ export default function Attendance() {
       setLoading(false);
     }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
-
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
@@ -750,7 +698,6 @@ export default function Attendance() {
       setReminders(res.data || []);
     } catch {}
   }, [isViewingOther, selectedUserId]);
-
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action, e) => {
     if (e) addAttRipple(e);
@@ -779,21 +726,19 @@ export default function Attendance() {
       toast.error(error.response?.data?.detail || 'Failed to record attendance', { duration: 4000 });
     } finally { setLoading(false); }
   }, [fetchData]);
-
   const handleApplyLeave = useCallback(async () => {
     if (!leaveFrom) { toast.error('Select a leave start date'); return; }
     try {
       await api.post('/attendance/apply-leave', {
         from_date: format(leaveFrom, 'yyyy-MM-dd'),
-        to_date:   leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
-        reason:    leaveReason || 'Personal Leave',
+        to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
+        reason: leaveReason || 'Personal Leave',
       });
       toast.success('✓ Leave request submitted');
       setShowLeaveForm(false); setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
       await fetchData();
     } catch { toast.error('Failed to submit leave request'); }
   }, [leaveFrom, leaveTo, leaveReason, fetchData]);
-
   const handleAddHolidays = useCallback(async () => {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
     if (validRows.length === 0) { toast.error('Add at least one holiday'); return; }
@@ -809,13 +754,12 @@ export default function Attendance() {
         console.error('Holiday save error:', detail, err?.response?.status);
       }
     }
-    if (added > 0)      toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} saved`);
+    if (added > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} saved`);
     if (errors.length > 0) errors.forEach(e => toast.error(e, { duration: 6000 }));
     setShowHolidayModal(false);
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
     await fetchData();
   }, [holidayRows, fetchData]);
-
   const handlePdfImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -829,7 +773,6 @@ export default function Attendance() {
     } catch (err) { toast.error(`PDF extraction failed: ${err.message}`); }
     finally { setPdfImporting(false); }
   }, []);
-
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
     setEditLoading(true);
@@ -842,13 +785,11 @@ export default function Attendance() {
     } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to update holiday'); }
     finally { setEditLoading(false); }
   }, [editingHoliday, editName, editDate, fetchData]);
-
   const handleDeleteHoliday = useCallback(async (date, name) => {
     if (!confirm(`Delete "${name}"?`)) return;
     try { await api.delete(`/holidays/${date}`); toast.success(`✓ "${name}" deleted`); await fetchData(); }
     catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete holiday'); }
   }, [fetchData]);
-
   const handleHolidayDecision = useCallback(async (holidayDate, decision) => {
     try {
       await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
@@ -856,12 +797,11 @@ export default function Attendance() {
       await fetchData();
     } catch { toast.error('Failed to update holiday'); }
   }, [fetchData]);
-
   const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
     setAbsentLoading(true);
     try {
       const body = targetDate ? { date: targetDate } : {};
-      const res  = await api.post('/attendance/mark-absent-bulk', body);
+      const res = await api.post('/attendance/mark-absent-bulk', body);
       const { marked, skipped, reason, date: markedDate } = res.data;
       if (skipped) {
         toast.info(`Skipped: ${reason}`);
@@ -872,14 +812,13 @@ export default function Attendance() {
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to mark absent'); }
     finally { setAbsentLoading(false); }
   }, [fetchData]);
-
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
       await api.post('/reminders', {
-        title:       reminderTitle.trim(),
+        title: reminderTitle.trim(),
         description: reminderDesc.trim() || null,
-        remind_at:   new Date(reminderDatetime).toISOString(),
+        remind_at: new Date(reminderDatetime).toISOString(),
       });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime('');
@@ -887,7 +826,6 @@ export default function Attendance() {
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
-
   // ── Trademark PDF upload → auto-fill reminder form ────────────────────────
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -903,33 +841,29 @@ export default function Attendance() {
       });
       const data = res.data;
       setTrademarkData(data);
-
       // Auto-fill title
       if (data.application_no) {
         const appName = data.applicant_name ? ` — ${data.applicant_name}` : '';
-        const cls     = data.class         ? ` (Class ${data.class})`     : '';
+        const cls = data.class ? ` (Class ${data.class})` : '';
         setReminderTitle(`${data.document_type || 'Trademark Hearing'} — App No. ${data.application_no}${cls}${appName}`);
       }
-
       // Auto-fill hearing date → datetime-local (default 10:00 AM)
       if (data.hearing_date) {
         setReminderDatetime(`${data.hearing_date}T10:00`);
       }
-
       // Auto-fill description with all extracted details
       const descLines = [];
-      if (data.application_no)   descLines.push(`Application No: ${data.application_no}`);
-      if (data.class)            descLines.push(`Class: ${data.class}`);
-      if (data.applicant_name)   descLines.push(`Applicant: ${data.applicant_name}`);
-      if (data.recipient_name)   descLines.push(`Agent/Recipient: ${data.recipient_name}`);
+      if (data.application_no) descLines.push(`Application No: ${data.application_no}`);
+      if (data.class) descLines.push(`Class: ${data.class}`);
+      if (data.applicant_name) descLines.push(`Applicant: ${data.applicant_name}`);
+      if (data.recipient_name) descLines.push(`Agent/Recipient: ${data.recipient_name}`);
       if (data.application_date) descLines.push(`Application Date: ${data.application_date}`);
-      if (data.used_since)       descLines.push(`Used Since: ${data.used_since}`);
-      if (data.hearing_date)     descLines.push(`Hearing Date: ${data.hearing_date}`);
-      if (data.letter_date)      descLines.push(`Notice Date: ${data.letter_date}`);
-      if (data.brand_name)       descLines.push(`Brand/Mark: ${data.brand_name}`);
+      if (data.used_since) descLines.push(`Used Since: ${data.used_since}`);
+      if (data.hearing_date) descLines.push(`Hearing Date: ${data.hearing_date}`);
+      if (data.letter_date) descLines.push(`Notice Date: ${data.letter_date}`);
+      if (data.brand_name) descLines.push(`Brand/Mark: ${data.brand_name}`);
       descLines.push('Hearing via Video Conferencing (Dynamic Utilities → Cause List → Trade Marks Show Cause & Review)');
       setReminderDesc(descLines.join('\n'));
-
       toast.success(`✓ Details extracted — form auto-filled!`);
     } catch (err) {
       const msg = err?.response?.data?.detail || err?.message || 'Failed to read PDF';
@@ -938,7 +872,6 @@ export default function Attendance() {
       setTrademarkLoading(false);
     }
   }, []);
-
   const handleDeleteReminder = useCallback(async (id) => {
     try {
       await api.delete(`/reminders/${id}`);
@@ -946,22 +879,19 @@ export default function Attendance() {
       toast.success('Reminder deleted');
     } catch { toast.error('Failed to delete reminder'); }
   }, []);
-
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
     try { await api.patch(`/reminders/${firedReminder.id}`, { is_dismissed: true }); } catch {}
     setReminders(prev => prev.map(r => r.id === firedReminder.id ? { ...r, is_dismissed: true } : r));
     setFiredReminder(null);
   }, [firedReminder]);
-
   const handleExportPDF = useCallback(async () => {
     setExportingPDF(true);
     try {
       let employeeName;
       if (isAdmin && selectedUserId === 'everyone') employeeName = 'All Employees';
-      else if (isAdmin && selectedUserId)           employeeName = allUsers.find(u => u.id === selectedUserId)?.full_name || 'Employee';
-      else                                          employeeName = user?.full_name || 'Staff Member';
-
+      else if (isAdmin && selectedUserId) employeeName = allUsers.find(u => u.id === selectedUserId)?.full_name || 'Employee';
+      else employeeName = user?.full_name || 'Staff Member';
       const doc = new jsPDF();
       doc.setFillColor(13, 59, 102);
       doc.rect(0, 0, 210, 24, 'F');
@@ -976,10 +906,8 @@ export default function Attendance() {
       doc.setFont(undefined, 'normal'); doc.setFontSize(11);
       doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 42);
       doc.setDrawColor(200, 200, 200); doc.line(10, 47, 200, 47);
-
       const monthlyHours = mySummary?.monthly_summary?.find(s => s.month === format(selectedDate, 'yyyy-MM'))?.total_hours || '0h 0m';
-      const absentCount  = attendanceHistory.filter(a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))).length;
-
+      const absentCount = attendanceHistory.filter(a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))).length;
       doc.setFontSize(11);
       doc.text(`Total Monthly Hours : ${monthlyHours}`, 10, 56);
       doc.text(`Days Present : ${attendanceHistory.filter(a => a.punch_in && a.status === 'present').length}`, 10, 64);
@@ -1014,7 +942,6 @@ export default function Attendance() {
     } catch { toast.error('Failed to export PDF'); }
     finally { setExportingPDF(false); }
   }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
-
   // ── Computed values ───────────────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
@@ -1030,59 +957,49 @@ export default function Attendance() {
     }
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
-
-  const monthTotalMinutes  = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
-  const monthDaysPresent   = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
-  const monthDaysAbsent    = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
+  const monthTotalMinutes = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
+  const monthDaysPresent = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
+  const monthDaysAbsent = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
   const totalDaysLateThisMonth = useMemo(() => monthAttendance.filter(a => a.punch_in && a.is_late).length, [monthAttendance]);
-
-  const isTodaySelected  = dateFnsIsToday(selectedDate);
+  const isTodaySelected = dateFnsIsToday(selectedDate);
   const selectedAttendance = isTodaySelected
     ? displayTodayAttendance
     : attendanceHistory.find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
-  const selectedHoliday  = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
-
+  const selectedHoliday = holidays.find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
   const attendanceMap = useMemo(() => {
     const map = {};
     attendanceHistory.forEach(a => { map[a.date] = a; });
     if (displayTodayAttendance) map[displayTodayAttendance.date] = displayTodayAttendance;
     return map;
   }, [attendanceHistory, displayTodayAttendance]);
-
   const viewedUserName = useMemo(() => {
     if (isEveryoneView) return 'All Employees';
     if (!isViewingOther) return null;
     return allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isEveryoneView, isViewingOther, selectedUserId, allUsers]);
-
   const progressPct = useMemo(() => {
     const hrs = parseDurationToHours(displayLiveDuration);
     return Math.min(100, Math.round((hrs / 8.5) * 100));
   }, [displayLiveDuration]);
-
   const upcomingReminders = useMemo(() =>
     reminders.filter(r => !r.is_dismissed).sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)),
     [reminders]
   );
-
   const recentAttendance = useMemo(() => {
     if (isEveryoneView) return attendanceHistory.slice(0, 25);
     return attendanceHistory.slice(0, 15);
   }, [attendanceHistory, isEveryoneView]);
-
   const userMap = useMemo(() => {
     const map = {};
     allUsers.forEach(u => { map[u.id] = u.full_name; });
     return map;
   }, [allUsers]);
-
   const getLocationLabel = useCallback((record, type = 'in') => {
     const loc = type === 'in' ? record.location : record.punch_out_location;
     if (!loc?.latitude || !loc?.longitude) return null;
     const key = `${loc.latitude},${loc.longitude}`;
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
-
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView || todayAttendance === null) return null;
     if (todayIsHoliday) return null;
@@ -1096,13 +1013,11 @@ export default function Attendance() {
     const hLeft = Math.floor(msLeft / 3600000), mLeft = Math.floor((msLeft % 3600000) / 60000);
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
-
   // BUG FIX: get today's holiday name from the holidays array (not from attendance object)
   const todayHolidayName = useMemo(
     () => holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
     [holidays, todayDateStr]
   );
-
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1111,7 +1026,6 @@ export default function Attendance() {
       <AnimatePresence>
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} />}
       </AnimatePresence>
-
       <motion.div
         className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
         style={{
@@ -1177,7 +1091,6 @@ export default function Attendance() {
             </motion.div>
           </div>
         </motion.div>
-
         {/* Error banner */}
         {dataError && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
@@ -1190,7 +1103,6 @@ export default function Attendance() {
             <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800 active:scale-95 transition-all">Retry</button>
           </motion.div>
         )}
-
         {/* Absent countdown warning banner — enhanced urgency */}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
           <motion.div variants={itemVariants}
@@ -1207,7 +1119,6 @@ export default function Attendance() {
             </Button>
           </motion.div>
         )}
-
         {/* Viewing-as banner */}
         {(isViewingOther || isEveryoneView) && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200" style={{ backgroundColor: '#EFF6FF' }}>
@@ -1223,7 +1134,6 @@ export default function Attendance() {
             </button>
           </motion.div>
         )}
-
         {/* ═══ TODAY STATUS HERO CARD ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1247,7 +1157,6 @@ export default function Attendance() {
                         </p>
                       </div>
                     </div>
-
                     {/* BUG FIX: was displayTodayAttendance.holiday?.name (doesn't exist) → now uses todayHolidayName */}
                     {todayIsHoliday && (
                       <div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}>
@@ -1256,7 +1165,6 @@ export default function Attendance() {
                         </p>
                       </div>
                     )}
-
                     {displayTodayAttendance?.status === 'absent' && (
                       <motion.div
                         className="backdrop-blur rounded-xl p-4"
@@ -1267,7 +1175,6 @@ export default function Attendance() {
                         </p>
                       </motion.div>
                     )}
-
                     {displayTodayAttendance?.punch_in && (
                       <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
                         <p className="text-blue-100 text-sm">
@@ -1283,7 +1190,6 @@ export default function Attendance() {
                         )}
                       </div>
                     )}
-
                     {displayTodayAttendance?.status === 'leave' && (
                       <div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(249,115,22,0.2)' }}>
                         <p className="text-sm font-semibold text-orange-200">
@@ -1291,7 +1197,6 @@ export default function Attendance() {
                         </p>
                       </div>
                     )}
-
                     {/* Punch In/Out buttons — with ripple + pulse */}
                     {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
@@ -1330,7 +1235,6 @@ export default function Attendance() {
                         ) : null}
                       </div>
                     )}
-
                     {isViewingOther && (
                       <p className="text-xs text-blue-300 font-medium pt-1">ℹ️ Punch actions are only available for your own attendance.</p>
                     )}
@@ -1341,7 +1245,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ═══ ADMIN PENDING HOLIDAY REVIEW ═══ */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1374,7 +1277,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* Admin absent summary */}
         {isAdmin && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1403,21 +1305,19 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ═══ STATS GRID ═══ */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
           <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Month` : 'This Month'}
             value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"
             color={COLORS.deepBlue} trend={`${monthDaysPresent} days present`} />
           <StatCard icon={CheckCircle2} label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen} trend=" " />
-          <StatCard icon={CalendarX}   label="Days Late"   value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange} trend=" " />
+          <StatCard icon={CalendarX} label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange} trend=" " />
           <StatCard icon={UserX} label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red}
             trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
           {canViewRankings && !isEveryoneView && (
             <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
         </motion.div>
-
         {/* ═══ DAILY PROGRESS ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1478,7 +1378,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ═══ HOLIDAYS + REMINDERS ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
@@ -1545,10 +1444,9 @@ export default function Attendance() {
                 </Card>
               );
             })()}
-
             {/* Reminders */}
             <Card className="border-0 shadow-md overflow-hidden flex flex-col">
-              <div className="px-6 py-4 flex items-center justify-between"
+              <div className="px-6 py-3 flex items-center justify-between"
                 style={{ background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`, borderBottom: `2px solid ${COLORS.purple}25` }}>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}>
@@ -1571,7 +1469,7 @@ export default function Attendance() {
                   </Button>
                 )}
               </div>
-              <CardContent className="p-6 flex-1">
+              <CardContent className="p-4 flex-1">
                 {upcomingReminders.length === 0 ? (
                   <div className="text-center py-10">
                     <Bell className="w-10 h-10 mx-auto text-slate-300 mb-3" />
@@ -1580,12 +1478,12 @@ export default function Attendance() {
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {upcomingReminders.map(r => {
+                  <div className="space-y-2">
+                    {upcomingReminders.map((r, index) => {
                       const isDue = isPast(new Date(r.remind_at));
                       return (
                         <motion.div key={r.id} variants={itemVariants}
-                          className="relative flex items-start gap-4 p-4 rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-md"
+                          className="relative flex items-start gap-3 p-3 rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-md"
                           style={{ borderColor: isDue ? `${COLORS.red}40` : `${COLORS.purple}30`, backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}06` }}>
                           <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                             style={{ backgroundColor: isDue ? `${COLORS.red}15` : `${COLORS.purple}18` }}>
@@ -1593,7 +1491,7 @@ export default function Attendance() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <p className="font-bold text-slate-800 text-sm leading-snug">{r.title}</p>
+                              <p className="font-bold text-slate-800 text-xs leading-snug"><span className="font-mono text-purple-500 mr-1">#{index + 1}.</span>{r.title}</p>
                               {isDue && <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase flex-shrink-0">Past Due</span>}
                             </div>
                             {r.description && <p className="text-xs text-slate-500 mb-2 line-clamp-1">{r.description}</p>}
@@ -1623,12 +1521,11 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ═══ CALENDAR + RECENT HISTORY ═══ */}
-        <motion.div className={`grid gap-8 ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
+        <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
           {/* Calendar */}
           {!isEveryoneView && (
-            <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6">
+            <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
               <Card className="border-0 shadow-md">
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -1662,12 +1559,12 @@ export default function Attendance() {
                   {/* Legend */}
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
-                      { color: COLORS.emeraldGreen, label: 'Present',   style: 'solid' },
-                      { color: COLORS.red,          label: 'Late',      style: 'solid' },
-                      { color: COLORS.red,          label: 'Absent',    style: 'solid', bg: '#FEE2E240' },
-                      { color: COLORS.red,          label: 'Not in yet',style: 'dashed' },
-                      { color: COLORS.amber,        label: 'Holiday',   style: 'solid' },
-                      { color: COLORS.orange,       label: 'Leave',     style: 'solid' },
+                      { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
+                      { color: COLORS.red, label: 'Late', style: 'solid' },
+                      { color: COLORS.red, label: 'Absent', style: 'solid', bg: '#FEE2E240' },
+                      { color: COLORS.red, label: 'Not in yet',style: 'dashed' },
+                      { color: COLORS.amber, label: 'Holiday', style: 'solid' },
+                      { color: COLORS.orange, label: 'Leave', style: 'solid' },
                     ].map(({ color, label, style, bg }) => (
                       <div key={label} className="flex items-center gap-1.5">
                         <span className="w-4 h-4 rounded-full border-2 flex-shrink-0"
@@ -1678,7 +1575,6 @@ export default function Attendance() {
                   </div>
                 </CardContent>
               </Card>
-
               {/* Selected Day Details */}
               <Card className="border-0 shadow-md overflow-hidden">
                 <CardContent className="p-0">
@@ -1748,11 +1644,10 @@ export default function Attendance() {
               </Card>
             </motion.div>
           )}
-
           {/* Recent Attendance Table */}
-          <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2'}>
-            <Card className="border-0 shadow-md h-fit">
-              <CardHeader className="border-b border-slate-100">
+          <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
+            <Card className="border-0 shadow-md h-full">
+              <CardHeader className="border-b border-slate-100 py-3">
                 <CardTitle style={{ color: COLORS.deepBlue }}>
                   {isEveryoneView ? 'All Employees — Recent Attendance' : isViewingOther ? `${viewedUserName}'s Recent Attendance` : 'Recent Attendance'}
                 </CardTitle>
@@ -1770,23 +1665,23 @@ export default function Attendance() {
                 ) : (
                   <div className="space-y-2 max-h-[700px] overflow-y-auto">
                     {recentAttendance.map((record, idx) => {
-                      const inLocLabel   = getLocationLabel(record, 'in');
-                      const outLocLabel  = getLocationLabel(record, 'out');
+                      const inLocLabel = getLocationLabel(record, 'in');
+                      const outLocLabel = getLocationLabel(record, 'out');
                       const recordUserName = isEveryoneView ? (userMap[record.user_id] || record.user_id) : null;
-                      const isAbsent     = record.status === 'absent';
-                      const isLeave      = record.status === 'leave';
-                      const isPresent    = record.punch_in && record.status === 'present';
+                      const isAbsent = record.status === 'absent';
+                      const isLeave = record.status === 'leave';
+                      const isPresent = record.punch_in && record.status === 'present';
                       return (
                         <motion.div
                           key={`${record.date}-${record.user_id || idx}`}
                           variants={itemVariants}
                           whileHover={{ x: 2, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}
-                          className="p-4 rounded-lg transition-all border cursor-default"
+                          className="p-3 rounded-lg transition-all border cursor-default"
                           style={{
                             backgroundColor: isAbsent ? '#FFF1F2' : isLeave ? '#FFF7ED' : isPresent ? '#F0FDF4' : '#F8FAFC',
-                            borderColor:     isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0',
-                            borderLeftWidth:  4,
-                            borderLeftColor:  isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200,
+                            borderColor: isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0',
+                            borderLeftWidth: 4,
+                            borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200,
                           }}>
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
@@ -1828,8 +1723,8 @@ export default function Attendance() {
                                 <Badge className="font-mono text-xs font-bold px-2 py-1"
                                   style={{
                                     backgroundColor: record.duration_minutes > 0 ? `${COLORS.emeraldGreen}20` : COLORS.slate200,
-                                    color:           record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue,
-                                    border:          `1px solid ${record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.slate200}`,
+                                    color: record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue,
+                                    border: `1px solid ${record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.slate200}`,
                                   }}>
                                   {formatDuration(record.duration_minutes)}
                                 </Badge>
@@ -1848,9 +1743,7 @@ export default function Attendance() {
             </Card>
           </motion.div>
         </motion.div>
-
         {/* ═══════ MODALS ═══════ */}
-
         {/* Punch-in Prompt */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
@@ -1882,7 +1775,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Leave Request Modal */}
         <AnimatePresence>
           {showLeaveForm && (
@@ -1954,7 +1846,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Add Holidays Modal */}
         <AnimatePresence>
           {showHolidayModal && (
@@ -2025,7 +1916,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
@@ -2079,7 +1969,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* New Reminder Modal — with Trademark PDF auto-fill */}
         <AnimatePresence>
           {showReminderForm && (
@@ -2087,7 +1976,6 @@ export default function Attendance() {
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
-
                 {/* Header */}
                 <div className="px-8 py-6 text-white flex-shrink-0"
                   style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
@@ -2106,7 +1994,6 @@ export default function Attendance() {
                       <X className="w-4 h-4 text-white" />
                     </button>
                   </div>
-
                   {/* PDF Upload Strip */}
                   <div className="mt-4 flex items-center gap-3">
                     <input ref={trademarkPdfRef} type="file" accept=".pdf" onChange={handleTrademarkPdfUpload} className="hidden" />
@@ -2130,10 +2017,8 @@ export default function Attendance() {
                     </p>
                   )}
                 </div>
-
                 {/* Scrollable body */}
                 <div className="p-8 space-y-5 overflow-y-auto flex-1">
-
                   {/* Extracted Details Preview Card */}
                   {trademarkData && (
                     <motion.div
@@ -2150,14 +2035,14 @@ export default function Attendance() {
                       </div>
                       <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                         {[
-                          { label: 'Application No',   value: trademarkData.application_no,   bold: true  },
-                          { label: 'Class',            value: trademarkData.class                          },
-                          { label: 'Applicant',        value: trademarkData.applicant_name,   bold: true  },
-                          { label: 'Agent/Recipient',  value: trademarkData.recipient_name                },
-                          { label: 'Application Date', value: trademarkData.application_date              },
-                          { label: 'Used Since',       value: trademarkData.used_since                    },
-                          { label: 'Notice Date',      value: trademarkData.letter_date                   },
-                          { label: 'Brand/Mark',       value: trademarkData.brand_name                    },
+                          { label: 'Application No', value: trademarkData.application_no, bold: true },
+                          { label: 'Class', value: trademarkData.class },
+                          { label: 'Applicant', value: trademarkData.applicant_name, bold: true },
+                          { label: 'Agent/Recipient', value: trademarkData.recipient_name },
+                          { label: 'Application Date', value: trademarkData.application_date },
+                          { label: 'Used Since', value: trademarkData.used_since },
+                          { label: 'Notice Date', value: trademarkData.letter_date },
+                          { label: 'Brand/Mark', value: trademarkData.brand_name },
                         ].filter(f => f.value).map(({ label, value, bold }) => (
                           <div key={label}>
                             <p className="text-slate-400 text-[10px] uppercase font-bold tracking-wide">{label}</p>
@@ -2175,11 +2060,11 @@ export default function Attendance() {
                             {/* Direct Google Calendar link with all details */}
                             {(() => {
                               const hearingDT = new Date(`${trademarkData.hearing_date}T10:00:00`);
-                              const endDT     = new Date(`${trademarkData.hearing_date}T11:00:00`);
-                              const fmt       = (d) => d.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
-                              const title     = reminderTitle || `Trademark Hearing — App No. ${trademarkData.application_no}`;
-                              const details   = reminderDesc  || `Application No: ${trademarkData.application_no}\nApplicant: ${trademarkData.applicant_name || '—'}\nClass: ${trademarkData.class || '—'}\nHearing via Video Conferencing (IPO Website → Dynamic Utilities → Cause List)`;
-                              const gcalUrl   = `https://calendar.google.com/calendar/render?action=TEMPLATE`
+                              const endDT = new Date(`${trademarkData.hearing_date}T11:00:00`);
+                              const fmt = (d) => d.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+                              const title = reminderTitle || `Trademark Hearing — App No. ${trademarkData.application_no}`;
+                              const details = reminderDesc || `Application No: ${trademarkData.application_no}\nApplicant: ${trademarkData.applicant_name || '—'}\nClass: ${trademarkData.class || '—'}\nHearing via Video Conferencing (IPO Website → Dynamic Utilities → Cause List)`;
+                              const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE`
                                 + `&text=${encodeURIComponent(title)}`
                                 + `&dates=${fmt(hearingDT)}/${fmt(endDT)}`
                                 + `&details=${encodeURIComponent(details)}`
@@ -2198,7 +2083,6 @@ export default function Attendance() {
                       </div>
                     </motion.div>
                   )}
-
                   {/* Manual / auto-filled fields */}
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">
@@ -2209,7 +2093,6 @@ export default function Attendance() {
                       placeholder="e.g., Trademark Show Cause Hearing, Team standup…"
                       className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors" />
                   </div>
-
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">
                       Date & Time *
@@ -2219,7 +2102,6 @@ export default function Attendance() {
                       min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
                       className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors" />
                   </div>
-
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">
                       Description
@@ -2229,7 +2111,6 @@ export default function Attendance() {
                       placeholder="Add notes, agenda, application details, meeting link…" rows={4}
                       className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 resize-none transition-colors text-sm font-mono" />
                   </div>
-
                   {reminderTitle && reminderDatetime && !trademarkData && (
                     <motion.div className="p-4 rounded-xl flex items-start gap-3"
                       style={{ backgroundColor: `${COLORS.deepBlue}08`, border: `1.5px solid ${COLORS.deepBlue}20` }}
@@ -2242,7 +2123,6 @@ export default function Attendance() {
                     </motion.div>
                   )}
                 </div>
-
                 {/* Footer */}
                 <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
                   <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
@@ -2253,12 +2133,10 @@ export default function Attendance() {
                     <Bell className="w-4 h-4 mr-2" /> Set Reminder
                   </Button>
                 </div>
-
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
-
       </motion.div>
     </TooltipProvider>
   );
