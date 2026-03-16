@@ -599,15 +599,22 @@ export default function Clients() {
   };
 
   // ── FETCH REFERRERS ─────────────────────────────────────────────────────
+  // FIX: The backend returns an array of objects ({ id, name, created_by, ... }).
+  // We extract only the `name` string so that savedReferrers is always string[],
+  // preventing React error #31 ("Objects are not valid as a React child") when
+  // the names are rendered inside <option> elements.
   const fetchReferrers = async () => {
     try {
       const response = await api.get('/referrers');
-      setSavedReferrers(response.data || []);
+      const raw = response.data || [];
+      const names = raw.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+      setSavedReferrers(names);
     } catch {
       // Fallback: load from localStorage if backend endpoint not yet available
       try {
         const stored = JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]');
-        setSavedReferrers(stored);
+        const names = stored.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+        setSavedReferrers(names);
       } catch {
         setSavedReferrers([]);
       }
