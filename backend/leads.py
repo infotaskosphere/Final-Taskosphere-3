@@ -375,12 +375,17 @@ async def update_lead(
         if not user_exists:
             raise HTTPException(status_code=400, detail="Assigned user not found")
 
-    # Guard won status — must go through the /convert endpoint
+    # Guard won status — must go through the /convert endpoint UNLESS
+    # the caller is explicitly deferring conversion by also passing
+    # converted_client_id (even as None).  This allows the frontend
+    # "Convert Later" flow to mark a lead as Won without creating a
+    # client immediately.
     if update_dict.get("status") == "won" and not existing.get("converted_client_id"):
-        raise HTTPException(
-            status_code=400,
-            detail="Use the /convert endpoint to mark a lead as won"
-        )
+        if "converted_client_id" not in update_dict:
+            raise HTTPException(
+                status_code=400,
+                detail="Use the /convert endpoint to mark a lead as won"
+            )
 
     # Reject past follow-up dates
     if update_dict.get("next_follow_up"):
