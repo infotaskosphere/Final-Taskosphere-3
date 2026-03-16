@@ -66,10 +66,6 @@ const ATTENDANCE_INTERACTION_STYLES = `
     0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
     50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
   }
-  @keyframes att-shimmer {
-    0% { background-position: -200% center; }
-    100% { background-position: 200% center; }
-  }
   .att-ripple-btn {
     position: relative;
     overflow: hidden;
@@ -173,7 +169,6 @@ function DigitalClock() {
         minHeight: 180,
         border: '1px solid rgba(255,255,255,0.06)',
       }}>
-      {/* Header strip */}
       <div className="flex items-center justify-between px-5 py-2.5"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
         <div className="flex items-center gap-2">
@@ -183,7 +178,6 @@ function DigitalClock() {
         </div>
         <span className="text-[9px] font-medium text-slate-500 tracking-widest" style={MONO}>UTC +5:30</span>
       </div>
-      {/* Main time */}
       <div className="flex items-center justify-center px-5 py-5 gap-0">
         <span className="text-white leading-none" style={{ ...MONO, fontSize: 58, fontWeight: 700, letterSpacing: '0.02em' }}>{hh}</span>
         <motion.span className="text-blue-400/80 leading-none mx-1"
@@ -195,7 +189,6 @@ function DigitalClock() {
           <span className="leading-none font-semibold tracking-widest" style={{ ...MONO, fontSize: 11, color: '#60a5fa' }}>{period}</span>
         </div>
       </div>
-      {/* Date footer */}
       <div className="px-5 py-2.5 text-center"
         style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.22)' }}>
         <span className="text-[10px] font-medium tracking-[0.16em] uppercase text-slate-400" style={MONO}>{dayDate}</span>
@@ -204,7 +197,7 @@ function DigitalClock() {
   );
 }
 // ═══════════════════════════════════════════════════════════════════════════
-// STAT CARD — enhanced with gradient bg + hover lift
+// STAT CARD
 // ═══════════════════════════════════════════════════════════════════════════
 function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, trend = null, onClick }) {
   return (
@@ -239,7 +232,7 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
   );
 }
 // ═══════════════════════════════════════════════════════════════════════════
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS (unchanged)
 // ═══════════════════════════════════════════════════════════════════════════
 const formatDuration = (minutes) => {
   if (minutes === null || minutes === undefined || isNaN(minutes)) return '0h 0m';
@@ -305,9 +298,6 @@ const buildGCalURL = (reminder) => {
     );
   } catch { return 'https://calendar.google.com'; }
 };
-// ═══════════════════════════════════════════════════════════════════════════
-// REVERSE GEOCODE
-// ═══════════════════════════════════════════════════════════════════════════
 const reverseGeocode = async (lat, lng) => {
   try {
     const res = await fetch(
@@ -321,10 +311,6 @@ const reverseGeocode = async (lat, lng) => {
   } catch {}
   return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 };
-// ═══════════════════════════════════════════════════════════════════════════
-// extractHolidaysFromPDF — calls YOUR backend (POST /api/holidays/extract-from-pdf)
-// Uses pdfplumber + regex on the server. NO Anthropic API, NO CORS issues.
-// Direct browser → api.anthropic.com calls are blocked by CORS; always use backend.
 const extractHolidaysFromPDF = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
@@ -334,7 +320,7 @@ const extractHolidaysFromPDF = async (file) => {
   const holidays = res.data?.holidays;
   if (!Array.isArray(holidays)) throw new Error('Unexpected response from server');
   if (holidays.length === 0) throw new Error('No holidays found in the PDF');
-  return holidays; // [{ name, date }]
+  return holidays;
 };
 // ═══════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY
@@ -465,7 +451,7 @@ function ReminderPopup({ reminder, onDismiss }) {
   );
 }
 // ═══════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
+// MAIN COMPONENT — COMPACT LAYOUT REVISION
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
@@ -503,17 +489,14 @@ export default function Attendance() {
   const [reminderDesc, setReminderDesc] = useState('');
   const [reminderDatetime, setReminderDatetime] = useState('');
   const firedIdsRef = useRef(new Set());
-  // PDF import + edit/delete
   const [pdfImporting, setPdfImporting] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
   const [editName, setEditName] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const pdfInputRef = useRef(null);
-  // Export PDF loading state
   const [exportingPDF, setExportingPDF] = useState(false);
-  // ── Trademark / IP notice PDF extractor (for Reminder modal) ─────────────
-  const [trademarkData, setTrademarkData] = useState(null); // extracted fields
+  const [trademarkData, setTrademarkData] = useState(null);
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
@@ -533,8 +516,7 @@ export default function Attendance() {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
-  // ── Effects ───────────────────────────────────────────────────────────────
-  useEffect(() => { fetchData(); fetchReminders(); }, []); // eslint-disable-line
+  useEffect(() => { fetchData(); fetchReminders(); }, []);
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
       const shouldClose =
@@ -589,7 +571,7 @@ export default function Attendance() {
       setLocationCache(prev => ({ ...prev, ...results }));
     };
     resolveLocations();
-  }, [attendanceHistory]); // eslint-disable-line
+  }, [attendanceHistory]);
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
@@ -606,8 +588,7 @@ export default function Attendance() {
     checkAbsentWarning();
     const id = setInterval(checkAbsentWarning, 60000);
     return () => clearInterval(id);
-  }, [todayAttendance, isViewingOther, isEveryoneView]); // eslint-disable-line
-  // ── Data Fetching ─────────────────────────────────────────────────────────
+  }, [todayAttendance, isViewingOther, isEveryoneView]);
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
     setDataError(null);
@@ -688,7 +669,7 @@ export default function Attendance() {
     } finally {
       setLoading(false);
     }
-  }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
+  }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
@@ -698,7 +679,6 @@ export default function Attendance() {
       setReminders(res.data || []);
     } catch {}
   }, [isViewingOther, selectedUserId]);
-  // ── Handlers ──────────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action, e) => {
     if (e) addAttRipple(e);
     setLoading(true);
@@ -826,7 +806,6 @@ export default function Attendance() {
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
-  // ── Trademark PDF upload → auto-fill reminder form ────────────────────────
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -841,17 +820,14 @@ export default function Attendance() {
       });
       const data = res.data;
       setTrademarkData(data);
-      // Auto-fill title
       if (data.application_no) {
         const appName = data.applicant_name ? ` — ${data.applicant_name}` : '';
         const cls = data.class ? ` (Class ${data.class})` : '';
         setReminderTitle(`${data.document_type || 'Trademark Hearing'} — App No. ${data.application_no}${cls}${appName}`);
       }
-      // Auto-fill hearing date → datetime-local (default 10:00 AM)
       if (data.hearing_date) {
         setReminderDatetime(`${data.hearing_date}T10:00`);
       }
-      // Auto-fill description with all extracted details
       const descLines = [];
       if (data.application_no) descLines.push(`Application No: ${data.application_no}`);
       if (data.class) descLines.push(`Class: ${data.class}`);
@@ -942,7 +918,6 @@ export default function Attendance() {
     } catch { toast.error('Failed to export PDF'); }
     finally { setExportingPDF(false); }
   }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
-  // ── Computed values ───────────────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
     let atts = attendanceHistory.filter(a => {
@@ -1013,14 +988,10 @@ export default function Attendance() {
     const hLeft = Math.floor(msLeft / 3600000), mLeft = Math.floor((msLeft % 3600000) / 60000);
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
-  // BUG FIX: get today's holiday name from the holidays array (not from attendance object)
   const todayHolidayName = useMemo(
     () => holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
     [holidays, todayDateStr]
   );
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ═══════════════════════════════════════════════════════════════════════════
   return (
     <TooltipProvider>
       <AnimatePresence>
@@ -1034,7 +1005,6 @@ export default function Attendance() {
         }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        {/* ═══ HEADER ═══ */}
         <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-black tracking-tight" style={{ color: COLORS.deepBlue, letterSpacing: '-0.02em' }}>
@@ -1091,7 +1061,6 @@ export default function Attendance() {
             </motion.div>
           </div>
         </motion.div>
-        {/* Error banner */}
         {dataError && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
             <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0" />
@@ -1103,7 +1072,6 @@ export default function Attendance() {
             <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800 active:scale-95 transition-all">Retry</button>
           </motion.div>
         )}
-        {/* Absent countdown warning banner — enhanced urgency */}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
           <motion.div variants={itemVariants}
             className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-300 absent-pulse"
@@ -1119,7 +1087,6 @@ export default function Attendance() {
             </Button>
           </motion.div>
         )}
-        {/* Viewing-as banner */}
         {(isViewingOther || isEveryoneView) && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200" style={{ backgroundColor: '#EFF6FF' }}>
             <Users className="w-4 h-4 text-blue-700" />
@@ -1134,7 +1101,6 @@ export default function Attendance() {
             </button>
           </motion.div>
         )}
-        {/* ═══ TODAY STATUS HERO CARD ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-0 shadow-xl overflow-hidden"
@@ -1157,7 +1123,6 @@ export default function Attendance() {
                         </p>
                       </div>
                     </div>
-                    {/* BUG FIX: was displayTodayAttendance.holiday?.name (doesn't exist) → now uses todayHolidayName */}
                     {todayIsHoliday && (
                       <div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}>
                         <p className="text-sm font-bold text-amber-200">
@@ -1197,7 +1162,6 @@ export default function Attendance() {
                         </p>
                       </div>
                     )}
-                    {/* Punch In/Out buttons — with ripple + pulse */}
                     {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
@@ -1245,7 +1209,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-        {/* ═══ ADMIN PENDING HOLIDAY REVIEW ═══ */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
@@ -1277,7 +1240,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-        {/* Admin absent summary */}
         {isAdmin && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-red-100 shadow-md">
@@ -1305,7 +1267,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-        {/* ═══ STATS GRID ═══ */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
           <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Month` : 'This Month'}
             value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"
@@ -1318,7 +1279,6 @@ export default function Attendance() {
             <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
         </motion.div>
-        {/* ═══ DAILY PROGRESS ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-0 shadow-md overflow-hidden">
@@ -1378,10 +1338,8 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-        {/* ═══ HOLIDAYS + REMINDERS ═══ */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
-            {/* Holidays */}
             {(() => {
               const monthHolidaysGrid = holidays.filter(h => {
                 try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); }
@@ -1444,7 +1402,6 @@ export default function Attendance() {
                 </Card>
               );
             })()}
-            {/* Reminders */}
             <Card className="border-0 shadow-md overflow-hidden flex flex-col">
               <div className="px-6 py-3 flex items-center justify-between"
                 style={{ background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`, borderBottom: `2px solid ${COLORS.purple}25` }}>
@@ -1521,9 +1478,7 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-        {/* ═══ CALENDAR + RECENT HISTORY ═══ */}
         <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
-          {/* Calendar */}
           {!isEveryoneView && (
             <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
               <Card className="border-0 shadow-md">
@@ -1556,7 +1511,6 @@ export default function Attendance() {
                       Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} />,
                     }}
                   />
-                  {/* Legend */}
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
@@ -1575,7 +1529,6 @@ export default function Attendance() {
                   </div>
                 </CardContent>
               </Card>
-              {/* Selected Day Details */}
               <Card className="border-0 shadow-md overflow-hidden">
                 <CardContent className="p-0">
                   {selectedAttendance?.status === 'absent' ? (
@@ -1644,7 +1597,6 @@ export default function Attendance() {
               </Card>
             </motion.div>
           )}
-          {/* Recent Attendance Table */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
             <Card className="border-0 shadow-md h-full">
               <CardHeader className="border-b border-slate-100 py-3">
@@ -1743,8 +1695,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         </motion.div>
-        {/* ═══════ MODALS ═══════ */}
-        {/* Punch-in Prompt */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
             <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
@@ -1775,7 +1725,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-        {/* Leave Request Modal */}
         <AnimatePresence>
           {showLeaveForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
@@ -1846,7 +1795,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-        {/* Add Holidays Modal */}
         <AnimatePresence>
           {showHolidayModal && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
@@ -1916,7 +1864,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-        {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
@@ -1969,14 +1916,12 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-        {/* New Reminder Modal — with Trademark PDF auto-fill */}
         <AnimatePresence>
           {showReminderForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
-                {/* Header */}
                 <div className="px-8 py-6 text-white flex-shrink-0"
                   style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
                   <div className="flex items-center justify-between">
@@ -1994,7 +1939,6 @@ export default function Attendance() {
                       <X className="w-4 h-4 text-white" />
                     </button>
                   </div>
-                  {/* PDF Upload Strip */}
                   <div className="mt-4 flex items-center gap-3">
                     <input ref={trademarkPdfRef} type="file" accept=".pdf" onChange={handleTrademarkPdfUpload} className="hidden" />
                     <button
@@ -2017,9 +1961,7 @@ export default function Attendance() {
                     </p>
                   )}
                 </div>
-                {/* Scrollable body */}
                 <div className="p-8 space-y-5 overflow-y-auto flex-1">
-                  {/* Extracted Details Preview Card */}
                   {trademarkData && (
                     <motion.div
                       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
@@ -2057,7 +1999,6 @@ export default function Attendance() {
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Hearing Date</p>
                               <p className="font-black text-sm" style={{ color: COLORS.purple }}>{trademarkData.hearing_date}</p>
                             </div>
-                            {/* Direct Google Calendar link with all details */}
                             {(() => {
                               const hearingDT = new Date(`${trademarkData.hearing_date}T10:00:00`);
                               const endDT = new Date(`${trademarkData.hearing_date}T11:00:00`);
@@ -2083,7 +2024,6 @@ export default function Attendance() {
                       </div>
                     </motion.div>
                   )}
-                  {/* Manual / auto-filled fields */}
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">
                       Title *
@@ -2123,7 +2063,6 @@ export default function Attendance() {
                     </motion.div>
                   )}
                 </div>
-                {/* Footer */}
                 <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
                   <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
                     className="font-bold rounded-lg active:scale-95 transition-all">Cancel</Button>
