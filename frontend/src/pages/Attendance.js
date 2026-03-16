@@ -341,53 +341,19 @@ const reverseGeocode = async (lat, lng) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BUG FIX: extractHolidaysFromPDF — single clean implementation
-// Original had two separate function bodies (api.post + orphaned fetch code)
-// Merged into one: directly calls Anthropic API with the PDF as base64
-// ═══════════════════════════════════════════════════════════════════════════
+// extractHolidaysFromPDF — calls YOUR backend (POST /api/holidays/extract-from-pdf)
+// Uses pdfplumber + regex on the server. NO Anthropic API, NO CORS issues.
+// Direct browser → api.anthropic.com calls are blocked by CORS; always use backend.
 const extractHolidaysFromPDF = async (file) => {
-  // Convert PDF to base64
-  const base64Data = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await api.post('/holidays/extract-from-pdf', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   });
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model:      'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{
-        role:    'user',
-        content: [
-          {
-            type:   'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64Data },
-          },
-          {
-            type: 'text',
-            text: `Extract ALL holidays from this document. Return ONLY a JSON array, no markdown.
-Format: [{"name":"Holiday Name","date":"YYYY-MM-DD"},...]
-Use the year from the document. Include every holiday row found.`,
-          },
-        ],
-      }],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `API error ${response.status}`);
-  }
-
-  const data   = await response.json();
-  const text   = data.content?.find(c => c.type === 'text')?.text || '';
-  const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-  if (!Array.isArray(parsed)) throw new Error('Unexpected response format');
-  return parsed.filter(h => h.name && h.date);
+  const holidays = res.data?.holidays;
+  if (!Array.isArray(holidays)) throw new Error('Unexpected response from server');
+  if (holidays.length === 0) throw new Error('No holidays found in the PDF');
+  return holidays; // [{ name, date }]
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
