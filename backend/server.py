@@ -2,11 +2,14 @@ import os
 import re
 import csv
 import uuid
+import json
+import base64
 import logging
 import pytz
 import asyncio
 import calendar
 import requests
+import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -4005,6 +4008,97 @@ async def delete_holiday(holiday_date: str, current_user: User = Depends(require
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
     return {"message": "Holiday removed"}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF HOLIDAY EXTRACTOR — proxy to Anthropic API to avoid browser CORS block
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.post("/holidays/extract-from-pdf")
+async def extract_holidays_from_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Accepts a PDF upload, sends it to Claude via the Anthropic API server-side
+    (avoids browser CORS restrictions), and returns extracted holidays as JSON.
+    Requires ANTHROPIC_API_KEY environment variable.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not anthropic_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured on the server")
+
+    content = await file.read()
+    base64_data = base64.b64encode(content).decode("utf-8")
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1000,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64_data
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Extract ALL holidays from this document. "
+                        "Return ONLY a JSON array with no markdown fences.\n"
+                        "Format: [{\"name\": \"Holiday Name\", \"date\": \"YYYY-MM-DD\"}, ...]\n"
+                        "Use the year shown in the document. Include every holiday row found."
+                    )
+                }
+            ]
+        }]
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=payload,
+            )
+    except httpx.RequestError as exc:
+        logger.error(f"Anthropic API request failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Could not reach Anthropic API: {str(exc)}")
+
+    if response.status_code != 200:
+        logger.error(f"Anthropic API error {response.status_code}: {response.text}")
+        raise HTTPException(status_code=502, detail=f"AI extraction failed (HTTP {response.status_code})")
+
+    data = response.json()
+    raw_text = next(
+        (block["text"] for block in data.get("content", []) if block.get("type") == "text"),
+        ""
+    )
+
+    # Strip any accidental markdown fences the model may add
+    clean_text = re.sub(r"```json|```", "", raw_text).strip()
+
+    try:
+        holidays = json.loads(clean_text)
+    except json.JSONDecodeError as exc:
+        logger.error(f"JSON parse failed for AI response: {exc}\nRaw: {clean_text}")
+        raise HTTPException(status_code=500, detail="AI returned an unparseable response")
+
+    if not isinstance(holidays, list):
+        raise HTTPException(status_code=500, detail="Unexpected AI response format (expected a list)")
+
+    valid = [h for h in holidays if h.get("name") and h.get("date")]
+    logger.info(f"PDF holiday extraction: {len(valid)} holidays found by {current_user.email}")
+    return {"holidays": valid}
 
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
