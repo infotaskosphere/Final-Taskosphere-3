@@ -4203,6 +4203,268 @@ async def extract_holidays_from_pdf(
     logger.info(f"PDF holiday extraction (free): {len(holidays)} holidays found by {current_user.email}")
     return {"holidays": holidays}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TRADEMARK / IP NOTICE PDF EXTRACTOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TM_MONTH_MAP = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2,
+    "march": 3, "mar": 3, "april": 4, "apr": 4,
+    "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
+
+
+def _parse_tm_date(text: str) -> Optional[str]:
+    """
+    Parse a date string in any common format used by India's IP Office.
+    Returns YYYY-MM-DD string or None.
+    """
+    if not text:
+        return None
+    text = text.strip()
+
+    # DD/MM/YYYY or DD-MM-YYYY
+    m = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b', text)
+    if m:
+        try:
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
+        except ValueError:
+            pass
+
+    # YYYY-MM-DD
+    m = re.search(r'\b(\d{4})-(\d{2})-(\d{2})\b', text)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except ValueError:
+            pass
+
+    # "06-04-2026" style already caught above, but also "06 April 2026"
+    m = re.search(
+        r'\b(\d{1,2})(?:st|nd|rd|th)?[\s\-]+('
+        r'january|february|march|april|may|june|july|august|september|october|november|december|'
+        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec'
+        r')[\s,]+(\d{4})\b',
+        text, re.IGNORECASE
+    )
+    if m:
+        try:
+            mo = _TM_MONTH_MAP[m.group(2).lower()]
+            return date(int(m.group(3)), mo, int(m.group(1))).isoformat()
+        except ValueError:
+            pass
+
+    return None
+
+
+def _extract_trademark_notice_data(raw_text: str) -> dict:
+    """
+    Parse raw text extracted from an IP/trademark notice PDF.
+
+    Handles bilingual (Hindi + English) notices from tmrsearch.ipindia.gov.in.
+    Returns a dict with all extracted fields; missing fields are None.
+    """
+    result = {
+        "document_type":    None,
+        "application_no":   None,
+        "class":            None,
+        "application_date": None,
+        "used_since":       None,
+        "applicant_name":   None,
+        "recipient_name":   None,
+        "hearing_date":     None,
+        "letter_date":      None,
+        "brand_name":       None,
+        "raw_text_snippet": raw_text[:500].strip(),
+    }
+
+    # ── Document Type ────────────────────────────────────────────────────────
+    text_lower = raw_text.lower()
+    if "show cause" in text_lower or "mis-r" in text_lower:
+        result["document_type"] = "Show Cause Hearing Notice"
+    elif "examination report" in text_lower:
+        result["document_type"] = "Examination Report Notice"
+    elif "opposition" in text_lower:
+        result["document_type"] = "Opposition Notice"
+    elif "renewal" in text_lower:
+        result["document_type"] = "Renewal Notice"
+    elif "registration" in text_lower and "certificate" in text_lower:
+        result["document_type"] = "Registration Certificate"
+    else:
+        result["document_type"] = "IP Office Notice"
+
+    # ── Application Number ───────────────────────────────────────────────────
+    # Handles: "Application No: 5922988" or "Application No. 1234567" or
+    # "आवेदन संख्या/Application No: 5922988"
+    m = re.search(
+        r'(?:application\s*no\.?|app\.?\s*no\.?|आवेदन\s*संख्या)[:\s\/]*(\d{5,10})',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["application_no"] = m.group(1).strip()
+
+    # ── Class ────────────────────────────────────────────────────────────────
+    m = re.search(
+        r'(?:in\s+class(?:es)?|class(?:es)?)[:\s\/]*(\d{1,2}(?:\s*[,&]\s*\d{1,2})*)',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["class"] = m.group(1).strip()
+
+    # ── Application Date ─────────────────────────────────────────────────────
+    m = re.search(
+        r'(?:application\s+date|आवेदन\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["application_date"] = _parse_tm_date(m.group(1))
+
+    # ── Used Since ───────────────────────────────────────────────────────────
+    m = re.search(
+        r'(?:used\s+since|उपयोग\s+की\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["used_since"] = _parse_tm_date(m.group(1))
+
+    # ── Applicant Name ───────────────────────────────────────────────────────
+    # "Name of Applicant: MR. RAJESH DHARIWAL"
+    m = re.search(
+        r'(?:name\s+of\s+applicant|applicant(?:\'s)?\s+name|आवेदक\s+का\s+नाम)[:\s\/]*([A-Z][A-Za-z.\s]{3,60}?)(?:\n|$|\|)',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["applicant_name"] = re.sub(r'\s+', ' ', m.group(1)).strip().rstrip('.,')
+
+    # ── Recipient / Agent Name ───────────────────────────────────────────────
+    # First block: "To,\n<NAME>\n<ADDRESS>" — take line after "To,"
+    m = re.search(
+        r'(?:सेवा\s+में\s*\/\s*To|To\s*,)\s*\n\s*([A-Z][A-Za-z\s.]{2,50})\n',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["recipient_name"] = re.sub(r'\s+', ' ', m.group(1)).strip()
+
+    # ── Hearing Date ─────────────────────────────────────────────────────────
+    # "fixed for hearing on 06-04-2026" or "दिनांक 06-04-2026 को सुनवाई"
+    # Try English first
+    m = re.search(
+        r'(?:hearing\s+on|fixed\s+for\s+hearing\s+on|scheduled.*?on)\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["hearing_date"] = _parse_tm_date(m.group(1))
+
+    if not result["hearing_date"]:
+        # Hindi version: "दिनांक 06-04-2026 को सुनवाई"
+        m = re.search(
+            r'दिनांक\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})\s+को\s+सुनवाई',
+            raw_text
+        )
+        if m:
+            result["hearing_date"] = _parse_tm_date(m.group(1))
+
+    if not result["hearing_date"]:
+        # Bold date pattern in English block — "on **06-04-2026** as scheduled"
+        m = re.search(
+            r'\bon\s+(\d{2}[-\/]\d{2}[-\/]\d{4})\s+as\s+scheduled',
+            raw_text, re.IGNORECASE
+        )
+        if m:
+            result["hearing_date"] = _parse_tm_date(m.group(1))
+
+    # ── Letter Date ──────────────────────────────────────────────────────────
+    # "Dated: 16-02-2026" at top of letter
+    m = re.search(
+        r'(?:dated?|दिनांक)[:\s]*(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["letter_date"] = _parse_tm_date(m.group(1))
+
+    # ── Brand / Mark Name ────────────────────────────────────────────────────
+    # Not always present in show cause notices. Try common patterns.
+    m = re.search(
+        r'(?:trade\s*mark(?:s)?\s+(?:application\s+)?(?:for|of)|in\s+respect\s+of)[:\s]+"?([A-Z][A-Za-z0-9\s&\-\'\.]{1,40})"?',
+        raw_text, re.IGNORECASE
+    )
+    if m:
+        result["brand_name"] = m.group(1).strip().strip('"\'')
+
+    return result
+
+
+@api_router.post("/documents/extract-trademark-notice")
+async def extract_trademark_notice(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Extract structured data from a trademark / IP notice PDF.
+
+    No API key required — uses pdfplumber + regex only.
+    Works with India IP Office notices (tmrsearch.ipindia.gov.in),
+    bilingual Hindi/English format.
+
+    Returns:
+        document_type, application_no, class, application_date,
+        used_since, applicant_name, recipient_name, hearing_date,
+        letter_date, brand_name
+    """
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # Extract text using pdfplumber
+    try:
+        import pdfplumber
+        parts = []
+        with pdfplumber.open(BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    parts.append(text)
+                # Also extract tables — helps with notices that put fields in table cells
+                for table in page.extract_tables():
+                    for row in table:
+                        if row:
+                            parts.append("  |  ".join(str(c or "").strip() for c in row))
+        raw_text = "\n".join(parts)
+    except Exception as exc:
+        logger.error(f"pdfplumber failed on trademark notice: {exc}")
+        raise HTTPException(status_code=422, detail=f"Could not read PDF: {str(exc)}")
+
+    if not raw_text or len(raw_text.strip()) < 20:
+        raise HTTPException(
+            status_code=422,
+            detail="No readable text found. Please upload a text-based (non-scanned) PDF."
+        )
+
+    extracted = _extract_trademark_notice_data(raw_text)
+
+    # Require at minimum an application number OR a hearing date
+    if not extracted["application_no"] and not extracted["hearing_date"]:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find application number or hearing date. "
+                   "Make sure this is a valid IP Office notice PDF."
+        )
+
+    logger.info(
+        f"Trademark notice extracted by {current_user.email}: "
+        f"app={extracted['application_no']}, hearing={extracted['hearing_date']}"
+    )
+    return extracted
+
+
+
 @app.exception_handler(Exception)
 async def universal_exception_handler(request: Request, exc: Exception):
     logger.error(f"Critical Error on {request.url.path}: {str(exc)}")
