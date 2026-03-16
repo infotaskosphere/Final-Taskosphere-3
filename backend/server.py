@@ -322,6 +322,8 @@ def convert_objectids(data):
             else:
                 new_dict[key] = value
         return new_dict
+    if isinstance(data, ObjectId):
+        return str(data)
     return data
 
 def get_user_permissions(current_user: User) -> dict:
@@ -589,6 +591,11 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
     }
 
     await db.referrers.insert_one(referrer)
+    # FIX: insert_one mutates `referrer` in-place by adding `_id: ObjectId(...)`.
+    # Returning the dict without popping _id causes FastAPI's jsonable_encoder
+    # to fail with: ValueError: [TypeError("'ObjectId' object is not iterable"),
+    # TypeError('vars() argument must have __dict__ attribute')]
+    referrer.pop("_id", None)
     return referrer
 
 
@@ -611,6 +618,7 @@ async def create_todo(
         doc["due_date"] = doc["due_date"].isoformat()
     result = await db.todos.insert_one(doc)
     doc["id"] = str(result.inserted_id)
+    doc.pop("_id", None)
     return doc
 
 @api_router.get("/todos")
@@ -818,6 +826,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     access_token = create_access_token({"sub": user_id})
     # Remove password from response dict before returning to prevent leaking hash
     new_user.pop("password", None)
+    new_user.pop("_id", None)
     return {"access_token": access_token, "token_type": "bearer", "user": new_user}
 
 @api_router.post("/auth/login", response_model=Token)
