@@ -1172,19 +1172,19 @@ async def handle_attendance(
 
 
    # PUNCH_OUT_BLOCK
-     if action == "punch_out":
-        if not attendance or not attendance.get("punch_in"):
-            raise HTTPException(status_code=400, detail="Not punched in yet")
-        if attendance.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out")
- 
-        punch_in_dt = attendance.get("punch_in")
-        punch_out_utc = datetime.now(timezone.utc)
-        punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
- 
-        user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
-        punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
- 
+if action == "punch_out":
+    if not attendance or not attendance.get("punch_in"):
+        raise HTTPException(status_code=400, detail="Not punched in yet")
+
+    if attendance.get("punch_out"):
+        raise HTTPException(status_code=400, detail="Already punched out")
+
+    punch_in_dt = attendance.get("punch_in")
+    punch_out_utc = datetime.now(timezone.utc)
+    punch_out_ist = punch_out_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
+    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
+    punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
         # ── FIX: MongoDB may return punch_in as a naive datetime (no tzinfo).
         #    Treat naive datetimes as UTC before computing the delta.
         if isinstance(punch_in_dt, datetime):
