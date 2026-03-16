@@ -1171,7 +1171,7 @@ async def handle_attendance(
         return {"message": "Punched in successfully", "is_late": is_late}
 
 
-   # PUNCH_OUT_BLOCK
+# PUNCH_OUT_BLOCK
 if action == "punch_out":
     if not attendance or not attendance.get("punch_in"):
         raise HTTPException(status_code=400, detail="Not punched in yet")
@@ -1185,40 +1185,43 @@ if action == "punch_out":
 
     user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0})
     punched_out_early = check_punched_out_early(user_doc or {}, punch_out_ist)
-        # ── FIX: MongoDB may return punch_in as a naive datetime (no tzinfo).
-        #    Treat naive datetimes as UTC before computing the delta.
-        if isinstance(punch_in_dt, datetime):
+
+    # ── FIX: MongoDB may return punch_in as a naive datetime (no tzinfo).
+    # Treat naive datetimes as UTC before computing the delta.
+    if isinstance(punch_in_dt, datetime):
+        if punch_in_dt.tzinfo is None:
+            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+    else:
+        # Fallback: parse from string if stored as ISO string
+        try:
+            punch_in_dt = datetime.fromisoformat(str(punch_in_dt))
             if punch_in_dt.tzinfo is None:
                 punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-        else:
-            # Fallback: parse from string if stored as ISO string
-            try:
-                punch_in_dt = datetime.fromisoformat(str(punch_in_dt))
-                if punch_in_dt.tzinfo is None:
-                    punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                punch_in_dt = punch_out_utc  # safeguard: 0-minute duration
- 
-        delta = punch_out_utc - punch_in_dt.astimezone(timezone.utc)
-        duration_minutes = int(delta.total_seconds() / 60)
- 
-        update_fields = {
-            "punch_out": punch_out_utc,
-            "punched_out_early": punched_out_early,
-            "duration_minutes": max(0, duration_minutes)
-        }
-        if data.get("location"):
-            update_fields["punch_out_location"] = data.get("location")
- 
-        await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today_str},
-            {"$set": update_fields}
-        )
-        return {
-            "message": "Punched out successfully",
-            "duration": duration_minutes,
-            "punched_out_early": punched_out_early
-        }
+        except Exception:
+            punch_in_dt = punch_out_utc  # safeguard: 0-minute duration
+
+    delta = punch_out_utc - punch_in_dt.astimezone(timezone.utc)
+    duration_minutes = int(delta.total_seconds() / 60)
+
+    update_fields = {
+        "punch_out": punch_out_utc,
+        "punched_out_early": punched_out_early,
+        "duration_minutes": max(0, duration_minutes)
+    }
+
+    if data.get("location"):
+        update_fields["punch_out_location"] = data.get("location")
+
+    await db.attendance.update_one(
+        {"user_id": current_user.id, "date": today_str},
+        {"$set": update_fields}
+    )
+
+    return {
+        "message": "Punched out successfully",
+        "duration": duration_minutes,
+        "punched_out_early": punched_out_early
+    }
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
