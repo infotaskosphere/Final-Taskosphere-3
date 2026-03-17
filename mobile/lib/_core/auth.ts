@@ -28,6 +28,7 @@ export async function login(email: string, password: string) {
 
   const data = await response.json();
 
+  // Save token
   if (data.token) {
     await SecureStore.setItemAsync(TOKEN_KEY, data.token);
   }
