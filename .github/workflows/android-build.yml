@@ -8,35 +8,53 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    defaults:
+      run:
+        working-directory: mobile
 
+    steps:
+      # 1. Checkout code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Setup Node (stable LTS)
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'pnpm'
 
+      # 3. Install pnpm properly
       - name: Install pnpm
         run: npm install -g pnpm
 
+      # 4. Install dependencies (clean)
       - name: Install dependencies
-        run: |
-          cd mobile
-          pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Generate Android project
+      # 5. Fix Expo dynamic config issue (CRITICAL)
+      - name: Prepare static Expo config for CI
         run: |
-          cd mobile
-          export CI=1
-          npx expo prebuild
-  
+          if [ -f app.config.ts ]; then
+            echo "⚠️ Replacing dynamic config for CI build"
+            mv app.config.ts app.config.ts.bak
+            echo 'export default { expo: { name: "Taskosphere", slug: "taskosphere" } };' > app.config.js
+          fi
+
+      # 6. Generate native Android project
+      - name: Generate Android project
+        env:
+          CI: true
+        run: npx expo prebuild --no-install
+
+      # 7. Build APK using Gradle
       - name: Build APK
         run: |
-          cd mobile/android
+          cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
+      # 8. Upload APK artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
