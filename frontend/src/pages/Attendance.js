@@ -2460,3 +2460,4 @@ export default function Attendance() {
       </motion.div>
     </TooltipProvider>
   );
+}
