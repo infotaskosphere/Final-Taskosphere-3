@@ -19,7 +19,7 @@ And add it to DEFAULT_ROLE_PERMISSIONS:
     staff   → False   (admin can toggle per-user)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime, timezone
 from typing import List, Optional
 import uuid
@@ -169,10 +169,8 @@ async def notify_admins_and_permitted(
         for uid in recipient_ids
     ]
 
-    try:
+    if docs:
         await db.notifications.insert_many(docs)
-    except Exception as e:
-        logger.error(f"[Notification] bulk insert failed: {e}")
 
 
 # ====================== EVENT HELPERS ======================
@@ -334,114 +332,73 @@ async def send_notification(
         )
         if result:
             return {"status": "success", "message": "Notification sent"}
-        raise HTTPException(status_code=500, detail="Failed to create notification")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create notification")
 
     raise HTTPException(
-        status_code=400,
-        detail="Provide user_id or set broadcast=true",
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Either 'broadcast' must be true or 'user_id' must be provided."
     )
 
 
-# ====================== USER: FETCH OWN NOTIFICATIONS ======================
+# ====================== USER: GET NOTIFICATIONS ======================
 
 @router.get("/", response_model=List[Notification])
 async def get_my_notifications(
     current_user: User = Depends(get_current_user),
+    limit: int = 100,
+    skip: int = 0,
+    unread_only: bool = False,
 ):
-    """
-    Returns the current user's own notifications, newest first.
-    Ownership enforced — users only see their own records.
-    """
-    cursor = db.notifications.find(
-        {"user_id": current_user.id},
-        {"_id": 0},
-    )
-    raw = await cursor.sort("created_at", -1).to_list(500)
-    return [normalize_notification(n) for n in raw]
+    query = {"user_id": current_user.id}
+    if unread_only:
+        query["is_read"] = False
+
+    notifications = await db.notifications.find(query, {"_id": 0})
+    notifications = notifications.sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+    return [normalize_notification(n) for n in notifications]
 
 
-@router.get("/unread-count")
-async def get_unread_count(
-    current_user: User = Depends(get_current_user),
-):
-    """Lightweight unread badge count for the navbar."""
-    count = await db.notifications.count_documents({
-        "user_id": current_user.id,
-        "is_read": False,
-    })
-    return {"unread_count": count}
-
-
-# ====================== USER: MARK AS READ ======================
-
-@router.put("/read-all")
-async def mark_all_read(
-    current_user: User = Depends(get_current_user),
-):
-    """Marks ALL of the current user's unread notifications as read."""
-    await db.notifications.update_many(
-        {"user_id": current_user.id, "is_read": False},
-        {"$set": {"is_read": True}},
-    )
-    return {"message": "All notifications marked as read"}
-
-
-@router.put("/{notification_id}/read")
+@router.patch("/{notification_id}/read")
 async def mark_notification_read(
     notification_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Marks a single notification as read. Ownership enforced."""
     result = await db.notifications.update_one(
         {"id": notification_id, "user_id": current_user.id},
-        {"$set": {"is_read": True}},
+        {"$set": {"is_read": True}}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Notification not found")
+        raise HTTPException(status_code=404, detail="Notification not found or not authorized")
     return {"message": "Notification marked as read"}
 
 
-# ====================== USER: DELETE NOTIFICATION ======================
+@router.patch("/read-all")
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+):
+    await db.notifications.update_many(
+        {"user_id": current_user.id, "is_read": False},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
 
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Deletes a notification. Ownership enforced — cannot delete others'."""
-    result = await db.notifications.delete_one({
-        "id": notification_id,
-        "user_id": current_user.id,
-    })
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Notification not found")
-    return {"message": "Notification removed"}
-
-
-# ====================== ADMIN: VIEW ANY USER'S NOTIFICATIONS ======================
-
-@router.get("/admin/user/{user_id}", response_model=List[Notification])
-async def admin_get_user_notifications(
-    user_id: str,
-    current_user: User = Depends(require_admin()),
-):
-    """
-    Admin-only: inspect any user's notification inbox.
-    Useful for debugging notification delivery.
-    """
-    cursor = db.notifications.find(
-        {"user_id": user_id},
-        {"_id": 0},
+    result = await db.notifications.delete_one(
+        {"id": notification_id, "user_id": current_user.id}
     )
-    raw = await cursor.sort("created_at", -1).to_list(200)
-    return [normalize_notification(n) for n in raw]
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found or not authorized")
+    return {"message": "Notification deleted"}
 
 
-@router.delete("/admin/clear/{user_id}")
-async def admin_clear_user_notifications(
-    user_id: str,
-    current_user: User = Depends(require_admin()),
+@router.delete("/clear-all")
+async def clear_all_notifications(
+    current_user: User = Depends(get_current_user),
 ):
-    """Admin-only: wipe all notifications for a specific user."""
-    result = await db.notifications.delete_many({"user_id": user_id})
-    return {"message": f"Deleted {result.deleted_count} notifications for user {user_id}"}
+    await db.notifications.delete_many({"user_id": current_user.id})
+    return {"message": "All notifications cleared"}
