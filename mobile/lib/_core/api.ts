@@ -118,7 +118,7 @@ export async function exchangeOAuthCode(
 
 // Logout
 export async function logout(): Promise<void> {
-  await apiCall<void>("/api/auth/logout", {
+  await apiCall<void>("/logout", {
     method: "POST",
   });
 }
@@ -133,7 +133,7 @@ export async function getMe(): Promise<{
   lastSignedIn: string;
 } | null> {
   try {
-    const result = await apiCall<{ user: any }>("/api/auth/me");
+    const result = await apiCall<{ user: any }>("/me");
     return result.user || null;
   } catch (error) {
     console.error("[API] getMe failed:", error);
