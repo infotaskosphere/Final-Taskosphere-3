@@ -1,4 +1,4 @@
-name: Build APK (Direct)
+name: Build APK (Stable)
 
 on:
   push:
@@ -9,43 +9,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # 2. Setup Node
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # 3. Enable pnpm (stable method)
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@8.15.0 --activate
-          pnpm -v
+      - name: Setup Java (IMPORTANT)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      # 4. Install dependencies
+      - name: Install pnpm
+        run: npm install -g pnpm
+
       - name: Install dependencies
-        run: |
-          cd mobile
-          pnpm install --no-frozen-lockfile
+        working-directory: mobile
+        run: pnpm install
 
-      # 5. Generate Android project
-      - name: Generate Android project
+      - name: Fix Expo config (IMPORTANT)
+        working-directory: mobile
         run: |
-          cd mobile
+          export CI=1
           npx expo prebuild --platform android --clean
 
-      # 6. Build APK
       - name: Build APK
+        working-directory: mobile/android
         run: |
-          cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
-      # 7. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
