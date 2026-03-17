@@ -2,7 +2,7 @@ import type { ExpoConfig } from "expo/config";
 
 const config: ExpoConfig = {
   name: "Taskosphere",
-  slug: "taskosphere",
+  slug: "taskosphere-mobile", // <-- Updated this line
   version: "1.0.0",
 
   android: {
