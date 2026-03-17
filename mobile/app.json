@@ -7,6 +7,9 @@
     "platforms": ["android"],
     "android": {
       "package": "com.taskosphere.app"
+    },
+    "extra": {
+      "apiUrl": "https://final-taskosphere-backend.onrender.com"
     }
   }
 }
