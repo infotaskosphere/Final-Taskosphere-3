@@ -6,37 +6,17 @@ const config: ExpoConfig = {
   version: "1.0.0",
   orientation: "portrait",
 
-  icon: "./assets/images/icon.png",
-
-  scheme: "taskosphere",
-
-  userInterfaceStyle: "automatic",
-
   android: {
     package: "com.taskosphere.app",
-    versionCode: 1,
-    adaptiveIcon: {
-      foregroundImage: "./assets/images/android-icon-foreground.png",
-      backgroundColor: "#ffffff"
-    }
-  },
-
-  ios: {
-    bundleIdentifier: "com.taskosphere.app",
-    supportsTablet: true
-  },
-
-  web: {
-    bundler: "metro"
+    versionCode: 1
   },
 
   extra: {
+    eas: {
+      projectId: "fcd70a5e-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    },
     API_URL: "https://final-taskosphere-backend.onrender.com"
-  },
-
-  plugins: [
-    "expo-router"
-  ]
+  }
 };
 
 export default config;
