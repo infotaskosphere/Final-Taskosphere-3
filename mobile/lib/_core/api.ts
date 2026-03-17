@@ -18,7 +18,7 @@ export async function apiCall<T>(
     }
   }
 
-  // ✅ Backend URL (fixed)
+  // ✅ Your backend URL
   const BASE_URL = "https://final-taskosphere-backend.onrender.com";
 
   const cleanEndpoint = endpoint.startsWith("/")
@@ -56,31 +56,12 @@ export async function apiCall<T>(
   }
 }
 
-// 🔐 OAuth (fixed path)
-export async function exchangeOAuthCode(
-  code: string,
-  state: string
-): Promise<{ sessionToken: string; user: any }> {
-
-  const params = new URLSearchParams({ code, state });
-
-  const result = await apiCall<{
-    app_session_id: string;
-    user: any;
-  }>(`/oauth/mobile?${params.toString()}`);
-
-  return {
-    sessionToken: result.app_session_id,
-    user: result.user,
-  };
-}
-
 // 🚪 Logout
 export async function logout(): Promise<void> {
   await apiCall("/logout", { method: "POST" });
 }
 
-// 👤 Get user
+// 👤 Get current user
 export async function getMe(): Promise<any | null> {
   try {
     return await apiCall("/me");
