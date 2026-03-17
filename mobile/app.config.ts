@@ -7,7 +7,6 @@ const config: ExpoConfig = {
   orientation: "portrait",
 
   icon: "./assets/images/icon.png",
-
   scheme: "taskosphere",
 
   userInterfaceStyle: "automatic",
@@ -32,16 +31,14 @@ const config: ExpoConfig = {
 
   extra: {
     eas: {
-      // ✅ IMPORTANT: This fixes your error
-      projectId: "fcd70a5e-9c5e-4b1e-8b0f-123456789abc"
+      // ✅ CORRECT PROJECT ID (from your error log)
+      projectId: "061784a1-003c-4777-84ee-9781ca0176b6"
     },
 
     API_URL: "https://final-taskosphere-backend.onrender.com"
   },
 
-  plugins: [
-    "expo-router"
-  ]
+  plugins: ["expo-router"]
 };
 
 export default config;
