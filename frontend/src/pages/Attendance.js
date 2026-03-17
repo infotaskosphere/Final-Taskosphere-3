@@ -586,7 +586,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER DETAIL POPUP — shown when a reminder stripe is clicked
 // ═══════════════════════════════════════════════════════════════════════════
-function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete }) {
+function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEdit }) {
   if (!reminder) return null;
   const isDue = isPast(new Date(reminder.remind_at));
   const gcalUrl = buildGCalURL(reminder);
@@ -671,16 +671,134 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete }) {
             Add to Google Calendar
           </a>
         </div>
-        {/* Footer */}
+        {/* Footer with EDIT button */}
         <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
           {!isViewingOther ? (
-            <button onClick={() => { onDelete(reminder.id); onClose(); }}
-              className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
-              <Trash2 className="w-4 h-4" /> Delete
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  onEdit(reminder.id);
+                  onClose();
+                }}
+                className="flex items-center gap-2 text-sm font-bold text-blue-500 hover:text-blue-700 active:scale-95 transition-all"
+              >
+                <Edit2 className="w-4 h-4" />
+                Edit
+              </button>
+              <button
+                onClick={() => { onDelete(reminder.id); onClose(); }}
+                className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </button>
+            </div>
           ) : <div />}
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">
             Close
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REMINDER EDIT MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
+  const [title, setTitle] = useState(reminder?.title || '');
+  const [description, setDescription] = useState(reminder?.description || '');
+  const [remindAt, setRemindAt] = useState(
+    reminder?.remind_at ? new Date(reminder.remind_at).toISOString().slice(0, 16) : ''
+  );
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        remind_at: remindAt ? new Date(remindAt).toISOString() : undefined,
+      });
+      onClose();
+    } catch (error) {
+      toast.error('Failed to update reminder');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+        initial={{ scale: 0.92, y: 24 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-8 py-6 text-white bg-gradient-to-r from-blue-500 to-blue-600">
+          <h2 className="text-xl font-bold">Edit Reminder</h2>
+        </div>
+
+        <div className="p-8 space-y-4">
+          <div>
+            <label className="text-sm font-bold text-slate-600 mb-2 block">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Reminder title"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-600 mb-2 block">Description</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={3}
+              placeholder="Add details..."
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-600 mb-2 block">Remind At</label>
+            <input
+              type="datetime-local"
+              value={remindAt}
+              onChange={e => setRemindAt(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl"
+          >
+            {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </motion.div>
@@ -738,9 +856,13 @@ export default function Attendance() {
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
 
-  // ── NEW: detail popup state ──────────────────────────────────────────────
+  // ── detail popup state ──────────────────────────────────────────────
   const [selectedHolidayDetail, setSelectedHolidayDetail] = useState(null);
   const [selectedReminderDetail, setSelectedReminderDetail] = useState(null);
+
+  // ── Patch 1: reminder edit modal state ──────────────────────────────
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingReminder, setEditingReminder] = useState(null);
 
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
@@ -986,7 +1108,6 @@ export default function Attendance() {
         added++;
       } catch (err) {
         const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
-        // CORS / network errors often have no response — give a clear message
         const isCors = !err?.response && (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('cors'));
         errors.push(isCors
           ? `${row.name}: Network/CORS error — check backend CORS config allows your frontend origin`
@@ -1073,6 +1194,32 @@ export default function Attendance() {
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
+
+  // ── Patch 2: reminder edit handlers ──────────────────────────────────
+  const handleEditReminder = useCallback((reminderId) => {
+    const reminder = reminders.find(r => r.id === reminderId);
+    if (reminder) {
+      setEditingReminder(reminder);
+      setIsEditModalOpen(true);
+    }
+  }, [reminders]);
+
+  const handleUpdateReminder = useCallback(async (updates) => {
+    if (!editingReminder?.id) return;
+    try {
+      await api.patch(`/reminders/${editingReminder.id}`, updates);
+      const uid = isViewingOther ? selectedUserId : null;
+      const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
+      const res = await api.get(url);
+      setReminders(res.data || []);
+      toast.success('Reminder updated successfully');
+      setIsEditModalOpen(false);
+      setEditingReminder(null);
+    } catch (err) {
+      toast.error('Failed to update reminder');
+      console.error(err);
+    }
+  }, [editingReminder, isViewingOther, selectedUserId]);
 
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -1293,6 +1440,22 @@ export default function Attendance() {
             isViewingOther={isViewingOther}
             onClose={() => setSelectedReminderDetail(null)}
             onDelete={handleDeleteReminder}
+            onEdit={handleEditReminder}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Patch 5: REMINDER EDIT MODAL ── */}
+      <AnimatePresence>
+        {isEditModalOpen && editingReminder && (
+          <ReminderEditModal
+            isOpen={isEditModalOpen}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setEditingReminder(null);
+            }}
+            reminder={editingReminder}
+            onSave={handleUpdateReminder}
           />
         )}
       </AnimatePresence>
