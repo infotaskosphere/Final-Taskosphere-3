@@ -49,6 +49,8 @@ import {
   Edit2,
   FileUp,
   Loader2,
+  ChevronRight,
+  Info,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -84,6 +86,25 @@ const ATTENDANCE_INTERACTION_STYLES = `
   }
   .absent-pulse {
     animation: att-pulse-red 1.5s ease-in-out infinite;
+  }
+  /* Slim custom scrollbar for cards */
+  .slim-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .slim-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 10px;
+  }
+  .slim-scroll::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.15);
+    border-radius: 10px;
+  }
+  .slim-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(0,0,0,0.28);
+  }
+  .slim-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0,0,0,0.15) transparent;
   }
 `;
 if (typeof document !== 'undefined' && !document.getElementById('att-interaction-styles')) {
@@ -406,7 +427,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER POPUP
+// REMINDER POPUP (firing alert)
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderPopup({ reminder, onDismiss }) {
   return (
@@ -450,6 +471,219 @@ function ReminderPopup({ reminder, onDismiss }) {
           </div>
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HOLIDAY DETAIL POPUP — shown when a holiday stripe is clicked
+// ═══════════════════════════════════════════════════════════════════════════
+function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
+  if (!holiday) return null;
+  let dayOfWeek = '';
+  try { dayOfWeek = format(parseISO(holiday.date), 'EEEE, MMMM d, yyyy'); } catch {}
+  const daysLeft = (() => {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const hDate = parseISO(holiday.date);
+      hDate.setHours(0, 0, 0, 0);
+      const diff = Math.round((hDate - today) / 86400000);
+      if (diff === 0) return 'Today!';
+      if (diff > 0) return `In ${diff} day${diff !== 1 ? 's' : ''}`;
+      return `${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} ago`;
+    } catch { return ''; }
+  })();
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-8 py-6 text-white relative overflow-hidden"
+          style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
+          <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10"
+            style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
+          <div className="flex items-start justify-between relative z-10">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center text-3xl">🎉</div>
+              <div>
+                <p className="text-amber-100 text-xs font-bold uppercase tracking-widest mb-1">Public Holiday</p>
+                <h2 className="text-2xl font-black leading-tight">{holiday.name}</h2>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all mt-1">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+        {/* Body */}
+        <div className="p-8 space-y-4">
+          <div className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{ backgroundColor: `${COLORS.amber}10`, border: `1.5px solid ${COLORS.amber}25` }}>
+            <CalendarIcon className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.amber }} />
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Date</p>
+              <p className="font-bold text-slate-800">{dayOfWeek}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{ backgroundColor: `${COLORS.deepBlue}08`, border: `1.5px solid ${COLORS.deepBlue}18` }}>
+            <Clock className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.deepBlue }} />
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Countdown</p>
+              <p className="font-bold" style={{ color: COLORS.deepBlue }}>{daysLeft}</p>
+            </div>
+          </div>
+          {holiday.type && (
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <Info className="w-5 h-5 flex-shrink-0 text-slate-400" />
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Type</p>
+                <p className="font-semibold text-slate-700 capitalize">{holiday.type}</p>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Footer */}
+        {isAdmin && (
+          <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+            <button onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }}
+              className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">
+                Close
+              </Button>
+              <Button onClick={() => { onEdit(holiday); onClose(); }}
+                className="font-bold text-white rounded-xl px-5 active:scale-95 transition-all"
+                style={{ backgroundColor: COLORS.amber }}>
+                <Edit2 className="w-4 h-4 mr-1.5" /> Edit
+              </Button>
+            </div>
+          </div>
+        )}
+        {!isAdmin && (
+          <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end">
+            <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">
+              Close
+            </Button>
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REMINDER DETAIL POPUP — shown when a reminder stripe is clicked
+// ═══════════════════════════════════════════════════════════════════════════
+function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete }) {
+  if (!reminder) return null;
+  const isDue = isPast(new Date(reminder.remind_at));
+  const gcalUrl = buildGCalURL(reminder);
+  const descLines = reminder.description ? reminder.description.split('\n').filter(Boolean) : [];
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-8 py-6 text-white relative overflow-hidden flex-shrink-0"
+          style={{ background: isDue
+            ? `linear-gradient(135deg, ${COLORS.red} 0%, #B91C1C 100%)`
+            : `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
+          <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10"
+            style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
+          <div className="flex items-start justify-between relative z-10">
+            <div className="flex items-center gap-4">
+              <motion.div
+                className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center"
+                animate={isDue ? { scale: [1, 1.1, 1] } : {}}
+                transition={{ duration: 1, repeat: Infinity }}>
+                <AlarmClock className="w-7 h-7 text-white" />
+              </motion.div>
+              <div>
+                <p className="text-purple-200 text-xs font-bold uppercase tracking-widest mb-1">
+                  {isDue ? '⚠️ Overdue Reminder' : 'Upcoming Reminder'}
+                </p>
+                <h2 className="text-xl font-black leading-tight pr-2">{reminder.title}</h2>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all mt-1 flex-shrink-0">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+        {/* Body */}
+        <div className="p-8 space-y-4 overflow-y-auto slim-scroll flex-1">
+          <div className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{
+              backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10`,
+              border: `1.5px solid ${isDue ? COLORS.red : COLORS.purple}25`,
+            }}>
+            <Clock className="w-5 h-5 flex-shrink-0" style={{ color: isDue ? COLORS.red : COLORS.purple }} />
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Scheduled For</p>
+              <p className="font-bold text-slate-800">{formatReminderTime(reminder.remind_at)}</p>
+              {isDue && <p className="text-xs text-red-500 font-semibold mt-0.5">This reminder is overdue</p>}
+            </div>
+          </div>
+          {descLines.length > 0 && (
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Details</p>
+              <div className="space-y-1.5">
+                {descLines.map((line, i) => {
+                  const [label, ...rest] = line.split(':');
+                  const val = rest.join(':').trim();
+                  if (val) {
+                    return (
+                      <div key={i} className="flex gap-2 text-sm">
+                        <span className="font-bold text-slate-600 flex-shrink-0 min-w-[110px]">{label}:</span>
+                        <span className="text-slate-700">{val}</span>
+                      </div>
+                    );
+                  }
+                  return <p key={i} className="text-sm text-slate-600 italic">{line}</p>;
+                })}
+              </div>
+            </div>
+          )}
+          <a href={gcalUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
+            style={{ backgroundColor: COLORS.deepBlue }}>
+            <CalendarPlus className="w-4 h-4" />
+            Add to Google Calendar
+          </a>
+        </div>
+        {/* Footer */}
+        <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
+          {!isViewingOther ? (
+            <button onClick={() => { onDelete(reminder.id); onClose(); }}
+              className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+          ) : <div />}
+          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">
+            Close
+          </Button>
+        </div>
+      </motion.div>
     </motion.div>
   );
 }
@@ -503,6 +737,10 @@ export default function Attendance() {
   const [trademarkData, setTrademarkData] = useState(null);
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
+
+  // ── NEW: detail popup state ──────────────────────────────────────────────
+  const [selectedHolidayDetail, setSelectedHolidayDetail] = useState(null);
+  const [selectedReminderDetail, setSelectedReminderDetail] = useState(null);
 
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
@@ -559,12 +797,9 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [reminders]);
 
-  // ─── FIX 1: resolveLocations — increased slice to 50, added punch_out_location
-  //            for today's attendance, added displayTodayAttendance to deps ────
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
-      // Increased from 15 → 50 so admin "everyone" view (25 rows) is fully covered
       for (const record of attendanceHistory.slice(0, 50)) {
         if (record.location?.latitude && record.location?.longitude) {
           const key = `${record.location.latitude},${record.location.longitude}`;
@@ -575,7 +810,6 @@ export default function Attendance() {
           if (!locationCache[key]) toResolve.push({ key, lat: record.punch_out_location.latitude, lng: record.punch_out_location.longitude });
         }
       }
-      // Also resolve today's punch-out location so it shows in the hero card
       if (displayTodayAttendance?.punch_out_location?.latitude && displayTodayAttendance?.punch_out_location?.longitude) {
         const loc = displayTodayAttendance.punch_out_location;
         const key = `${loc.latitude},${loc.longitude}`;
@@ -587,7 +821,7 @@ export default function Attendance() {
       setLocationCache(prev => ({ ...prev, ...results }));
     };
     resolveLocations();
-  }, [attendanceHistory, displayTodayAttendance]); // added displayTodayAttendance
+  }, [attendanceHistory, displayTodayAttendance]);
 
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
@@ -752,12 +986,17 @@ export default function Attendance() {
         added++;
       } catch (err) {
         const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
-        errors.push(`${row.name}: ${detail}`);
+        // CORS / network errors often have no response — give a clear message
+        const isCors = !err?.response && (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('cors'));
+        errors.push(isCors
+          ? `${row.name}: Network/CORS error — check backend CORS config allows your frontend origin`
+          : `${row.name}: ${detail}`
+        );
         console.error('Holiday save error:', detail, err?.response?.status);
       }
     }
     if (added > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} saved`);
-    if (errors.length > 0) errors.forEach(e => toast.error(e, { duration: 6000 }));
+    if (errors.length > 0) errors.forEach(e => toast.error(e, { duration: 7000 }));
     setShowHolidayModal(false);
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
     await fetchData();
@@ -1032,6 +1271,32 @@ export default function Attendance() {
       <AnimatePresence>
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} />}
       </AnimatePresence>
+
+      {/* ── HOLIDAY DETAIL POPUP ── */}
+      <AnimatePresence>
+        {selectedHolidayDetail && (
+          <HolidayDetailPopup
+            holiday={selectedHolidayDetail}
+            isAdmin={isAdmin}
+            onClose={() => setSelectedHolidayDetail(null)}
+            onEdit={(h) => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
+            onDelete={handleDeleteHoliday}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── REMINDER DETAIL POPUP ── */}
+      <AnimatePresence>
+        {selectedReminderDetail && (
+          <ReminderDetailPopup
+            reminder={selectedReminderDetail}
+            isViewingOther={isViewingOther}
+            onClose={() => setSelectedReminderDetail(null)}
+            onDelete={handleDeleteReminder}
+          />
+        )}
+      </AnimatePresence>
+
       <motion.div
         className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
         style={{
@@ -1379,182 +1644,196 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ── HOLIDAY + REMINDER CARDS ── */}
+        {/* ── HOLIDAY + REMINDER CARDS (compact with slim scroll) ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
 
-            {/* ══ HOLIDAY CARD ══ */}
+            {/* ══ HOLIDAY CARD — compact with slim scroll ══ */}
             {(() => {
               const monthHolidaysGrid = holidays.filter(h => {
                 try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); }
                 catch { return false; }
               });
               return (
-                <Card className="border-0 shadow-md overflow-hidden flex flex-col">
-                  <div className="px-6 py-3 flex items-center justify-between"
+                <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
+                  {/* Fixed header */}
+                  <div className="px-5 py-3 flex items-center justify-between flex-shrink-0"
                     style={{ background: `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`, borderBottom: `2px solid ${COLORS.amber}25` }}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
                         style={{ backgroundColor: `${COLORS.amber}22` }}>
-                        <span className="text-xl">🎉</span>
+                        <span className="text-base">🎉</span>
                       </div>
                       <div>
-                        <h3 className="font-black text-slate-800" style={{ color: COLORS.deepBlue }}>
-                          Holidays — {format(selectedDate, 'MMMM yyyy')}
+                        <h3 className="font-black text-sm" style={{ color: COLORS.deepBlue }}>
+                          Holidays — {format(selectedDate, 'MMM yyyy')}
                         </h3>
-                        <p className="text-xs text-slate-500 font-medium">
-                          {monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''} this month
-                          {!isViewingOther && ' • popups on calendar'}
+                        <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">
+                          {monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''} · click any row for details
                         </p>
                       </div>
                     </div>
                     {isAdmin && (
                       <Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }}
-                        className="att-ripple-btn font-bold rounded-xl text-white px-4 py-2 active:scale-95 transition-all hover:opacity-90 flex-shrink-0"
+                        size="sm"
+                        className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs"
                         style={{ backgroundColor: COLORS.amber }}>
-                        <Plus className="w-4 h-4 mr-1.5" /> Add
+                        <Plus className="w-3.5 h-3.5 mr-1" /> Add
                       </Button>
                     )}
                   </div>
-                  <CardContent className="p-4 flex-1">
+
+                  {/* Scrollable list */}
+                  <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                     {monthHolidaysGrid.length === 0 ? (
-                      <div className="text-center py-10">
-                        <span className="text-4xl block mb-3">🗓️</span>
-                        <p className="text-slate-400 font-medium text-sm">No holidays this month</p>
+                      <div className="flex flex-col items-center justify-center h-full py-8">
+                        <span className="text-3xl block mb-2">🗓️</span>
+                        <p className="text-slate-400 font-medium text-xs">No holidays this month</p>
                         {isAdmin && (
                           <button
                             onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }}
-                            className="mt-3 text-amber-600 hover:text-amber-800 text-xs font-bold underline active:scale-95 transition-all">
+                            className="mt-2 text-amber-600 hover:text-amber-800 text-xs font-bold underline active:scale-95 transition-all">
                             + Add a holiday
                           </button>
                         )}
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {monthHolidaysGrid.map(h => (
-                          <motion.div key={h.date} variants={itemVariants}
-                            className="relative flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-md group"
-                            style={{ borderColor: `${COLORS.amber}40`, backgroundColor: `${COLORS.amber}08` }}>
-                            <div className="w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-white font-black shadow-sm"
-                              style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                              <span className="text-[9px] leading-none uppercase tracking-wide">{format(parseISO(h.date), 'MMM')}</span>
-                              <span className="text-base leading-none font-black">{format(parseISO(h.date), 'd')}</span>
+                      monthHolidaysGrid.map(h => (
+                        <motion.div
+                          key={h.date}
+                          className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
+                          style={{ borderColor: `${COLORS.amber}35`, backgroundColor: `${COLORS.amber}06` }}
+                          whileHover={{ backgroundColor: `${COLORS.amber}12` }}
+                          onClick={() => setSelectedHolidayDetail(h)}
+                        >
+                          {/* Date badge */}
+                          <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
+                            style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                            <span className="text-[8px] leading-none uppercase tracking-wide">{format(parseISO(h.date), 'MMM')}</span>
+                            <span className="text-sm leading-none font-black">{format(parseISO(h.date), 'd')}</span>
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate leading-snug">{h.name}</p>
+                            <p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p>
+                          </div>
+                          {/* Arrow hint */}
+                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors flex-shrink-0" />
+                          {/* Admin quick actions on hover */}
+                          {isAdmin && (
+                            <div
+                              className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
+                                className="w-6 h-6 flex items-center justify-center rounded text-blue-500 hover:bg-blue-50 active:scale-90 transition-all" title="Edit">
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button onClick={() => handleDeleteHoliday(h.date, h.name)}
+                                className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all" title="Delete">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-800 truncate leading-snug">{h.name}</p>
-                              <p className="text-xs text-slate-500 font-medium mt-0.5">{format(parseISO(h.date), 'EEEE')}</p>
-                            </div>
-                            <span className="text-[10px] font-black uppercase px-2 py-1 rounded-full flex-shrink-0"
-                              style={{ color: COLORS.amber, backgroundColor: `${COLORS.amber}20`, border: `1px solid ${COLORS.amber}40` }}>
-                              Holiday
-                            </span>
-                            {isAdmin && (
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
-                                  className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 active:scale-90 transition-all" title="Edit">
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button onClick={() => handleDeleteHoliday(h.date, h.name)}
-                                  className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 active:scale-90 transition-all" title="Delete">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
+                          )}
+                        </motion.div>
+                      ))
                     )}
-                  </CardContent>
+                  </div>
                 </Card>
               );
             })()}
 
-            {/* ══ REMINDER CARD ══ */}
-            <Card className="border-0 shadow-md overflow-hidden flex flex-col">
-              <div className="px-6 py-3 flex items-center justify-between"
+            {/* ══ REMINDER CARD — compact with slim scroll ══ */}
+            <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
+              {/* Fixed header */}
+              <div className="px-5 py-3 flex items-center justify-between flex-shrink-0"
                 style={{ background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`, borderBottom: `2px solid ${COLORS.purple}25` }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}>
-                    <AlarmClock className="w-5 h-5" style={{ color: COLORS.purple }} />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}>
+                    <AlarmClock className="w-4 h-4" style={{ color: COLORS.purple }} />
                   </div>
                   <div>
-                    <h3 className="font-black text-slate-800" style={{ color: COLORS.deepBlue }}>
+                    <h3 className="font-black text-sm" style={{ color: COLORS.deepBlue }}>
                       {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
                     </h3>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {upcomingReminders.length} upcoming{!isViewingOther && ' • popups fire automatically'}
+                    <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">
+                      {upcomingReminders.length} upcoming · click any row for details
                     </p>
                   </div>
                 </div>
                 {!isViewingOther && (
                   <Button onClick={() => setShowReminderForm(true)}
-                    className="att-ripple-btn font-bold rounded-xl text-white px-4 py-2 active:scale-95 transition-all hover:opacity-90 flex-shrink-0"
+                    size="sm"
+                    className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs"
                     style={{ backgroundColor: COLORS.purple }}>
-                    <Plus className="w-4 h-4 mr-1.5" /> New
+                    <Plus className="w-3.5 h-3.5 mr-1" /> New
                   </Button>
                 )}
               </div>
-              <CardContent className="p-4 flex-1">
+
+              {/* Scrollable list */}
+              <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                 {upcomingReminders.length === 0 ? (
-                  <div className="text-center py-10">
-                    <Bell className="w-10 h-10 mx-auto text-slate-300 mb-3" />
-                    <p className="text-slate-500 font-medium text-sm">
-                      {isViewingOther ? 'No upcoming reminders for this user' : 'No upcoming reminders. Create one to get started!'}
+                  <div className="flex flex-col items-center justify-center h-full py-8">
+                    <Bell className="w-8 h-8 mx-auto text-slate-200 mb-2" />
+                    <p className="text-slate-400 font-medium text-xs text-center">
+                      {isViewingOther ? 'No upcoming reminders' : 'No reminders yet. Create one!'}
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {upcomingReminders.map((r, index) => {
-                      const isDue = isPast(new Date(r.remind_at));
-                      return (
-                        <motion.div key={r.id} variants={itemVariants}
-                          className="relative flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-md"
+                  upcomingReminders.map((r, index) => {
+                    const isDue = isPast(new Date(r.remind_at));
+                    return (
+                      <motion.div
+                        key={r.id}
+                        className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
+                        style={{
+                          borderColor: isDue ? `${COLORS.red}35` : `${COLORS.purple}25`,
+                          backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}05`,
+                        }}
+                        whileHover={{ backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10` }}
+                        onClick={() => setSelectedReminderDetail(r)}
+                      >
+                        {/* Index badge */}
+                        <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 font-black text-xs"
                           style={{
-                            borderColor: isDue ? `${COLORS.red}40` : `${COLORS.purple}30`,
-                            backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}06`,
+                            backgroundColor: isDue ? `${COLORS.red}18` : `${COLORS.purple}18`,
+                            color: isDue ? COLORS.red : COLORS.purple,
                           }}>
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                            style={{ backgroundColor: isDue ? `${COLORS.red}15` : `${COLORS.purple}18` }}>
-                            <span className="text-xs font-black" style={{ color: isDue ? COLORS.red : COLORS.purple }}>
-                              {index + 1}
-                            </span>
+                          {index + 1}
+                        </div>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate leading-snug">{r.title}</p>
+                          <p className="text-[11px] font-mono font-semibold truncate"
+                            style={{ color: isDue ? COLORS.red : COLORS.purple }}>
+                            ⏰ {formatReminderTime(r.remind_at)}
+                          </p>
+                        </div>
+                        {isDue && (
+                          <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block">
+                            Due
+                          </span>
+                        )}
+                        {/* Arrow */}
+                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 transition-colors flex-shrink-0" />
+                        {/* Quick delete on hover */}
+                        {!isViewingOther && (
+                          <div
+                            className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button onClick={() => handleDeleteReminder(r.id)}
+                              className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all" title="Delete">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-slate-800 truncate leading-snug">{r.title}</p>
-                            <p className="text-xs font-mono font-semibold truncate mt-0.5"
-                              style={{ color: isDue ? COLORS.red : COLORS.purple }}>
-                              ⏰ {formatReminderTime(r.remind_at)}
-                            </p>
-                            {r.description && (
-                              <p className="text-[11px] text-slate-400 truncate mt-0.5">{r.description}</p>
-                            )}
-                          </div>
-                          {isDue && (
-                            <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block">
-                              Due
-                            </span>
-                          )}
-                          <div className="flex gap-1.5 flex-shrink-0">
-                            <a href={buildGCalURL(r)} target="_blank" rel="noopener noreferrer"
-                              className="flex items-center justify-center w-7 h-7 rounded-lg text-white transition-all hover:opacity-80 active:scale-90"
-                              style={{ backgroundColor: COLORS.deepBlue }}
-                              title="Add to Google Calendar">
-                              <CalendarPlus className="w-3.5 h-3.5" />
-                            </a>
-                            {!isViewingOther && (
-                              <button onClick={() => handleDeleteReminder(r.id)}
-                                className="flex items-center justify-center w-7 h-7 rounded-lg text-red-500 bg-red-50 hover:bg-red-100 active:scale-90 transition-all"
-                                title="Delete reminder">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
+                        )}
+                      </motion.div>
+                    );
+                  })
                 )}
-              </CardContent>
+              </div>
             </Card>
           </motion.div>
         )}
@@ -1562,11 +1841,10 @@ export default function Attendance() {
         {/* ── CALENDAR + RECENT ATTENDANCE ── */}
         <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
 
-          {/* ── FIX 2 & 3: Left column — calendar card fixed height, detail card stretches ── */}
           {!isEveryoneView && (
             <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
 
-              {/* Calendar Card — flex-shrink-0 keeps it at natural height */}
+              {/* Calendar Card */}
               <Card className="border-0 shadow-md flex-shrink-0">
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -1616,7 +1894,7 @@ export default function Attendance() {
                 </CardContent>
               </Card>
 
-              {/* Detail Card — flex-1 + min-h-0 makes it grow to fill remaining height */}
+              {/* Detail Card */}
               <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
                 <CardContent className="p-0 h-full overflow-y-auto">
                   {selectedAttendance?.status === 'absent' ? (
@@ -1705,7 +1983,7 @@ export default function Attendance() {
                 ) : recentAttendance.length === 0 ? (
                   <p className="text-center py-12 text-slate-500 font-medium">No records yet</p>
                 ) : (
-                  <div className="space-y-2 max-h-[700px] overflow-y-auto">
+                  <div className="space-y-2 max-h-[700px] overflow-y-auto slim-scroll">
                     {recentAttendance.map((record, idx) => {
                       const inLocLabel = getLocationLabel(record, 'in');
                       const outLocLabel = getLocationLabel(record, 'out');
@@ -1923,7 +2201,7 @@ export default function Attendance() {
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name</p>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Date</p>
                   </div>
-                  <div className="space-y-3 max-h-[50vh] overflow-y-auto mb-6">
+                  <div className="space-y-3 max-h-[50vh] overflow-y-auto slim-scroll mb-6">
                     {holidayRows.map((row, idx) => (
                       <motion.div key={idx} className="grid grid-cols-[1fr_160px_40px] gap-3 items-center"
                         initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
@@ -2063,7 +2341,7 @@ export default function Attendance() {
                     </p>
                   )}
                 </div>
-                <div className="p-8 space-y-5 overflow-y-auto flex-1">
+                <div className="p-8 space-y-5 overflow-y-auto slim-scroll flex-1">
                   {trademarkData && (
                     <motion.div
                       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
