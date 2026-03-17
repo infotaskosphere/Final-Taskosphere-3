@@ -28,8 +28,9 @@ jobs:
       - name: Generate Android project
         run: |
           cd mobile
-          npx expo prebuild --non-interactive
-
+          export CI=1
+          npx expo prebuild
+  
       - name: Build APK
         run: |
           cd mobile/android
