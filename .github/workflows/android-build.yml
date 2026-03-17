@@ -15,46 +15,47 @@ jobs:
     steps:
       # 1. Checkout code
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      # 2. Setup Node (stable LTS)
+      # 2. Setup Node (stable, no cache issues)
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
           node-version: 18
-          cache: 'pnpm'
 
-      # 3. Install pnpm properly
-      - name: Install pnpm
-        run: npm install -g pnpm
+      # 3. Enable pnpm properly (fixes your error)
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@8.15.0 --activate
+          pnpm -v
 
-      # 4. Install dependencies (clean)
+      # 4. Install dependencies
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
-      # 5. Fix Expo dynamic config issue (CRITICAL)
-      - name: Prepare static Expo config for CI
+      # 5. Fix Expo dynamic config issue (IMPORTANT)
+      - name: Fix Expo config for CI
         run: |
           if [ -f app.config.ts ]; then
-            echo "⚠️ Replacing dynamic config for CI build"
             mv app.config.ts app.config.ts.bak
             echo 'export default { expo: { name: "Taskosphere", slug: "taskosphere" } };' > app.config.js
           fi
 
-      # 6. Generate native Android project
+      # 6. Generate Android project
       - name: Generate Android project
         env:
           CI: true
         run: npx expo prebuild --no-install
 
-      # 7. Build APK using Gradle
+      # 7. Build APK
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 8. Upload APK artifact
+      # 8. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
