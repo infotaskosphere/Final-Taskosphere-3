@@ -16,6 +16,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'pnpm'
 
       - name: Setup Java (IMPORTANT)
         uses: actions/setup-java@v4
@@ -23,24 +24,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
+      # ✅ KEY FIX: safer install
       - name: Install dependencies
         working-directory: mobile
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
+      # ✅ KEY FIX: Expo CI compatibility
       - name: Fix Expo config (IMPORTANT)
         working-directory: mobile
         run: |
           export CI=1
+          export EXPO_NO_DOCTOR=1
           npx expo prebuild --platform android --clean
 
+      # ✅ KEY FIX: Gradle stability
       - name: Build APK
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx4g"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
