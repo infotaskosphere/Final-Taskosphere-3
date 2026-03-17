@@ -9,7 +9,10 @@
       "package": "com.taskosphere.app"
     },
     "extra": {
-      "apiUrl": "https://final-taskosphere-backend.onrender.com"
+      "apiUrl": "https://final-taskosphere-backend.onrender.com",
+      "eas": {
+        "projectId": "061784a1-003c-4777-84ee-9781ca0176b6"
+      }
     }
   }
 }
