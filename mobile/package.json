@@ -15,7 +15,8 @@
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "android": "expo start --android",
-    "ios": "expo start --ios"
+    "ios": "expo start --ios",
+    "clean": "cd android && ./gradlew clean && cd .."
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -69,6 +70,9 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "babel-preset-expo": "~54.0.29",
+    "react-refresh": "~0.14.0",
     "@types/cookie": "^0.6.0",
     "@types/express": "^4.17.25",
     "@types/node": "^20.11.30",
