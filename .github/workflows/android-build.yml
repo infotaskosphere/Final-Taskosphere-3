@@ -44,7 +44,7 @@ jobs:
 
       # 6. Generate Android project
       - name: Generate Android project
-        env:
+        run: |
           cd mobile
           npx expo prebuild --platform android --clean
 
