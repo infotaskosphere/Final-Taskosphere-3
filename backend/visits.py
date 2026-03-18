@@ -487,7 +487,42 @@ async def admin_monthly_plan(
     return {"month": month, "users": list(grouped.values())}
 
 
-# ── 7. GET SINGLE — /{visit_id}  ← parameterised, comes LAST ─────────────────
+# ── 7. QUICK STATUS — /visits/{visit_id}/quick-status  ← static sub-path ─────
+# Dedicated lightweight endpoint for the Yes/No done-or-missed toggle on cards.
+# Accepts: { "done": true } or { "done": false }
+# true  → status = "completed",  completed_at = now
+# false → status = "missed"
+@router.post("/{visit_id}/quick-status")
+async def quick_status(
+    visit_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+):
+    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    if not visit:
+        raise HTTPException(404, "Visit not found")
+    if not _can_write_visit(current_user, visit["assigned_to"]):
+        raise HTTPException(403, "Not authorised")
+
+    done    = bool(data.get("done", True))
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "status":     "completed" if done else "missed",
+        "updated_at": now_iso,
+    }
+    if done:
+        payload["completed_at"] = now_iso
+
+    await db.visits.update_one({"id": visit_id}, {"$set": payload})
+    updated = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    logger.info(
+        f"quick_status: visit={visit_id} done={done} "
+        f"by={current_user.id}"
+    )
+    return updated
+
+
+# ── 8. GET SINGLE — /{visit_id}  ← parameterised, comes LAST ─────────────────
 @router.get("/{visit_id}")
 async def get_visit(
     visit_id: str,
@@ -522,7 +557,7 @@ async def get_visit(
     return visit
 
 
-# ── 8. UPDATE — /{visit_id}  ← parameterised ─────────────────────────────────
+# ── 9. UPDATE — /{visit_id}  ← parameterised ─────────────────────────────────
 @router.patch("/{visit_id}")
 async def update_visit(
     visit_id: str,
@@ -543,7 +578,7 @@ async def update_visit(
     return updated
 
 
-# ── 9. DELETE — /{visit_id}  ← parameterised ─────────────────────────────────
+# ── 10. DELETE — /{visit_id}  ← parameterised ────────────────────────────────
 @router.delete("/{visit_id}")
 async def delete_visit(
     visit_id: str,
@@ -566,7 +601,7 @@ async def delete_visit(
     return {"message": f"Deleted {deleted} visit(s)"}
 
 
-# ── 10. ADD COMMENT — /{visit_id}/comments  ← parameterised ──────────────────
+# ── 11. ADD COMMENT — /{visit_id}/comments  ← parameterised ─────────────────
 @router.post("/{visit_id}/comments", status_code=201)
 async def add_comment(
     visit_id: str,
@@ -596,7 +631,7 @@ async def add_comment(
     return comment
 
 
-# ── 11. DELETE COMMENT — /{visit_id}/comments/{comment_id}  ← parameterised ──
+# ── 12. DELETE COMMENT — /{visit_id}/comments/{comment_id}  ← parameterised ──
 @router.delete("/{visit_id}/comments/{comment_id}")
 async def delete_comment(
     visit_id:   str,
