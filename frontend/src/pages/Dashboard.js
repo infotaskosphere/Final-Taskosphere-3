@@ -205,15 +205,23 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
 }
 
 // ── Visits Dashboard Card ─────────────────────────────────────────────────────
-function VisitsCard({ isDark, navigate }) {
-  const { data: visits = [], isLoading, isError } = useQuery({
+function VisitsCard({ isDark, navigate, currentUserId }) {
+  const { data: allVisits = [], isLoading, isError } = useQuery({
     queryKey: ['visits-upcoming-dashboard'],
     queryFn: () => api.get('/visits/upcoming', { params: { days: 7 } }).then(r => r.data),
     staleTime: 0,
     refetchOnWindowFocus: true,
-    retry: false,                   // don't retry on 404 — backend may not be wired yet
-    onError: () => {},              // suppress console error noise
+    retry: false,
+    onError: () => {},
   });
+
+  // Only show visits where the current user is the one doing the visit
+  // (assigned_to === current user). Never show all visits even for admin —
+  // admin sees the full picture on /visits page, not on the dashboard card.
+  const visits = useMemo(
+    () => allVisits.filter(v => v.assigned_to === currentUserId),
+    [allVisits, currentUserId]
+  );
 
   const todayCount    = visits.filter(v => isToday(parseISO(v.visit_date))).length;
   const tomorrowCount = visits.filter(v => isTomorrow(parseISO(v.visit_date))).length;
@@ -1219,11 +1227,11 @@ export default function Dashboard() {
             />
             <div className="p-3">
               {tasksAssignedToMe.length === 0 ? (
-                <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
+                <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
                   No tasks assigned to you
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
                   <AnimatePresence>
                     {tasksAssignedToMe.map(task => (
                       <TaskStrip
@@ -1255,11 +1263,11 @@ export default function Dashboard() {
             />
             <div className="p-3">
               {tasksAssignedByMe.length === 0 ? (
-                <div className={`h-32 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
+                <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>
                   No tasks assigned yet
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
                   <AnimatePresence>
                     {tasksAssignedByMe.map(task => (
                       <TaskStrip
@@ -1445,7 +1453,7 @@ export default function Dashboard() {
         </SectionCard>
 
         {/* ── Visits Card ──────────────────────────────────────────────────── */}
-        <VisitsCard isDark={isDark} navigate={navigate} />
+        <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} />
 
       </motion.div>
 
