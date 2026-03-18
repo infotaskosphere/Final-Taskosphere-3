@@ -3,12 +3,11 @@ notifications.py
 ================
 Full notification router + internal event helpers.
 
-Notification visibility rules (enforced here and in notification_events.py):
+Notification visibility rules:
   • Admin          → always receives ALL system/task/todo/dsc/lead notifications
   • Specific users → receive task/todo notifications only if their permissions
                      include  can_receive_task_notifications = True
-                     (add this flag to UserPermissions in models.py — see NOTE below)
-  • Notification owners → always see their own notifications (ownership layer)
+  • Notification owners → always see their own notifications
 
 NOTE: Add the following field to UserPermissions in models.py:
     can_receive_task_notifications: bool = False
@@ -25,12 +24,33 @@ from typing import List, Optional
 import uuid
 import logging
 
-from backend.dependencies import db, get_current_user, require_admin, _get_perm
+from backend.dependencies import db, get_current_user, require_admin
 from pydantic import BaseModel, Field, ConfigDict
-from backend.dependencies import safe_dt
 from backend.models import User
 
 logger = logging.getLogger(__name__)
+
+
+# ====================== HELPERS ======================
+
+def safe_dt(value):
+    """
+    Coerce any datetime-like value to a timezone-aware datetime.
+    Defined locally to avoid circular imports with dependencies.py.
+    """
+    if not value:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    try:
+        dt = datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
 # ====================== PYDANTIC MODELS ======================
@@ -65,8 +85,10 @@ def normalize_notification(doc: dict) -> dict:
     """Standardises MongoDB document to prevent Pydantic 500 errors."""
     if not doc:
         return doc
+    # Ensure 'id' field exists (MongoDB stores as _id)
     if "_id" in doc and "id" not in doc:
         doc["id"] = str(doc["_id"])
+    doc.pop("_id", None)
     doc["created_at"] = safe_dt(doc.get("created_at"))
     return doc
 
@@ -99,6 +121,7 @@ async def create_notification(
         doc = notification.model_dump()
         doc["created_at"] = datetime.now(timezone.utc)
         await db.notifications.insert_one(doc)
+        doc.pop("_id", None)
         return notification
     except Exception as e:
         logger.error(f"[Notification] Failed to create for user {user_id}: {e}")
@@ -141,10 +164,9 @@ async def notify_admins_and_permitted(
       • All admin users
       • All non-admin users who have can_receive_task_notifications = True
 
-    Pass exclude_user_id to avoid notifying the actor themselves
-    (e.g. don't notify an admin who created a task about their own action).
+    Pass exclude_user_id to avoid notifying the actor themselves.
     """
-    admin_ids = await _get_admin_user_ids()
+    admin_ids     = await _get_admin_user_ids()
     permitted_ids = await _get_permitted_user_ids()
 
     # Merge, deduplicate, exclude actor
@@ -155,15 +177,15 @@ async def notify_admins_and_permitted(
     if not recipient_ids:
         return
 
-    now = datetime.now(timezone.utc)
+    now  = datetime.now(timezone.utc)
     docs = [
         {
-            "id": str(uuid.uuid4()),
-            "user_id": uid,
-            "title": title,
-            "message": message,
-            "type": type,
-            "is_read": False,
+            "id":         str(uuid.uuid4()),
+            "user_id":    uid,
+            "title":      title,
+            "message":    message,
+            "type":       type,
+            "is_read":    False,
             "created_at": now,
         }
         for uid in recipient_ids
@@ -174,7 +196,18 @@ async def notify_admins_and_permitted(
 
 
 # ====================== EVENT HELPERS ======================
-# Import and call these from your tasks / todos routers.
+# Import and call these from your tasks / todos / visits routers.
+
+def _role_value(user: User) -> str:
+    """
+    Safely extract the role string whether it is stored as a plain str
+    or as a Pydantic enum (has a .value attribute).
+    Fixes the AttributeError: 'str' object has no attribute 'value' crash
+    that occurs when role is already a plain string.
+    """
+    role = user.role
+    return role.value if hasattr(role, "value") else str(role)
+
 
 async def on_task_status_changed(
     task_id: str,
@@ -186,7 +219,7 @@ async def on_task_status_changed(
     Call this whenever a task's status is updated.
     Notifies admins + permitted users (excludes the actor if they are admin).
     """
-    exclude = changed_by_user.id if changed_by_user.role.value == "admin" else None
+    exclude = changed_by_user.id if _role_value(changed_by_user) == "admin" else None
     await notify_admins_and_permitted(
         title="Task Status Updated",
         message=(
@@ -224,10 +257,9 @@ async def on_task_assigned(
     """
     Call this when a NON-ADMIN user assigns a task.
     Admin self-assignments are excluded from generating a notification.
-
     Also sends a personal notification to the assignee.
     """
-    is_admin_assigning = assigned_by_user.role.value == "admin"
+    is_admin_assigning = _role_value(assigned_by_user) == "admin"
 
     # Notify admins + permitted users only when a non-admin triggers assignment
     if not is_admin_assigning:
@@ -263,7 +295,7 @@ async def on_todo_created(
     Notifies admins + permitted users (non-admin creator triggers the alert).
     Admin-created todos do NOT generate an alert (avoids self-spam).
     """
-    if created_by_user.role.value == "admin":
+    if _role_value(created_by_user) == "admin":
         return  # Admins creating todos don't need to alert themselves
 
     await notify_admins_and_permitted(
@@ -282,7 +314,9 @@ async def on_todo_created(
 @router.post("/send")
 async def send_notification(
     payload: AdminNotificationRequest,
-    current_user: User = Depends(require_admin()),
+    # BUG FIX: require_admin is an async function dependency — do NOT call it
+    # with () here. Use Depends(require_admin) not Depends(require_admin()).
+    current_user: User = Depends(require_admin),
 ):
     """
     Admin-only endpoint to manually send notifications.
@@ -302,12 +336,12 @@ async def send_notification(
 
         docs = [
             {
-                "id": str(uuid.uuid4()),
-                "user_id": u["id"],
-                "title": payload.title,
-                "message": payload.message,
-                "type": payload.type,
-                "is_read": False,
+                "id":         str(uuid.uuid4()),
+                "user_id":    u["id"],
+                "title":      payload.title,
+                "message":    payload.message,
+                "type":       payload.type,
+                "is_read":    False,
                 "created_at": now,
             }
             for u in users
@@ -332,11 +366,14 @@ async def send_notification(
         )
         if result:
             return {"status": "success", "message": "Notification sent"}
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create notification")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create notification",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Either 'broadcast' must be true or 'user_id' must be provided."
+        detail="Either 'broadcast' must be true or 'user_id' must be provided.",
     )
 
 
@@ -349,13 +386,31 @@ async def get_my_notifications(
     skip: int = 0,
     unread_only: bool = False,
 ):
-    query = {"user_id": current_user.id}
+    query: dict = {"user_id": current_user.id}
     if unread_only:
         query["is_read"] = False
 
-    notifications = await db.notifications.find(query, {"_id": 0})
-    notifications = notifications.sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
-    return [normalize_notification(n) for n in notifications]
+    # BUG FIX: .find() returns a cursor — must chain .sort().skip().limit()
+    # before awaiting .to_list(). The original code awaited .find() directly
+    # then called cursor methods on the result, which raises AttributeError.
+    raw = await db.notifications.find(query, {"_id": 0}) \
+        .sort("created_at", -1) \
+        .skip(skip) \
+        .limit(limit) \
+        .to_list(length=limit)
+
+    return [normalize_notification(n) for n in raw]
+
+
+# ── Unread count — lightweight endpoint for the bell badge ────────────────────
+@router.get("/unread-count")
+async def get_unread_count(
+    current_user: User = Depends(get_current_user),
+):
+    count = await db.notifications.count_documents(
+        {"user_id": current_user.id, "is_read": False}
+    )
+    return {"count": count}
 
 
 @router.patch("/{notification_id}/read")
@@ -365,22 +420,34 @@ async def mark_notification_read(
 ):
     result = await db.notifications.update_one(
         {"id": notification_id, "user_id": current_user.id},
-        {"$set": {"is_read": True}}
+        {"$set": {"is_read": True}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found or not authorized")
     return {"message": "Notification marked as read"}
 
 
+# BUG FIX: /read-all MUST come before /{notification_id} in declaration order
+# to prevent FastAPI treating "read-all" as a notification_id path param.
 @router.patch("/read-all")
 async def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
 ):
     await db.notifications.update_many(
         {"user_id": current_user.id, "is_read": False},
-        {"$set": {"is_read": True}}
+        {"$set": {"is_read": True}},
     )
     return {"message": "All notifications marked as read"}
+
+
+# BUG FIX: /clear-all MUST come before /{notification_id} in declaration order
+# to prevent FastAPI treating "clear-all" as a notification_id path param.
+@router.delete("/clear-all")
+async def clear_all_notifications(
+    current_user: User = Depends(get_current_user),
+):
+    await db.notifications.delete_many({"user_id": current_user.id})
+    return {"message": "All notifications cleared"}
 
 
 @router.delete("/{notification_id}")
@@ -394,11 +461,3 @@ async def delete_notification(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found or not authorized")
     return {"message": "Notification deleted"}
-
-
-@router.delete("/clear-all")
-async def clear_all_notifications(
-    current_user: User = Depends(get_current_user),
-):
-    await db.notifications.delete_many({"user_id": current_user.id})
-    return {"message": "All notifications cleared"}
