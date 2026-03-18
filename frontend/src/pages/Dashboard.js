@@ -206,11 +206,13 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
 
 // ── Visits Dashboard Card ─────────────────────────────────────────────────────
 function VisitsCard({ isDark, navigate }) {
-  const { data: visits = [], isLoading } = useQuery({
+  const { data: visits = [], isLoading, isError } = useQuery({
     queryKey: ['visits-upcoming-dashboard'],
     queryFn: () => api.get('/visits/upcoming', { params: { days: 7 } }).then(r => r.data),
     staleTime: 0,
     refetchOnWindowFocus: true,
+    retry: false,                   // don't retry on 404 — backend may not be wired yet
+    onError: () => {},              // suppress console error noise
   });
 
   const todayCount    = visits.filter(v => isToday(parseISO(v.visit_date))).length;
@@ -255,6 +257,20 @@ function VisitsCard({ isDark, navigate }) {
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="h-5 w-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : isError ? (
+          <div className="text-center py-7 space-y-3">
+            <div className="flex justify-center">
+              <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" />
+              </div>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              Visit module not connected yet
+            </p>
+            <p className={`text-xs ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
+              Add the visits router to your backend
+            </p>
           </div>
         ) : visits.length === 0 ? (
           <div className="text-center py-7 space-y-3">
