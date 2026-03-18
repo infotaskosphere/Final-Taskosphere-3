@@ -102,7 +102,7 @@ const TypePill = ({ type, customLabel }) => {
   const displayLabel = type === 'other' && customLabel ? customLabel : cfg.label;
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-wide whitespace-nowrap flex-shrink-0"
+      className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border tracking-wide"
       style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
@@ -1202,9 +1202,6 @@ export default function Clients() {
     toast.success(`"${saved}" saved to referrer list`);
   };
 
-  // ── IMPROVED CLIENT CARD ─────────────────────────────────────────────────
-  // Fixed height card: accent strip top → header row → divider → info rows → services → footer actions
-  // All cards render identically structured sections regardless of data availability
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
@@ -1217,204 +1214,125 @@ export default function Clients() {
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
     const clientAssignments = getClientAssignments(client);
     const locationStr = [client.city, client.state].filter(Boolean).join(', ');
-
-    // DSC expiry check: flag if any DSC expires within 60 days
-    const today = new Date();
-    const expiringDSC = client.dsc_details?.find(d => {
-      if (!d.expiry_date) return false;
-      const exp = new Date(d.expiry_date);
-      const diff = (exp - today) / (1000 * 60 * 60 * 24);
-      return diff >= 0 && diff <= 60;
-    });
+    const addressShort = client.address
+      ? (client.address.length > 42 ? client.address.substring(0, 42) + '…' : client.address)
+      : '';
 
     return (
       <div style={style} className="p-2 box-border">
         <div
-          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl ${isArchived ? 'opacity-60' : ''}`}
-          style={{
-            border: `1.5px solid ${cfg.border}`,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.06), 0 0 0 0 transparent',
-          }}
+          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
+          style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
-          {/* ── TOP ACCENT STRIP ── */}
-          <div className="h-[4px] w-full flex-shrink-0" style={{ background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}aa)` }} />
-
-          {/* ── CARD HEADER: Avatar + Name + Type pill ── */}
-          <div className="flex items-start gap-3 px-4 pt-4 pb-3 flex-shrink-0">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-md"
-              style={{ background: avatarGrad }}
-            >
-              {client.company_name?.charAt(0).toUpperCase() || '?'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-1 mb-0.5">
-                <h3 className="font-bold text-[13px] leading-snug text-slate-900 line-clamp-2 break-words flex-1 min-w-0 pr-1">
-                  {client.company_name}
-                </h3>
-                <TypePill type={client.client_type} customLabel={client.client_type_label} />
+          <div className="h-[5px] w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
+          <div className="flex flex-col p-3 gap-2 flex-1 overflow-y-auto">
+            <div className="flex items-start gap-2">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
+                style={{ background: avatarGrad }}
+              >
+                {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-mono text-slate-300 tracking-wide">#{getClientNumber(index)}</span>
-                {isArchived && (
-                  <span className="text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full tracking-wide">
-                    ARCHIVED
-                  </span>
-                )}
-                {expiringDSC && (
-                  <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full tracking-wide">
-                    DSC EXPIRING
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ── DIVIDER ── */}
-          <div className="mx-4 h-px flex-shrink-0" style={{ backgroundColor: cfg.border }} />
-
-          {/* ── INFO ROWS — always same 4 rows, empty rows show placeholder ── */}
-          <div className="flex flex-col gap-0 px-4 py-3 flex-shrink-0">
-
-            {/* Row 1: Primary contact person */}
-            <div className="flex items-center gap-2 py-1 min-h-[22px]">
-              <User className="h-3 w-3 text-slate-300 flex-shrink-0" />
-              {primaryContact?.name ? (
-                <span className="text-[11px] text-slate-700 font-semibold truncate">
-                  {primaryContact.name}
-                  {primaryContact.designation && (
-                    <span className="text-slate-400 font-normal"> · {primaryContact.designation}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 flex-wrap mb-0.5">
+                  <span className="text-[9px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                  {isArchived && (
+                    <span className="text-[8px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">Archived</span>
                   )}
-                </span>
-              ) : (
-                <span className="text-[11px] text-slate-300 italic">No contact person</span>
-              )}
+                </div>
+                <h3 className="font-bold text-[13px] leading-tight text-slate-900 line-clamp-2 break-words">{client.company_name}</h3>
+              </div>
+              <TypePill type={client.client_type} customLabel={client.client_type_label} />
             </div>
-
-            {/* Row 2: Phone */}
-            <div className="flex items-center gap-2 py-1 min-h-[22px]">
-              <Phone className="h-3 w-3 text-slate-300 flex-shrink-0" />
-              {client.phone ? (
-                <span className="text-[11px] text-slate-600 font-medium tracking-wide truncate">{client.phone}</span>
-              ) : (
-                <span className="text-[11px] text-slate-300 italic">No phone</span>
-              )}
-            </div>
-
-            {/* Row 3: Email */}
-            <div className="flex items-center gap-2 py-1 min-h-[22px]">
-              <Mail className="h-3 w-3 text-slate-300 flex-shrink-0" />
-              {client.email ? (
-                <span className="text-[11px] text-slate-500 truncate">{client.email}</span>
-              ) : (
-                <span className="text-[11px] text-slate-300 italic">No email</span>
-              )}
-            </div>
-
-            {/* Row 4: Location */}
-            <div className="flex items-center gap-2 py-1 min-h-[22px]">
-              <MapPin className="h-3 w-3 text-slate-300 flex-shrink-0" />
-              {locationStr ? (
-                <span className="text-[11px] text-slate-500 truncate">{locationStr}</span>
-              ) : (
-                <span className="text-[11px] text-slate-300 italic">No location</span>
-              )}
-            </div>
-
-            {/* Row 5: Referral / Assignment — show whichever is available, prefer referral */}
-            <div className="flex items-center gap-2 py-1 min-h-[22px]">
-              {client.referred_by ? (
-                <>
-                  <Share2 className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="text-[11px] text-slate-500 truncate">
-                    Ref: <span className="font-medium text-slate-600">{client.referred_by}</span>
+            <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
+            <div className="flex flex-col gap-1">
+              {primaryContact?.name && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-700 font-semibold">
+                  <User className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">
+                    {primaryContact.name}
+                    {primaryContact.designation && <span className="text-slate-400 font-normal"> · {primaryContact.designation}</span>}
                   </span>
-                </>
-              ) : clientAssignments.length > 0 ? (
-                <>
-                  <Briefcase className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  {(() => {
-                    const assignedUser = users.find(u => u.id === clientAssignments[0].user_id);
-                    return assignedUser ? (
-                      <span className="text-[11px] text-slate-500 truncate">
-                        <span className="font-medium text-slate-600">{assignedUser.full_name || assignedUser.name}</span>
-                        {clientAssignments.length > 1 && <span className="text-slate-400"> +{clientAssignments.length - 1}</span>}
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-slate-300 italic">Unassigned</span>
+                </div>
+              )}
+              {client.phone && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                  <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate font-medium">{client.phone}</span>
+                </div>
+              )}
+              {client.email && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">{client.email}</span>
+                </div>
+              )}
+              {(locationStr || addressShort) && (
+                <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
+                  <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                  <span className="line-clamp-1">{locationStr || addressShort}</span>
+                </div>
+              )}
+              {client.referred_by && (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                  <span className="truncate">Ref: {client.referred_by}</span>
+                </div>
+              )}
+              {clientAssignments.length > 0 && (
+                <div className="flex flex-col gap-0.5">
+                  {clientAssignments.map((a, i) => {
+                    const assignedUser = users.find(u => u.id === a.user_id);
+                    if (!assignedUser) return null;
+                    return (
+                      <div key={i} className="flex items-start gap-1.5 text-[10px] text-slate-500">
+                        <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate font-medium text-slate-600">{assignedUser.full_name || assignedUser.name}</span>
+                          {a.services && a.services.length > 0 && (
+                            <span className="text-[9px] text-slate-400 truncate">{a.services.join(', ')}</span>
+                          )}
+                        </div>
+                      </div>
                     );
-                  })()}
-                </>
-              ) : (
-                <>
-                  <Briefcase className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                  <span className="text-[11px] text-slate-300 italic">Unassigned</span>
-                </>
+                  })}
+                </div>
               )}
             </div>
-          </div>
-
-          {/* ── SERVICES TAGS ── always same height zone */}
-          <div className="px-4 pb-3 flex-shrink-0 min-h-[36px] flex items-start">
-            {serviceCount > 0 ? (
+            {serviceCount > 0 && (
               <div className="flex items-center gap-1 flex-wrap">
-                {client.services?.slice(0, 3).map((svc, i) => (
-                  <span
-                    key={i}
-                    className="text-[9px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap tracking-wide"
-                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-                  >
-                    {svc.replace('Other: ', '').substring(0, 12)}
+                {client.services?.slice(0, 4).map((svc, i) => (
+                  <span key={i} className="text-[9px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
+                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+                    {svc.replace('Other: ', '').substring(0, 14)}
                   </span>
                 ))}
-                {serviceCount > 3 && (
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
-                    +{serviceCount - 3} more
+                {serviceCount > 4 && (
+                  <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                    +{serviceCount - 4}
                   </span>
                 )}
               </div>
-            ) : (
-              <span className="text-[10px] text-slate-300 italic">No services</span>
             )}
           </div>
-
-          {/* ── FOOTER ACTIONS ── */}
-          <div
-            className="flex items-stretch mt-auto border-t flex-shrink-0"
-            style={{ borderColor: cfg.border }}
-          >
-            <button
-              onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-bold tracking-wide border-r"
-              style={{ borderColor: cfg.border }}
-              title="WhatsApp"
-            >
-              <MessageCircle className="h-3.5 w-3.5" />
-              <span>WhatsApp</span>
+          <div className="flex items-center gap-1 pt-2 border-t flex-shrink-0" style={{ borderColor: cfg.border }}>
+            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-semibold" title="WhatsApp">
+              <MessageCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">WhatsApp</span>
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-bold tracking-wide"
-              style={canDeleteData ? { borderRight: `1px solid ${cfg.border}` } : {}}
-              title="Edit"
-            >
-              <Edit className="h-3.5 w-3.5" />
-              <span>Edit</span>
+            <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-semibold" title="Edit">
+              <Edit className="h-3.5 w-3.5" /><span className="hidden sm:inline">Edit</span>
             </button>
             {canDeleteData && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm("Delete this client permanently?")) {
-                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                  }
-                }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-red-400 hover:bg-red-50 transition-colors text-[10px] font-bold tracking-wide"
-                title="Delete"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Delete</span>
+              <button onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Delete this client permanently?")) {
+                  api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                }
+              }} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-[10px] font-semibold" title="Delete">
+                <Trash2 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Delete</span>
               </button>
             )}
           </div>
@@ -2318,7 +2236,7 @@ export default function Clients() {
         ) : viewMode === 'board' ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 270;
+              const CARD_MIN = 260;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
@@ -2328,7 +2246,7 @@ export default function Clients() {
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={300}
+                  rowHeight={285}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
