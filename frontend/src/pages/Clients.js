@@ -1,4 +1,5 @@
-import Papa from "papaparse/papaparse.js";
+import Papa from 'papaparse/papaparse.js';
+import { Loader2 } from 'lucide-react';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -102,7 +103,7 @@ const TypePill = ({ type, customLabel }) => {
   const displayLabel = type === 'other' && customLabel ? customLabel : cfg.label;
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border tracking-wide"
+      className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-wide whitespace-nowrap flex-shrink-0"
       style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
@@ -1202,6 +1203,9 @@ export default function Clients() {
     toast.success(`"${saved}" saved to referrer list`);
   };
 
+  // ── REDESIGNED CLIENT CARD WITH ALL INFORMATION VISIBLE ──────────────────
+  // Shows all critical info: Name, Email, Mobile, Director, Assigned To, Services, Referred By
+  // No horizontal scrolling needed, all buttons fully visible
   const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
     const client = filteredClients[index];
@@ -1214,125 +1218,209 @@ export default function Clients() {
     const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
     const clientAssignments = getClientAssignments(client);
     const locationStr = [client.city, client.state].filter(Boolean).join(', ');
-    const addressShort = client.address
-      ? (client.address.length > 42 ? client.address.substring(0, 42) + '…' : client.address)
-      : '';
+
+    // DSC expiry check: flag if any DSC expires within 60 days
+    const today = new Date();
+    const expiringDSC = client.dsc_details?.find(d => {
+      if (!d.expiry_date) return false;
+      const exp = new Date(d.expiry_date);
+      const diff = (exp - today) / (1000 * 60 * 60 * 24);
+      return diff >= 0 && diff <= 60;
+    });
 
     return (
-      <div style={style} className="p-2 box-border">
+      <div style={style} className="p-3 box-border">
         <div
-          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
-          style={{ border: `1px solid ${cfg.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
+          style={{
+            border: `1.5px solid ${cfg.border}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
-          <div className="h-[5px] w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
-          <div className="flex flex-col p-3 gap-2 flex-1 overflow-y-auto">
-            <div className="flex items-start gap-2">
+          {/* ── TOP ACCENT STRIP ── */}
+          <div className="h-[4px] w-full flex-shrink-0" style={{ background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}aa)` }} />
+
+          {/* ── CARD HEADER: Avatar + Name + Type pill ── */}
+          <div className="px-4 pt-4 pb-2 flex-shrink-0">
+            <div className="flex items-start gap-3 mb-2">
               <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
+                className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-bold flex-shrink-0 shadow-md"
                 style={{ background: avatarGrad }}
               >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1 flex-wrap mb-0.5">
-                  <span className="text-[9px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                <h3 className="font-bold text-sm leading-tight text-slate-900 break-words">
+                  {client.company_name}
+                </h3>
+                <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                  <TypePill type={client.client_type} customLabel={client.client_type_label} />
                   {isArchived && (
-                    <span className="text-[8px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">Archived</span>
+                    <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-600 border-amber-200">
+                      ARCHIVED
+                    </Badge>
+                  )}
+                  {expiringDSC && (
+                    <Badge variant="outline" className="text-[8px] bg-orange-50 text-orange-600 border-orange-200">
+                      DSC EXPIRING
+                    </Badge>
                   )}
                 </div>
-                <h3 className="font-bold text-[13px] leading-tight text-slate-900 line-clamp-2 break-words">{client.company_name}</h3>
               </div>
-              <TypePill type={client.client_type} customLabel={client.client_type_label} />
             </div>
-            <div className="h-px w-full" style={{ backgroundColor: cfg.border }} />
-            <div className="flex flex-col gap-1">
-              {primaryContact?.name && (
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-700 font-semibold">
-                  <User className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate">
+          </div>
+
+          {/* ── DIVIDER ── */}
+          <div className="mx-4 h-px flex-shrink-0" style={{ backgroundColor: cfg.border }} />
+
+          {/* ── MAIN INFO SECTION - FULLY VISIBLE ── */}
+          <div className="px-4 py-3 space-y-2.5 flex-shrink-0 flex-1 overflow-y-auto">
+            
+            {/* Contact Person / Director */}
+            <div className="flex items-start gap-2">
+              <User className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Director</p>
+                {primaryContact?.name ? (
+                  <p className="text-xs text-slate-700 font-semibold break-words">
                     {primaryContact.name}
-                    {primaryContact.designation && <span className="text-slate-400 font-normal"> · {primaryContact.designation}</span>}
-                  </span>
-                </div>
-              )}
-              {client.phone && (
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-                  <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate font-medium">{client.phone}</span>
-                </div>
-              )}
-              {client.email && (
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                  <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate">{client.email}</span>
-                </div>
-              )}
-              {(locationStr || addressShort) && (
-                <div className="flex items-start gap-1.5 text-[10px] text-slate-500">
-                  <MapPin className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
-                  <span className="line-clamp-1">{locationStr || addressShort}</span>
-                </div>
-              )}
-              {client.referred_by && (
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                  <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                  <span className="truncate">Ref: {client.referred_by}</span>
-                </div>
-              )}
-              {clientAssignments.length > 0 && (
-                <div className="flex flex-col gap-0.5">
-                  {clientAssignments.map((a, i) => {
-                    const assignedUser = users.find(u => u.id === a.user_id);
-                    if (!assignedUser) return null;
-                    return (
-                      <div key={i} className="flex items-start gap-1.5 text-[10px] text-slate-500">
-                        <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="truncate font-medium text-slate-600">{assignedUser.full_name || assignedUser.name}</span>
-                          {a.services && a.services.length > 0 && (
-                            <span className="text-[9px] text-slate-400 truncate">{a.services.join(', ')}</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            {serviceCount > 0 && (
-              <div className="flex items-center gap-1 flex-wrap">
-                {client.services?.slice(0, 4).map((svc, i) => (
-                  <span key={i} className="text-[9px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap"
-                    style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
-                    {svc.replace('Other: ', '').substring(0, 14)}
-                  </span>
-                ))}
-                {serviceCount > 4 && (
-                  <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
-                    +{serviceCount - 4}
-                  </span>
+                    {primaryContact.designation && (
+                      <span className="text-slate-500 font-normal block text-[10px]">{primaryContact.designation}</span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Not specified</p>
                 )}
+              </div>
+            </div>
+
+            {/* Mobile Number */}
+            <div className="flex items-start gap-2">
+              <Phone className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Mobile</p>
+                {client.phone ? (
+                  <p className="text-xs text-slate-700 font-medium break-words">{client.phone}</p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Not provided</p>
+                )}
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="flex items-start gap-2">
+              <Mail className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Email</p>
+                {client.email ? (
+                  <p className="text-xs text-slate-700 break-words">{client.email}</p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Not provided</p>
+                )}
+              </div>
+            </div>
+
+            {/* Assigned To */}
+            <div className="flex items-start gap-2">
+              <Briefcase className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Assigned To</p>
+                {clientAssignments.length > 0 ? (
+                  <div className="space-y-1">
+                    {clientAssignments.map((a, i) => {
+                      const u = users.find(x => x.id === a.user_id);
+                      return u ? (
+                        <p key={i} className="text-xs text-slate-700 font-medium break-words">
+                          {u.full_name || u.name}
+                          {a.services?.length > 0 && (
+                            <span className="text-slate-500 text-[10px] block">{a.services.join(', ')}</span>
+                          )}
+                        </p>
+                      ) : null;
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Unassigned</p>
+                )}
+              </div>
+            </div>
+
+            {/* Services Provided */}
+            {serviceCount > 0 && (
+              <div className="flex items-start gap-2">
+                <BarChart3 className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1">Services</p>
+                  <div className="flex flex-wrap gap-1">
+                    {client.services?.map((svc, i) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-bold px-2 py-1 rounded-full border whitespace-normal break-words"
+                        style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+                      >
+                        {svc.replace('Other: ', '')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Referred By */}
+            {client.referred_by && (
+              <div className="flex items-start gap-2">
+                <Share2 className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Referred By</p>
+                  <p className="text-xs text-slate-700 font-medium break-words">{client.referred_by}</p>
+                </div>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1 pt-2 border-t flex-shrink-0" style={{ borderColor: cfg.border }}>
-            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-semibold" title="WhatsApp">
-              <MessageCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">WhatsApp</span>
+
+          {/* ── ACTION BUTTONS FOOTER ── */}
+          <div
+            className="flex items-stretch mt-auto border-t flex-shrink-0 gap-0"
+            style={{ borderColor: cfg.border }}
+          >
+            {/* WhatsApp Button */}
+            <button
+              onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-emerald-600 hover:bg-emerald-50 transition-colors border-r"
+              style={{ borderColor: cfg.border }}
+              title="Send WhatsApp message"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span className="text-[9px] font-bold tracking-wide">WhatsApp</span>
             </button>
-            <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-semibold" title="Edit">
-              <Edit className="h-3.5 w-3.5" /><span className="hidden sm:inline">Edit</span>
+
+            {/* Edit Button */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-blue-600 hover:bg-blue-50 transition-colors"
+              style={canDeleteData ? { borderRight: `1px solid ${cfg.border}` } : {}}
+              title="Edit client details"
+            >
+              <Edit className="h-4 w-4" />
+              <span className="text-[9px] font-bold tracking-wide">Edit</span>
             </button>
+
+            {/* Delete Button */}
             {canDeleteData && (
-              <button onClick={(e) => {
-                e.stopPropagation();
-                if (confirm("Delete this client permanently?")) {
-                  api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                }
-              }} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-[10px] font-semibold" title="Delete">
-                <Trash2 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Delete</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm("Delete this client permanently?")) {
+                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                  }
+                }}
+                className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-red-500 hover:bg-red-50 transition-colors"
+                title="Delete client"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="text-[9px] font-bold tracking-wide">Delete</span>
               </button>
             )}
           </div>
@@ -2236,7 +2324,7 @@ export default function Clients() {
         ) : viewMode === 'board' ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 260;
+              const CARD_MIN = 270;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
@@ -2246,7 +2334,7 @@ export default function Clients() {
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={285}
+                  rowHeight={300}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
