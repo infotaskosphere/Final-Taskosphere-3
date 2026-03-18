@@ -550,6 +550,7 @@ export default function Clients() {
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
+  const [clientTypeFilter, setClientTypeFilter] = useState('all');
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
 
@@ -728,6 +729,7 @@ export default function Clients() {
       const matchesService = serviceFilter === 'all' ||
         (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
+      const matchesClientType = clientTypeFilter === 'all' || (c?.client_type || 'proprietor') === clientTypeFilter;
 
       let matchesAssigned = true;
       if (assignedToFilter !== 'all') {
@@ -740,9 +742,9 @@ export default function Clients() {
         }
       }
 
-      return matchesSearch && matchesService && matchesStatus && matchesAssigned;
+      return matchesSearch && matchesService && matchesStatus && matchesAssigned && matchesClientType;
     });
-  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter]);
+  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
@@ -1224,7 +1226,7 @@ export default function Clients() {
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
           <div className="h-[5px] w-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
-          <div className="flex flex-col p-3 gap-2 overflow-hidden flex-1">
+          <div className="flex flex-col p-3 gap-2 flex-1 overflow-y-auto">
             <div className="flex items-start gap-2">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
@@ -1313,26 +1315,26 @@ export default function Clients() {
                 )}
               </div>
             )}
-            <div className="flex items-center gap-1 pt-2 border-t" style={{ borderColor: cfg.border }}>
-              <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-semibold" title="WhatsApp">
-                <MessageCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">WhatsApp</span>
+          </div>
+          <div className="flex items-center gap-1 pt-2 border-t flex-shrink-0" style={{ borderColor: cfg.border }}>
+            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors text-[10px] font-semibold" title="WhatsApp">
+              <MessageCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">WhatsApp</span>
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-semibold" title="Edit">
+              <Edit className="h-3.5 w-3.5" /><span className="hidden sm:inline">Edit</span>
+            </button>
+            {canDeleteData && (
+              <button onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Delete this client permanently?")) {
+                  api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                }
+              }} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-[10px] font-semibold" title="Delete">
+                <Trash2 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Delete</span>
               </button>
-              <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors text-[10px] font-semibold" title="Edit">
-                <Edit className="h-3.5 w-3.5" /><span className="hidden sm:inline">Edit</span>
-              </button>
-              {canDeleteData && (
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm("Delete this client permanently?")) {
-                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
-                  }
-                }} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors text-[10px] font-semibold" title="Delete">
-                  <Trash2 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Delete</span>
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -2180,6 +2182,13 @@ export default function Clients() {
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Archived</SelectItem>
               <SelectItem value="all">All Status</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
+            <SelectTrigger className="h-10 w-[130px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Types" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
