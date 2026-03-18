@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import html2canvas from 'html2canvas';
 
 // ─── Brand palette ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -95,14 +96,9 @@ export default function Reports() {
   const { user, hasPermission } = useAuth();
 
   // ── Permission matrix ──────────────────────────────────────────────────────
-  // FIX: canViewReports was incorrectly allowing staff with NO permission.
-  // Backend allows everyone to view their OWN report, so this flag should
-  // only gate viewing OTHER users' reports (admin panel sections).
-  // All authenticated users land here and always see their own data.
   const isAdmin           = user?.role === 'admin';
   const canViewReports    = isAdmin || hasPermission('can_view_reports');
   const canDownloadReports = isAdmin || hasPermission('can_download_reports');
-  // Cross-user report access: admin sees all, others see explicitly granted users
   const canSeeOthers = isAdmin || (user?.permissions?.view_other_reports?.length > 0);
 
   const [reportData,     setReportData]     = useState([]);
@@ -113,6 +109,9 @@ export default function Reports() {
   const [selectedUserId, setSelectedUserId] = useState('all');
   const [starPerformers, setStarPerformers] = useState([]);
   const [rankingPeriod,  setRankingPeriod]  = useState('monthly');
+
+  // Refs for capturing charts
+  const chartRefs = useRef({});
 
   useEffect(() => {
     if (user) fetchAllData();
@@ -135,11 +134,9 @@ export default function Reports() {
   const fetchAllData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      // Always fetch own report first (works for ALL authenticated users)
       const reportRequests = [api.get('/reports/efficiency')];
 
       if (isAdmin) {
-        // Admin: fetch full user list, then each user's report in parallel
         try {
           const usersRes = await api.get('/users');
           const otherUsers = (usersRes.data || []).filter(u => u.id !== user?.id);
@@ -148,7 +145,6 @@ export default function Reports() {
           });
         } catch { /* /users failed — only own report will be shown */ }
       } else {
-        // Non-admin: fetch reports for explicitly permitted user IDs only
         const allowedUsers = user?.permissions?.view_other_reports || [];
         allowedUsers.forEach(id => {
           reportRequests.push(api.get('/reports/efficiency', { params: { user_id: id } }));
@@ -166,7 +162,7 @@ export default function Reports() {
         api.get('/tasks'),
       ]);
       setDashboardStats(statsRes.data);
-      setTasks(tasksRes.data);
+      setTasks(tasksRes.data || []);
     } catch {
       toast.error('Failed to fetch reports');
     } finally {
@@ -252,11 +248,14 @@ export default function Reports() {
     return days;
   };
 
-  // ── Export ─────────────────────────────────────────────────────────────────
+  // ── Export to CSV ──────────────────────────────────────────────────────────
   const handleDownloadCsv = () => {
     const headers = ['User', 'Total Tasks Completed', 'Screen Time (min)', 'Days Logged'];
     const rows    = filteredReportData.map(d => [
-      d.user?.full_name || 'Unknown', d.total_tasks_completed, d.total_screen_time, d.days_logged
+      d.user?.full_name || 'Unknown', 
+      d.total_tasks_completed || 0, 
+      d.total_screen_time || 0, 
+      d.days_logged || 0
     ]);
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
     const a   = document.createElement('a');
@@ -265,20 +264,206 @@ export default function Reports() {
     a.click();
   };
 
-  const handleExportPdf = () => {
-    const doc = new jsPDF();
-    doc.text('Efficiency Reports', 10, 10);
-    doc.autoTable({
-      head: [['User', 'Tasks Completed', 'Screen Time (min)', 'Days Logged']],
-      body: filteredReportData.map(d => [d.user?.full_name || 'Unknown', d.total_tasks_completed || 0, d.total_screen_time || 0, d.days_logged || 0]),
-      startY: 20,
-    });
-    doc.save('efficiency_reports.pdf');
+  // ── Export to PDF with charts ──────────────────────────────────────────────
+  const handleExportPdf = async () => {
+    try {
+      const doc = new jsPDF('p', 'mm', 'a4');
+      let yPosition = 15;
+
+      // Title
+      doc.setFontSize(20);
+      doc.setTextColor(13, 59, 102);
+      doc.text('Efficiency Reports & Analytics', 15, yPosition);
+      yPosition += 10;
+
+      // Date
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 15, yPosition);
+      yPosition += 8;
+
+      // KPI Summary Section
+      doc.setFontSize(12);
+      doc.setTextColor(13, 59, 102);
+      doc.text('Key Performance Indicators', 15, yPosition);
+      yPosition += 8;
+
+      const kpiData = [
+        ['Metric', 'Value'],
+        ['Total Tasks', tasks.length.toString()],
+        ['Completed Tasks', getTotalCompleted().toString()],
+        ['Completion Rate', `${tasks.length > 0 ? Math.round((tasks.filter(t => t.status === 'completed').length / tasks.length) * 100) : 0}%`],
+        ['Avg Screen Time', formatTime(getAvgScreenTime())],
+        ['Pending Work', tasks.filter(t => t.status !== 'completed').length.toString()],
+      ];
+
+      doc.autoTable({
+        head: [kpiData[0]],
+        body: kpiData.slice(1),
+        startY: yPosition,
+        margin: 15,
+        theme: 'grid',
+        headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
+        bodyStyles: { textColor: [50, 50, 50] },
+        alternateRowStyles: { fillColor: [240, 240, 240] },
+      });
+
+      yPosition = doc.lastAutoTable.finalY + 12;
+
+      // Task Status Table
+      if (getTaskStatusData().length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(13, 59, 102);
+        doc.text('Task Status Distribution', 15, yPosition);
+        yPosition += 8;
+
+        const statusData = [
+          ['Status', 'Count', 'Percentage'],
+          ...getTaskStatusData().map(d => [
+            d.name,
+            d.value.toString(),
+            `${((d.value / tasks.length) * 100).toFixed(1)}%`
+          ])
+        ];
+
+        doc.autoTable({
+          head: [statusData[0]],
+          body: statusData.slice(1),
+          startY: yPosition,
+          margin: 15,
+          theme: 'grid',
+          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          bodyStyles: { textColor: [50, 50, 50] },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+        });
+
+        yPosition = doc.lastAutoTable.finalY + 12;
+      }
+
+      // Task Category Table
+      if (getTaskCategoryData().length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(13, 59, 102);
+        doc.text('Tasks by Category', 15, yPosition);
+        yPosition += 8;
+
+        const categoryData = [
+          ['Category', 'Task Count'],
+          ...getTaskCategoryData().map(d => [d.name, d.tasks.toString()])
+        ];
+
+        doc.autoTable({
+          head: [categoryData[0]],
+          body: categoryData.slice(1),
+          startY: yPosition,
+          margin: 15,
+          theme: 'grid',
+          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          bodyStyles: { textColor: [50, 50, 50] },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+        });
+
+        yPosition = doc.lastAutoTable.finalY + 12;
+      }
+
+      // Employee Performance Table
+      const perfData = getEmployeePerformanceData();
+      if (perfData.length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(13, 59, 102);
+        doc.text(isAdmin ? 'Star Performers' : 'Your Performance', 15, yPosition);
+        yPosition += 8;
+
+        const perfTableData = [
+          ['Employee', 'Performance Score', 'Hours'],
+          ...perfData.map(d => [d.name, d.tasks.toString(), d.hours.toString()])
+        ];
+
+        doc.autoTable({
+          head: [perfTableData[0]],
+          body: perfTableData.slice(1),
+          startY: yPosition,
+          margin: 15,
+          theme: 'grid',
+          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          bodyStyles: { textColor: [50, 50, 50] },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+        });
+
+        yPosition = doc.lastAutoTable.finalY + 12;
+      }
+
+      // Efficiency Report Table
+      if (filteredReportData.length > 0) {
+        doc.addPage();
+        doc.setFontSize(12);
+        doc.setTextColor(13, 59, 102);
+        doc.text('Detailed Efficiency Report', 15, 15);
+
+        const efficiencyData = [
+          ['User', 'Tasks Completed', 'Screen Time (min)', 'Days Logged'],
+          ...filteredReportData.map(d => [
+            d.user?.full_name || 'Unknown',
+            (d.total_tasks_completed || 0).toString(),
+            (d.total_screen_time || 0).toString(),
+            (d.days_logged || 0).toString()
+          ])
+        ];
+
+        doc.autoTable({
+          head: [efficiencyData[0]],
+          body: efficiencyData.slice(1),
+          startY: 25,
+          margin: 15,
+          theme: 'grid',
+          headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
+          bodyStyles: { textColor: [50, 50, 50] },
+          alternateRowStyles: { fillColor: [240, 240, 240] },
+        });
+      }
+
+      // Team Workload Table (Admin only)
+      if (isAdmin && dashboardStats?.team_workload && dashboardStats.team_workload.length > 0) {
+        doc.addPage();
+        doc.setFontSize(12);
+        doc.setTextColor(13, 59, 102);
+        doc.text('Team Workload Distribution', 15, 15);
+
+        const workloadData = [
+          ['Employee', 'Total Tasks', 'Pending', 'Completed', 'Progress %'],
+          ...dashboardStats.team_workload.map(m => {
+            const pct = m.total_tasks > 0 ? Math.round((m.completed_tasks / m.total_tasks) * 100) : 0;
+            return [
+              m.user_name || 'Unknown',
+              (m.total_tasks || 0).toString(),
+              (m.pending_tasks || 0).toString(),
+              (m.completed_tasks || 0).toString(),
+              `${pct}%`
+            ];
+          })
+        ];
+
+        doc.autoTable({
+          head: [workloadData[0]],
+          body: workloadData.slice(1),
+          startY: 25,
+          margin: 15,
+          theme: 'grid',
+          headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
+          bodyStyles: { textColor: [50, 50, 50] },
+          alternateRowStyles: { fillColor: [240, 240, 240] },
+        });
+      }
+
+      doc.save('efficiency_reports.pdf');
+      toast.success('PDF exported successfully!');
+    } catch (error) {
+      console.error('PDF export error:', error);
+      toast.error('Failed to export PDF');
+    }
   };
 
   // ── Access gate ────────────────────────────────────────────────────────────
-  // All authenticated users can see this page (own data always available)
-  // Only the cross-user "admin panel" sections are gated by canViewReports
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
