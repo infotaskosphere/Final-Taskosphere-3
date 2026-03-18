@@ -173,6 +173,7 @@ class UserPermissions(BaseModel):
     view_other_activity: List[str] = Field(default_factory=list)
     assigned_clients: List[str] = Field(default_factory=list)
 
+
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -182,14 +183,14 @@ class User(BaseModel):
     password: Optional[str] = None
     departments: List[str] = Field(default_factory=list)
     phone: Optional[str] = None
-    birthday: Optional[Any] = None  # Flexible date
+    birthday: Optional[Any] = None # Flexible
     profile_picture: Optional[str] = None
     punch_in_time: Optional[str] = "10:30"
     grace_time: Optional[str] = "00:15"
     punch_out_time: Optional[str] = "19:00"
     telegram_id: Optional[int] = None
     permissions: UserPermissions = Field(default_factory=UserPermissions)
-    created_at: Optional[Any] = None # Flexible timestamp
+    created_at: Optional[Any] = None # Flexible
     is_active: bool = True
     status: str = "pending_approval"
     approved_by: Optional[str] = None
@@ -201,6 +202,7 @@ class User(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
 
 class UserCreate(BaseModel):
     full_name: str
@@ -219,6 +221,7 @@ class UserCreate(BaseModel):
     permissions: Optional[Dict[str, Any]] = None
     status: Optional[str] = "pending_approval"
 
+
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
@@ -235,14 +238,17 @@ class UserUpdate(BaseModel):
     telegram_id: Optional[int] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: User
+
 
 # ======================
 # TODOS & TASKS
@@ -259,10 +265,12 @@ class Todo(BaseModel):
     updated_at: Optional[Any] = None
     completed_at: Optional[Any] = None
 
+
 class TodoCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[Any] = None
+
 
 class TaskBase(BaseModel):
     title: str
@@ -280,11 +288,14 @@ class TaskBase(BaseModel):
     recurrence_end_date: Optional[Any] = None
     type: Optional[str] = None
 
+
 class TaskCreate(TaskBase):
     pass
 
+
 class BulkTaskCreate(BaseModel):
     tasks: List[TaskCreate]
+
 
 class Task(TaskBase):
     model_config = ConfigDict(extra="ignore")
@@ -292,9 +303,11 @@ class Task(TaskBase):
     created_by: str
     created_at: Optional[Any] = None
     updated_at: Optional[Any] = None
+    parent_task_id: Optional[str] = None
+
 
 # ======================
-# ATTENDANCE (FIXED)
+# ATTENDANCE (REWRITTEN FOR STABILITY)
 # ======================
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -305,99 +318,102 @@ class Attendance(BaseModel):
     punch_in: Optional[Any] = None  # Changed to Any to prevent 500 error
     punch_out: Optional[Any] = None # Changed to Any to prevent 500 error
     duration_minutes: Optional[int] = 0
+    leave_reason: Optional[str] = None
     is_late: bool = False
     punched_out_early: bool = False
-    leave_reason: Optional[str] = None
-    auto_marked: bool = False
-    auto_marked_at: Optional[Any] = None
+
+
+class AttendanceBase(BaseModel):
+    punch_in: Any
+    punch_out: Optional[Any] = None
+
+
+class AttendanceCreate(BaseModel):
+    action: str
+
 
 # ======================
-# STAFF ACTIVITY
+# STAFF ACTIVITY (FIXED FOR 422 ERROR)
 # ======================
 class StaffActivityCreate(BaseModel):
+    # Added fields to match frontend POST request directly
     app_name: str = "Taskosphere Web"
-    window_title: str
-    url: str
+    window_title: Optional[str] = None
+    url: Optional[str] = None
+    website: Optional[str] = None
     category: str = "productivity"
-    duration_seconds: int
+    duration_seconds: int = 0
+    idle: Optional[bool] = False
+    # Original required field, defaulted to prevent 422 if frontend skips it
     activity_type: str = "active_time"
     description: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
 
 class StaffActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    activity_type: str
-    app_name: Optional[str] = None
+    activity_type: str = "active_time"
+    app_name: str = "Taskosphere Web"
     window_title: Optional[str] = None
     url: Optional[str] = None
-    category: Optional[str] = None
+    category: str = "other"
     duration_seconds: int = 0
-    description: Optional[str] = None
     timestamp: Optional[Any] = None
     metadata: Optional[Dict[str, Any]] = None
 
-# ======================
-# PERFORMANCE METRICS
-# ======================
-class PerformanceMetric(BaseModel):
+
+class ActivityLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    user_name: str
-    profile_picture: Optional[str] = None
-    attendance_percent: float = 0.0
-    total_hours: float = 0.0
-    task_completion_percent: float = 0.0
-    todo_ontime_percent: float = 0.0
-    timely_punchin_percent: float = 0.0
-    overall_score: float = 0.0
-    rank: int = 0
-    badge: str = "Good Performer"
+    date: str
+    screen_time_minutes: int = 0
+    tasks_completed: int = 0
+
+
+class ActivityLogUpdate(BaseModel):
+    screen_time_minutes: Optional[int] = None
+    tasks_completed: Optional[int] = None
+
 
 # ======================
-# DUE DATES
+# DSC MANAGEMENT (FIXED FOR 500 ERROR)
 # ======================
-class DueDateBase(BaseModel):
-    title: str
-    description: Optional[str] = None
-    due_date: Any
-    reminder_days: int = 30
-    category: Optional[str] = None
-    department: str
-    assigned_to: Optional[str] = None
-    client_id: Optional[str] = None
-    status: str = "pending"
+class DSCBase(BaseModel):
+    holder_name: str
+    dsc_type: Optional[str] = None
+    dsc_password: Optional[str] = None
+    associated_with: Optional[str] = None
+    entity_type: str = "firm"
+    issue_date: Any  # Changed to Any for database-to-json safety
+    expiry_date: Any # Changed to Any for database-to-json safety
+    notes: Optional[str] = None
+    current_status: str = "IN"
+    current_location: str = "with_company"
+    taken_by: Optional[str] = None
+    taken_date: Optional[Any] = None
+    movement_log: List[Any] = Field(default_factory=list)
 
-class DueDateCreate(DueDateBase):
+
+class DSCCreate(DSCBase):
     pass
 
-class DueDate(DueDateBase):
+
+class DSC(DSCBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
 
-# ======================
-# DSC REGISTER (FIXED)
-# ======================
-class DSC(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    certificate_number: Optional[str] = None
-    holder_name: str
-    issue_date: Optional[Any] = None # Changed to Any to prevent 500 error
-    expiry_date: Optional[Any] = None # Changed to Any to prevent 500 error
-    status: str = "active"
-    notes: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: Optional[Any] = None
 
-class DSCCreate(BaseModel):
-    certificate_number: str
-    holder_name: str
-    issue_date: Any
-    expiry_date: Any
+class DSCMovement(BaseModel):
+    movement_type: str
+    person_name: str
+    timestamp: Optional[Any] = None
     notes: Optional[str] = None
+
 
 class DSCListResponse(BaseModel):
     data: List[DSC]
@@ -405,10 +421,12 @@ class DSCListResponse(BaseModel):
     page: int
     limit: int
 
+
 class DSCMovementRequest(BaseModel):
     movement_type: str
     person_name: str
     notes: Optional[str] = None
+
 
 class MovementUpdateRequest(BaseModel):
     movement_id: str
@@ -424,6 +442,7 @@ class ReminderCreate(BaseModel):
     description: Optional[str] = None
     remind_at: Any
 
+
 class Reminder(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -433,6 +452,7 @@ class Reminder(BaseModel):
     remind_at: Any
     is_dismissed: bool = False
     created_at: Optional[Any] = None
+
 
 # ======================
 # DOCUMENT MANAGEMENT
@@ -450,8 +470,10 @@ class DocumentBase(BaseModel):
     current_location: str = "with_company"
     movement_log: List[Any] = Field(default_factory=list)
 
+
 class DocumentCreate(DocumentBase):
     pass
+
 
 class Document(DocumentBase):
     model_config = ConfigDict(extra="ignore")
@@ -459,22 +481,26 @@ class Document(DocumentBase):
     created_by: str
     created_at: Optional[Any] = None
 
+
 class DocumentMovement(BaseModel):
     movement_type: str
     person_name: str
     timestamp: Optional[Any] = None
     notes: Optional[str] = None
 
+
 class DocumentMovementRequest(BaseModel):
     movement_type: str
     person_name: str
     notes: Optional[str] = None
+
 
 class DocumentMovementUpdateRequest(BaseModel):
     movement_id: str
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
+
 
 # ======================
 # CLIENT MANAGEMENT
@@ -487,12 +513,14 @@ class ContactPerson(BaseModel):
     birthday: Optional[Any] = None
     din: Optional[str] = None
 
+
 class ClientDSC(BaseModel):
     certificate_number: str
     holder_name: str
     issue_date: Any
     expiry_date: Any
     notes: Optional[str] = None
+
 
 class ClientBase(BaseModel):
     company_name: str = Field(..., min_length=3, max_length=255)
@@ -532,14 +560,17 @@ class ClientBase(BaseModel):
             raise ValueError('Company name must be at least 3 characters long')
         return v
 
+
 class ClientCreate(ClientBase):
     pass
+
 
 class Client(ClientBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
+
 
 class MasterClientForm(BaseModel):
     company_name: str
@@ -565,6 +596,7 @@ class MasterClientForm(BaseModel):
                     data[k] = None
         return data
 
+
 # ======================
 # LEADS MODEL
 # ======================
@@ -580,14 +612,47 @@ class LeadBase(BaseModel):
     assigned_to: Optional[str] = None
     referred_by: Optional[str] = None
 
+
 class LeadCreate(LeadBase):
     pass
+
 
 class Lead(LeadBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
+
+
+# ======================
+# DUE DATES & REMINDERS
+# ======================
+class DueDateBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: Any
+    reminder_days: int = 30
+    category: Optional[str] = None
+    department: str
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    status: str = "pending"
+
+
+class DueDateCreate(DueDateBase):
+    pass
+
+
+class DueDate(DueDateBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+
+class BirthdayEmailRequest(BaseModel):
+    client_id: str
+
 
 # ======================
 # NOTIFICATIONS & AUDIT
@@ -597,12 +662,14 @@ class NotificationBase(BaseModel):
     message: str
     type: str
 
+
 class Notification(NotificationBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     is_read: bool = False
     created_at: Optional[Any] = None
+
 
 class AuditLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -614,6 +681,7 @@ class AuditLog(BaseModel):
     old_data: Optional[dict] = None
     new_data: Optional[dict] = None
     timestamp: Optional[Any] = None
+
 
 # ======================
 # DASHBOARD & METRICS
@@ -633,6 +701,21 @@ class DashboardStats(BaseModel):
     compliance_status: dict
     expired_dsc_count: int = 0
 
+
+class PerformanceMetric(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    attendance_percent: float = 0.0
+    total_hours: float = 0.0
+    task_completion_percent: float = 0.0
+    todo_ontime_percent: float = 0.0
+    timely_punchin_percent: float = 0.0
+    overall_score: float = 0.0
+    rank: int = 0
+    badge: str = "Good Performer"
+
+
 # ======================
 # HOLIDAY MODELS
 # ======================
@@ -641,9 +724,8 @@ class HolidayCreate(BaseModel):
     name: str
     description: Optional[str] = None
 
+
 class HolidayResponse(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
-    status: str = "confirmed"
-    type: Optional[str] = "manual"
