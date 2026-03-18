@@ -103,7 +103,6 @@ function Avatar({ src, name, size = 7 }) {
 }
 
 // ─── Yes / No quick-action button pair ───────────────────────────────────────
-// Shown on every card that is still scheduled/rescheduled.
 function QuickStatusButtons({ visit, onDone }) {
   const qc = useQueryClient();
 
@@ -122,7 +121,7 @@ function QuickStatusButtons({ visit, onDone }) {
   const pending = quickMut.isPending;
 
   return (
-    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       {/* YES — visit done */}
       <motion.button
         whileHover={{ scale: 1.06 }}
@@ -157,16 +156,46 @@ function QuickStatusButtons({ visit, onDone }) {
 }
 
 // ─── Compact Visit Card ───────────────────────────────────────────────────────
-function VisitCard({ v, onClick }) {
-  const sm     = STATUS_META[v.status] || STATUS_META.scheduled;
-  const isOver = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
+// Includes: date badge · purpose · client · meta · Yes/No · status dropdown · edit · delete
+function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
+  const qc = useQueryClient();
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+
+  const isOver    = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
   const showQuick = v.status === "scheduled" || v.status === "rescheduled";
+
+  const isAdmin = currentUser?.role === "admin";
+  const isOwner = v.assigned_to === currentUser?.id;
+  const canWrite = isAdmin || isOwner;
+
+  // Status change mutation — used by the inline dropdown on the card
+  const statusMut = useMutation({
+    mutationFn: (newStatus) => api.patch(`/visits/${v.id}`, { status: newStatus }),
+    onSuccess: (_, newStatus) => {
+      toast.success(`Status updated to ${newStatus}`);
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
+      setShowStatusMenu(false);
+    },
+    onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
+  });
+
+  // Delete mutation — inline on the card
+  const deleteMut = useMutation({
+    mutationFn: () => api.delete(`/visits/${v.id}`),
+    onSuccess: () => {
+      toast.success("Visit deleted");
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
+    },
+    onError: (err) => toast.error(err.response?.data?.detail || "Delete failed"),
+  });
 
   return (
     <motion.div
       variants={fadeUp}
       layout
-      whileHover={{ y: -1, boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}
+      whileHover={{ y: -1, boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}
       transition={spring}
       onClick={onClick}
       className={cn(
@@ -203,7 +232,7 @@ function VisitCard({ v, onClick }) {
 
         {/* ── Main content ── */}
         <div className="flex-1 min-w-0">
-          {/* Row 1: purpose + badges */}
+          {/* Row 1: purpose + status badge + flags */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
               {v.purpose}
@@ -223,7 +252,7 @@ function VisitCard({ v, onClick }) {
             )}
           </div>
 
-          {/* Row 2: client + meta */}
+          {/* Row 2: client + location + services + comments */}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
               <Building2 className="h-3 w-3 flex-shrink-0 text-slate-400" />
@@ -231,7 +260,8 @@ function VisitCard({ v, onClick }) {
             </span>
             {v.location && (
               <span className="flex items-center gap-0.5 text-[10px] text-slate-400 truncate max-w-[120px]">
-                <MapPin className="h-2.5 w-2.5 flex-shrink-0" />{v.location.slice(0, 28)}{v.location.length > 28 ? "…" : ""}
+                <MapPin className="h-2.5 w-2.5 flex-shrink-0" />
+                {v.location.slice(0, 28)}{v.location.length > 28 ? "…" : ""}
               </span>
             )}
             {v.services?.length > 0 && (
@@ -256,30 +286,130 @@ function VisitCard({ v, onClick }) {
           </div>
         </div>
 
-        {/* ── Right: priority + avatar + Yes/No ── */}
-        <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
-          <div className="hidden sm:flex flex-col items-end gap-1">
+        {/* ── Right action cluster ── */}
+        <div
+          className="flex items-center gap-1.5 flex-shrink-0"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Priority dot + avatar (hidden on small screens) */}
+          <div className="hidden sm:flex flex-col items-end gap-1 mr-1">
             <PriorityDot priority={v.priority} />
             <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
           </div>
 
-          {/* Yes / No quick toggle — only for actionable visits */}
-          {showQuick && (
-            <QuickStatusButtons visit={v} />
-          )}
+          {/* Yes / No — only for scheduled/rescheduled */}
+          {showQuick && <QuickStatusButtons visit={v} />}
 
-          {/* Completed / missed icon pill */}
+          {/* Completed pill */}
           {v.status === "completed" && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30
-              border border-emerald-200 dark:border-emerald-800 text-emerald-600 text-[10px] font-bold">
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg
+              bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800
+              text-emerald-600 text-[10px] font-bold">
               <CheckCircle2 className="h-3 w-3" /> Done
             </span>
           )}
+
+          {/* Missed pill */}
           {v.status === "missed" && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 dark:bg-orange-900/30
-              border border-orange-200 dark:border-orange-800 text-orange-500 text-[10px] font-bold">
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg
+              bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800
+              text-orange-500 text-[10px] font-bold">
               <AlertCircle className="h-3 w-3" /> Missed
             </span>
+          )}
+
+          {/* Divider */}
+          {canWrite && (
+            <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
+          )}
+
+          {/* Edit button */}
+          {canWrite && (
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={(e) => { e.stopPropagation(); onEdit?.(v); }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500
+                hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+              title="Edit visit"
+            >
+              <Edit3 className="h-3.5 w-3.5" />
+            </motion.button>
+          )}
+
+          {/* Status dropdown chevron — matching the screenshot */}
+          {canWrite && (
+            <div className="relative">
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={(e) => { e.stopPropagation(); setShowStatusMenu(s => !s); }}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-600
+                  text-slate-500 dark:text-slate-400
+                  hover:border-slate-300 dark:hover:border-slate-500
+                  hover:bg-slate-50 dark:hover:bg-slate-700
+                  transition-colors"
+                title="Change status"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </motion.button>
+
+              <AnimatePresence>
+                {showStatusMenu && (
+                  <motion.div
+                    className="absolute right-0 top-full mt-1 w-40 z-50
+                      bg-white dark:bg-slate-800
+                      border border-slate-200 dark:border-slate-700
+                      rounded-xl shadow-xl overflow-hidden"
+                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0,  scale: 1    }}
+                    exit={{   opacity: 0, y: -6, scale: 0.96  }}
+                    transition={{ type: "spring", stiffness: 300, damping: 22 }}
+                  >
+                    {Object.entries(STATUS_META).map(([s, m]) => (
+                      <button
+                        key={s}
+                        onClick={(e) => { e.stopPropagation(); statusMut.mutate(s); }}
+                        disabled={statusMut.isPending}
+                        className={cn(
+                          "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold",
+                          "hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-left",
+                          v.status === s ? "bg-slate-50 dark:bg-slate-700" : "",
+                        )}
+                      >
+                        <m.icon className={cn("h-3 w-3 flex-shrink-0", m.color)} />
+                        <span className={m.color}>{m.label}</span>
+                        {v.status === s && (
+                          <Check className="h-3 w-3 ml-auto text-slate-400" />
+                        )}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Delete button */}
+          {canWrite && (
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm("Delete this visit?")) deleteMut.mutate();
+              }}
+              disabled={deleteMut.isPending}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-500
+                hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors
+                disabled:opacity-50"
+              title="Delete visit"
+            >
+              {deleteMut.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Trash2 className="h-3.5 w-3.5" />
+              }
+            </motion.button>
           )}
         </div>
       </div>
@@ -1061,7 +1191,10 @@ export default function VisitsPage() {
                 <VisitCard
                   key={v.id}
                   v={v}
+                  currentUser={user}
                   onClick={() => setSelectedVisit(v)}
+                  onEdit={(visit) => { setEditingVisit(visit); setShowForm(true); }}
+                  onDelete={() => qc.invalidateQueries({ queryKey: ["visits"] })}
                 />
               ))}
             </AnimatePresence>
