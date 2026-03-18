@@ -18,6 +18,8 @@ from io import StringIO, BytesIO
 from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
+from backend.visits import router as visits_router
+
 
 # Single logger definition
 logger = logging.getLogger(__name__)
@@ -4502,6 +4504,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
     )
 
 # Api Router
+api_router.include_router(visits_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
