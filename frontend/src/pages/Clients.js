@@ -1229,7 +1229,7 @@ export default function Clients() {
     });
 
     return (
-      <div style={style} className="p-3 box-border">
+      <div style={style} className="p-2 box-border">
         <div
           className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
           style={{
@@ -1242,28 +1242,28 @@ export default function Clients() {
           <div className="h-[4px] w-full flex-shrink-0" style={{ background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}aa)` }} />
 
           {/* ── CARD HEADER: Avatar + Name + Type pill ── */}
-          <div className="px-4 pt-4 pb-2 flex-shrink-0">
-            <div className="flex items-start gap-3 mb-2">
+          <div className="px-3 pt-3 pb-1.5 flex-shrink-0">
+            <div className="flex items-start gap-2 mb-1">
               <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-bold flex-shrink-0 shadow-md"
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-sm"
                 style={{ background: avatarGrad }}
               >
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-sm leading-tight text-slate-900 break-words">
+                <h3 className="font-bold text-xs leading-tight text-slate-900 break-words">
                   {client.company_name}
                 </h3>
-                <div className="flex items-center gap-2 flex-wrap mt-1">
-                  <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                  <span className="text-[8px] font-mono text-slate-300">#{getClientNumber(index)}</span>
                   <TypePill type={client.client_type} customLabel={client.client_type_label} />
                   {isArchived && (
-                    <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-600 border-amber-200">
+                    <Badge variant="outline" className="text-[7px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0">
                       ARCHIVED
                     </Badge>
                   )}
                   {expiringDSC && (
-                    <Badge variant="outline" className="text-[8px] bg-orange-50 text-orange-600 border-orange-200">
+                    <Badge variant="outline" className="text-[7px] bg-orange-50 text-orange-600 border-orange-200 px-1 py-0">
                       DSC EXPIRING
                     </Badge>
                   )}
@@ -1273,76 +1273,76 @@ export default function Clients() {
           </div>
 
           {/* ── DIVIDER ── */}
-          <div className="mx-4 h-px flex-shrink-0" style={{ backgroundColor: cfg.border }} />
+          <div className="mx-3 h-px flex-shrink-0" style={{ backgroundColor: cfg.border }} />
 
           {/* ── MAIN INFO SECTION - FULLY VISIBLE ── */}
-          <div className="px-4 py-3 space-y-2.5 flex-shrink-0 flex-1 overflow-y-auto">
+          <div className="px-3 py-2 space-y-1 flex-shrink-0 flex-1">
             
             {/* Contact Person / Director */}
             <div className="flex items-start gap-2">
-              <User className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Director</p>
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Director</p>
                 {primaryContact?.name ? (
-                  <p className="text-xs text-slate-700 font-semibold break-words">
+                  <p className="text-[11px] text-slate-700 font-semibold break-words leading-tight">
                     {primaryContact.name}
                     {primaryContact.designation && (
-                      <span className="text-slate-500 font-normal block text-[10px]">{primaryContact.designation}</span>
+                      <span className="text-slate-500 font-normal block text-[9px]">{primaryContact.designation}</span>
                     )}
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-400 italic">Not specified</p>
+                  <p className="text-[11px] text-slate-400 italic">Not specified</p>
                 )}
               </div>
             </div>
 
             {/* Mobile Number */}
             <div className="flex items-start gap-2">
-              <Phone className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <Phone className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Mobile</p>
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Mobile</p>
                 {client.phone ? (
-                  <p className="text-xs text-slate-700 font-medium break-words">{client.phone}</p>
+                  <p className="text-[11px] text-slate-700 font-medium break-words leading-tight">{client.phone}</p>
                 ) : (
-                  <p className="text-xs text-slate-400 italic">Not provided</p>
+                  <p className="text-[11px] text-slate-400 italic">Not provided</p>
                 )}
               </div>
             </div>
 
             {/* Email */}
             <div className="flex items-start gap-2">
-              <Mail className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <Mail className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Email</p>
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Email</p>
                 {client.email ? (
-                  <p className="text-xs text-slate-700 break-words">{client.email}</p>
+                  <p className="text-[11px] text-slate-700 break-words leading-tight">{client.email}</p>
                 ) : (
-                  <p className="text-xs text-slate-400 italic">Not provided</p>
+                  <p className="text-[11px] text-slate-400 italic">Not provided</p>
                 )}
               </div>
             </div>
 
             {/* Assigned To */}
             <div className="flex items-start gap-2">
-              <Briefcase className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Assigned To</p>
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Assigned To</p>
                 {clientAssignments.length > 0 ? (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {clientAssignments.map((a, i) => {
                       const u = users.find(x => x.id === a.user_id);
                       return u ? (
-                        <p key={i} className="text-xs text-slate-700 font-medium break-words">
+                        <p key={i} className="text-[11px] text-slate-700 font-medium break-words leading-tight">
                           {u.full_name || u.name}
                           {a.services?.length > 0 && (
-                            <span className="text-slate-500 text-[10px] block">{a.services.join(', ')}</span>
+                            <span className="text-slate-500 text-[9px] block">{a.services.join(', ')}</span>
                           )}
                         </p>
                       ) : null;
                     })}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400 italic">Unassigned</p>
+                  <p className="text-[11px] text-slate-400 italic">Unassigned</p>
                 )}
               </div>
             </div>
@@ -1350,14 +1350,14 @@ export default function Clients() {
             {/* Services Provided */}
             {serviceCount > 0 && (
               <div className="flex items-start gap-2">
-                <BarChart3 className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                <BarChart3 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1">Services</p>
-                  <div className="flex flex-wrap gap-1">
+                  <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5 leading-tight">Services</p>
+                  <div className="flex flex-wrap gap-0.5">
                     {client.services?.map((svc, i) => (
                       <span
                         key={i}
-                        className="text-[9px] font-bold px-2 py-1 rounded-full border whitespace-normal break-words"
+                        className="text-[8px] font-bold px-1.5 py-0.5 rounded-full border whitespace-normal break-words"
                         style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
                       >
                         {svc.replace('Other: ', '')}
@@ -1371,10 +1371,10 @@ export default function Clients() {
             {/* Referred By */}
             {client.referred_by && (
               <div className="flex items-start gap-2">
-                <Share2 className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                <Share2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold">Referred By</p>
-                  <p className="text-xs text-slate-700 font-medium break-words">{client.referred_by}</p>
+                  <p className="text-[9px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Referred By</p>
+                  <p className="text-[11px] text-slate-700 font-medium break-words leading-tight">{client.referred_by}</p>
                 </div>
               </div>
             )}
@@ -1388,23 +1388,23 @@ export default function Clients() {
             {/* WhatsApp Button */}
             <button
               onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-emerald-600 hover:bg-emerald-50 transition-colors border-r"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-emerald-600 hover:bg-emerald-50 transition-colors border-r"
               style={{ borderColor: cfg.border }}
               title="Send WhatsApp message"
             >
-              <MessageCircle className="h-4 w-4" />
-              <span className="text-[9px] font-bold tracking-wide">WhatsApp</span>
+              <MessageCircle className="h-3.5 w-3.5" />
+              <span className="text-[8px] font-bold tracking-wide">WhatsApp</span>
             </button>
 
             {/* Edit Button */}
             <button
               onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-blue-600 hover:bg-blue-50 transition-colors"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-blue-600 hover:bg-blue-50 transition-colors"
               style={canDeleteData ? { borderRight: `1px solid ${cfg.border}` } : {}}
               title="Edit client details"
             >
-              <Edit className="h-4 w-4" />
-              <span className="text-[9px] font-bold tracking-wide">Edit</span>
+              <Edit className="h-3.5 w-3.5" />
+              <span className="text-[8px] font-bold tracking-wide">Edit</span>
             </button>
 
             {/* Delete Button */}
@@ -1416,11 +1416,11 @@ export default function Clients() {
                     api.delete(`/clients/${client.id}`).then(() => fetchClients());
                   }
                 }}
-                className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-red-500 hover:bg-red-50 transition-colors"
+                className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-red-500 hover:bg-red-50 transition-colors"
                 title="Delete client"
               >
-                <Trash2 className="h-4 w-4" />
-                <span className="text-[9px] font-bold tracking-wide">Delete</span>
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="text-[8px] font-bold tracking-wide">Delete</span>
               </button>
             )}
           </div>
@@ -2324,7 +2324,7 @@ export default function Clients() {
         ) : viewMode === 'board' ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 270;
+              const CARD_MIN = 320;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
@@ -2334,7 +2334,7 @@ export default function Clients() {
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={300}
+                  rowHeight={580}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
