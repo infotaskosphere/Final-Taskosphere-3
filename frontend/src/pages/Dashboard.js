@@ -100,6 +100,29 @@ const VISIT_STATUS_COLORS = {
   rescheduled: { bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-500 dark:text-purple-400', dot: 'bg-purple-500'  },
 };
 
+// ── FIX 1: Slim pill scrollbar ────────────────────────────────────────────────
+// Injected once at module level — no global CSS file needed.
+// Matches the uploaded design: 3px track, rounded pill thumb.
+const slimScroll = {
+  overflowY:      'auto',
+  scrollbarWidth: 'thin',               // Firefox
+  scrollbarColor: '#cbd5e1 transparent', // Firefox: thumb / track
+};
+
+if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scroll')) {
+  const s = document.createElement('style');
+  s.id = 'dash-slim-scroll';
+  s.textContent = `
+    .slim-scroll::-webkit-scrollbar { width: 3px; height: 3px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    .slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .dark .slim-scroll::-webkit-scrollbar-thumb { background: #475569; }
+    .dark .slim-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  `;
+  document.head.appendChild(s);
+}
+
 // ── Task Strip Component ──────────────────────────────────────────────────────
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   const status     = task.status || 'pending';
@@ -215,9 +238,8 @@ function VisitsCard({ isDark, navigate, currentUserId }) {
     onError: () => {},
   });
 
-  // Only show visits where the current user is the one doing the visit
-  // (assigned_to === current user). Never show all visits even for admin —
-  // admin sees the full picture on /visits page, not on the dashboard card.
+  // Only show the current user's own visits on dashboard.
+  // Full team view is on /visits page.
   const visits = useMemo(
     () => allVisits.filter(v => v.assigned_to === currentUserId),
     [allVisits, currentUserId]
@@ -300,7 +322,8 @@ function VisitsCard({ isDark, navigate, currentUserId }) {
             </Button>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+          // FIX: slim-scroll class + slimScroll style + reduced max-h
+          <div className="slim-scroll space-y-2 max-h-[200px]" style={slimScroll}>
             <AnimatePresence>
               {visits.map((v, i) => {
                 const sc  = VISIT_STATUS_COLORS[v.status] || VISIT_STATUS_COLORS.scheduled;
@@ -466,6 +489,20 @@ export default function Dashboard() {
     refetchOnWindowFocus: true,
   });
 
+  // ── FIX 2: Real open leads count (non-closed) ─────────────────────────────
+  const { data: leadsData = [] } = useQuery({
+    queryKey: ['leads-open-count'],
+    queryFn: () => api.get('/leads').then(r => r.data || []),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const openLeadsCount = useMemo(
+    () => leadsData.filter(l =>
+      l.status !== 'closed' && l.status !== 'won' && l.status !== 'lost'
+    ).length,
+    [leadsData]
+  );
+
   // ── Derived values ──────────────────────────────────────────────────────────
   const todayIsHoliday = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -497,7 +534,17 @@ export default function Dashboard() {
     [tasks, user?.id]
   );
 
-  const recentTasks = useMemo(() => tasks.slice(0, 5), [tasks]);
+  // ── FIX 3: Recent tasks sorted newest-first by created_at ─────────────────
+  const recentTasks = useMemo(() =>
+    [...tasks]
+      .sort((a, b) => {
+        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return db - da; // descending — newest first
+      })
+      .slice(0, 5),
+    [tasks]
+  );
 
   // Rankings
   useEffect(() => {
@@ -980,13 +1027,13 @@ export default function Dashboard() {
       {/* ── Recent Tasks + Deadlines + Attendance ─────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
-        {/* Recent Tasks */}
+        {/* Recent Tasks — sorted newest-first */}
         <SectionCard>
           <CardHeaderRow
             iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
             icon={<Target className="h-4 w-4 text-blue-500" />}
             title="Recent Tasks"
-            subtitle="Latest assignments"
+            subtitle="Newest first"
             action={
               <Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`}
                 onClick={() => navigate('/tasks')}>
@@ -998,7 +1045,8 @@ export default function Dashboard() {
             {recentTasks.length === 0 ? (
               <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No recent tasks</div>
             ) : (
-              <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+              // FIX 4: slim-scroll + reduced max-h
+              <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
                 <AnimatePresence>
                   {recentTasks.map(task => {
                     const statusStyle   = getStatusStyle(task.status);
@@ -1021,7 +1069,7 @@ export default function Dashboard() {
                         </div>
                         <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                           <CalendarIcon className="h-3 w-3" />
-                          {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
+                          {task.created_at ? format(new Date(task.created_at), 'MMM d, yyyy · h:mm a') : 'No date'}
                         </div>
                       </motion.div>
                     );
@@ -1050,7 +1098,7 @@ export default function Dashboard() {
             {upcomingDueDates.length === 0 ? (
               <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming deadlines</div>
             ) : (
-              <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+              <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
                 <AnimatePresence>
                   {upcomingDueDates.map(due => {
                     const color = getDeadlineColor(due.days_remaining || 0);
@@ -1231,7 +1279,7 @@ export default function Dashboard() {
                   No tasks assigned to you
                 </div>
               ) : (
-                <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
                   <AnimatePresence>
                     {tasksAssignedToMe.map(task => (
                       <TaskStrip
@@ -1267,7 +1315,7 @@ export default function Dashboard() {
                   No tasks assigned yet
                 </div>
               ) : (
-                <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
                   <AnimatePresence>
                     {tasksAssignedByMe.map(task => (
                       <TaskStrip
@@ -1318,7 +1366,8 @@ export default function Dashboard() {
             {rankings.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No ranking data</div>
             ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+              // FIX 4: slim-scroll + reduced max-h
+              <div className="slim-scroll space-y-2 max-h-[240px]" style={slimScroll}>
                 <AnimatePresence>
                   {rankings.map((member, i) => (
                     <RankingItem key={member.user_id || i} member={member} index={i} period={rankingPeriod} />
@@ -1397,7 +1446,8 @@ export default function Dashboard() {
             {pendingTodos.length === 0 ? (
               <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No todos yet</div>
             ) : (
-              <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+              // FIX 4: slim-scroll + reduced max-h
+              <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
                 <AnimatePresence>
                   {pendingTodos.map(todo => (
                     <motion.div
@@ -1464,8 +1514,9 @@ export default function Dashboard() {
             path:   '/leads',
             icon:   <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />,
             iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,
-            label:  String(stats?.total_leads || 0),
-            sub:    'Leads',
+            // FIX 2: show open leads count, not total
+            label:  String(openLeadsCount),
+            sub:    'Open Leads',
           },
           {
             path:   '/clients',
