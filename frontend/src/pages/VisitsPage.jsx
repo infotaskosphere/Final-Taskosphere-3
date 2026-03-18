@@ -286,16 +286,19 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
           </div>
         </div>
 
-        {/* ── Right action cluster ── */}
+        {/* ── Right action cluster — single flat horizontal row ── */}
         <div
           className="flex items-center gap-1.5 flex-shrink-0"
           onClick={e => e.stopPropagation()}
         >
-          {/* Priority dot + avatar (hidden on small screens) */}
-          <div className="hidden sm:flex flex-col items-end gap-1 mr-1">
-            <PriorityDot priority={v.priority} />
-            <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
-          </div>
+          {/* Priority dot */}
+          <PriorityDot priority={v.priority} />
+
+          {/* Avatar */}
+          <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
+
+          {/* Thin divider */}
+          <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
 
           {/* Yes / No — only for scheduled/rescheduled */}
           {showQuick && <QuickStatusButtons visit={v} />}
@@ -318,12 +321,12 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
             </span>
           )}
 
-          {/* Divider */}
+          {/* Divider before icon actions */}
           {canWrite && (
             <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
           )}
 
-          {/* Edit button */}
+          {/* Edit */}
           {canWrite && (
             <motion.button
               whileHover={{ scale: 1.1 }}
@@ -337,7 +340,7 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
             </motion.button>
           )}
 
-          {/* Status dropdown chevron — matching the screenshot */}
+          {/* Status dropdown chevron */}
           {canWrite && (
             <div className="relative">
               <motion.button
@@ -390,7 +393,7 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
             </div>
           )}
 
-          {/* Delete button */}
+          {/* Delete */}
           {canWrite && (
             <motion.button
               whileHover={{ scale: 1.1 }}
