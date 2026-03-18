@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { format } from 'date-fns';
+import { format, parseISO, isToday, isTomorrow } from 'date-fns';
 import { toast } from 'sonner';
 import RoleGuard from "@/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,47 +45,43 @@ import {
   ChevronRight,
   Target,
   Activity,
+  MapPin,
+  Repeat,
+  Plus,
 } from 'lucide-react';
 
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
-  emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
-  coral: '#FF6B6B',
-  amber: '#F59E0B',
+  deepBlue:    '#0D3B66',
+  mediumBlue:  '#1F6FB2',
+  emeraldGreen:'#1FAF5A',
+  lightGreen:  '#5CCB5F',
+  coral:       '#FF6B6B',
+  amber:       '#F59E0B',
 };
 
-// ── Spring Physics (for Framer Motion) ──────────────────────────────────────
+// ── Spring Physics ────────────────────────────────────────────────────────────
 const springPhysics = {
-  card: { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
-  lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 },
+  card:   { type: "spring", stiffness: 280, damping: 22, mass: 0.85 },
+  lift:   { type: "spring", stiffness: 320, damping: 24, mass: 0.9  },
   button: { type: "spring", stiffness: 400, damping: 28 },
-  icon: { type: "spring", stiffness: 450, damping: 25 },
-  tap: { type: "spring", stiffness: 500, damping: 30 }
+  icon:   { type: "spring", stiffness: 450, damping: 25 },
+  tap:    { type: "spring", stiffness: 500, damping: 30 },
 };
 
-// ── Animation Variants ──────────────────────────────────────────────────────
+// ── Animation Variants ────────────────────────────────────────────────────────
 const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06, delayChildren: 0.1 }
-  }
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 24 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] }
-  },
-  exit: { opacity: 0, y: 12, transition: { duration: 0.3 } }
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+  exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
-// ── Priority Stripe Helper ──────────────────────────────────────────────────
+// ── Priority Stripe Helper ────────────────────────────────────────────────────
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
   if (p === 'critical') return 'border-l-[3px] border-l-red-500';
@@ -95,10 +91,19 @@ const getPriorityStripeClass = (priority) => {
   return 'border-l-[3px] border-l-slate-200';
 };
 
-// ── Task Strip Component ────────────────────────────────────────────────────
+// ── Visit Status meta ─────────────────────────────────────────────────────────
+const VISIT_STATUS_COLORS = {
+  scheduled:   { bg: 'bg-blue-50 dark:bg-blue-900/30',    text: 'text-blue-600 dark:text-blue-400',    dot: 'bg-blue-500'    },
+  completed:   { bg: 'bg-emerald-50 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+  missed:      { bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-500 dark:text-orange-400', dot: 'bg-orange-400'  },
+  cancelled:   { bg: 'bg-red-50 dark:bg-red-900/20',      text: 'text-red-500 dark:text-red-400',      dot: 'bg-red-500'     },
+  rescheduled: { bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-500 dark:text-purple-400', dot: 'bg-purple-500'  },
+};
+
+// ── Task Strip Component ──────────────────────────────────────────────────────
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
-  const status = task.status || 'pending';
-  const isCompleted = status === 'completed';
+  const status     = task.status || 'pending';
+  const isCompleted  = status === 'completed';
   const isInProgress = status === 'in_progress';
 
   return (
@@ -117,12 +122,14 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className={`font-medium text-sm truncate leading-tight transition ${
-            isCompleted ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-100'
+            isCompleted
+              ? 'line-through text-slate-400 dark:text-slate-500'
+              : 'text-slate-800 dark:text-slate-100'
           }`}>
             {task.title || 'Untitled Task'}
-            {task.client_name ? (
+            {task.client_name && (
               <span className="text-slate-400 dark:text-slate-500 font-normal"> · {task.client_name}</span>
-            ) : ''}
+            )}
           </p>
         </div>
         {isToMe && (
@@ -158,7 +165,6 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
           </div>
         )}
       </div>
-
       <div className="mt-1.5 text-xs text-slate-400 dark:text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
         <span>
           {isToMe ? 'From: ' : 'To: '}
@@ -173,7 +179,7 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate }) {
   );
 }
 
-// ── Shared Card Shell ───────────────────────────────────────────────────────
+// ── Shared Card Shell ─────────────────────────────────────────────────────────
 function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`}>
@@ -182,7 +188,7 @@ function SectionCard({ children, className = '' }) {
   );
 }
 
-// ── Card Header Row ─────────────────────────────────────────────────────────
+// ── Card Header Row ───────────────────────────────────────────────────────────
 function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
@@ -198,23 +204,201 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
   );
 }
 
-// ── Main Dashboard Component ────────────────────────────────────────────────
+// ── Visits Dashboard Card ─────────────────────────────────────────────────────
+function VisitsCard({ isDark, navigate }) {
+  const { data: visits = [], isLoading } = useQuery({
+    queryKey: ['visits-upcoming-dashboard'],
+    queryFn: () => api.get('/visits/upcoming', { params: { days: 7 } }).then(r => r.data),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  const todayCount    = visits.filter(v => isToday(parseISO(v.visit_date))).length;
+  const tomorrowCount = visits.filter(v => isTomorrow(parseISO(v.visit_date))).length;
+
+  const subtitleText = todayCount > 0
+    ? `${todayCount} today`
+    : tomorrowCount > 0
+    ? `${tomorrowCount} tomorrow`
+    : 'Next 7 days';
+
+  return (
+    <SectionCard>
+      {/* Header */}
+      <CardHeaderRow
+        iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
+        icon={<MapPin className="h-4 w-4 text-teal-500" />}
+        title="Client Visits"
+        subtitle={subtitleText}
+        action={
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost" size="sm"
+              className={`h-7 w-7 p-0 rounded-lg ${isDark ? 'text-teal-400 hover:text-teal-300' : 'text-teal-500'}`}
+              onClick={() => navigate('/visits?action=new')}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost" size="sm"
+              className={`text-xs h-7 px-3 ${isDark ? 'text-teal-400 hover:text-teal-300' : 'text-teal-500'}`}
+              onClick={() => navigate('/visits')}
+            >
+              View All
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Body */}
+      <div className="p-3">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="h-5 w-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : visits.length === 0 ? (
+          <div className="text-center py-7 space-y-3">
+            <div className="flex justify-center">
+              <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <MapPin className="h-6 w-6 text-slate-300 dark:text-slate-500" />
+              </div>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              No visits in next 7 days
+            </p>
+            <Button
+              size="sm"
+              onClick={() => navigate('/visits?action=new')}
+              className="rounded-xl text-white text-xs"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Schedule Visit
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            <AnimatePresence>
+              {visits.map((v, i) => {
+                const sc  = VISIT_STATUS_COLORS[v.status] || VISIT_STATUS_COLORS.scheduled;
+                const isT = isToday(parseISO(v.visit_date));
+                return (
+                  <motion.div
+                    key={v.id}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0, transition: { delay: i * 0.05, ...springPhysics.card } }}
+                    whileHover={{ y: -2, transition: springPhysics.lift }}
+                    onClick={() => navigate('/visits')}
+                    className={`relative flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all group ${
+                      isT
+                        ? 'border-teal-200 dark:border-teal-800 bg-teal-50/60 dark:bg-teal-900/15 hover:border-teal-300 dark:hover:border-teal-700'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    {/* Date column */}
+                    <div className="flex-shrink-0 w-12 text-center">
+                      <div className={`rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <div
+                          className="py-0.5 text-[8px] font-bold text-white uppercase"
+                          style={{ background: isT ? COLORS.emeraldGreen : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                        >
+                          {isT ? 'TODAY' : format(parseISO(v.visit_date), 'MMM')}
+                        </div>
+                        <div className={`py-1 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                          <p className={`text-base font-black leading-none ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                            {format(parseISO(v.visit_date), 'd')}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-1">
+                        <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                          {v.client_name || '—'}
+                        </p>
+                        <span className={cn('flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1', sc.bg, sc.text)}>
+                          <span className={cn('h-1.5 w-1.5 rounded-full', sc.dot)} />
+                          {v.status}
+                        </span>
+                      </div>
+                      <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {v.purpose}
+                      </p>
+                      <div className={`flex items-center gap-2 mt-1 flex-wrap text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {v.visit_time && (
+                          <span className="flex items-center gap-0.5">
+                            <Clock className="h-2.5 w-2.5" />{v.visit_time}
+                          </span>
+                        )}
+                        {v.location && (
+                          <span className="flex items-center gap-0.5 truncate max-w-[100px]">
+                            <MapPin className="h-2.5 w-2.5 flex-shrink-0" />{v.location.slice(0, 25)}
+                          </span>
+                        )}
+                        {v.recurrence && v.recurrence !== 'none' && (
+                          <span className="flex items-center gap-0.5 text-purple-400">
+                            <Repeat className="h-2.5 w-2.5" />{v.recurrence}
+                          </span>
+                        )}
+                        <span className="ml-auto font-medium" style={{ color: COLORS.mediumBlue }}>
+                          {v.assigned_to_name?.split(' ')[0]}
+                        </span>
+                      </div>
+                    </div>
+
+                    <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? 'text-slate-400' : 'text-slate-300'}`} />
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      {visits.length > 0 && (
+        <div className={`px-4 py-2 border-t flex items-center justify-between ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+          <div className="flex items-center gap-3">
+            {visits.filter(v => v.status === 'scheduled').length > 0 && (
+              <span className="text-xs font-semibold text-blue-500">
+                {visits.filter(v => v.status === 'scheduled').length} Scheduled
+              </span>
+            )}
+            {visits.filter(v => v.status === 'completed').length > 0 && (
+              <span className="text-xs font-semibold text-emerald-500">
+                {visits.filter(v => v.status === 'completed').length} Completed
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => navigate('/visits')}
+            className={`text-xs font-semibold flex items-center gap-0.5 hover:underline ${isDark ? 'text-teal-400' : 'text-teal-600'}`}
+          >
+            Full Plan <ChevronRight className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Main Dashboard Component ──────────────────────────────────────────────────
 export default function Dashboard() {
   const { user, hasPermission } = useAuth();
-  const navigate = useNavigate();
+  const navigate    = useNavigate();
   const queryClient = useQueryClient();
-  const [loading, setLoading] = useState(false);
-  const [rankings, setRankings] = useState([]);
-  const [rankingPeriod, setRankingPeriod] = useState("monthly");
-  const [newTodo, setNewTodo] = useState('');
-  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
-  const [selectedDueDate, setSelectedDueDate] = useState(undefined);
-  const [mustPunchIn, setMustPunchIn] = useState(false);
-  // actionDone: optimistic flag set immediately when user punches in or marks leave.
-  // Prevents the gate from flickering back open during the async query refetch.
-  const [actionDone, setActionDone] = useState(false);
 
-  // Observe dark mode class so cards re-render when theme switches
+  const [loading, setLoading]           = useState(false);
+  const [rankings, setRankings]         = useState([]);
+  const [rankingPeriod, setRankingPeriod] = useState('monthly');
+  const [newTodo, setNewTodo]           = useState('');
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
+  const [selectedDueDate, setSelectedDueDate]     = useState(undefined);
+  const [mustPunchIn, setMustPunchIn]   = useState(false);
+  const [actionDone, setActionDone]     = useState(false);
+
+  // Dark mode observer
   const [isDark, setIsDark] = useState(() =>
     typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
   );
@@ -226,36 +410,39 @@ export default function Dashboard() {
     return () => observer.disconnect();
   }, []);
 
-  const { data: tasks = [] } = useTasks();
-  const { data: stats } = useDashboardStats();
+  // ── Data queries ────────────────────────────────────────────────────────────
+  const { data: tasks = [] }            = useTasks();
+  const { data: stats }                 = useDashboardStats();
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
-  const { data: todayAttendance } = useTodayAttendance();
-  const updateTaskMutation = useUpdateTask();
+  const { data: todayAttendance }       = useTodayAttendance();
+  const updateTaskMutation              = useUpdateTask();
 
-  // ── Fetch holidays to derive todayIsHoliday reliably ────────────────────
-  // We fetch holidays independently here for the same reason as Attendance.jsx:
-  // todayAttendance.status === 'holiday' is unreliable — if an absent record
-  // exists for today, the backend returns that instead of the holiday status.
-  // The holidays array is the single source of truth.
-  // Holidays query — no staleTime so it always reflects latest additions.
-  // refetchOnWindowFocus ensures that if admin adds a holiday on the Attendance
-  // page and comes back to Dashboard, it picks up the new holiday immediately.
-  const { data: holidaysData = [], refetch: refetchHolidays } = useQuery({
-    queryKey: ['holidays'],          // shared key — same as any other holidays fetch
+  // Holidays query
+  const { data: holidaysData = [] } = useQuery({
+    queryKey: ['holidays'],
     queryFn: async () => {
       const res = await api.get('/holidays');
       return res.data || [];
     },
-    staleTime: 0,                    // always re-fetch when component mounts
+    staleTime: 0,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
   });
 
-  // ── todayIsHoliday: derived from confirmed holidays array ────────────────
-  // Used to:
-  //   1. Suppress the punch-in gate overlay on holidays
-  //   2. Still allow user to punch in voluntarily if they choose to work
-  // todayDateStr recomputed inside useMemo so it never stays stale across midnight
+  // ── Todos ───────────────────────────────────────────────────────────────────
+  const { data: todosRaw = [] } = useQuery({
+    queryKey: ['todos', 'dashboard-card', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const res = await api.get('/todos', { params: { user_id: user.id } });
+      return res.data;
+    },
+    enabled: !!user?.id,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  // ── Derived values ──────────────────────────────────────────────────────────
   const todayIsHoliday = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
     return holidaysData.some(h => h.date === today && h.status === 'confirmed');
@@ -266,128 +453,95 @@ export default function Dashboard() {
     return holidaysData.find(h => h.date === today && h.status === 'confirmed')?.name || '';
   }, [holidaysData]);
 
-  // Keep todayDateStr for other uses
-  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
-
-  // ── DASHBOARD TODOS — always scoped to the current user only ─────────────
-  const { data: todosRaw = [] } = useQuery({
-    queryKey: ["todos", "dashboard-card", user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const res = await api.get("/todos", { params: { user_id: user.id } });
-      return res.data;
-    },
-    enabled: !!user?.id,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
-  // ── Normalise completed flag across both field conventions ────────────────
   const todos = useMemo(() =>
     todosRaw.map(todo => ({
       ...todo,
-      completed: todo.status === "completed" || todo.is_completed === true,
+      completed: todo.status === 'completed' || todo.is_completed === true,
     })),
     [todosRaw]
   );
 
-  // Only show pending todos on the dashboard card
-  const pendingTodos = useMemo(() =>
-    todos.filter(todo => !todo.completed),
-    [todos]
-  );
+  const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
 
   const tasksAssignedToMe = useMemo(() =>
-    tasks
-      .filter(t => t.assigned_to === user?.id && t.status !== "completed")
-      .slice(0, 6),
+    tasks.filter(t => t.assigned_to === user?.id && t.status !== 'completed').slice(0, 6),
     [tasks, user?.id]
   );
 
   const tasksAssignedByMe = useMemo(() =>
-    tasks
-      .filter(t => t.created_by === user?.id && t.assigned_to !== user?.id)
-      .slice(0, 6),
+    tasks.filter(t => t.created_by === user?.id && t.assigned_to !== user?.id).slice(0, 6),
     [tasks, user?.id]
   );
 
   const recentTasks = useMemo(() => tasks.slice(0, 5), [tasks]);
 
-  // Rankings (star performers)
+  // Rankings
   useEffect(() => {
     async function fetchRankings() {
       try {
-        const period = rankingPeriod === "all" ? "all_time" : rankingPeriod;
-        const res = await api.get("/reports/performance-rankings", { params: { period } });
+        const period = rankingPeriod === 'all' ? 'all_time' : rankingPeriod;
+        const res = await api.get('/reports/performance-rankings', { params: { period } });
         setRankings(res.data || []);
       } catch (err) {
-        console.warn("Failed to fetch rankings:", err);
+        console.warn('Failed to fetch rankings:', err);
         setRankings([]);
       }
     }
     fetchRankings();
   }, [rankingPeriod]);
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ───────────────────────────────────────────────────────────────
   const createTodo = useMutation({
-    mutationFn: data => api.post("/todos", data),
+    mutationFn: data => api.post('/todos', data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
-      toast.success("Todo added");
+      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      toast.success('Todo added');
     },
-    onError: () => toast.error("Failed to add todo"),
+    onError: () => toast.error('Failed to add todo'),
   });
 
   const updateTodo = useMutation({
-    mutationFn: ({ id, status }) => {
-      const isCompleting = status === "completed";
-      return api.patch(`/todos/${id}`, { is_completed: isCompleting });
-    },
+    mutationFn: ({ id, status }) =>
+      api.patch(`/todos/${id}`, { is_completed: status === 'completed' }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
-      toast.success("Todo updated");
+      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      toast.success('Todo updated');
     },
-    onError: (error) => {
-      toast.error("Failed to update todo");
-      console.error("Update error:", error);
-    },
+    onError: () => toast.error('Failed to update todo'),
   });
 
   const deleteTodo = useMutation({
     mutationFn: id => api.delete(`/todos/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos", "dashboard-card", user?.id] });
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
-      toast.success("Todo deleted");
+      queryClient.invalidateQueries({ queryKey: ['todos', 'dashboard-card', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      toast.success('Todo deleted');
     },
-    onError: () => toast.error("Failed to delete todo"),
+    onError: () => toast.error('Failed to delete todo'),
   });
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
     createTodo.mutate({
-      title: newTodo.trim(),
-      status: "pending",
+      title:    newTodo.trim(),
+      status:   'pending',
       due_date: selectedDueDate ? selectedDueDate.toISOString() : null,
     });
-    setNewTodo("");
+    setNewTodo('');
     setSelectedDueDate(undefined);
   };
 
   const handleToggleTodo = (id) => {
-    const todo = todosRaw.find(t => (t.id === id || t._id === id));
+    const todo = todosRaw.find(t => t.id === id || t._id === id);
     if (!todo) return;
-    const currentCompleted = todo.is_completed === true || todo.status === "completed";
-    const newStatus = currentCompleted ? "pending" : "completed";
-    updateTodo.mutate({ id: todo.id || todo._id, status: newStatus });
+    const currentCompleted = todo.is_completed === true || todo.status === 'completed';
+    updateTodo.mutate({ id: todo.id || todo._id, status: currentCompleted ? 'pending' : 'completed' });
   };
 
-  const handleDeleteTodo = (id) => {
-    deleteTodo.mutate(id);
-  };
+  const handleDeleteTodo = (id) => deleteTodo.mutate(id);
 
   const updateAssignedTaskStatus = (taskId, newStatus) => {
     updateTaskMutation.mutate(
@@ -399,7 +553,6 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
         },
         onError: (err) => {
-          console.error("Update Error:", err);
           toast.error(err.response?.data?.detail || 'Failed to update task');
         },
       }
@@ -411,13 +564,11 @@ export default function Dashboard() {
     try {
       await api.post('/attendance', { action });
       toast.success(action === 'punch_in' ? 'Punched in successfully!' : 'Punched out successfully!');
-      // Close gate immediately (optimistic) before refetch completes
       if (action === 'punch_in') {
         setActionDone(true);
         setMustPunchIn(false);
-        document.body.style.overflow = "auto";
+        document.body.style.overflow = 'auto';
       }
-      // Refetch attendance AND holidays so both are fresh
       await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
       await queryClient.refetchQueries({ queryKey: ['holidays'] });
     } catch (err) {
@@ -427,19 +578,17 @@ export default function Dashboard() {
     }
   };
 
-  // ── Utility Helpers ─────────────────────────────────────────────────────────
+  // ── Utility helpers ─────────────────────────────────────────────────────────
   const getTodayDuration = () => {
-    if (!todayAttendance?.punch_in) return "0h 0m";
+    if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
       const mins = todayAttendance.duration_minutes || 0;
       return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     }
-    const punchInStr = todayAttendance.punch_in;
+    const punchInStr  = todayAttendance.punch_in;
     const punchInDate = new Date(punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z');
     const diffMs = Date.now() - punchInDate.getTime();
-    const h = Math.floor(diffMs / 3600000);
-    const m = Math.floor((diffMs % 3600000) / 60000);
-    return `${h}h ${m}m`;
+    return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
   };
 
   const completionRate = stats?.total_tasks > 0
@@ -448,53 +597,52 @@ export default function Dashboard() {
 
   const nextDeadline = upcomingDueDates.length > 0
     ? upcomingDueDates.reduce((prev, curr) =>
-        prev.days_remaining < curr.days_remaining ? prev : curr
-      )
+        prev.days_remaining < curr.days_remaining ? prev : curr)
     : null;
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin        = user?.role === 'admin';
   const showTaskSection = isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
   const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
 
   const getStatusStyle = (status) => {
     const styles = {
       completed:   { bg: 'bg-emerald-100 dark:bg-emerald-900/40', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' },
-      in_progress: { bg: 'bg-blue-100 dark:bg-blue-900/40',       text: 'text-blue-700 dark:text-blue-400',       dot: 'bg-blue-500' },
-      pending:     { bg: 'bg-slate-100 dark:bg-slate-700',         text: 'text-slate-600 dark:text-slate-300',     dot: 'bg-slate-400' },
+      in_progress: { bg: 'bg-blue-100 dark:bg-blue-900/40',       text: 'text-blue-700 dark:text-blue-400',       dot: 'bg-blue-500'    },
+      pending:     { bg: 'bg-slate-100 dark:bg-slate-700',         text: 'text-slate-600 dark:text-slate-300',     dot: 'bg-slate-400'   },
     };
     return styles[status] || styles.pending;
   };
 
   const getPriorityStyle = (priority) => {
     const styles = {
-      high:   { bg: 'bg-red-50 dark:bg-red-900/20',    text: 'text-red-600',    border: 'border-red-200 dark:border-red-800' },
+      high:   { bg: 'bg-red-50 dark:bg-red-900/20',    text: 'text-red-600',    border: 'border-red-200 dark:border-red-800'    },
       medium: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600', border: 'border-amber-200 dark:border-amber-800' },
-      low:    { bg: 'bg-blue-50 dark:bg-blue-900/20',   text: 'text-blue-600',  border: 'border-blue-200 dark:border-blue-800' },
+      low:    { bg: 'bg-blue-50 dark:bg-blue-900/20',   text: 'text-blue-600',  border: 'border-blue-200 dark:border-blue-800'  },
     };
     return styles[priority?.toLowerCase()] || styles.medium;
   };
 
   const getDeadlineColor = (daysLeft) => {
-    if (daysLeft <= 0)  return { bg: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30',       badge: 'bg-red-500 text-white',    text: 'text-red-600' };
-    if (daysLeft <= 7)  return { bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:bg-orange-100',                  badge: 'bg-orange-500 text-white', text: 'text-orange-600' };
-    if (daysLeft <= 15) return { bg: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100',                  badge: 'bg-yellow-500 text-white', text: 'text-yellow-600' };
-    return { bg: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge: 'bg-green-600 text-white', text: 'text-green-700' };
+    if (daysLeft <= 0)  return { bg: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30',           badge: 'bg-red-500 text-white',    text: 'text-red-600'    };
+    if (daysLeft <= 7)  return { bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:bg-orange-100',                     badge: 'bg-orange-500 text-white', text: 'text-orange-600' };
+    if (daysLeft <= 15) return { bg: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100',                     badge: 'bg-yellow-500 text-white', text: 'text-yellow-600' };
+    return              { bg: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 hover:bg-green-100', badge: 'bg-green-600 text-white', text: 'text-green-700' };
   };
 
   const formatToLocalTime = (dateString) => {
-    if (!dateString) return "--:--";
-    const date = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
-    return format(date, 'hh:mm a');
+    if (!dateString) return '--:--';
+    const d = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
+    return format(d, 'hh:mm a');
   };
 
-  // ── Ranking Item (Memoized) ─────────────────────────────────────────────────
+  // ── Ranking Item ────────────────────────────────────────────────────────────
   const RankingItem = React.memo(({ member, index, period }) => {
-    const rank = index + 1;
+    const rank     = index + 1;
     const isGold   = index === 0;
     const isSilver = index === 1;
     const isBronze = index === 2;
     const isPodium = isGold || isSilver || isBronze;
-    const medal = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
+    const medal    = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : null;
 
     const rowStyle = isGold
       ? { background: 'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)', border: '1px solid #E2AA00' }
@@ -568,84 +716,37 @@ export default function Dashboard() {
   });
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good Morning ☀️";
-    if (hour < 17) return "Good Afternoon 🌤️";
-    if (hour < 21) return "Good Evening 🌆";
-    return "Working Late? 🌙";
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning ☀️';
+    if (h < 17) return 'Good Afternoon 🌤️';
+    if (h < 21) return 'Good Evening 🌆';
+    return 'Working Late? 🌙';
   };
 
-  // ── mustPunchIn gate logic ────────────────────────────────────────────────
-  // Rules:
-  //   - NEVER show gate on holidays (todayIsHoliday) — user has the day off.
-  //     BUT if they come to the dashboard, the attendance card still shows a
-  //     Punch In button so they CAN clock in voluntarily.
-  //   - Never show gate on leave days.
-  //   - Never show gate if already punched in.
-  //   - Never show gate if auto-marked absent (day is over).
-  //   - Only show gate if todayAttendance is loaded AND not punched in yet.
-  //
-  // KEY: We use todayIsHoliday (from holidays array) NOT todayAttendance.status
-  // because the backend may return an absent record on a holiday day if the
-  // 7PM auto-mark ran before the holiday was added to the database.
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Punch-In gate logic ─────────────────────────────────────────────────────
   useEffect(() => {
-    // Don't do anything until attendance data has loaded
     if (!todayAttendance) {
       setMustPunchIn(false);
-      document.body.style.overflow = "auto";
+      document.body.style.overflow = 'auto';
       return;
     }
+    if (actionDone)           { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
+    if (todayIsHoliday)       { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
+    if (todayAttendance.status === 'leave') { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
+    if (todayAttendance.punch_in)           { setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
+    if (todayAttendance.status === 'absent'){ setMustPunchIn(false); document.body.style.overflow = 'auto'; return; }
 
-    // Rule 0: user already took action this session — don't show gate
-    // This is an optimistic guard while the query refetches in the background
-    if (actionDone) {
-      setMustPunchIn(false);
-      document.body.style.overflow = "auto";
-      return;
-    }
-
-    // Rule 1: holidays — no gate, user is on holiday
-    if (todayIsHoliday) {
-      setMustPunchIn(false);
-      document.body.style.overflow = "auto";
-      return;
-    }
-
-    // Rule 2: leave day — no gate
-    if (todayAttendance.status === "leave") {
-      setMustPunchIn(false);
-      document.body.style.overflow = "auto";
-      return;
-    }
-
-    // Rule 3: already punched in — no gate
-    if (todayAttendance.punch_in) {
-      setMustPunchIn(false);
-      document.body.style.overflow = "auto";
-      return;
-    }
-
-    // Rule 4: auto-marked absent — day is already over, no gate
-    if (todayAttendance.status === "absent") {
-      setMustPunchIn(false);
-      document.body.style.overflow = "auto";
-      return;
-    }
-
-    // Genuine case: user is logged in on a working day and hasn't punched in
     setMustPunchIn(true);
-    document.body.style.overflow = "hidden";
-
-    return () => { document.body.style.overflow = "auto"; };
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = 'auto'; };
   }, [todayAttendance, todayIsHoliday, actionDone]);
 
-  const metricCardCls = "rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border";
+  const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark
-    ? "bg-slate-800 border-slate-700 hover:border-slate-600"
-    : "bg-white border-slate-200/80 hover:border-slate-300";
+    ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+    : 'bg-white border-slate-200/80 hover:border-slate-300';
 
-  // ── JSX Render ──────────────────────────────────────────────────────────────
+  // ── JSX ─────────────────────────────────────────────────────────────────────
   return (
     <motion.div
       className="space-y-4"
@@ -653,7 +754,7 @@ export default function Dashboard() {
       initial="hidden"
       animate="visible"
     >
-      {/* ── Welcome Banner ──────────────────────────────────────────────── */}
+      {/* ── Welcome Banner ────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <div
           className="relative overflow-hidden rounded-2xl px-6 py-5"
@@ -707,7 +808,7 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      {/* ── Key Metrics ─────────────────────────────────────────────────── */}
+      {/* ── Key Metrics ──────────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
 
         {/* Total Tasks */}
@@ -737,7 +838,7 @@ export default function Dashboard() {
           </CardContent>
         </motion.div>
 
-        {/* Overdue Tasks */}
+        {/* Overdue */}
         <motion.div
           whileHover={{ y: -3, transition: springPhysics.card }}
           whileTap={{ scale: 0.985 }}
@@ -756,8 +857,7 @@ export default function Dashboard() {
                   {stats?.overdue_tasks || 0}
                 </p>
               </div>
-              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.coral}18` }}>
+              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.coral}18` }}>
                 <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
               </div>
             </div>
@@ -783,8 +883,7 @@ export default function Dashboard() {
                   {completionRate}%
                 </p>
               </div>
-              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
+              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}>
                 <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
               </div>
             </div>
@@ -841,8 +940,7 @@ export default function Dashboard() {
                   {todayIsHoliday ? '🎉' : getTodayDuration()}
                 </p>
               </div>
-              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform"
-                style={{ backgroundColor: `${COLORS.amber}18` }}>
+              <div className="p-2 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: `${COLORS.amber}18` }}>
                 <Clock className="h-4 w-4" style={{ color: COLORS.amber }} />
               </div>
             </div>
@@ -855,7 +953,7 @@ export default function Dashboard() {
 
       </motion.div>
 
-      {/* ── Recent Tasks + Deadlines + Attendance ───────────────────────── */}
+      {/* ── Recent Tasks + Deadlines + Attendance ─────────────────────────── */}
       <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
         {/* Recent Tasks */}
@@ -879,7 +977,7 @@ export default function Dashboard() {
               <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                 <AnimatePresence>
                   {recentTasks.map(task => {
-                    const statusStyle = getStatusStyle(task.status);
+                    const statusStyle   = getStatusStyle(task.status);
                     const priorityStyle = getPriorityStyle(task.priority);
                     return (
                       <motion.div
@@ -976,7 +1074,6 @@ export default function Dashboard() {
             }
           />
           <div className="p-3">
-            {/* Holiday banner inside attendance card */}
             {todayIsHoliday ? (
               <div
                 className="rounded-xl px-4 py-4 text-center"
@@ -994,7 +1091,6 @@ export default function Dashboard() {
                 <p className={`text-xs mt-1 ${isDark ? 'text-amber-400/70' : 'text-amber-600'}`}>
                   Office is closed. Enjoy your day!
                 </p>
-                {/* Still allow punch-in on holidays for those who work */}
                 {!todayAttendance?.punch_in && (
                   <button
                     onClick={() => handlePunchAction('punch_in')}
@@ -1086,14 +1182,13 @@ export default function Dashboard() {
         </SectionCard>
       </motion.div>
 
-      {/* ── Assigned Tasks – Two Columns ────────────────────────────────── */}
+      {/* ── Assigned Tasks – Two Columns ──────────────────────────────────── */}
       {showTaskSection && (
         <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
 
           {/* Tasks Assigned to Me */}
           <SectionCard className="cursor-pointer hover:shadow-md transition group"
-            onClick={() => navigate('/tasks?filter=assigned-to-me')}
-          >
+            onClick={() => navigate('/tasks?filter=assigned-to-me')}>
             <CardHeaderRow
               iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
               icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
@@ -1129,8 +1224,7 @@ export default function Dashboard() {
 
           {/* Tasks Assigned by Me */}
           <SectionCard className="cursor-pointer hover:shadow-md transition group"
-            onClick={() => navigate('/tasks?filter=assigned-by-me')}
-          >
+            onClick={() => navigate('/tasks?filter=assigned-by-me')}>
             <CardHeaderRow
               iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
               icon={<Briefcase className="h-4 w-4 text-blue-600" />}
@@ -1166,8 +1260,8 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* ── Star Performers + To-Do List ────────────────────────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* ── Star Performers + To-Do + Visits ─────────────────────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
         {/* Star Performers */}
         <SectionCard>
@@ -1175,11 +1269,11 @@ export default function Dashboard() {
             iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'}
             icon={<TrendingUp className="h-4 w-4 text-yellow-500" />}
             title="Star Performers"
-            subtitle="Full rankings · Gold · Silver · Bronze"
+            subtitle="Gold · Silver · Bronze"
             action={
               isAdmin ? (
                 <div className={`flex gap-0.5 rounded-lg p-0.5 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                  {["all", "monthly", "weekly"].map(p => (
+                  {['all', 'monthly', 'weekly'].map(p => (
                     <button
                       key={p}
                       onClick={() => setRankingPeriod(p)}
@@ -1242,8 +1336,13 @@ export default function Dashboard() {
               />
               <Popover open={showDueDatePicker} onOpenChange={setShowDueDatePicker}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" size="icon"
-                    className={cn("h-9 w-9 rounded-xl flex-shrink-0", isDark ? 'border-slate-600 bg-slate-700 text-slate-300' : 'border-slate-200', !selectedDueDate && "text-slate-400")}>
+                  <Button
+                    variant="outline" size="icon"
+                    className={cn('h-9 w-9 rounded-xl flex-shrink-0',
+                      isDark ? 'border-slate-600 bg-slate-700 text-slate-300' : 'border-slate-200',
+                      !selectedDueDate && 'text-slate-400'
+                    )}
+                  >
                     <CalendarIcon className="h-4 w-4" />
                   </Button>
                 </PopoverTrigger>
@@ -1251,14 +1350,17 @@ export default function Dashboard() {
                   <CalendarComponent
                     mode="single"
                     selected={selectedDueDate}
-                    onSelect={date => { setSelectedDueDate(date); setShowDueDatePicker(false); }}
+                    onSelect={d => { setSelectedDueDate(d); setShowDueDatePicker(false); }}
                     initialFocus
                   />
                 </PopoverContent>
               </Popover>
-              <Button onClick={addTodo} disabled={!newTodo.trim()}
+              <Button
+                onClick={addTodo}
+                disabled={!newTodo.trim()}
                 className="px-4 rounded-xl h-9 text-sm font-semibold flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
                 Add
               </Button>
             </div>
@@ -1325,38 +1427,49 @@ export default function Dashboard() {
             )}
           </div>
         </SectionCard>
+
+        {/* ── Visits Card ──────────────────────────────────────────────────── */}
+        <VisitsCard isDark={isDark} navigate={navigate} />
+
       </motion.div>
 
-      {/* ── Quick Access Tiles ───────────────────────────────────────────── */}
+      {/* ── Quick Access Tiles ────────────────────────────────────────────── */}
       <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
         {[
           {
-            path: '/leads',
-            icon: <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />,
+            path:   '/leads',
+            icon:   <Target className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />,
             iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,
-            label: String(stats?.total_leads || 0),
-            sub: 'Leads',
+            label:  String(stats?.total_leads || 0),
+            sub:    'Leads',
           },
           {
-            path: '/clients',
-            icon: <Building2 className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />,
+            path:   '/clients',
+            icon:   <Building2 className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />,
             iconBg: isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}12`,
-            label: String(stats?.total_clients || 0),
-            sub: 'Clients',
+            label:  String(stats?.total_clients || 0),
+            sub:    'Clients',
           },
           {
-            path: '/dsc',
-            icon: <Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
+            path:   '/dsc',
+            icon:   <Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
             iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
-            label: String(stats?.total_dsc || 0),
-            sub: 'DSC Certs',
+            label:  String(stats?.total_dsc || 0),
+            sub:    'DSC Certs',
           },
           {
-            path: '/duedates',
-            icon: <CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
+            path:   '/duedates',
+            icon:   <CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
             iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
-            label: String(stats?.upcoming_due_dates || 0),
-            sub: 'Compliance',
+            label:  String(stats?.upcoming_due_dates || 0),
+            sub:    'Compliance',
+          },
+          {
+            path:   '/visits',
+            icon:   <MapPin className="h-4 w-4 text-teal-500" />,
+            iconBg: isDark ? 'rgba(20,184,166,0.2)' : '#f0fdfa',
+            label:  'Visits',
+            sub:    'Plan & Track',
           },
         ].map(tile => (
           <motion.div
@@ -1402,10 +1515,7 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* ── Punch-In Gate Overlay ────────────────────────────────────────── */}
-      {/* Shown only on working days when user hasn't punched in.            */}
-      {/* NEVER shown on holidays — user has day off. todayIsHoliday is the  */}
-      {/* source of truth, not todayAttendance.status.                       */}
+      {/* ── Punch-In Gate Overlay ─────────────────────────────────────────── */}
       <AnimatePresence>
         {mustPunchIn && !todayIsHoliday && (
           <motion.div
@@ -1419,7 +1529,7 @@ export default function Dashboard() {
               initial={{ scale: 0.88, y: 48 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.88, y: 48 }}
-              transition={{ type: "spring", stiffness: 160, damping: 18 }}
+              transition={{ type: 'spring', stiffness: 160, damping: 18 }}
               className={`w-full max-w-sm mx-4 rounded-3xl overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'}`}
               style={{ boxShadow: '0 32px 80px rgba(0,0,0,0.45)' }}
             >
@@ -1434,7 +1544,7 @@ export default function Dashboard() {
                   className="text-2xl font-bold text-white"
                   initial={{ scale: 0.95 }}
                   animate={{ scale: 1 }}
-                  transition={{ type: "spring", stiffness: 220, damping: 14 }}
+                  transition={{ type: 'spring', stiffness: 220, damping: 14 }}
                 >
                   {getGreeting()}
                 </motion.h2>
@@ -1449,7 +1559,7 @@ export default function Dashboard() {
                 <motion.div
                   initial={{ y: 0 }}
                   animate={{ y: [0, -2, 0] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                   whileHover={{ y: 0 }}
                 >
                   <Button
@@ -1457,7 +1567,7 @@ export default function Dashboard() {
                     disabled={loading}
                     className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg hover:shadow-emerald-200 transition-all"
                   >
-                    {loading ? "Punching In..." : "Punch In Now"}
+                    {loading ? 'Punching In…' : 'Punch In Now'}
                   </Button>
                 </motion.div>
                 <Button
@@ -1466,17 +1576,15 @@ export default function Dashboard() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      await api.post("/attendance/mark-leave-today");
-                      toast.success("Marked on leave today");
-                      // Close gate immediately (optimistic) before refetch
+                      await api.post('/attendance/mark-leave-today');
+                      toast.success('Marked on leave today');
                       setActionDone(true);
                       setMustPunchIn(false);
-                      document.body.style.overflow = "auto";
-                      // Refetch attendance and holidays so both are fresh
+                      document.body.style.overflow = 'auto';
                       await queryClient.refetchQueries({ queryKey: ['todayAttendance'] });
                       await queryClient.refetchQueries({ queryKey: ['holidays'] });
                     } catch (err) {
-                      toast.error(err.response?.data?.detail || "Failed to mark leave");
+                      toast.error(err.response?.data?.detail || 'Failed to mark leave');
                     } finally {
                       setLoading(false);
                     }
