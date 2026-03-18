@@ -963,7 +963,6 @@ async def delete_reminder(
     await db.reminders.delete_one({"id": reminder_id})
     return {"message": "Reminder deleted"}
 
-
 #============================================================
 # USER MANAGEMENT
 #=============================================================
@@ -3957,14 +3956,18 @@ async def get_holidays(current_user: User = Depends(get_current_user)):
     holidays = await db.holidays.find(query, {"_id": 0}).sort("date", 1).to_list(500)
     return holidays
 
+
 @api_router.post("/holidays", response_model=HolidayResponse)
 async def create_holiday(
     holiday: HolidayCreate,
     current_user: User = Depends(require_admin)
 ):
-    # FIX: Build the dict carefully — HolidayCreate only has date, name, description.
-    # Do NOT try to access holiday.type since that field does not exist on HolidayCreate.
-    # Store the date as an ISO string for consistent MongoDB querying.
+    """
+    Create a holiday entry.
+    FIX: Build the dict carefully — HolidayCreate only has date, name, description.
+    Do NOT try to access holiday.type since that field does not exist on HolidayCreate.
+    Store the date as an ISO string for consistent MongoDB querying.
+    """
     holiday_dict = {
         "date": holiday.date.isoformat(),
         "name": holiday.name,
@@ -4016,6 +4019,7 @@ async def create_holiday(
             return final
         raise HTTPException(status_code=500, detail=f"Failed to save holiday: {str(e)}")
 
+
 @api_router.patch("/holidays/{holiday_date}/status")
 async def update_holiday_status(
     holiday_date: str,
@@ -4033,7 +4037,6 @@ async def update_holiday_status(
         raise HTTPException(status_code=404, detail="Holiday not found")
     return {"message": f"Holiday marked as {new_status}"}
 
-import traceback
 
 @api_router.delete("/holidays/{holiday_date}")
 async def delete_holiday(holiday_date: str, current_user: User = Depends(require_admin)):
