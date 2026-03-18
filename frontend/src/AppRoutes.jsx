@@ -4,21 +4,22 @@ import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 /* Lazy Pages */
-const Login = lazy(() => import("@/pages/Login"));
-const TaskAudit = lazy(() => import("@/pages/TaskAudit"));
-const Register = lazy(() => import("@/pages/Register"));
-const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const Tasks = lazy(() => import("@/pages/Tasks"));
-const TodoDashboard = lazy(() => import("@/pages/TodoDashboard")); // ✅ ADDED
-const DSCRegister = lazy(() => import("@/pages/DSCRegister"));
+const Login            = lazy(() => import("@/pages/Login"));
+const TaskAudit        = lazy(() => import("@/pages/TaskAudit"));
+const Register         = lazy(() => import("@/pages/Register"));
+const Dashboard        = lazy(() => import("@/pages/Dashboard"));
+const Tasks            = lazy(() => import("@/pages/Tasks"));
+const TodoDashboard    = lazy(() => import("@/pages/TodoDashboard"));
+const DSCRegister      = lazy(() => import("@/pages/DSCRegister"));
 const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister"));
-const Attendance = lazy(() => import("@/pages/Attendance"));
-const Reports = lazy(() => import("@/pages/Reports"));
-const Clients = lazy(() => import("@/pages/Clients"));
-const Users = lazy(() => import("@/pages/Users"));
-const DueDates = lazy(() => import("@/pages/DueDates"));
-const StaffActivity = lazy(() => import("@/pages/StaffActivity"));
-const LeadsPage = lazy(() => import("@/pages/Leads"));
+const Attendance       = lazy(() => import("@/pages/Attendance"));
+const Reports          = lazy(() => import("@/pages/Reports"));
+const Clients          = lazy(() => import("@/pages/Clients"));
+const Users            = lazy(() => import("@/pages/Users"));
+const DueDates         = lazy(() => import("@/pages/DueDates"));
+const StaffActivity    = lazy(() => import("@/pages/StaffActivity"));
+const LeadsPage        = lazy(() => import("@/pages/Leads"));
+const VisitsPage       = lazy(() => import("@/pages/VisitsPage")); // ✅ ADDED
 
 
 /* Route Guards */
@@ -102,7 +103,7 @@ function AppRoutes() {
           }
         />
 
-        {/* ✅ TODO DASHBOARD — accessible to ALL authenticated users (owns their own todos) */}
+        {/* Todo Dashboard */}
         <Route
           path="/todos"
           element={
@@ -209,6 +210,16 @@ function AppRoutes() {
             <Permission permission="can_view_audit_logs">
               <TaskAudit />
             </Permission>
+          }
+        />
+
+        {/* ✅ Client Visits — accessible to all authenticated users */}
+        <Route
+          path="/visits"
+          element={
+            <Protected>
+              <VisitsPage />
+            </Protected>
           }
         />
 
