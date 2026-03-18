@@ -236,6 +236,10 @@ async def startup_event():
         await db.todos.create_index([("user_id", 1), ("created_at", -1)])
         await db.attendance.create_index([("user_id", 1), ("date", -1)])
         await db.notifications.create_index("user_id")
+        await db.visits.create_index([("assigned_to", 1), ("visit_date", -1)])
+        await db.visits.create_index("visit_date")
+        await db.visits.create_index("client_id")
+        await db.visits.create_index("status")
         await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
         await db.notifications.create_index("created_at")
         # Unique indexes — use background=True so they don't block startup if they already exist
