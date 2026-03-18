@@ -1464,13 +1464,6 @@ export default function Dashboard() {
             label:  String(stats?.upcoming_due_dates || 0),
             sub:    'Compliance',
           },
-          {
-            path:   '/visits',
-            icon:   <MapPin className="h-4 w-4 text-teal-500" />,
-            iconBg: isDark ? 'rgba(20,184,166,0.2)' : '#f0fdfa',
-            label:  'Visits',
-            sub:    'Plan & Track',
-          },
         ].map(tile => (
           <motion.div
             key={tile.path}
