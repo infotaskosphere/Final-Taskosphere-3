@@ -166,7 +166,6 @@ class UserPermissions(BaseModel):
     can_view_staff_rankings: bool = False
     can_delete_data: bool = False
     can_delete_tasks: bool = False
-    # Specific access lists (Layer 3)
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -326,10 +325,17 @@ class Attendance(BaseModel):
 
 
 # ======================
-# STAFF ACTIVITY
+# STAFF ACTIVITY (REWRITTEN FOR REACT SYNC COMPATIBILITY)
 # ======================
 class StaffActivityCreate(BaseModel):
-    activity_type: str
+    # Added fields to match frontend POST request directly
+    app_name: str = "Taskosphere Web"
+    window_title: str
+    url: str
+    category: str = "productivity"
+    duration_seconds: int
+    # Original required field, defaulted to prevent 422 if frontend doesn't send it
+    activity_type: str = "active_time"
     description: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
@@ -339,6 +345,11 @@ class StaffActivityLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     activity_type: str
+    app_name: Optional[str] = None
+    window_title: Optional[str] = None
+    url: Optional[str] = None
+    category: Optional[str] = None
+    duration_seconds: int = 0
     description: Optional[str] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Optional[Dict[str, Any]] = None
@@ -501,7 +512,6 @@ class DocumentMovementUpdateRequest(BaseModel):
 
 # ======================
 # CLIENT MANAGEMENT
-# CHANGE: phone is now Optional (not required)
 # ======================
 class ContactPerson(BaseModel):
     name: str
@@ -525,7 +535,6 @@ class ClientBase(BaseModel):
     client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
     contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: Optional[EmailStr] = None
-    # CHANGE: phone is now Optional — not required
     phone: Optional[str] = None
     date_of_incorporation: Optional[date] = None
     birthday: Optional[date] = None
@@ -672,7 +681,7 @@ class DashboardStats(BaseModel):
 
 
 # ======================
-# HOLIDAY MODELS - FIXED
+# HOLIDAY MODELS
 # ======================
 class HolidayCreate(BaseModel):
     date: date
@@ -681,8 +690,8 @@ class HolidayCreate(BaseModel):
 
 
 class HolidayResponse(BaseModel):
-    date: str  # ISO format string
+    date: str
     name: str
     description: Optional[str] = None
-    status: str = "confirmed"  # FIXED: Added missing status field
-    type: Optional[str] = "manual"  # FIXED: Added type field
+    status: str = "confirmed"
+    type: Optional[str] = "manual"
