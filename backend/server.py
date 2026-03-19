@@ -67,6 +67,7 @@ from backend.dependencies import (
 from backend.leads import router as leads_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
+from backend.email_integration import router as email_router  # ← NEW: email integration
 # External Services
 from fpdf import FPDF
 from sendgrid import SendGridAPIClient
@@ -255,6 +256,12 @@ async def startup_event():
             background=True
         )
         await db.holidays.create_index("date", unique=True, background=True)
+        # ── NEW: email connections index ──────────────────────────────────────
+        await db.email_connections.create_index(
+            [("user_id", 1), ("provider", 1)],
+            unique=True,
+            background=True
+        )
     except Exception as e:
         # Log index creation errors but do NOT crash the server
         logger.warning(f"Index creation warning (non-fatal): {e}")
@@ -4551,4 +4558,5 @@ api_router.include_router(visits_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
+api_router.include_router(email_router)   # ← NEW: email integration router
 app.include_router(api_router)
