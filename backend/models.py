@@ -196,7 +196,7 @@ class User(BaseModel):
     approved_by: Optional[str] = None
     approved_at: Optional[Any] = None
 
-    @field_validator('birthday', mode='before')
+    @field_validator("birthday", mode="before")
     @classmethod
     def empty_string_to_none(cls, v):
         if v == "" or v is None:
@@ -434,9 +434,9 @@ class MovementUpdateRequest(BaseModel):
     person_name: Optional[str] = None
     notes: Optional[str] = None
 
-# =====================
+# ======================
 # REMINDER MODELS
-# =====================
+# ======================
 class ReminderCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -540,24 +540,24 @@ class ClientBase(BaseModel):
         description="List of {user_id, services} assignments"
     )
 
-    @field_validator('phone', mode='before')
+    @field_validator("phone", mode="before")
     @classmethod
     def validate_phone(cls, v) -> Optional[str]:
         if v is None or str(v).strip() == "":
             return None
         cleaned = re.sub(r"\s|-|\+", "", str(v))
         if not cleaned.isdigit():
-            raise ValueError('Phone number must contain only digits')
+            raise ValueError("Phone number must contain only digits")
         if not (10 <= len(cleaned) <= 15):
-            raise ValueError('Phone number must be 10-15 digits')
+            raise ValueError("Phone number must be 10-15 digits")
         return v
 
-    @field_validator('company_name')
+    @field_validator("company_name")
     @classmethod
     def validate_company_name(cls, v: str) -> str:
         v = str(v).strip()
         if len(v) < 3:
-            raise ValueError('Company name must be at least 3 characters long')
+            raise ValueError("Company name must be at least 3 characters long")
         return v
 
 
@@ -587,7 +587,7 @@ class MasterClientForm(BaseModel):
     notes: Optional[str] = None
     referred_by: Optional[str] = None
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def clean_empty_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
@@ -729,3 +729,35 @@ class HolidayResponse(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
+
+
+# ======================
+# EMAIL INTEGRATION MODELS
+# ======================
+class EmailConnection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    user_id: str
+    provider: str  # e.g., "google", "microsoft", "yahoo", "custom_imap"
+    method: str    # e.g., "oauth", "imap"
+    email_address: Optional[str] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    expires_at: Optional[str] = None  # ISO format datetime string
+    app_password_enc: Optional[str] = None # Encrypted app password for IMAP
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    connected_at: Optional[str] = None # ISO format datetime string
+
+class ExtractedEvent(BaseModel):
+    title: str
+    event_type: str
+    date: Optional[str] = None
+    time: Optional[str] = None
+    location: Optional[str] = None
+    organizer: Optional[str] = None
+    description: Optional[str] = None
+    urgency: str = "medium"
+    source_subject: str
+    source_from: str
+    source_date: str
+    raw_snippet: Optional[str] = None
