@@ -53,7 +53,7 @@ import {
   Info,
   Mail,
 } from 'lucide-react';
-import EmailEventImporter from '@/components/EmailEventImporter.jsx';
+import EmailEventImporter from '@/components/EmailEventImporter';
 // ═══════════════════════════════════════════════════════════════════════════
 // INTERACTION STYLES — injected once
 // ═══════════════════════════════════════════════════════════════════════════
