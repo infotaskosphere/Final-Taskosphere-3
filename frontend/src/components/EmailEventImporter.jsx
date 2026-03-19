@@ -388,24 +388,53 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
   };
 
   const handleOAuthConnect = (provider) => {
-    // Open OAuth in new tab — callback will redirect back to app
-    const url = `/api/email/auth/${provider}`;
-    window.open(url, "_blank", "width=600,height=700");
-    // Poll for connection every 3s for up to 2 minutes
+    // Use the full backend URL so the OAuth redirect stays in the popup
+    const backendUrl = import.meta.env.VITE_API_URL?.replace("/api", "") 
+      || "https://final-taskosphere-backend.onrender.com";
+    const url = `${backendUrl}/api/email/auth/${provider}`;
+
+    const popup = window.open(url, "emailOAuth", "width=600,height=700,scrollbars=yes");
+
+    if (!popup) {
+      toast.error("Popup blocked! Please allow popups for this site and try again.");
+      return;
+    }
+
+    // Poll every 2s — check if popup closed (OAuth done) OR if connection appeared
     const poll = setInterval(async () => {
       try {
+        // If popup was closed by the callback page
+        if (popup.closed) {
+          clearInterval(poll);
+          const res = await api.get("/email/connections");
+          const conns = res.data?.connections || [];
+          const found = conns.find(c => c.provider === provider);
+          if (found) {
+            setConnections(conns);
+            toast.success(`✓ ${provider === "google" ? "Gmail" : "Outlook"} connected!`);
+          } else {
+            toast.error("OAuth cancelled or failed. Please try again.");
+          }
+          return;
+        }
+        // Also check if connection appeared while popup still open
         const res = await api.get("/email/connections");
         const conns = res.data?.connections || [];
         const found = conns.find(c => c.provider === provider);
         if (found) {
           setConnections(conns);
-          setConnectingProvider(null);
           clearInterval(poll);
+          popup.close();
           toast.success(`✓ ${provider === "google" ? "Gmail" : "Outlook"} connected!`);
         }
       } catch {}
-    }, 3000);
-    setTimeout(() => clearInterval(poll), 120000);
+    }, 2000);
+
+    // Give up after 3 minutes
+    setTimeout(() => {
+      clearInterval(poll);
+      if (!popup.closed) popup.close();
+    }, 180000);
   };
 
   const handleDisconnect = async (provider) => {
