@@ -5,6 +5,28 @@ module.exports = {
     "./src/**/*.{js,jsx,ts,tsx}",
   ],
   theme: {
+    screens: {
+      // Mobile Breakpoints (360-414px)
+      'xs': '360px',
+      'sm': '375px',
+      'sm-md': '390px',
+      'md': '414px',
+      
+      // Foldable / Tablet Breakpoints (600-820px)
+      'tablet': '600px',
+      'tablet-md': '768px',
+      'tablet-lg': '820px',
+      
+      // Laptop Breakpoints (1024-1440px)
+      'lg': '1024px',
+      'xl': '1366px',
+      '2xl': '1440px',
+      
+      // Desktop Breakpoints (1920-3840px)
+      '3xl': '1920px',
+      '4xl': '2560px',
+      '5xl': '3840px',
+    },
     extend: {
       fontFamily: {
         outfit: ['Outfit', 'sans-serif'],
@@ -57,6 +79,23 @@ module.exports = {
           '4': 'hsl(var(--chart-4))',
           '5': 'hsl(var(--chart-5))'
         }
+      },
+      spacing: {
+        // Additional responsive spacing utilities
+        'safe-xs': 'max(0.25rem, env(safe-area-inset-left))',
+        'safe-sm': 'max(0.5rem, env(safe-area-inset-left))',
+        'safe-md': 'max(1rem, env(safe-area-inset-left))',
+      },
+      fontSize: {
+        // Responsive typography
+        'xs': ['0.75rem', { lineHeight: '1rem' }],
+        'sm': ['0.875rem', { lineHeight: '1.25rem' }],
+        'base': ['1rem', { lineHeight: '1.5rem' }],
+        'lg': ['1.125rem', { lineHeight: '1.75rem' }],
+        'xl': ['1.25rem', { lineHeight: '1.75rem' }],
+        '2xl': ['1.5rem', { lineHeight: '2rem' }],
+        '3xl': ['1.875rem', { lineHeight: '2.25rem' }],
+        '4xl': ['2.25rem', { lineHeight: '2.5rem' }],
       }
     }
   },
