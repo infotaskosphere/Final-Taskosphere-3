@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -16,55 +16,50 @@ import {
   User, MessageSquare, Repeat, Building2, CheckCircle2,
   XCircle, AlertCircle, RotateCcw, Edit3, Trash2,
   Send, ChevronDown, ClipboardList, Loader2, Check,
+  Mail,    // ← ADD THIS
 } from "lucide-react";
-
 // ─── Brand palette ────────────────────────────────────────────────────────────
 const C = {
-  deepBlue:   "#0D3B66",
+  deepBlue: "#0D3B66",
   mediumBlue: "#1F6FB2",
-  emerald:    "#1FAF5A",
+  emerald: "#1FAF5A",
   lightGreen: "#5CCB5F",
-  coral:      "#FF6B6B",
-  amber:      "#F59E0B",
+  coral: "#FF6B6B",
+  amber: "#F59E0B",
 };
-
-const spring  = { type: "spring", stiffness: 300, damping: 24 };
-const fadeUp  = {
-  hidden:  { opacity: 0, y: 16 },
+const spring = { type: "spring", stiffness: 300, damping: 24 };
+const fadeUp = {
+  hidden: { opacity: 0, y: 16 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.23, 1, 0.32, 1] } },
-  exit:    { opacity: 0, y: -8, transition: { duration: 0.2 } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
 };
 const stagger = {
-  hidden:  { opacity: 0 },
+  hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
 };
-
 // ─── Status meta ─────────────────────────────────────────────────────────────
 const STATUS_META = {
-  scheduled:   { label: "Scheduled",   icon: Clock,        color: "text-blue-600",    bg: "bg-blue-50 dark:bg-blue-900/30",    border: "border-blue-200 dark:border-blue-800"    },
-  completed:   { label: "Completed",   icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/30", border: "border-emerald-200 dark:border-emerald-800" },
-  cancelled:   { label: "Cancelled",   icon: XCircle,      color: "text-red-500",     bg: "bg-red-50 dark:bg-red-900/30",      border: "border-red-200 dark:border-red-800"      },
-  missed:      { label: "Missed",      icon: AlertCircle,  color: "text-orange-500",  bg: "bg-orange-50 dark:bg-orange-900/30", border: "border-orange-200 dark:border-orange-800"},
-  rescheduled: { label: "Rescheduled", icon: RotateCcw,    color: "text-purple-500",  bg: "bg-purple-50 dark:bg-purple-900/30", border: "border-purple-200 dark:border-purple-800"},
+  scheduled: { label: "Scheduled", icon: Clock, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-900/30", border: "border-blue-200 dark:border-blue-800" },
+  completed: { label: "Completed", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/30", border: "border-emerald-200 dark:border-emerald-800" },
+  cancelled: { label: "Cancelled", icon: XCircle, color: "text-red-500", bg: "bg-red-50 dark:bg-red-900/30", border: "border-red-200 dark:border-red-800" },
+  missed: { label: "Missed", icon: AlertCircle, color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30", border: "border-orange-200 dark:border-orange-800"},
+  rescheduled: { label: "Rescheduled", icon: RotateCcw, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30", border: "border-purple-200 dark:border-purple-800"},
 };
-
 const PRIORITY_META = {
-  low:    { label: "Low",    color: "text-blue-500",   dot: "bg-blue-400"   },
-  medium: { label: "Medium", color: "text-amber-500",  dot: "bg-amber-400"  },
-  high:   { label: "High",   color: "text-orange-500", dot: "bg-orange-400" },
-  urgent: { label: "Urgent", color: "text-red-600",    dot: "bg-red-500"    },
+  low: { label: "Low", color: "text-blue-500", dot: "bg-blue-400" },
+  medium: { label: "Medium", color: "text-amber-500", dot: "bg-amber-400" },
+  high: { label: "High", color: "text-orange-500", dot: "bg-orange-400" },
+  urgent: { label: "Urgent", color: "text-red-600", dot: "bg-red-500" },
 };
-
 // ─── API helpers ──────────────────────────────────────────────────────────────
-const fetchVisits  = (p) => api.get("/visits", { params: p }).then(r => r.data);
-const fetchClients = ()  => api.get("/clients").then(r => r.data);
-const fetchUsers   = ()  => api.get("/users").then(r => r.data);
+const fetchVisits = (p) => api.get("/visits", { params: p }).then(r => r.data);
+const fetchClients = () => api.get("/clients").then(r => r.data);
+const fetchUsers = () => api.get("/users").then(r => r.data);
 const fetchSummary = (uid, month) =>
   api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
-
 // ─── Tiny reusable pieces ─────────────────────────────────────────────────────
 function StatusBadge({ status, size = "sm" }) {
-  const m    = STATUS_META[status] || STATUS_META.scheduled;
+  const m = STATUS_META[status] || STATUS_META.scheduled;
   const Icon = m.icon;
   return (
     <span className={cn(
@@ -77,7 +72,6 @@ function StatusBadge({ status, size = "sm" }) {
     </span>
   );
 }
-
 function PriorityDot({ priority }) {
   const m = PRIORITY_META[priority] || PRIORITY_META.medium;
   return (
@@ -87,7 +81,6 @@ function PriorityDot({ priority }) {
     </span>
   );
 }
-
 function Avatar({ src, name, size = 7 }) {
   return src ? (
     <img src={src} alt={name}
@@ -101,11 +94,9 @@ function Avatar({ src, name, size = 7 }) {
     </div>
   );
 }
-
 // ─── Yes / No quick-action button pair ───────────────────────────────────────
 function QuickStatusButtons({ visit, onDone }) {
   const qc = useQueryClient();
-
   const quickMut = useMutation({
     mutationFn: (done) =>
       api.post(`/visits/${visit.id}/quick-status`, { done }),
@@ -117,9 +108,7 @@ function QuickStatusButtons({ visit, onDone }) {
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
   });
-
   const pending = quickMut.isPending;
-
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       {/* YES — visit done */}
@@ -135,7 +124,6 @@ function QuickStatusButtons({ visit, onDone }) {
         {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
         Yes
       </motion.button>
-
       {/* NO — visit missed */}
       <motion.button
         whileHover={{ scale: 1.06 }}
@@ -154,20 +142,16 @@ function QuickStatusButtons({ visit, onDone }) {
     </div>
   );
 }
-
 // ─── Compact Visit Card ───────────────────────────────────────────────────────
 // Includes: date badge · purpose · client · meta · Yes/No · status dropdown · edit · delete
 function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
   const qc = useQueryClient();
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-
-  const isOver    = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
+  const isOver = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
   const showQuick = v.status === "scheduled" || v.status === "rescheduled";
-
   const isAdmin = currentUser?.role === "admin";
   const isOwner = v.assigned_to === currentUser?.id;
   const canWrite = isAdmin || isOwner;
-
   // Status change mutation — used by the inline dropdown on the card
   const statusMut = useMutation({
     mutationFn: (newStatus) => api.patch(`/visits/${v.id}`, { status: newStatus }),
@@ -179,7 +163,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
   });
-
   // Delete mutation — inline on the card
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/visits/${v.id}`),
@@ -190,7 +173,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Delete failed"),
   });
-
   return (
     <motion.div
       variants={fadeUp}
@@ -206,7 +188,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
       )}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
-
         {/* ── Date badge ── */}
         <div className="flex-shrink-0 w-11 text-center">
           <div className="rounded-lg overflow-hidden border dark:border-slate-700">
@@ -229,7 +210,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
             <p className="text-[9px] text-slate-400 mt-0.5 font-medium leading-none">{v.visit_time}</p>
           )}
         </div>
-
         {/* ── Main content ── */}
         <div className="flex-1 min-w-0">
           {/* Row 1: purpose + status badge + flags */}
@@ -251,7 +231,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               </span>
             )}
           </div>
-
           {/* Row 2: client + location + services + comments */}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
@@ -285,7 +264,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
             )}
           </div>
         </div>
-
         {/* ── Right action cluster — single flat horizontal row ── */}
         <div
           className="flex items-center gap-1.5 flex-shrink-0"
@@ -293,16 +271,12 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
         >
           {/* Priority dot */}
           <PriorityDot priority={v.priority} />
-
           {/* Avatar */}
           <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
-
           {/* Thin divider */}
           <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
-
           {/* Yes / No — only for scheduled/rescheduled */}
           {showQuick && <QuickStatusButtons visit={v} />}
-
           {/* Completed pill */}
           {v.status === "completed" && (
             <span className="flex items-center gap-1 px-2 py-1 rounded-lg
@@ -311,7 +285,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               <CheckCircle2 className="h-3 w-3" /> Done
             </span>
           )}
-
           {/* Missed pill */}
           {v.status === "missed" && (
             <span className="flex items-center gap-1 px-2 py-1 rounded-lg
@@ -320,12 +293,10 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               <AlertCircle className="h-3 w-3" /> Missed
             </span>
           )}
-
           {/* Divider before icon actions */}
           {canWrite && (
             <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
           )}
-
           {/* Edit */}
           {canWrite && (
             <motion.button
@@ -339,7 +310,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               <Edit3 className="h-3.5 w-3.5" />
             </motion.button>
           )}
-
           {/* Status dropdown chevron */}
           {canWrite && (
             <div className="relative">
@@ -356,7 +326,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </motion.button>
-
               <AnimatePresence>
                 {showStatusMenu && (
                   <motion.div
@@ -365,8 +334,8 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
                       border border-slate-200 dark:border-slate-700
                       rounded-xl shadow-xl overflow-hidden"
                     initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0,  scale: 1    }}
-                    exit={{   opacity: 0, y: -6, scale: 0.96  }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
                     transition={{ type: "spring", stiffness: 300, damping: 22 }}
                   >
                     {Object.entries(STATUS_META).map(([s, m]) => (
@@ -392,7 +361,6 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
               </AnimatePresence>
             </div>
           )}
-
           {/* Delete */}
           {canWrite && (
             <motion.button
@@ -419,48 +387,41 @@ function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
     </motion.div>
   );
 }
-
 // ─── Visit Form Modal ─────────────────────────────────────────────────────────
 function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
   const isEdit = !!visit?.id;
-  const qc     = useQueryClient();
-
+  const qc = useQueryClient();
   const [form, setForm] = useState({
-    client_id:           visit?.client_id      || "",
-    assigned_to:         visit?.assigned_to    || currentUser.id,
-    visit_date:          visit?.visit_date      || format(new Date(), "yyyy-MM-dd"),
-    visit_time:          visit?.visit_time      || "",
-    purpose:             visit?.purpose        || "",
-    services:            (visit?.services || []).join(", "),
-    priority:            visit?.priority       || "medium",
-    notes:               visit?.notes          || "",
-    location:            visit?.location       || "",
-    recurrence:          visit?.recurrence     || "none",
+    client_id: visit?.client_id || "",
+    assigned_to: visit?.assigned_to || currentUser.id,
+    visit_date: visit?.visit_date || format(new Date(), "yyyy-MM-dd"),
+    visit_time: visit?.visit_time || "",
+    purpose: visit?.purpose || "",
+    services: (visit?.services || []).join(", "),
+    priority: visit?.priority || "medium",
+    notes: visit?.notes || "",
+    location: visit?.location || "",
+    recurrence: visit?.recurrence || "none",
     recurrence_end_date: visit?.recurrence_end_date || "",
   });
-
-  const [bulkMode, setBulkMode]   = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
   const [bulkDates, setBulkDates] = useState([]);
   const [bulkCalMonth, setBulkCalMonth] = useState(new Date());
   const calDays = eachDayOfInterval({ start: startOfMonth(bulkCalMonth), end: endOfMonth(bulkCalMonth) });
-
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
   const toggleBulkDate = (d) => {
     const s = format(d, "yyyy-MM-dd");
     setBulkDates(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
   };
-
   const saveMut = useMutation({
     mutationFn: async () => {
       const payload = {
         ...form,
-        services:    form.services.split(",").map(s => s.trim()).filter(Boolean),
+        services: form.services.split(",").map(s => s.trim()).filter(Boolean),
         client_name: clients.find(c => c.id === form.client_id)?.company_name || "",
       };
-      if (!payload.visit_time)          delete payload.visit_time;
+      if (!payload.visit_time) delete payload.visit_time;
       if (!payload.recurrence_end_date) delete payload.recurrence_end_date;
-
       if (bulkMode && bulkDates.length)
         return api.post("/visits/bulk-schedule", { ...payload, visit_dates: bulkDates });
       if (isEdit)
@@ -475,12 +436,9 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Save failed"),
   });
-
   const canAssign = currentUser.role === "admin" || currentUser.role === "manager";
-
   const inputCls = "w-full px-3 py-2 rounded-xl border dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400";
   const labelCls = "block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-1 uppercase tracking-wider";
-
   return (
     <motion.div
       className="fixed inset-0 z-[9000] flex items-center justify-center p-4"
@@ -513,7 +471,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
             <X className="h-4 w-4" />
           </button>
         </div>
-
         <div className="p-5 space-y-3.5">
           {/* Bulk toggle */}
           {!isEdit && (
@@ -532,7 +489,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </button>
             </div>
           )}
-
           {/* Client + Assigned To */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -554,7 +510,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </div>
             )}
           </div>
-
           {/* Date / bulk calendar */}
           {bulkMode ? (
             <div>
@@ -579,8 +534,8 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
                   ))}
                   {Array(startOfMonth(bulkCalMonth).getDay()).fill(null).map((_, i) => <div key={`e${i}`} />)}
                   {calDays.map(d => {
-                    const s    = format(d, "yyyy-MM-dd");
-                    const sel  = bulkDates.includes(s);
+                    const s = format(d, "yyyy-MM-dd");
+                    const sel = bulkDates.includes(s);
                     const past = isBefore(d, new Date()) && !isToday(d);
                     return (
                       <button key={s} disabled={past} onClick={() => !past && toggleBulkDate(d)}
@@ -611,14 +566,12 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </div>
             </div>
           )}
-
           {/* Purpose */}
           <div>
             <label className={labelCls}>Purpose *</label>
             <input value={form.purpose} onChange={e => set("purpose", e.target.value)}
               placeholder="e.g. Annual GST review meeting" className={inputCls} />
           </div>
-
           {/* Services + Priority */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -635,14 +588,12 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </select>
             </div>
           </div>
-
           {/* Location */}
           <div>
             <label className={labelCls}>Location / Address</label>
             <input value={form.location} onChange={e => set("location", e.target.value)}
               placeholder="Address or Google Maps link" className={inputCls} />
           </div>
-
           {/* Recurrence */}
           {!isEdit && !bulkMode && (
             <div className="grid grid-cols-2 gap-3">
@@ -664,7 +615,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               )}
             </div>
           )}
-
           {/* Notes */}
           <div>
             <label className={labelCls}>Notes</label>
@@ -672,7 +622,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               placeholder="Any pre-visit notes or reminders…"
               className={cn(inputCls, "resize-none")} />
           </div>
-
           {/* Actions */}
           <div className="flex gap-2.5 pt-1">
             <Button variant="outline" onClick={onClose} className="flex-1 rounded-xl h-9 text-sm">
@@ -693,14 +642,12 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
     </motion.div>
   );
 }
-
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
 function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
   const qc = useQueryClient();
-  const [comment, setComment]         = useState("");
-  const [outcome, setOutcome]         = useState(visit?.outcome || "");
+  const [comment, setComment] = useState("");
+  const [outcome, setOutcome] = useState(visit?.outcome || "");
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-
   const statusMut = useMutation({
     mutationFn: (status) => api.patch(`/visits/${visit.id}`, { status }),
     onSuccess: () => {
@@ -711,13 +658,11 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Update failed"),
   });
-
   const outcomeMut = useMutation({
     mutationFn: () => api.patch(`/visits/${visit.id}`, { outcome }),
     onSuccess: () => { toast.success("Outcome saved"); qc.invalidateQueries({ queryKey: ["visits"] }); },
     onError: err => toast.error(err.response?.data?.detail || "Save failed"),
   });
-
   const commentMut = useMutation({
     mutationFn: () => api.post(`/visits/${visit.id}/comments`, { text: comment }),
     onSuccess: () => {
@@ -728,13 +673,11 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Failed"),
   });
-
   const deleteCommentMut = useMutation({
     mutationFn: (cid) => api.delete(`/visits/${visit.id}/comments/${cid}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["visits"] }); onDeleted?.(); },
     onError: err => toast.error(err.response?.data?.detail || "Failed"),
   });
-
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/visits/${visit.id}`),
     onSuccess: () => {
@@ -745,11 +688,9 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Delete failed"),
   });
-
-  const isAdmin  = currentUser.role === "admin";
-  const isOwner  = visit.assigned_to === currentUser.id;
+  const isAdmin = currentUser.role === "admin";
+  const isOwner = visit.assigned_to === currentUser.id;
   const canWrite = isAdmin || isOwner;
-
   return (
     <motion.div
       className="fixed inset-0 z-[9000] flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -783,8 +724,8 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
                       <motion.div
                         className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-50"
                         initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0,  scale: 1 }}
-                        exit={{   opacity: 0, y: -6, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
                       >
                         {Object.entries(STATUS_META).map(([s, m]) => (
                           <button key={s} onClick={() => statusMut.mutate(s)}
@@ -811,7 +752,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
             </button>
           </div>
         </div>
-
         <div className="p-5 space-y-4">
           {/* Title block */}
           <div>
@@ -828,7 +768,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               </span>
             </div>
           </div>
-
           {/* Quick yes/no inside detail panel too */}
           {(visit.status === "scheduled" || visit.status === "rescheduled") && (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border dark:border-slate-700">
@@ -838,14 +777,13 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               <QuickStatusButtons visit={visit} onDone={onDeleted} />
             </div>
           )}
-
           {/* Detail grid */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { icon: Calendar, label: "Date",        value: format(parseISO(visit.visit_date), "MMM d, yyyy") },
-              { icon: Clock,    label: "Time",        value: visit.visit_time || "—"                           },
-              { icon: User,     label: "Assigned To", value: visit.assigned_to_name || "—"                     },
-              { icon: MapPin,   label: "Location",    value: visit.location || "—"                             },
+              { icon: Calendar, label: "Date", value: format(parseISO(visit.visit_date), "MMM d, yyyy") },
+              { icon: Clock, label: "Time", value: visit.visit_time || "—" },
+              { icon: User, label: "Assigned To", value: visit.assigned_to_name || "—" },
+              { icon: MapPin, label: "Location", value: visit.location || "—" },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800">
                 <Icon className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
@@ -856,7 +794,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               </div>
             ))}
           </div>
-
           {/* Services */}
           {visit.services?.length > 0 && (
             <div>
@@ -872,7 +809,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               </div>
             </div>
           )}
-
           {/* Notes */}
           {visit.notes && (
             <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800">
@@ -880,7 +816,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               <p className="text-xs text-amber-800 dark:text-amber-200">{visit.notes}</p>
             </div>
           )}
-
           {/* Outcome */}
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
@@ -905,7 +840,6 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               </button>
             </div>
           </div>
-
           {/* Comments */}
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
@@ -963,12 +897,10 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     </motion.div>
   );
 }
-
 // ─── Month Calendar View ──────────────────────────────────────────────────────
 function MonthCalendar({ visits, currentMonth, onDayClick }) {
-  const days     = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+  const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
   const startDay = startOfMonth(currentMonth).getDay();
-
   const visitsByDate = useMemo(() => {
     const map = {};
     visits.forEach(v => {
@@ -977,7 +909,6 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
     });
     return map;
   }, [visits]);
-
   return (
     <div className="grid grid-cols-7 gap-0.5">
       {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
@@ -985,9 +916,9 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
       ))}
       {Array(startDay).fill(null).map((_, i) => <div key={`e${i}`} />)}
       {days.map(d => {
-        const key    = format(d, "yyyy-MM-dd");
+        const key = format(d, "yyyy-MM-dd");
         const dayVis = visitsByDate[key] || [];
-        const today  = isToday(d);
+        const today = isToday(d);
         return (
           <button key={key} onClick={() => onDayClick(d, dayVis)}
             className={cn("min-h-[64px] p-1.5 rounded-xl border text-left transition-all hover:shadow-sm",
@@ -1019,42 +950,37 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
     </div>
   );
 }
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function VisitsPage() {
   const { user } = useAuth();
-  const qc       = useQueryClient();
-
-  const [viewMode, setViewMode]         = useState("list");
+  const qc = useQueryClient();
+  const [viewMode, setViewMode] = useState("list");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterUser, setFilterUser]     = useState("all");
-  const [showForm, setShowForm]         = useState(false);
+  const [filterUser, setFilterUser] = useState("all");
+  const [showForm, setShowForm] = useState(false);
   const [editingVisit, setEditingVisit] = useState(null);
-  const [selectedVisit, setSelectedVisit]     = useState(null);
+  const [selectedVisit, setSelectedVisit] = useState(null);
   const [selectedDayVisits, setSelectedDayVisits] = useState(null);
-
+  const [showEmailImporter, setShowEmailImporter] = useState(false);
   const monthStr = format(currentMonth, "yyyy-MM");
-  const isAdmin  = user?.role === "admin";
-  const isMgr    = user?.role === "manager";
-
+  const isAdmin = user?.role === "admin";
+  const isMgr = user?.role === "manager";
   const { data: visits = [], isLoading } = useQuery({
     queryKey: ["visits", monthStr, filterStatus, filterUser],
-    queryFn:  () => fetchVisits({
-      month:   monthStr,
-      status:  filterStatus !== "all" ? filterStatus : undefined,
-      user_id: filterUser   !== "all" ? filterUser   : undefined,
+    queryFn: () => fetchVisits({
+      month: monthStr,
+      status: filterStatus !== "all" ? filterStatus : undefined,
+      user_id: filterUser !== "all" ? filterUser : undefined,
     }),
     staleTime: 0,
   });
-
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  const { data: users   = [] } = useQuery({ queryKey: ["users"],   queryFn: fetchUsers, enabled: isAdmin || isMgr });
-  const { data: summary }      = useQuery({
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr });
+  const { data: summary } = useQuery({
     queryKey: ["visits-summary", filterUser !== "all" ? filterUser : user?.id, monthStr],
-    queryFn:  () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
+    queryFn: () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
   });
-
   // Keep detail panel in sync when list refreshes
   useEffect(() => {
     if (selectedVisit) {
@@ -1062,17 +988,37 @@ export default function VisitsPage() {
       if (updated) setSelectedVisit(updated);
     }
   }, [visits]);
-
   const statCards = [
-    { label: "Total",     value: summary?.total || 0,                                                            color: C.deepBlue   },
-    { label: "Completed", value: summary?.by_status?.completed || 0,                                             color: C.emerald    },
-    { label: "Upcoming",  value: summary?.by_status?.scheduled || 0,                                             color: C.mediumBlue },
-    { label: "Missed",    value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0),       color: C.coral      },
+    { label: "Total", value: summary?.total || 0, color: C.deepBlue },
+    { label: "Completed", value: summary?.by_status?.completed || 0, color: C.emerald },
+    { label: "Upcoming", value: summary?.by_status?.scheduled || 0, color: C.mediumBlue },
+    { label: "Missed", value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0), color: C.coral },
   ];
+
+  const handleEmailEventForVisit = useCallback((event) => {
+    const prefilled = {
+      purpose:    event.title || "",
+      visit_date: event.date  || format(new Date(), "yyyy-MM-dd"),
+      visit_time: event.time  || "",
+      location:   event.location || "",
+      notes: [
+        event.description ? `Notes: ${event.description.slice(0, 300)}` : "",
+        event.organizer   ? `Organiser: ${event.organizer}`             : "",
+        event.source_from ? `From email: ${event.source_from}`          : "",
+      ].filter(Boolean).join("\n"),
+      priority:  event.urgency === "urgent" ? "urgent"
+               : event.urgency === "high"   ? "high"
+               : "medium",
+      client_id:   "",
+      assigned_to: "",
+      services:    event.event_type === "hearing" ? "Trademark, Legal" : "",
+    };
+    setEditingVisit(prefilled);
+    setShowForm(true);
+  }, []);
 
   return (
     <motion.div className="space-y-4" variants={stagger} initial="hidden" animate="visible">
-
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -1094,16 +1040,24 @@ export default function VisitsPage() {
               </button>
             ))}
           </div>
-          <Button
-            onClick={() => { setEditingVisit(null); setShowForm(true); }}
-            className="rounded-xl text-white font-semibold shadow-sm h-9"
-            style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
-          >
-            <Plus className="h-4 w-4 mr-1.5" /> Schedule
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowEmailImporter(true)}
+              className="rounded-xl h-9 border-purple-200 text-purple-700 hover:bg-purple-50 font-semibold text-sm"
+            >
+              <Mail className="h-4 w-4 mr-1.5" /> From Email
+            </Button>
+            <Button
+              onClick={() => { setEditingVisit(null); setShowForm(true); }}
+              className="rounded-xl text-white font-semibold shadow-sm h-9"
+              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
+            >
+              <Plus className="h-4 w-4 mr-1.5" /> Schedule
+            </Button>
+          </div>
         </div>
       </motion.div>
-
       {/* ── Summary cards ───────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {statCards.map(({ label, value, color }) => (
@@ -1120,7 +1074,6 @@ export default function VisitsPage() {
           </div>
         ))}
       </motion.div>
-
       {/* ── Controls ────────────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl px-2 py-1.5">
@@ -1136,13 +1089,11 @@ export default function VisitsPage() {
             <ChevronRight className="h-4 w-4 text-slate-500" />
           </button>
         </div>
-
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400">
           <option value="all">All Statuses</option>
           {Object.entries(STATUS_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
         </select>
-
         {(isAdmin || isMgr) && (
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
             className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400">
@@ -1150,13 +1101,11 @@ export default function VisitsPage() {
             {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
           </select>
         )}
-
         <button onClick={() => setCurrentMonth(new Date())}
           className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-medium">
           Today
         </button>
       </motion.div>
-
       {/* ── Main content ────────────────────────────────────────────────── */}
       <motion.div variants={fadeUp}>
         {isLoading ? (
@@ -1183,8 +1132,8 @@ export default function VisitsPage() {
           <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl p-4 shadow-sm">
             <MonthCalendar visits={visits} currentMonth={currentMonth}
               onDayClick={(d, dayVis) => {
-                if (dayVis.length === 1)      setSelectedVisit(dayVis[0]);
-                else if (dayVis.length > 1)   setSelectedDayVisits({ date: d, visits: dayVis });
+                if (dayVis.length === 1) setSelectedVisit(dayVis[0]);
+                else if (dayVis.length > 1) setSelectedDayVisits({ date: d, visits: dayVis });
               }} />
           </div>
         ) : (
@@ -1204,7 +1153,6 @@ export default function VisitsPage() {
           </div>
         )}
       </motion.div>
-
       {/* ── Day picker (calendar multi-visit) ───────────────────────────── */}
       <AnimatePresence>
         {selectedDayVisits && (
@@ -1250,7 +1198,6 @@ export default function VisitsPage() {
           </motion.div>
         )}
       </AnimatePresence>
-
       {/* ── Form modal ───────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showForm && (
@@ -1263,7 +1210,6 @@ export default function VisitsPage() {
           />
         )}
       </AnimatePresence>
-
       {/* ── Detail panel ────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedVisit && (
@@ -1277,6 +1223,15 @@ export default function VisitsPage() {
               const updated = visits.find(v => v.id === selectedVisit?.id);
               if (updated) setSelectedVisit(updated);
             }}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showEmailImporter && (
+          <EmailEventImporter
+            mode="visit"
+            onSelectEvent={handleEmailEventForVisit}
+            onClose={() => setShowEmailImporter(false)}
           />
         )}
       </AnimatePresence>
