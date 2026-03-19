@@ -51,8 +51,9 @@ import {
   Loader2,
   ChevronRight,
   Info,
+  Mail,
 } from 'lucide-react';
-
+import EmailEventImporter from '@/components/EmailEventImporter';
 // ═══════════════════════════════════════════════════════════════════════════
 // INTERACTION STYLES — injected once
 // ═══════════════════════════════════════════════════════════════════════════
@@ -113,7 +114,6 @@ if (typeof document !== 'undefined' && !document.getElementById('att-interaction
   s.textContent = ATTENDANCE_INTERACTION_STYLES;
   document.head.appendChild(s);
 }
-
 function addAttRipple(e) {
   const btn = e.currentTarget;
   const circle = document.createElement('span');
@@ -127,7 +127,6 @@ function addAttRipple(e) {
   btn.appendChild(circle);
   setTimeout(() => circle.remove(), 600);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // BRAND COLORS & CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -145,7 +144,6 @@ const COLORS = {
 };
 const IST_TIMEZONE = 'Asia/Kolkata';
 const ABSENT_CUTOFF_HOUR_IST = 19;
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } },
@@ -154,7 +152,6 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
-
 if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-font')) {
   const link = document.createElement('link');
   link.id = 'roboto-mono-font';
@@ -162,7 +159,6 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
   link.href = 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap';
   document.head.appendChild(link);
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // DIGITAL CLOCK
 // ═══════════════════════════════════════════════════════════════════════════
@@ -216,7 +212,6 @@ function DigitalClock() {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // STAT CARD
 // ═══════════════════════════════════════════════════════════════════════════
@@ -252,7 +247,6 @@ function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, tre
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -344,7 +338,6 @@ const extractHolidaysFromPDF = async (file) => {
   if (holidays.length === 0) throw new Error('No holidays found in the PDF');
   return holidays;
 };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // CUSTOM CALENDAR DAY
 // ═══════════════════════════════════════════════════════════════════════════
@@ -425,7 +418,6 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
     </Tooltip>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER POPUP (firing alert)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -474,7 +466,6 @@ function ReminderPopup({ reminder, onDismiss }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // HOLIDAY DETAIL POPUP — shown when a holiday stripe is clicked
 // ═══════════════════════════════════════════════════════════════════════════
@@ -582,7 +573,6 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER DETAIL POPUP — shown when a reminder stripe is clicked
 // ═══════════════════════════════════════════════════════════════════════════
@@ -702,7 +692,6 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER EDIT MODAL
 // ═══════════════════════════════════════════════════════════════════════════
@@ -713,7 +702,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
     reminder?.remind_at ? new Date(reminder.remind_at).toISOString().slice(0, 16) : ''
   );
   const [isSaving, setIsSaving] = useState(false);
-
   const handleSave = async () => {
     if (!title.trim()) {
       toast.error('Title is required');
@@ -733,9 +721,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
       setIsSaving(false);
     }
   };
-
   if (!isOpen) return null;
-
   return (
     <motion.div
       className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
@@ -754,7 +740,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
         <div className="px-8 py-6 text-white bg-gradient-to-r from-blue-500 to-blue-600">
           <h2 className="text-xl font-bold">Edit Reminder</h2>
         </div>
-
         <div className="p-8 space-y-4">
           <div>
             <label className="text-sm font-bold text-slate-600 mb-2 block">Title</label>
@@ -766,7 +751,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
               placeholder="Reminder title"
             />
           </div>
-
           <div>
             <label className="text-sm font-bold text-slate-600 mb-2 block">Description</label>
             <textarea
@@ -777,7 +761,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
               placeholder="Add details..."
             />
           </div>
-
           <div>
             <label className="text-sm font-bold text-slate-600 mb-2 block">Remind At</label>
             <input
@@ -788,7 +771,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
             />
           </div>
         </div>
-
         <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">
             Cancel
@@ -805,7 +787,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -855,15 +836,13 @@ export default function Attendance() {
   const [trademarkData, setTrademarkData] = useState(null);
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
-
   // ── detail popup state ──────────────────────────────────────────────
   const [selectedHolidayDetail, setSelectedHolidayDetail] = useState(null);
   const [selectedReminderDetail, setSelectedReminderDetail] = useState(null);
-
   // ── Patch 1: reminder edit modal state ──────────────────────────────
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
-
+  const [showEmailImporter, setShowEmailImporter] = useState(false);
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
@@ -881,7 +860,6 @@ export default function Attendance() {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
-
   useEffect(() => { fetchData(); fetchReminders(); }, []);
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
@@ -918,7 +896,6 @@ export default function Attendance() {
     const id = setInterval(check, 30000);
     return () => clearInterval(id);
   }, [reminders]);
-
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
@@ -944,7 +921,6 @@ export default function Attendance() {
     };
     resolveLocations();
   }, [attendanceHistory, displayTodayAttendance]);
-
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
@@ -962,7 +938,6 @@ export default function Attendance() {
     const id = setInterval(checkAbsentWarning, 60000);
     return () => clearInterval(id);
   }, [todayAttendance, isViewingOther, isEveryoneView]);
-
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true);
     setDataError(null);
@@ -1044,7 +1019,6 @@ export default function Attendance() {
       setLoading(false);
     }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
-
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
@@ -1054,7 +1028,6 @@ export default function Attendance() {
       setReminders(res.data || []);
     } catch {}
   }, [isViewingOther, selectedUserId]);
-
   const handlePunchAction = useCallback(async (action, e) => {
     if (e) addAttRipple(e);
     setLoading(true);
@@ -1082,7 +1055,6 @@ export default function Attendance() {
       toast.error(error.response?.data?.detail || 'Failed to record attendance', { duration: 4000 });
     } finally { setLoading(false); }
   }, [fetchData]);
-
   const handleApplyLeave = useCallback(async () => {
     if (!leaveFrom) { toast.error('Select a leave start date'); return; }
     try {
@@ -1096,7 +1068,6 @@ export default function Attendance() {
       await fetchData();
     } catch { toast.error('Failed to submit leave request'); }
   }, [leaveFrom, leaveTo, leaveReason, fetchData]);
-
   const handleAddHolidays = useCallback(async () => {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
     if (validRows.length === 0) { toast.error('Add at least one holiday'); return; }
@@ -1122,7 +1093,6 @@ export default function Attendance() {
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
     await fetchData();
   }, [holidayRows, fetchData]);
-
   const handlePdfImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1136,7 +1106,6 @@ export default function Attendance() {
     } catch (err) { toast.error(`PDF extraction failed: ${err.message}`); }
     finally { setPdfImporting(false); }
   }, []);
-
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
     setEditLoading(true);
@@ -1149,13 +1118,11 @@ export default function Attendance() {
     } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to update holiday'); }
     finally { setEditLoading(false); }
   }, [editingHoliday, editName, editDate, fetchData]);
-
   const handleDeleteHoliday = useCallback(async (date, name) => {
     if (!confirm(`Delete "${name}"?`)) return;
     try { await api.delete(`/holidays/${date}`); toast.success(`✓ "${name}" deleted`); await fetchData(); }
     catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete holiday'); }
   }, [fetchData]);
-
   const handleHolidayDecision = useCallback(async (holidayDate, decision) => {
     try {
       await api.patch(`/holidays/${holidayDate}/status`, { status: decision });
@@ -1163,7 +1130,6 @@ export default function Attendance() {
       await fetchData();
     } catch { toast.error('Failed to update holiday'); }
   }, [fetchData]);
-
   const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
     setAbsentLoading(true);
     try {
@@ -1179,7 +1145,6 @@ export default function Attendance() {
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to mark absent'); }
     finally { setAbsentLoading(false); }
   }, [fetchData]);
-
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
@@ -1194,7 +1159,21 @@ export default function Attendance() {
       await fetchReminders();
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
-
+  const handleEmailEventForReminder = useCallback((event) => {
+  setReminderTitle(event.title || "");
+  if (event.date) {
+    const timeStr = event.time || "10:00";
+    setReminderDatetime(`${event.date}T${timeStr}`);
+  }
+  const descLines = [];
+  if (event.event_type)  descLines.push(`Event type: ${event.event_type}`);
+  if (event.organizer)   descLines.push(`Organiser: ${event.organizer}`);
+  if (event.location)    descLines.push(`Location: ${event.location}`);
+  if (event.description) descLines.push(`Notes: ${event.description.slice(0, 200)}`);
+  if (event.source_from) descLines.push(`From: ${event.source_from}`);
+  setReminderDesc(descLines.join("\n"));
+  setShowReminderForm(true);
+}, []);
   // ── Patch 2: reminder edit handlers ──────────────────────────────────
   const handleEditReminder = useCallback((reminderId) => {
     const reminder = reminders.find(r => r.id === reminderId);
@@ -1203,7 +1182,6 @@ export default function Attendance() {
       setIsEditModalOpen(true);
     }
   }, [reminders]);
-
   const handleUpdateReminder = useCallback(async (updates) => {
     if (!editingReminder?.id) return;
     try {
@@ -1220,7 +1198,6 @@ export default function Attendance() {
       console.error(err);
     }
   }, [editingReminder, isViewingOther, selectedUserId]);
-
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1263,7 +1240,6 @@ export default function Attendance() {
       setTrademarkLoading(false);
     }
   }, []);
-
   const handleDeleteReminder = useCallback(async (id) => {
     try {
       await api.delete(`/reminders/${id}`);
@@ -1271,14 +1247,12 @@ export default function Attendance() {
       toast.success('Reminder deleted');
     } catch { toast.error('Failed to delete reminder'); }
   }, []);
-
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
     try { await api.patch(`/reminders/${firedReminder.id}`, { is_dismissed: true }); } catch {}
     setReminders(prev => prev.map(r => r.id === firedReminder.id ? { ...r, is_dismissed: true } : r));
     setFiredReminder(null);
   }, [firedReminder]);
-
   const handleExportPDF = useCallback(async () => {
     setExportingPDF(true);
     try {
@@ -1336,7 +1310,6 @@ export default function Attendance() {
     } catch { toast.error('Failed to export PDF'); }
     finally { setExportingPDF(false); }
   }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
-
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
     let atts = attendanceHistory.filter(a => {
@@ -1351,7 +1324,6 @@ export default function Attendance() {
     }
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
-
   const monthTotalMinutes = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
   const monthDaysPresent = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
   const monthDaysAbsent = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
@@ -1412,13 +1384,11 @@ export default function Attendance() {
     () => holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
     [holidays, todayDateStr]
   );
-
   return (
     <TooltipProvider>
       <AnimatePresence>
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} />}
       </AnimatePresence>
-
       {/* ── HOLIDAY DETAIL POPUP ── */}
       <AnimatePresence>
         {selectedHolidayDetail && (
@@ -1431,7 +1401,6 @@ export default function Attendance() {
           />
         )}
       </AnimatePresence>
-
       {/* ── REMINDER DETAIL POPUP ── */}
       <AnimatePresence>
         {selectedReminderDetail && (
@@ -1444,7 +1413,6 @@ export default function Attendance() {
           />
         )}
       </AnimatePresence>
-
       {/* ── Patch 5: REMINDER EDIT MODAL ── */}
       <AnimatePresence>
         {isEditModalOpen && editingReminder && (
@@ -1459,7 +1427,6 @@ export default function Attendance() {
           />
         )}
       </AnimatePresence>
-
       <motion.div
         className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
         style={{
@@ -1517,7 +1484,6 @@ export default function Attendance() {
             </motion.div>
           </div>
         </motion.div>
-
         {/* ── ALERTS ── */}
         {dataError && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
@@ -1559,7 +1525,6 @@ export default function Attendance() {
             </button>
           </motion.div>
         )}
-
         {/* ── TODAY STATUS HERO ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1669,7 +1634,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── PENDING HOLIDAY REVIEW ── */}
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1702,7 +1666,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── ABSENT SUMMARY ── */}
         {isAdmin && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1731,7 +1694,6 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── STAT CARDS ── */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
           <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Month` : 'This Month'}
@@ -1745,7 +1707,6 @@ export default function Attendance() {
             <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
         </motion.div>
-
         {/* ── DAILY PROGRESS ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
@@ -1806,11 +1767,9 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── HOLIDAY + REMINDER CARDS (compact with slim scroll) ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
-
             {/* ══ HOLIDAY CARD — compact with slim scroll ══ */}
             {(() => {
               const monthHolidaysGrid = holidays.filter(h => {
@@ -1845,7 +1804,6 @@ export default function Attendance() {
                       </Button>
                     )}
                   </div>
-
                   {/* Scrollable list */}
                   <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                     {monthHolidaysGrid.length === 0 ? (
@@ -1905,7 +1863,6 @@ export default function Attendance() {
                 </Card>
               );
             })()}
-
             {/* ══ REMINDER CARD — compact with slim scroll ══ */}
             <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
               {/* Fixed header */}
@@ -1925,15 +1882,24 @@ export default function Attendance() {
                   </div>
                 </div>
                 {!isViewingOther && (
-                  <Button onClick={() => setShowReminderForm(true)}
-                    size="sm"
-                    className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs"
-                    style={{ backgroundColor: COLORS.purple }}>
-                    <Plus className="w-3.5 h-3.5 mr-1" /> New
-                  </Button>
+                  <div className="flex items-center gap-2">
+    <Button
+      onClick={() => setShowEmailImporter(true)}
+      size="sm"
+      variant="outline"
+      className="font-bold rounded-lg h-8 px-3 active:scale-95 transition-all flex-shrink-0 text-xs border-purple-200 text-purple-700 hover:bg-purple-50"
+    >
+      <Mail className="w-3.5 h-3.5 mr-1" /> From Email
+    </Button>
+    <Button onClick={() => setShowReminderForm(true)}
+      size="sm"
+      className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs"
+      style={{ backgroundColor: COLORS.purple }}>
+      <Plus className="w-3.5 h-3.5 mr-1" /> New
+    </Button>
+  </div>
                 )}
               </div>
-
               {/* Scrollable list */}
               <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                 {upcomingReminders.length === 0 ? (
@@ -2000,13 +1966,10 @@ export default function Attendance() {
             </Card>
           </motion.div>
         )}
-
         {/* ── CALENDAR + RECENT ATTENDANCE ── */}
         <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
-
           {!isEveryoneView && (
             <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
-
               {/* Calendar Card */}
               <Card className="border-0 shadow-md flex-shrink-0">
                 <CardHeader>
@@ -2056,7 +2019,6 @@ export default function Attendance() {
                   </div>
                 </CardContent>
               </Card>
-
               {/* Detail Card */}
               <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
                 <CardContent className="p-0 h-full overflow-y-auto">
@@ -2126,7 +2088,6 @@ export default function Attendance() {
               </Card>
             </motion.div>
           )}
-
           {/* ── RECENT ATTENDANCE TABLE ── */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
             <Card className="border-0 shadow-md h-full">
@@ -2226,9 +2187,7 @@ export default function Attendance() {
             </Card>
           </motion.div>
         </motion.div>
-
         {/* ══════════════════════ MODALS ══════════════════════ */}
-
         {/* Punch-In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
@@ -2260,7 +2219,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
@@ -2332,7 +2290,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Add Holiday Modal */}
         <AnimatePresence>
           {showHolidayModal && (
@@ -2403,7 +2360,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
@@ -2457,7 +2413,6 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
         {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
@@ -2619,7 +2574,15 @@ export default function Attendance() {
             </motion.div>
           )}
         </AnimatePresence>
-
+<AnimatePresence>
+  {showEmailImporter && (
+    <EmailEventImporter
+      mode="reminder"
+      onSelectEvent={handleEmailEventForReminder}
+      onClose={() => setShowEmailImporter(false)}
+    />
+  )}
+</AnimatePresence>
       </motion.div>
     </TooltipProvider>
   );
