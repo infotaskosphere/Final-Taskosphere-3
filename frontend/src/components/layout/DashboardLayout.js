@@ -145,7 +145,7 @@ const DashboardLayout = ({ children }) => {
   const activeLabel = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
   const sidebarWidth  = collapsed ? 'w-[72px]'  : 'w-[260px]';
-  const contentMargin = collapsed ? 'lg:ml-[72px]' : 'lg:ml-[260px]';
+  const contentMargin = collapsed ? 'tablet-lg:ml-[72px] lg:ml-[72px]' : 'tablet-lg:ml-[260px] lg:ml-[260px]';
 
   // ── Sidebar nav item renderer ─────────────────────────────────────────────
   const NavItem = ({ item }) => {
@@ -237,7 +237,7 @@ const DashboardLayout = ({ children }) => {
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/50 z-40 tablet-lg:hidden lg:hidden backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -263,14 +263,14 @@ const DashboardLayout = ({ children }) => {
       >
         {/* ── Logo Area ─────────────────────────────────────────────────── */}
         <div
-          className="flex items-center justify-between px-4 py-4 flex-shrink-0"
+          className="flex items-center justify-between px-3 sm:px-4 py-3 sm:py-4 flex-shrink-0"
           style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
         >
           <div className={`flex items-center overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
             <img
               src="/logo.png"
               alt="Taskosphere"
-              className={`object-contain transition-all duration-300 ${collapsed ? 'h-9 w-9' : 'h-12'}`}
+              className={`object-contain transition-all duration-300 ${collapsed ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 sm:h-12'}`}
             />
           </div>
 
@@ -278,7 +278,7 @@ const DashboardLayout = ({ children }) => {
           <motion.button
             onClick={() => setCollapsed(prev => !prev)}
             className={`
-              hidden lg:flex p-1.5 rounded-lg transition-all flex-shrink-0
+              hidden tablet-lg:flex lg:flex p-1.5 rounded-lg transition-all flex-shrink-0
               ${isDark
                 ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
                 : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
@@ -313,8 +313,8 @@ const DashboardLayout = ({ children }) => {
             className="flex-shrink-0 px-3 py-3"
             style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
           >
-            <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-              <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+            <div className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 sm:py-2.5 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
                 {user?.profile_picture ? (
                   <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                 ) : (
@@ -327,7 +327,7 @@ const DashboardLayout = ({ children }) => {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className={`font-semibold text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                <p className={`font-semibold text-[10px] sm:text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                   {user?.full_name}
                 </p>
                 <p className={`text-[10px] truncate capitalize ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -340,7 +340,7 @@ const DashboardLayout = ({ children }) => {
       </aside>
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className={`${contentMargin} transition-all duration-300 ease-in-out min-h-screen flex flex-col`}>
+      <div className={`${contentMargin} transition-all duration-300 ease-in-out min-h-screen flex flex-col pt-12 sm:pt-14`}>
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <header
@@ -355,7 +355,7 @@ const DashboardLayout = ({ children }) => {
             WebkitBackdropFilter: 'blur(12px)',
           }}
         >
-          <div className="flex items-center justify-between px-5 md:px-7 h-14">
+          <div className="flex items-center justify-between px-3 sm:px-5 md:px-7 h-12 sm:h-14">
 
             {/* Mobile menu button */}
             <motion.div whileTap={{ scale: 0.9 }}>
@@ -363,14 +363,14 @@ const DashboardLayout = ({ children }) => {
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(prev => !prev)}
-                className={`lg:hidden h-9 w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
+                className={`tablet-lg:hidden lg:hidden h-8 w-8 sm:h-9 sm:w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
               >
                 <Menu className="h-4 w-4" />
               </Button>
             </motion.div>
 
             {/* Page breadcrumb (desktop) */}
-            <div className="hidden lg:flex items-center gap-2">
+            <div className="hidden tablet-lg:flex lg:flex items-center gap-2">
               {/* Active nav icon */}
               {(() => {
                 const active = visibleNavItems.find(i => i.path === location.pathname);
@@ -381,24 +381,24 @@ const DashboardLayout = ({ children }) => {
                     className="p-1.5 rounded-lg"
                     style={{ background: `${COLORS.deepBlue}12` }}
                   >
-                    <Icon className="h-3.5 w-3.5" style={{ color: COLORS.deepBlue }} />
+                    <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: COLORS.deepBlue }} />
                   </div>
                 );
               })()}
-              <span className={`text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className={`text-xs sm:text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {activeLabel}
               </span>
             </div>
 
             {/* Right cluster */}
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-1 sm:gap-2 ml-auto">
 
               <NotificationBell />
 
               {/* Theme toggle */}
               <motion.button
                 onClick={() => setIsDark(prev => !prev)}
-                className={`h-9 w-9 rounded-xl flex items-center justify-center border transition-all ${
+                className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center border transition-all ${
                   isDark
                     ? 'bg-slate-800 border-slate-600 text-amber-400 hover:bg-slate-700'
                     : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
@@ -425,7 +425,7 @@ const DashboardLayout = ({ children }) => {
               <div className="relative" data-user-menu>
                 <motion.button
                   onClick={() => setUserMenuOpen(prev => !prev)}
-                  className={`flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl border transition-all ${
+                  className={`flex items-center gap-1.5 sm:gap-2.5 pl-1.5 sm:pl-2 pr-2 sm:pr-3 py-1 sm:py-1.5 rounded-xl border transition-all ${
                     isDark
                       ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/60 bg-slate-800/60'
                       : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
@@ -433,7 +433,7 @@ const DashboardLayout = ({ children }) => {
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
                 >
-                  <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
                     {user?.profile_picture ? (
                       <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                     ) : (
@@ -445,7 +445,7 @@ const DashboardLayout = ({ children }) => {
                       </div>
                     )}
                   </div>
-                  <span className={`hidden md:block text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  <span className={`hidden md:block text-xs sm:text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
                     {user?.full_name?.split(' ')[0]}
                   </span>
                   <motion.div
