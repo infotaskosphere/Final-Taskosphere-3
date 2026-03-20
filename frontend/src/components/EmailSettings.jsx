@@ -1,14 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // EmailSettings.jsx
-// A full settings page where users can connect multiple email accounts
-// using App Passwords — NO OAuth, NO Google Cloud Console needed.
-//
-// Drop into your settings route:
-//   <Route path="/settings/email" element={<EmailSettings />} />
-//
-// Or embed inside your existing Settings page:
-//   import EmailSettings from "@/components/EmailSettings";
-//   <EmailSettings />
+// Connect multiple email accounts via App Passwords — NO OAuth needed.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -16,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import {
-  Mail, Plus, Trash2, CheckCircle2, AlertCircle, RefreshCw,
+  Mail, Plus, Trash2, CheckCircle2, AlertCircle,
   Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
   Wifi, WifiOff, Edit2, Check, X, Info, Shield,
 } from "lucide-react";
@@ -42,7 +34,6 @@ const PROVIDER_ICONS = {
   other:   "@",
 };
 
-// ── Quick provider buttons ────────────────────────────────────────────────────
 const QUICK_PROVIDERS = [
   {
     id: "gmail",
@@ -137,20 +128,19 @@ const QUICK_PROVIDERS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONNECT FORM  (shown per provider)
+// CONNECT FORM
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ConnectForm({ provider, onSuccess, onCancel }) {
-  const [email, setEmail]       = useState(provider.domain ? `@${provider.domain}` : "");
-  const [password, setPassword] = useState("");
-  const [host, setHost]         = useState(provider.imap_host);
-  const [port, setPort]         = useState(provider.imap_port);
-  const [label, setLabel]       = useState("");
-  const [showPass, setShowPass] = useState(false);
+  const [email, setEmail]         = useState(provider.domain ? `@${provider.domain}` : "");
+  const [password, setPassword]   = useState("");
+  const [host, setHost]           = useState(provider.imap_host);
+  const [port, setPort]           = useState(provider.imap_port);
+  const [label, setLabel]         = useState("");
+  const [showPass, setShowPass]   = useState(false);
   const [showSteps, setShowSteps] = useState(true);
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading]     = useState(false);
 
-  // Auto-fill email cursor position
   const emailRef = React.useRef(null);
   useEffect(() => {
     if (provider.domain && emailRef.current) {
@@ -163,7 +153,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
     const trimEmail = email.trim();
     if (!trimEmail || !trimEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
     if (!password) { toast.error("App Password is required"); return; }
-
     setLoading(true);
     try {
       await api.post("/email/connections", {
@@ -275,7 +264,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               onChange={e => setEmail(e.target.value)}
               placeholder={`you@${provider.domain || "example.com"}`}
               className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 transition-shadow"
-              style={{ "--tw-ring-color": provider.color + "40" } as any}
             />
           </div>
 
@@ -309,12 +297,12 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               type="text"
               value={label}
               onChange={e => setLabel(e.target.value)}
-              placeholder={`e.g. Work Gmail, Personal Yahoo`}
+              placeholder="e.g. Work Gmail, Personal Yahoo"
               className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 transition-shadow"
             />
           </div>
 
-          {/* Custom IMAP host (only for "other") */}
+          {/* Custom IMAP host — only for "other" */}
           {provider.id === "other" && (
             <div className="grid grid-cols-3 gap-2">
               <div className="col-span-2">
@@ -342,8 +330,7 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
 
         {/* Actions */}
         <div className="flex gap-2 pt-1">
-          <Button variant="outline" onClick={onCancel}
-            className="flex-1 rounded-xl h-10 text-sm font-semibold">
+          <Button variant="outline" onClick={onCancel} className="flex-1 rounded-xl h-10 text-sm font-semibold">
             Cancel
           </Button>
           <Button
@@ -380,7 +367,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
   const [testing, setTesting]           = useState(false);
 
   const color = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
-  const icon  = PROVIDER_ICONS[conn.provider] || PROVIDER_ICONS.other;
+  const icon  = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
 
   const handleSaveLabel = async () => {
     try {
@@ -394,11 +381,8 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
 
   const handleTest = async () => {
     setTesting(true);
-    try {
-      await onTest(conn.email_address);
-    } finally {
-      setTesting(false);
-    }
+    try { await onTest(conn.email_address); }
+    finally { setTesting(false); }
   };
 
   const hasError = !!conn.sync_error;
@@ -430,7 +414,10 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
                 autoFocus
                 value={labelVal}
                 onChange={e => setLabelVal(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(); if (e.key === "Escape") setEditingLabel(false); }}
+                onKeyDown={e => {
+                  if (e.key === "Enter") handleSaveLabel();
+                  if (e.key === "Escape") setEditingLabel(false);
+                }}
                 className="flex-1 px-2 py-1 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
               />
               <button onClick={handleSaveLabel} className="p-1 text-emerald-600 hover:text-emerald-700">
@@ -488,7 +475,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Test button */}
           <button
             onClick={handleTest}
             disabled={testing}
@@ -499,7 +485,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
             Test
           </button>
 
-          {/* Pause/Resume toggle */}
           <button
             onClick={() => onToggle(conn.email_address, !conn.is_active)}
             title={conn.is_active ? "Pause syncing" : "Resume syncing"}
@@ -508,7 +493,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
             {conn.is_active ? "Pause" : "Resume"}
           </button>
 
-          {/* Disconnect */}
           <button
             onClick={() => onDisconnect(conn.email_address)}
             title="Disconnect"
@@ -527,9 +511,9 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function EmailSettings() {
-  const [connections, setConnections]   = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [activeForm, setActiveForm]     = useState(null);  // provider id or null
+  const [connections, setConnections]       = useState([]);
+  const [loading, setLoading]               = useState(true);
+  const [activeForm, setActiveForm]         = useState(null);
   const [showAddOptions, setShowAddOptions] = useState(false);
 
   const loadConnections = useCallback(async () => {
@@ -545,7 +529,8 @@ export default function EmailSettings() {
 
   useEffect(() => { loadConnections(); }, [loadConnections]);
 
-  const handleDisconnect = async (emailAddress: string) => {
+  // ── removed ": string" and ": boolean" TypeScript annotations ────────────
+  const handleDisconnect = async (emailAddress) => {
     if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
     try {
       await api.delete(`/email/connections/${encodeURIComponent(emailAddress)}`);
@@ -556,7 +541,7 @@ export default function EmailSettings() {
     }
   };
 
-  const handleTest = async (emailAddress: string) => {
+  const handleTest = async (emailAddress) => {
     try {
       await api.post(`/email/connections/${encodeURIComponent(emailAddress)}/test`);
       toast.success(`✓ ${emailAddress} is working`);
@@ -567,7 +552,7 @@ export default function EmailSettings() {
     }
   };
 
-  const handleToggle = async (emailAddress: string, isActive: boolean) => {
+  const handleToggle = async (emailAddress, isActive) => {
     try {
       await api.patch(`/email/connections/${encodeURIComponent(emailAddress)}`, { is_active: isActive });
       setConnections(prev =>
@@ -590,7 +575,7 @@ export default function EmailSettings() {
   return (
     <div className="max-w-2xl mx-auto py-8 px-4 space-y-8">
 
-      {/* ── Page header ── */}
+      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Email Accounts</h1>
         <p className="text-sm text-slate-500 mt-1">
@@ -599,7 +584,7 @@ export default function EmailSettings() {
         </p>
       </div>
 
-      {/* ── How it works banner ── */}
+      {/* How it works */}
       <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-start gap-3">
         <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
           <Info className="w-4 h-4 text-blue-600" />
@@ -607,14 +592,14 @@ export default function EmailSettings() {
         <div>
           <p className="text-sm font-semibold text-blue-800 mb-1">How it works</p>
           <p className="text-xs text-blue-700 leading-relaxed">
-            We connect to your inbox using IMAP (the same standard used by email apps like Outlook Desktop, Thunderbird, Apple Mail).
-            You generate a special <strong>App Password</strong> from your email provider — it's separate from your login password
-            and can be revoked anytime. We only read emails to extract event data; we never send emails or modify anything.
+            We connect to your inbox using IMAP — the same standard used by Outlook, Thunderbird, and Apple Mail.
+            You generate a special <strong>App Password</strong> from your provider — separate from your login password,
+            revokable anytime. We only read emails to extract event data; we never send or modify anything.
           </p>
         </div>
       </div>
 
-      {/* ── Connected accounts ── */}
+      {/* Connected accounts */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-700">
@@ -639,7 +624,6 @@ export default function EmailSettings() {
             <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
           </div>
         ) : connections.length === 0 && !showAddOptions && !activeForm ? (
-          /* Empty state */
           <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
               <Mail className="w-8 h-8 text-slate-400" />
@@ -673,7 +657,7 @@ export default function EmailSettings() {
         )}
       </div>
 
-      {/* ── Add account section ── */}
+      {/* Add account — provider picker */}
       <AnimatePresence>
         {(showAddOptions || connections.length === 0) && !activeForm && (
           <motion.div
@@ -709,7 +693,7 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      {/* ── Connect form ── */}
+      {/* Connect form */}
       <AnimatePresence>
         {activeForm && activeProvider && (
           <ConnectForm
@@ -724,7 +708,7 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      {/* ── Tips ── */}
+      {/* Tips */}
       {connections.length > 0 && !activeForm && (
         <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tips</p>
@@ -732,7 +716,7 @@ export default function EmailSettings() {
             {[
               "You can connect multiple accounts — events from all accounts appear together",
               "If an account shows an error, click Test to diagnose or re-generate the App Password",
-              "Pause an account temporarily to stop it from being scanned without losing the connection",
+              "Pause an account temporarily to stop scanning without losing the connection",
               "App Passwords can be revoked from your email provider anytime — your main password stays safe",
             ].map((tip, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-slate-500">
