@@ -1,12 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// EmailSettings.jsx  v2
-// Connect multiple email accounts via App Passwords — NO OAuth needed.
-// NEW IN V2:
-//  - Fixed "Failed to save" error (uses /email/save-as-reminder and /email/save-as-visit)
-//  - First-time auto-save dialog: asks if user wants events auto-added
-//  - Daily auto-scan at 12:00 PM (configurable) — no manual scan needed
-//  - Improved junk filtering displayed to user
-//  - Attendance / Holiday / Visit card integration via /email/attendance/today-summary
+// EmailSettings.jsx  v3
+// Connect MULTIPLE email accounts via App Passwords — NO OAuth needed.
+// NEW IN V3:
+//  - Gmail pre-flight checklist (IMAP enable + App Password guide)
+//  - Multi-account UI made explicit — "Add Another Account" always visible
+//  - Better error messages with direct fix links
+//  - All v2 features retained (auto-save dialog, daily scan, junk filter)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -18,12 +17,12 @@ import {
   Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
   Wifi, WifiOff, Edit2, Check, X, Info, Shield,
   RefreshCw, Calendar, Bell, Eraser, Clock, Sparkles,
-  Settings2, ToggleLeft, ToggleRight, Zap,
+  Settings2, ToggleLeft, ToggleRight, Zap, AlertTriangle,
+  ExternalLink as Link,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { format, parseISO } from "date-fns";
 
-// ── Brand colours ─────────────────────────────────────────────────────────────
 const C = { deepBlue: "#0D3B66", mediumBlue: "#1F6FB2", emerald: "#1FAF5A" };
 
 const PROVIDER_COLORS = {
@@ -46,20 +45,22 @@ const QUICK_PROVIDERS = [
     id: "gmail", label: "Gmail", color: "#EA4335", icon: "G",
     domain: "gmail.com", imap_host: "imap.gmail.com", imap_port: 993,
     app_password_url: "https://myaccount.google.com/apppasswords",
+    imap_enable_url:  "https://mail.google.com/mail/u/0/#settings/fwdandpop",
     steps: [
-      { num: 1, text: "Open", link: "https://myaccount.google.com", linkText: "myaccount.google.com" },
-      { num: 2, text: "Go to Security → 2-Step Verification → Enable it" },
-      { num: 3, text: "Search 'App passwords' in your Google Account" },
-      { num: 4, text: "App: Mail · Device: Other (name it Taskosphere) → Generate" },
-      { num: 5, text: "Copy the 16-character password and paste below" },
+      { num: 1, text: "Enable IMAP:", link: "https://mail.google.com/mail/u/0/#settings/fwdandpop", linkText: "Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP → Save" },
+      { num: 2, text: "Enable 2-Step Verification:", link: "https://myaccount.google.com/security", linkText: "myaccount.google.com/security" },
+      { num: 3, text: "Create App Password:", link: "https://myaccount.google.com/apppasswords", linkText: "myaccount.google.com/apppasswords" },
+      { num: 4, text: "Select App: Mail · Device: Other · Name: Taskosphere → Generate" },
+      { num: 5, text: "Copy the 16-character password shown and paste it below" },
     ],
-    note: "⚠️ 2-Step Verification must be enabled first.",
+    note: "⚠️ All 3 steps above are required. AUTHENTICATION FAILED means IMAP is off or App Password is wrong.",
     placeholder: "abcd efgh ijkl mnop",
   },
   {
     id: "outlook", label: "Outlook / Hotmail", color: "#0078D4", icon: "M",
     domain: "outlook.com", imap_host: "outlook.office365.com", imap_port: 993,
     app_password_url: "https://account.microsoft.com/security",
+    imap_enable_url: null,
     steps: [
       { num: 1, text: "Open", link: "https://account.microsoft.com/security", linkText: "account.microsoft.com/security" },
       { num: 2, text: "Click 'Advanced security options'" },
@@ -73,6 +74,7 @@ const QUICK_PROVIDERS = [
     id: "yahoo", label: "Yahoo Mail", color: "#720E9E", icon: "Y",
     domain: "yahoo.com", imap_host: "imap.mail.yahoo.com", imap_port: 993,
     app_password_url: "https://login.yahoo.com/myaccount/security/",
+    imap_enable_url: null,
     steps: [
       { num: 1, text: "Open", link: "https://login.yahoo.com/myaccount/security/", linkText: "Yahoo Account Security" },
       { num: 2, text: "Click 'Generate app password'" },
@@ -86,6 +88,7 @@ const QUICK_PROVIDERS = [
     id: "icloud", label: "iCloud Mail", color: "#3B82F6", icon: "iC",
     domain: "icloud.com", imap_host: "imap.mail.me.com", imap_port: 993,
     app_password_url: "https://appleid.apple.com",
+    imap_enable_url: null,
     steps: [
       { num: 1, text: "Open", link: "https://appleid.apple.com", linkText: "appleid.apple.com" },
       { num: 2, text: "Sign In & Security → App-Specific Passwords" },
@@ -98,6 +101,7 @@ const QUICK_PROVIDERS = [
   {
     id: "other", label: "Other Email", color: "#374151", icon: "@",
     domain: "", imap_host: "", imap_port: 993, app_password_url: "",
+    imap_enable_url: null,
     steps: [
       { num: 1, text: "Ask your email provider for IMAP settings" },
       { num: 2, text: "Typical host: imap.yourdomain.com · Port: 993" },
@@ -107,6 +111,80 @@ const QUICK_PROVIDERS = [
     placeholder: "your email password",
   },
 ];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GMAIL PREFLIGHT CHECKLIST (shown when auth fails)
+// ═══════════════════════════════════════════════════════════════════════════════
+function GmailChecklistBanner({ onDismiss }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="rounded-2xl border-2 border-red-200 bg-red-50 overflow-hidden"
+    >
+      <div className="flex items-center gap-3 px-4 py-3 bg-red-100 border-b border-red-200">
+        <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+        <p className="text-sm font-bold text-red-800 flex-1">
+          Authentication Failed — Complete these 3 steps for Gmail
+        </p>
+        <button onClick={onDismiss} className="text-red-400 hover:text-red-600">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="p-4 space-y-3">
+        {[
+          {
+            num: 1,
+            title: "Enable IMAP in Gmail",
+            desc: "Gmail has IMAP disabled by default.",
+            link: "https://mail.google.com/mail/u/0/#settings/fwdandpop",
+            linkText: "Open Gmail IMAP Settings →",
+            detail: "Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP → Save Changes",
+          },
+          {
+            num: 2,
+            title: "Turn on 2-Step Verification",
+            desc: "Required before App Passwords work.",
+            link: "https://myaccount.google.com/security",
+            linkText: "Open Google Security →",
+            detail: "Security → 2-Step Verification → Turn On",
+          },
+          {
+            num: 3,
+            title: "Generate a fresh App Password",
+            desc: "Use App Password, NOT your Gmail login password.",
+            link: "https://myaccount.google.com/apppasswords",
+            linkText: "Create App Password →",
+            detail: "App: Mail · Device: Other (Taskosphere) → Generate → Copy 16 chars",
+          },
+        ].map(step => (
+          <div key={step.num} className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <span className="text-[10px] font-black text-white">{step.num}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-800">{step.title}</p>
+              <p className="text-xs text-red-600 mt-0.5">{step.detail}</p>
+              <a
+                href={step.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-red-700 underline hover:text-red-900"
+              >
+                {step.linkText}
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+        ))}
+        <div className="mt-2 p-2.5 rounded-xl bg-white border border-red-100 text-xs text-red-700">
+          After completing all 3 steps, generate a <strong>brand new</strong> App Password and try again.
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTO-SAVE FIRST-TIME DIALOG
@@ -143,7 +221,6 @@ function AutoSaveDialog({ onSave, onSkip }) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
     >
       <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden">
-        {/* Header */}
         <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-blue-50 to-purple-50 border-b border-slate-100">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
@@ -159,9 +236,7 @@ function AutoSaveDialog({ onSave, onSkip }) {
             court hearings, GST deadlines, and client visits — without you lifting a finger.
           </p>
         </div>
-
         <div className="p-6 space-y-5">
-          {/* Toggle: Auto-save Reminders */}
           <div className="flex items-center justify-between p-4 rounded-2xl border border-purple-100 bg-purple-50">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center">
@@ -179,7 +254,6 @@ function AutoSaveDialog({ onSave, onSkip }) {
             </button>
           </div>
 
-          {/* Toggle: Auto-save Visits */}
           <div className="flex items-center justify-between p-4 rounded-2xl border border-blue-100 bg-blue-50">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
@@ -197,7 +271,6 @@ function AutoSaveDialog({ onSave, onSkip }) {
             </button>
           </div>
 
-          {/* Scan time picker */}
           <div className="flex items-center gap-3 p-4 rounded-2xl border border-slate-100 bg-slate-50">
             <div className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center flex-shrink-0">
               <Clock className="w-4 h-4 text-slate-600" />
@@ -220,8 +293,7 @@ function AutoSaveDialog({ onSave, onSkip }) {
           </div>
 
           <div className="flex gap-3 pt-1">
-            <Button variant="outline" onClick={onSkip}
-              className="flex-1 rounded-xl h-11 text-sm font-semibold text-slate-500">
+            <Button variant="outline" onClick={onSkip} className="flex-1 rounded-xl h-11 text-sm font-semibold text-slate-500">
               Not now
             </Button>
             <Button onClick={handleSave} disabled={saving}
@@ -239,7 +311,7 @@ function AutoSaveDialog({ onSave, onSkip }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AUTO-SAVE STATUS BADGE (shown in header)
+// AUTO-SAVE STATUS BADGE
 // ═══════════════════════════════════════════════════════════════════════════════
 function AutoSaveStatusBadge({ prefs, onEdit }) {
   if (!prefs) return null;
@@ -266,14 +338,15 @@ function AutoSaveStatusBadge({ prefs, onEdit }) {
 // CONNECT FORM
 // ═══════════════════════════════════════════════════════════════════════════════
 function ConnectForm({ provider, onSuccess, onCancel }) {
-  const [emailVal, setEmailVal] = useState(provider.domain ? `@${provider.domain}` : "");
-  const [password, setPassword] = useState("");
-  const [host,     setHost]     = useState(provider.imap_host);
-  const [port,     setPort]     = useState(provider.imap_port);
-  const [label,    setLabel]    = useState("");
-  const [showPass, setShowPass] = useState(false);
-  const [showSteps, setShowSteps] = useState(true);
-  const [loading,  setLoading]  = useState(false);
+  const [emailVal,   setEmailVal]   = useState(provider.domain ? `@${provider.domain}` : "");
+  const [password,   setPassword]   = useState("");
+  const [host,       setHost]       = useState(provider.imap_host);
+  const [port,       setPort]       = useState(provider.imap_port);
+  const [label,      setLabel]      = useState("");
+  const [showPass,   setShowPass]   = useState(false);
+  const [showSteps,  setShowSteps]  = useState(true);
+  const [loading,    setLoading]    = useState(false);
+  const [authError,  setAuthError]  = useState(false);
 
   const emailRef = useRef(null);
   useEffect(() => {
@@ -287,7 +360,7 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
     const trimEmail = emailVal.trim();
     if (!trimEmail || !trimEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
     if (!password) { toast.error("App Password is required"); return; }
-
+    setAuthError(false);
     setLoading(true);
     try {
       await api.post("/email/connections", {
@@ -301,6 +374,13 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       onSuccess();
     } catch (err) {
       const msg = err?.response?.data?.detail || "Connection failed. Check your credentials.";
+      const isAuthFail = msg.toLowerCase().includes("authentication") ||
+                         msg.toLowerCase().includes("login failed") ||
+                         msg.toLowerCase().includes("invalid credentials");
+      if (isAuthFail && provider.id === "gmail") {
+        setAuthError(true);
+        setShowSteps(true);
+      }
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -334,6 +414,14 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       </div>
 
       <div className="p-5 space-y-4">
+        {/* Gmail auth error checklist */}
+        <AnimatePresence>
+          {authError && provider.id === "gmail" && (
+            <GmailChecklistBanner onDismiss={() => setAuthError(false)} />
+          )}
+        </AnimatePresence>
+
+        {/* Steps accordion */}
         {provider.steps.length > 0 && (
           <div className="rounded-xl border border-slate-100 overflow-hidden">
             <button onClick={() => setShowSteps(s => !s)}
@@ -386,13 +474,14 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               value={emailVal} onChange={e => setEmailVal(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleConnect()}
               placeholder={`you@${provider.domain || "example.com"}`}
-              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all"
+              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white
+                focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all"
             />
           </div>
 
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
-              App Password <span className="font-normal text-slate-400 normal-case">(not your login password)</span>
+              App Password <span className="font-normal text-slate-400 normal-case">(NOT your Gmail login password)</span>
             </label>
             <div className="relative">
               <input
@@ -400,7 +489,8 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
                 value={password} onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleConnect()}
                 placeholder={provider.placeholder || "app password"}
-                className="w-full px-4 py-2.5 pr-11 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 font-mono transition-all"
+                className="w-full px-4 py-2.5 pr-11 text-sm rounded-xl border border-slate-200 bg-white
+                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 font-mono transition-all"
               />
               <button onClick={() => setShowPass(s => !s)} type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
@@ -411,11 +501,12 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
 
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
-              Friendly Name <span className="font-normal text-slate-400 normal-case">(optional)</span>
+              Friendly Name <span className="font-normal text-slate-400 normal-case">(optional — e.g. "Trademark Gmail")</span>
             </label>
             <input type="text" value={label} onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. Work Gmail, Personal Yahoo"
-              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
+              placeholder="e.g. Trademark Gmail, Personal Yahoo"
+              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white
+                focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
           </div>
 
           {provider.id === "other" && (
@@ -449,7 +540,7 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
         <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-100">
           <Shield className="w-4 h-4 text-green-600 flex-shrink-0" />
           <p className="text-xs text-green-700">
-            Your password is tested and stored securely. We only read email subjects &amp; bodies for event extraction — we never send or modify anything.
+            Password is stored securely. We only read email subjects &amp; bodies for event extraction — we never send or modify anything.
           </p>
         </div>
       </div>
@@ -567,7 +658,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
           <span className="mx-1">·</span>
           <span className="font-medium">{conn.imap_host}</span>
         </div>
-
         <div className="flex items-center gap-1">
           <button onClick={handleSync} disabled={syncing} title="Sync now"
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all">
@@ -580,7 +670,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
             Test
           </button>
           <button onClick={() => onToggle(conn.email_address, !conn.is_active)}
-            title={conn.is_active ? "Pause syncing" : "Resume syncing"}
             className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all">
             {conn.is_active ? "Pause" : "Resume"}
           </button>
@@ -595,7 +684,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SINGLE EXTRACTED EVENT ROW — FIXED SAVE LOGIC
+// EVENT ROW — fixed save logic
 // ═══════════════════════════════════════════════════════════════════════════════
 function EventRow({ event, type }) {
   const [saving, setSaving] = useState(false);
@@ -607,19 +696,15 @@ function EventRow({ event, type }) {
     setError(null);
     try {
       if (type === "reminder") {
-        // Build ISO datetime for remind_at
         const dateStr = event.date || new Date().toISOString().slice(0, 10);
         const timeStr = event.time || "10:00";
         let remindAt;
-        try {
-          remindAt = new Date(`${dateStr}T${timeStr}:00+05:30`).toISOString();
-        } catch {
-          remindAt = new Date(Date.now() + 86400000).toISOString();
-        }
+        try { remindAt = new Date(`${dateStr}T${timeStr}:00+05:30`).toISOString(); }
+        catch { remindAt = new Date(Date.now() + 86400000).toISOString(); }
 
         const descParts = [];
-        if (event.organizer)     descParts.push(`From: ${event.organizer}`);
-        if (event.description)   descParts.push(`Notes: ${event.description}`);
+        if (event.organizer)      descParts.push(`From: ${event.organizer}`);
+        if (event.description)    descParts.push(`Notes: ${event.description}`);
         if (event.source_subject) descParts.push(`Subject: ${event.source_subject}`);
 
         await api.post("/email/save-as-reminder", {
@@ -648,12 +733,9 @@ function EventRow({ event, type }) {
     }
   };
 
-  const col = type === "reminder" ? "purple" : "blue";
-  const colMap = {
-    reminder: { bg: "bg-purple-50", border: "border-purple-100", text: "text-purple-700", btn: "#8B5CF6" },
-    visit:    { bg: "bg-blue-50",   border: "border-blue-100",   text: "text-blue-700",   btn: "#3B82F6" },
-  };
-  const colors = colMap[type];
+  const colors = type === "reminder"
+    ? { bg: "bg-purple-50", border: "border-purple-100", text: "text-purple-700", btn: "#8B5CF6" }
+    : { bg: "bg-blue-50",   border: "border-blue-100",   text: "text-blue-700",   btn: "#3B82F6" };
 
   return (
     <div className={`flex flex-col gap-1 p-3 rounded-xl border ${colors.bg} ${colors.border}`}>
@@ -667,23 +749,17 @@ function EventRow({ event, type }) {
           {event.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{event.description}</p>}
         </div>
         <button
-          onClick={handleSave}
-          disabled={saving || saved}
+          onClick={handleSave} disabled={saving || saved}
           className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-60"
           style={{ background: saved ? "#1FAF5A" : colors.btn }}
         >
-          {saving
-            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            : saved
-            ? <><CheckCircle2 className="w-3.5 h-3.5" />Saved</>
-            : type === "reminder"
-            ? <><Bell className="w-3.5 h-3.5" />Save</>
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : saved ? <><CheckCircle2 className="w-3.5 h-3.5" />Saved</>
+            : type === "reminder" ? <><Bell className="w-3.5 h-3.5" />Save</>
             : <><Calendar className="w-3.5 h-3.5" />Save</>}
         </button>
       </div>
-      {error && (
-        <p className="text-xs text-red-600 bg-red-50 rounded-lg px-2 py-1 border border-red-100">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-2 py-1 border border-red-100">{error}</p>}
     </div>
   );
 }
@@ -692,18 +768,16 @@ function EventRow({ event, type }) {
 // MAIN EmailSettings COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function EmailSettings() {
-  const [connections,      setConnections]      = useState([]);
-  const [loading,          setLoading]          = useState(true);
-  const [activeForm,       setActiveForm]        = useState(null);
-  const [showAddOptions,   setShowAddOptions]    = useState(false);
-  const [extractedEvents,  setExtractedEvents]  = useState([]);
-  const [scanning,         setScanning]         = useState(false);
-  const [clearing,         setClearing]         = useState(false);
-
-  // Auto-save preferences state
-  const [autoSavePrefs,    setAutoSavePrefs]    = useState(null);
-  const [showAutoDialog,   setShowAutoDialog]   = useState(false);
-  const [prefsChecked,     setPrefsChecked]     = useState(false);
+  const [connections,     setConnections]     = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [activeForm,      setActiveForm]      = useState(null);
+  const [showAddOptions,  setShowAddOptions]  = useState(false);
+  const [extractedEvents, setExtractedEvents] = useState([]);
+  const [scanning,        setScanning]        = useState(false);
+  const [clearing,        setClearing]        = useState(false);
+  const [autoSavePrefs,   setAutoSavePrefs]   = useState(null);
+  const [showAutoDialog,  setShowAutoDialog]  = useState(false);
+  const [prefsChecked,    setPrefsChecked]    = useState(false);
 
   const loadConnections = useCallback(async () => {
     try {
@@ -724,28 +798,18 @@ export default function EmailSettings() {
       ]);
       setAutoSavePrefs(prefsRes.data);
       setPrefsChecked(true);
-      // Show first-time dialog if user has connections but hasn't set prefs yet
-      if (!existsRes.data.has_set_prefs) {
-        // We'll show after checking connections
-        return false; // "not yet set"
-      }
-      return true; // "already set"
+      return existsRes.data.has_set_prefs;
     } catch {
       setPrefsChecked(true);
       return true;
     }
   }, []);
 
-  useEffect(() => {
-    loadConnections();
-  }, [loadConnections]);
+  useEffect(() => { loadConnections(); }, [loadConnections]);
 
   useEffect(() => {
     loadAutoSavePrefs().then(alreadySet => {
-      if (!alreadySet) {
-        // Show dialog after a short delay once the page loads
-        setTimeout(() => setShowAutoDialog(true), 1200);
-      }
+      if (!alreadySet) setTimeout(() => setShowAutoDialog(true), 1200);
     });
   }, [loadAutoSavePrefs]);
 
@@ -783,7 +847,7 @@ export default function EmailSettings() {
     try {
       const res = await api.get(`/email/extract-events?force_refresh=true&limit=50`, { timeout: 60000 });
       const events = (res.data || []).filter(e => e.email_account === emailAddress);
-      toast.success(`✓ Synced ${emailAddress} — ${events.length} legal event(s) found`);
+      toast.success(`✓ Synced — ${events.length} legal event(s) found`);
       loadConnections();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Sync failed");
@@ -797,11 +861,10 @@ export default function EmailSettings() {
       const res = await api.get("/email/extract-events?force_refresh=true&limit=100", { timeout: 90000 });
       const events = res.data || [];
       setExtractedEvents(events);
-      if (events.length === 0) {
-        toast.info("No upcoming legal events found — junk emails were filtered out");
-      } else {
-        toast.success(`✓ Found ${events.length} legal event(s) across ${connections.length} account(s)`);
-      }
+      toast.success(events.length === 0
+        ? "All emails scanned — no legal events found (junk filtered)"
+        : `✓ Found ${events.length} legal event(s) across ${connections.length} account(s)`
+      );
     } catch (err) {
       if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
         toast.error("Scan taking too long. Try syncing accounts individually.");
@@ -814,7 +877,7 @@ export default function EmailSettings() {
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm("Clear all extracted events cache? This forces a completely fresh scan next time.")) return;
+    if (!window.confirm("Clear all extracted events cache? Forces a completely fresh scan next time.")) return;
     setClearing(true);
     try {
       await api.delete("/email/events/clear-all");
@@ -828,7 +891,6 @@ export default function EmailSettings() {
     setActiveForm(null);
     setShowAddOptions(false);
     loadConnections();
-    // Show auto-save dialog if prefs not set yet
     if (prefsChecked && !autoSavePrefs?.auto_save_reminders && !autoSavePrefs?.auto_save_visits) {
       setTimeout(() => setShowAutoDialog(true), 600);
     }
@@ -850,19 +912,15 @@ export default function EmailSettings() {
 
   return (
     <>
-      {/* Auto-save first-time dialog */}
       <AnimatePresence>
         {showAutoDialog && (
           <AutoSaveDialog
             onSave={handleAutoSaveSaved}
             onSkip={() => {
               setShowAutoDialog(false);
-              // Save "skip" pref so we don't ask again
               api.post("/email/auto-save-prefs", {
-                auto_save_reminders: false,
-                auto_save_visits: false,
-                scan_time_hour: 12,
-                scan_time_minute: 0,
+                auto_save_reminders: false, auto_save_visits: false,
+                scan_time_hour: 12, scan_time_minute: 0,
               }).catch(() => {});
             }}
           />
@@ -870,36 +928,41 @@ export default function EmailSettings() {
       </AnimatePresence>
 
       <div className="max-w-2xl mx-auto py-8 px-4 space-y-8">
-        {/* Page Header */}
+
+        {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Email Accounts</h1>
             <p className="text-sm text-slate-500 mt-1">
-              Connect email accounts to auto-extract hearings, deadlines &amp; visits.
+              Connect <strong>multiple</strong> email accounts — all inboxes are scanned together.
             </p>
           </div>
           <AutoSaveStatusBadge prefs={autoSavePrefs} onEdit={() => setShowAutoDialog(true)} />
         </div>
 
-        {/* How it works info box */}
+        {/* How it works */}
         <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-start gap-3">
           <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
             <Info className="w-4 h-4 text-blue-600" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-blue-800 mb-1">How it works</p>
+            <p className="text-sm font-semibold text-blue-800 mb-1">Multiple accounts supported</p>
             <p className="text-xs text-blue-700 leading-relaxed">
-              AI scans only for <strong>legal &amp; compliance emails</strong> — Trademark hearings,
-              NCLT/Court notices, GST/ROC deadlines, and client visits. Bills, OTPs, marketing,
-              and job emails are automatically discarded.
+              You can connect as many Gmail, Outlook, or Yahoo accounts as you need.
+              After connecting the first account, click <strong>+ Add Another Account</strong> to add more.
+              All inboxes are scanned together for <strong>hearings, GST deadlines, and client visits</strong>.
               {autoSavePrefs?.auto_save_reminders || autoSavePrefs?.auto_save_visits
-                ? <> Auto-save is <strong>ON</strong> — events are saved directly without manual clicks, daily at <strong>{autoSavePrefs.scan_time_hour < 12 ? autoSavePrefs.scan_time_hour + ":00 AM" : autoSavePrefs.scan_time_hour === 12 ? "12:00 PM" : (autoSavePrefs.scan_time_hour - 12) + ":00 PM"} IST</strong>.</>
-                : <> Enable Auto-Save (click the badge above) to skip manual clicks entirely.</>}
+                ? <> Auto-save is <strong>ON</strong> — events save automatically at <strong>
+                    {autoSavePrefs.scan_time_hour < 12 ? autoSavePrefs.scan_time_hour + ":00 AM"
+                      : autoSavePrefs.scan_time_hour === 12 ? "12:00 PM"
+                      : (autoSavePrefs.scan_time_hour - 12) + ":00 PM"} IST</strong>.</>
+                : <> <a href="#" onClick={e => { e.preventDefault(); setShowAutoDialog(true); }}
+                    className="font-semibold underline">Enable Auto-Save</a> to skip manual clicks entirely.</>}
             </p>
           </div>
         </div>
 
-        {/* Connected Accounts Section */}
+        {/* Connected Accounts */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-700">
@@ -920,15 +983,18 @@ export default function EmailSettings() {
                     className="rounded-xl h-8 text-xs font-semibold border-purple-200 text-purple-700 hover:bg-purple-50">
                     {scanning
                       ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Scanning…</>
-                      : <><RefreshCw className="w-3.5 h-3.5 mr-1" />Scan Now</>}
+                      : <><RefreshCw className="w-3.5 h-3.5 mr-1" />Scan All</>}
                   </Button>
-                  <button
-                    onClick={() => { setShowAddOptions(s => !s); setActiveForm(null); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
-                    style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}>
-                    <Plus className="w-4 h-4" /> Add Account
-                  </button>
                 </>
+              )}
+              {/* Always visible Add Account button once any account exists */}
+              {connections.length > 0 && (
+                <button
+                  onClick={() => { setShowAddOptions(s => !s); setActiveForm(null); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
+                  style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}>
+                  <Plus className="w-4 h-4" /> Add Another Account
+                </button>
               )}
             </div>
           </div>
@@ -943,9 +1009,9 @@ export default function EmailSettings() {
                 <Mail className="w-8 h-8 text-slate-400" />
               </div>
               <div>
-                <p className="font-semibold text-slate-700">No email accounts connected</p>
+                <p className="font-semibold text-slate-700">No email accounts connected yet</p>
                 <p className="text-sm text-slate-400 mt-1">
-                  Connect Gmail, Outlook, Yahoo or any IMAP email to extract legal events automatically.
+                  Connect Gmail, Outlook, Yahoo or any IMAP email — you can add multiple accounts.
                 </p>
               </div>
               <button onClick={() => setShowAddOptions(true)}
@@ -983,32 +1049,20 @@ export default function EmailSettings() {
                 <button onClick={() => setExtractedEvents([])}
                   className="text-xs text-slate-400 hover:text-slate-600 font-semibold">Clear</button>
               </div>
-
-              {extractedEvents.length === 0 && (
-                <div className="p-4 rounded-xl bg-green-50 border border-green-100 text-sm text-green-700">
-                  ✓ All emails scanned — no legal events found (junk filtered out).
-                </div>
-              )}
-
               {reminderEvents.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
                     <Bell className="w-3.5 h-3.5" /> Save as Reminders ({reminderEvents.length})
                   </p>
-                  {reminderEvents.map((ev, i) => (
-                    <EventRow key={i} event={ev} type="reminder" />
-                  ))}
+                  {reminderEvents.map((ev, i) => <EventRow key={i} event={ev} type="reminder" />)}
                 </div>
               )}
-
               {visitEvents.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-blue-700 uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5" /> Save as Visits ({visitEvents.length})
                   </p>
-                  {visitEvents.map((ev, i) => (
-                    <EventRow key={i} event={ev} type="visit" />
-                  ))}
+                  {visitEvents.map((ev, i) => <EventRow key={i} event={ev} type="visit" />)}
                 </div>
               )}
             </motion.div>
@@ -1020,13 +1074,13 @@ export default function EmailSettings() {
           {(showAddOptions || connections.length === 0) && !activeForm && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
               <h2 className="text-base font-bold text-slate-700">
-                {connections.length === 0 ? "Choose your email provider" : "Add another account"}
+                {connections.length === 0 ? "Choose your email provider" : "Add another account — choose provider"}
               </h2>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {QUICK_PROVIDERS.map(prov => (
                   <button key={prov.id}
                     onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
-                    className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border-2 border-transparent hover:border-current transition-all active:scale-95 group"
+                    className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border-2 border-transparent hover:border-current transition-all active:scale-95"
                     style={{ backgroundColor: prov.color + "08" }}>
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black text-white"
                       style={{ backgroundColor: prov.color }}>
@@ -1060,12 +1114,12 @@ export default function EmailSettings() {
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tips</p>
           <ul className="space-y-1.5">
             {[
+              "You can connect multiple Gmail, Outlook, Yahoo accounts — click '+ Add Another Account' after the first one",
+              "Gmail requires: (1) IMAP enabled, (2) 2-Step Verification ON, (3) App Password generated",
+              "Use the App Password from Google — NOT your regular Gmail login password",
               "AI filters out Jio bills, bank OTPs, Adobe ads — only legal/compliance emails are extracted",
               "Enable Auto-Save (top badge) to have events silently added to Reminders & Visits every day",
-              "Daily auto-scan runs at your chosen time (default 12 PM IST) — no manual click needed",
-              "Use 'Reset Cache' if you see wrong results, then run Scan Now for a fresh extraction",
-              "If an account shows an error, click Test or re-generate the App Password",
-              "Attendance page and Holiday/Visit cards auto-update from email-extracted events",
+              "Use 'Reset Cache' if you see wrong results, then Scan All for a fresh extraction",
             ].map((tip, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-slate-500">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
