@@ -26,7 +26,6 @@ import {
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// ── Brand colours ─────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue:    '#0D3B66',
   mediumBlue:  '#1F6FB2',
@@ -47,7 +46,6 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
 
-// ── Permission templates ───────────────────────────────────────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
     can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
@@ -121,7 +119,6 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 const DeptPill = ({ dept, size = 'sm' }) => {
   const info = DEPARTMENTS.find(d => d.value === dept);
   if (!info) return null;
@@ -149,7 +146,6 @@ const StatusBadge = ({ status, isActive }) => {
   );
 };
 
-// ── Pending card ──────────────────────────────────────────────────────────────
 const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   <motion.div variants={itemVariants} layout
     className="relative bg-white rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all">
@@ -194,16 +190,14 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   </motion.div>
 );
 
-// ── User card ─────────────────────────────────────────────────────────────────
 const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReject,
   currentUserId, isAdmin, canEditUsers, canManagePermissions, approving }) => {
   const [showActions, setShowActions] = useState(false);
   const isPending = userData.status === 'pending_approval';
-
   const roleStyle = {
     admin:   { bg: 'bg-gradient-to-r from-purple-500 to-indigo-500', text: 'text-white', icon: <Crown className="h-3 w-3" /> },
     manager: { bg: 'bg-gradient-to-r from-blue-500 to-cyan-500',     text: 'text-white', icon: <Briefcase className="h-3 w-3" /> },
-    staff:   { bg: 'bg-slate-100',                                    text: 'text-slate-700', icon: <UserIcon className="h-3 w-3" /> },
+    staff:   { bg: 'bg-slate-100', text: 'text-slate-700',            icon: <UserIcon className="h-3 w-3" /> },
   }[userData.role?.toLowerCase()] || { bg: 'bg-slate-100', text: 'text-slate-700', icon: <UserIcon className="h-3 w-3" /> };
 
   return (
@@ -214,24 +208,19 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
       onMouseLeave={() => setShowActions(false)}
     >
       {isPending && <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />}
-
-      {/* Hover action buttons */}
       <div className={`absolute top-3 right-3 flex gap-1 transition-all duration-200 ${showActions ? 'opacity-100' : 'opacity-0'}`}>
-        {/* Admin can always manage permissions for non-admin users */}
         {canManagePermissions && userData.role !== 'admin' && !isPending && (
           <button onClick={() => onPermissions(userData)}
             className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors" title="Manage Permissions">
             <Shield className="h-4 w-4" />
           </button>
         )}
-        {/* Admin can edit ANY user including other admins */}
         {(isAdmin || (canEditUsers && !isPending)) && (
           <button onClick={() => onEdit(userData)}
             className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors" title="Edit User">
             <Edit className="h-4 w-4" />
           </button>
         )}
-        {/* Admin can delete any user except themselves */}
         {(isAdmin || canEditUsers) && userData.id !== currentUserId && (
           <button onClick={() => onDelete(userData.id)}
             className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors" title="Delete User">
@@ -239,15 +228,12 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           </button>
         )}
       </div>
-
       <div className="flex items-start gap-3 sm:gap-4 mb-4">
         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow bg-slate-200 flex-shrink-0">
           {userData.profile_picture
             ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
             : <div className="w-full h-full flex items-center justify-center text-white text-lg sm:text-xl font-bold"
-                style={{ background: isPending
-                  ? 'linear-gradient(135deg,#f59e0b,#f97316)'
-                  : `linear-gradient(135deg,${COLORS.emeraldGreen},${COLORS.lightGreen})` }}>
+                style={{ background: isPending ? 'linear-gradient(135deg,#f59e0b,#f97316)' : `linear-gradient(135deg,${COLORS.emeraldGreen},${COLORS.lightGreen})` }}>
                 {userData.full_name?.charAt(0)}
               </div>}
         </div>
@@ -261,11 +247,9 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           </div>
         </div>
       </div>
-
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">{userData.departments.map(d => <DeptPill key={d} dept={d} size="sm" />)}</div>
       )}
-
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 flex-shrink-0" /><span className="truncate">{userData.email}</span></p>
         <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 flex-shrink-0" />{userData.phone || 'No phone'}</p>
@@ -277,8 +261,6 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
           Joined {userData.created_at ? format(new Date(userData.created_at), 'MMM dd, yyyy') : 'N/A'}
         </p>
       </div>
-
-      {/* Approve / Reject inside card for pending users */}
       {isPending && isAdmin && (
         <div className="flex gap-2 mt-4 pt-3 border-t border-amber-100">
           <Button size="sm" disabled={approving === userData.id} onClick={() => onApprove(userData)}
@@ -295,18 +277,36 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
   );
 };
 
+// ── Permission toggle row — extracted to avoid closure issues ─────────────────
+// CRITICAL: permKey is captured as a plain string, NOT inside an object.
+// This prevents the `p.key` shadowing bug where `p` was the prev-state
+// object and `p.key` was always `undefined`.
+const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) => (
+  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+    <div className="pr-4">
+      <p className="text-sm font-bold text-slate-700">{label}</p>
+      <p className="text-[10px] text-slate-500">{desc}</p>
+    </div>
+    <Switch
+      checked={!!permissions[permKey]}
+      onCheckedChange={(val) =>
+        // ✅ FIX: `permKey` is closed over as a string — never shadows prev state
+        setPermissions(prev => ({ ...prev, [permKey]: val }))
+      }
+    />
+  </div>
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Users() {
-  const { user, hasPermission, refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const isAdmin = user?.role === 'admin';
-
   const perms = user?.permissions || {};
-  // Admin always has full access — permission flags only matter for non-admins
   const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
   const canEditUsers         = isAdmin || !!perms.can_manage_users;
-  const canManagePermissions = isAdmin; // ONLY admins can touch permissions
+  const canManagePermissions = isAdmin;
 
   const [users,   setUsers]   = useState([]);
   const [clients, setClients] = useState([]);
@@ -314,14 +314,13 @@ export default function Users() {
   const [activeTab,    setActiveTab]    = useState('all');
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [permDialogOpen, setPermDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUser,        setSelectedUser]        = useState(null);
   const [selectedUserForPerms, setSelectedUserForPerms] = useState(null);
-  const [approvingId, setApprovingId]   = useState(null);
-  const [loading, setLoading]           = useState(false);
+  const [approvingId, setApprovingId] = useState(null);
+  const [loading,     setLoading]     = useState(false);
   const [clientSearch, setClientSearch] = useState('');
-  const [roleChanged, setRoleChanged]   = useState(false);
+  const [roleChanged,  setRoleChanged]  = useState(false);
 
-  // ── Form state — admin sees ALL fields for ALL users ──────────────────────
   const [formData, setFormData] = useState({
     full_name: '', email: '', password: '', role: 'staff',
     departments: [], phone: '', birthday: '', profile_picture: '',
@@ -331,7 +330,6 @@ export default function Users() {
 
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
-  // ── Data fetching ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (canViewUserPage) { fetchUsers(); fetchClients(); }
   }, [canViewUserPage]);
@@ -355,6 +353,7 @@ export default function Users() {
   const fetchPermissions = async (userId) => {
     try {
       const res = await api.get(`/users/${userId}/permissions`);
+      // Merge with EMPTY_PERMISSIONS so every key always exists
       setPermissions({ ...EMPTY_PERMISSIONS, ...(res.data || {}) });
     } catch {
       toast.error('Using default permission template');
@@ -362,7 +361,6 @@ export default function Users() {
     }
   };
 
-  // ── Form helpers ───────────────────────────────────────────────────────────
   const handleInput = (e) => {
     const { name, value } = e.target;
     setFormData(p => ({ ...p, [name]: value }));
@@ -390,14 +388,13 @@ export default function Users() {
     reader.readAsDataURL(file);
   };
 
-  // Open edit dialog — admin gets ALL fields pre-filled
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setRoleChanged(false);
     setFormData({
       full_name:       userData.full_name       || '',
       email:           userData.email           || '',
-      password:        '',   // blank — only filled if admin wants to change it
+      password:        '',
       role:            userData.role            || 'staff',
       departments:     userData.departments     || [],
       phone:           userData.phone           || '',
@@ -407,21 +404,19 @@ export default function Users() {
       punch_in_time:   userData.punch_in_time   || '10:30',
       grace_time:      userData.grace_time      || '00:10',
       punch_out_time:  userData.punch_out_time  || '19:00',
-      telegram_id:     userData.telegram_id     != null ? String(userData.telegram_id) : '',
+      telegram_id:     userData.telegram_id != null ? String(userData.telegram_id) : '',
       is_active:       userData.is_active !== false,
-      status:          userData.status          || 'active',
+      status:          userData.status || 'active',
     });
     setDialogOpen(true);
   };
 
-  // ── Save user ──────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!formData.full_name.trim()) { toast.error('Full name is required'); return; }
     if (!selectedUser && !formData.email.trim()) { toast.error('Email is required'); return; }
     setLoading(true);
     try {
       if (selectedUser) {
-        // Admin can update every field including email, role, status, password
         const payload = {
           full_name:       formData.full_name.trim(),
           phone:           formData.phone           || null,
@@ -432,41 +427,29 @@ export default function Users() {
           punch_out_time:  formData.punch_out_time  || null,
           telegram_id:     formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
           is_active:       formData.is_active,
-          // Admin-only fields
           ...(isAdmin && {
-            email:  formData.email.trim(),
-            role:   formData.role,
-            status: formData.status,
+            email:       formData.email.trim(),
+            role:        formData.role,
+            status:      formData.status,
+            departments: formData.departments,
           }),
-          // Only send password if admin typed a new one
-          ...(isAdmin && formData.password.trim() && {
-            password: formData.password.trim(),
-          }),
-          // Departments — admin can change for anyone
-          ...(isAdmin && { departments: formData.departments }),
+          ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
         await api.put(`/users/${selectedUser.id}`, payload);
-        // Refresh own context if editing self
         if (selectedUser.id === user.id) await refreshUser();
-        toast.success('✓ User profile updated successfully');
+        toast.success('✓ User updated successfully');
       } else {
-        // Create new user
         await api.post('/auth/register', {
-          full_name:      formData.full_name.trim(),
-          email:          formData.email.trim(),
-          password:       formData.password,
-          role:           formData.role,
-          departments:    formData.departments,
-          phone:          formData.phone      || null,
-          birthday:       formData.birthday   || null,
-          punch_in_time:  formData.punch_in_time,
-          grace_time:     formData.grace_time,
+          full_name: formData.full_name.trim(), email: formData.email.trim(),
+          password: formData.password, role: formData.role,
+          departments: formData.departments, phone: formData.phone || null,
+          birthday: formData.birthday || null,
+          punch_in_time: formData.punch_in_time, grace_time: formData.grace_time,
           punch_out_time: formData.punch_out_time,
-          telegram_id:    formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active:      false,
-          status:         'pending_approval',
+          telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active: false, status: 'pending_approval',
         });
-        toast.success('✓ New member registered — awaiting admin approval');
+        toast.success('✓ Member registered — awaiting approval');
       }
       setDialogOpen(false);
       fetchUsers();
@@ -476,7 +459,6 @@ export default function Users() {
     } finally { setLoading(false); }
   };
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (id) => {
     if (!isAdmin && !canEditUsers) { toast.error('No permission to delete users'); return; }
     if (id === user.id) { toast.error('You cannot delete your own account'); return; }
@@ -488,29 +470,30 @@ export default function Users() {
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to delete user'); }
   };
 
-  // ── Permissions ────────────────────────────────────────────────────────────
   const openPermissionsDialog = async (userData) => {
     setSelectedUserForPerms(userData);
     await fetchPermissions(userData.id);
     setPermDialogOpen(true);
   };
 
+  // ── Save permissions — builds clean payload ──────────────────────────────
   const handleSavePermissions = async () => {
     if (!canManagePermissions) { toast.error('Only administrators can update permissions'); return; }
     setLoading(true);
     try {
+      const ensureArray = (v) => (Array.isArray(v) ? v : []);
       const payload = {
         ...permissions,
-        assigned_clients:      Array.isArray(permissions.assigned_clients)      ? permissions.assigned_clients      : [],
-        view_other_tasks:      Array.isArray(permissions.view_other_tasks)      ? permissions.view_other_tasks      : [],
-        view_other_attendance: Array.isArray(permissions.view_other_attendance) ? permissions.view_other_attendance : [],
-        view_other_reports:    Array.isArray(permissions.view_other_reports)    ? permissions.view_other_reports    : [],
-        view_other_todos:      Array.isArray(permissions.view_other_todos)      ? permissions.view_other_todos      : [],
-        view_other_activity:   Array.isArray(permissions.view_other_activity)   ? permissions.view_other_activity   : [],
+        assigned_clients:      ensureArray(permissions.assigned_clients),
+        view_other_tasks:      ensureArray(permissions.view_other_tasks),
+        view_other_attendance: ensureArray(permissions.view_other_attendance),
+        view_other_reports:    ensureArray(permissions.view_other_reports),
+        view_other_todos:      ensureArray(permissions.view_other_todos),
+        view_other_activity:   ensureArray(permissions.view_other_activity),
       };
       await api.put(`/users/${selectedUserForPerms.id}/permissions`, payload);
       if (selectedUserForPerms.id === user.id) await refreshUser();
-      toast.success('✓ System access rules updated');
+      toast.success('✓ Permissions updated successfully');
       setPermDialogOpen(false);
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to update permissions'); }
     finally { setLoading(false); }
@@ -518,16 +501,15 @@ export default function Users() {
 
   const resetPermissionsToRole = (role) => {
     setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
-    toast.info(`Permissions reset to ${role} defaults — click Save to apply`);
+    toast.info(`Reset to ${role} defaults — click "Update Permissions" to save`);
   };
 
-  // ── Approve / Reject ───────────────────────────────────────────────────────
   const handleApprove = async (userData) => {
     if (!isAdmin) { toast.error('Only admins can approve users'); return; }
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/approve`);
-      toast.success(`✓ ${userData.full_name} approved and activated`);
+      toast.success(`✓ ${userData.full_name} approved`);
       fetchUsers();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to approve'); }
     finally { setApprovingId(null); }
@@ -535,7 +517,7 @@ export default function Users() {
 
   const handleReject = async (userData) => {
     if (!isAdmin) { toast.error('Only admins can reject users'); return; }
-    if (!window.confirm(`Reject ${userData.full_name}? They will not be able to log in.`)) return;
+    if (!window.confirm(`Reject ${userData.full_name}?`)) return;
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/reject`);
@@ -545,10 +527,8 @@ export default function Users() {
     finally { setApprovingId(null); }
   };
 
-  // ── Filtered lists ─────────────────────────────────────────────────────────
   const pendingUsers  = users.filter(u => u.status === 'pending_approval');
   const rejectedUsers = users.filter(u => u.status === 'rejected');
-
   const filteredUsers = users.filter(u => {
     const q = searchQuery.toLowerCase();
     const match = (u.full_name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
@@ -570,13 +550,50 @@ export default function Users() {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Permission accordion sections ─────────────────────────────────────────
+  const GLOBAL_PERMS = [
+    { key: 'can_view_all_tasks',              label: 'Universal Task Access',        desc: 'See tasks assigned to any user/dept' },
+    { key: 'can_view_all_clients',            label: 'Master Client List',            desc: 'See all company legal entities' },
+    { key: 'can_view_all_dsc',                label: 'DSC Vault Access',              desc: 'View all Digital Signatures' },
+    { key: 'can_view_documents',              label: 'Document Library',              desc: 'Access physical document register' },
+    { key: 'can_view_all_duedates',           label: 'Compliance Roadmap',            desc: 'View all upcoming statutory due dates' },
+    { key: 'can_view_reports',                label: 'Analytics Dashboard',           desc: 'View performance and system reports' },
+    { key: 'can_view_todo_dashboard',         label: 'Todo Dashboard',                desc: 'Access global team todo overview' },
+    { key: 'can_view_audit_logs',             label: 'System Audit Trail',            desc: 'View activity logs and record histories' },
+    { key: 'can_view_all_leads',              label: 'Leads Pipeline',                desc: 'View the global leads dashboard' },
+    { key: 'can_view_user_page',              label: 'User Directory',                desc: 'View team members directory' },
+    { key: 'can_view_selected_users_reports', label: 'Team Reports Access',           desc: 'View reports for selected users' },
+    { key: 'can_view_staff_rankings',         label: 'Staff Rankings',                desc: 'View performance leaderboard' },
+    { key: 'can_view_own_data',               label: 'View Own Data',                 desc: 'Access own attendance, tasks and reports' },
+  ];
+
+  const OPS_PERMS = [
+    { key: 'can_assign_tasks',       label: 'Task Delegation',        desc: 'Assign tasks to other staff' },
+    { key: 'can_assign_clients',     label: 'Client Assignment',      desc: 'Assign and reassign staff to clients' },
+    { key: 'can_manage_users',       label: 'User Governance',        desc: 'Manage other team members and roles' },
+    { key: 'can_view_attendance',    label: 'Attendance Management',  desc: 'Review punch timings and late reports' },
+    { key: 'can_view_staff_activity',label: 'Staff Monitoring',       desc: 'View app usage and screen activity' },
+    { key: 'can_send_reminders',     label: 'Automated Reminders',    desc: 'Trigger email/notification reminders' },
+    { key: 'can_download_reports',   label: 'Export Data',            desc: 'Download CSV/PDF versions of reports' },
+    { key: 'can_manage_settings',    label: 'System Settings',        desc: 'Modify global system configuration' },
+    { key: 'can_delete_data',        label: 'Delete Records',         desc: 'Permanently delete data entries' },
+    { key: 'can_delete_tasks',       label: 'Delete Tasks',           desc: 'Delete any task regardless of ownership' },
+    { key: 'can_connect_email',      label: 'Connect Email Accounts', desc: 'Link personal email via IMAP for event extraction' },
+  ];
+
+  const EDIT_PERMS = [
+    { key: 'can_edit_tasks',     label: 'Modify Tasks',     desc: 'Update/delete task definitions' },
+    { key: 'can_edit_clients',   label: 'Modify Clients',   desc: 'Update client master data' },
+    { key: 'can_edit_dsc',       label: 'Modify DSC',       desc: 'Update certificate details' },
+    { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records' },
+    { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory timelines' },
+    { key: 'can_edit_users',     label: 'Modify Users',     desc: 'Update user profiles' },
+  ];
+
   return (
     <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
 
-      {/* ── Page header ── */}
+      {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>User Directory</h1>
@@ -590,19 +607,15 @@ export default function Users() {
           </p>
         </div>
 
-        {/* Create new member — admin only */}
         {isAdmin && (
-          <Button
-            className="rounded-xl font-bold h-12 shadow-lg hover:scale-105 transition-all"
+          <Button className="rounded-xl font-bold h-12 shadow-lg hover:scale-105 transition-all"
             style={{ background: COLORS.deepBlue }}
             onClick={() => {
               setSelectedUser(null); setRoleChanged(false);
-              setFormData({
-                full_name: '', email: '', password: '', role: 'staff',
+              setFormData({ full_name: '', email: '', password: '', role: 'staff',
                 departments: [], phone: '', birthday: '', profile_picture: '',
                 punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
-                telegram_id: '', is_active: true, status: 'active',
-              });
+                telegram_id: '', is_active: true, status: 'active' });
               setDialogOpen(true);
             }}>
             <Plus className="h-5 w-5 mr-2" />Create New Member
@@ -618,14 +631,10 @@ export default function Users() {
               {selectedUser ? `Edit — ${selectedUser.full_name}` : 'Register New Member'}
             </DialogTitle>
             <DialogDescription>
-              {isAdmin
-                ? 'Admin view — all fields editable including role, email, password and status.'
-                : 'Update profile details below.'}
+              {isAdmin ? 'Admin view — all fields editable.' : 'Update profile details below.'}
             </DialogDescription>
           </DialogHeader>
-
           <div className="space-y-6 py-4">
-            {/* Profile picture */}
             <div className="flex justify-center">
               <div className="relative">
                 <div className="w-28 h-28 rounded-3xl overflow-hidden bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center">
@@ -640,45 +649,33 @@ export default function Users() {
                 </label>
               </div>
             </div>
-
-            {/* Name + Email */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Full Name *</Label>
-                <Input name="full_name" value={formData.full_name} onChange={handleInput}
-                  placeholder="e.g. Manthan Desai" className="rounded-xl" />
+                <Input name="full_name" value={formData.full_name} onChange={handleInput} placeholder="e.g. Manthan Desai" className="rounded-xl" />
               </div>
               <div className="space-y-2">
-                <Label className="font-semibold">
-                  Email {isAdmin ? '*' : <span className="text-slate-400 font-normal">(read only)</span>}
-                </Label>
-                {/* Admin can edit email of OTHER users; cannot change own email here */}
+                <Label className="font-semibold">Email {isAdmin ? '*' : <span className="text-slate-400 font-normal">(read only)</span>}</Label>
                 <Input type="email" name="email" value={formData.email} onChange={handleInput}
                   placeholder="name@firm.com" className="rounded-xl"
                   disabled={!isAdmin || (selectedUser && selectedUser.id === user.id)} />
               </div>
             </div>
-
-            {/* Phone + Password */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Phone</Label>
-                <Input name="phone" value={formData.phone} onChange={handleInput}
-                  placeholder="+91 00000 00000" className="rounded-xl" />
+                <Input name="phone" value={formData.phone} onChange={handleInput} placeholder="+91 00000 00000" className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-slate-400" />
                   {selectedUser ? 'New Password' : 'Initial Password *'}
-                  {selectedUser && <span className="text-slate-400 font-normal text-xs">(leave blank to keep current)</span>}
+                  {selectedUser && <span className="text-slate-400 font-normal text-xs">(blank = keep current)</span>}
                 </Label>
                 <Input type="password" name="password" value={formData.password} onChange={handleInput}
-                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'}
-                  className="rounded-xl" />
+                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'} className="rounded-xl" />
               </div>
             </div>
-
-            {/* Shift parameters */}
             <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
               <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
                 <Clock className="h-4 w-4" /> Shift Schedule
@@ -696,8 +693,6 @@ export default function Users() {
                 ))}
               </div>
             </div>
-
-            {/* Birthday + Telegram */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Birthday</Label>
@@ -705,12 +700,9 @@ export default function Users() {
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Telegram ID</Label>
-                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput}
-                  placeholder="Numeric Telegram ID" className="rounded-xl" />
+                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="Numeric Telegram ID" className="rounded-xl" />
               </div>
             </div>
-
-            {/* Role + Status — admin only */}
             {isAdmin && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
@@ -745,7 +737,6 @@ export default function Users() {
                     </div>
                   )}
                 </div>
-
                 <div className="space-y-2">
                   <Label className="font-semibold">Account Status</Label>
                   <Select value={formData.status} onValueChange={v => setFormData(p => ({ ...p, status: v, is_active: v === 'active' }))}>
@@ -760,16 +751,6 @@ export default function Users() {
                 </div>
               </div>
             )}
-
-            {/* Account active toggle — non-admin edit */}
-            {!isAdmin && selectedUser && (
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                <Label className="font-semibold">Account Active</Label>
-                <Switch checked={formData.is_active} onCheckedChange={v => setFormData(p => ({ ...p, is_active: v }))} />
-              </div>
-            )}
-
-            {/* Departments — admin sees for any user */}
             {isAdmin && (
               <div className="space-y-3">
                 <Label className="font-semibold">Assigned Departments</Label>
@@ -789,11 +770,9 @@ export default function Users() {
               </div>
             )}
           </div>
-
           <DialogFooter className="gap-3 border-t pt-5">
             <Button variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl h-12">Discard</Button>
-            <Button onClick={handleSubmit} disabled={loading}
-              className="rounded-xl h-12 px-8 font-bold shadow-lg"
+            <Button onClick={handleSubmit} disabled={loading} className="rounded-xl h-12 px-8 font-bold shadow-lg"
               style={{ background: COLORS.emeraldGreen }}>
               {loading ? 'Saving…' : selectedUser ? 'Save Updates' : 'Create Member'}
             </Button>
@@ -869,7 +848,7 @@ export default function Users() {
             </motion.div>
       )}
 
-      {/* ── Main user grid ── */}
+      {/* ── Main grid ── */}
       {activeTab !== 'pending' && (
         <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredUsers.length === 0
@@ -878,18 +857,21 @@ export default function Users() {
                 <h3 className="text-xl font-bold text-slate-400">No members found</h3>
               </div>
             : filteredUsers.map(u => (
-                <UserCard key={u.id} userData={u}
-                  onEdit={handleEdit} onDelete={handleDelete} onPermissions={openPermissionsDialog}
-                  onApprove={handleApprove} onReject={handleReject}
+                <UserCard key={u.id} userData={u} onEdit={handleEdit} onDelete={handleDelete}
+                  onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
                   currentUserId={user?.id} isAdmin={isAdmin}
-                  canEditUsers={canEditUsers} canManagePermissions={canManagePermissions}
-                  approving={approvingId} />
-              ))
-          }
+                  canEditUsers={canEditUsers} canManagePermissions={canManagePermissions} approving={approvingId} />
+              ))}
         </motion.div>
       )}
 
-      {/* ── Permissions Dialog ── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          PERMISSIONS DIALOG
+          All Switch onCheckedChange handlers use the extracted PermToggleRow
+          component to guarantee the closure captures `permKey` as a string,
+          not as `p.key` (which would be undefined because `p` is the prev
+          state object in the setPermissions updater function).
+      ══════════════════════════════════════════════════════════════════════ */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
@@ -897,7 +879,9 @@ export default function Users() {
               <div className="p-3 bg-emerald-50 rounded-2xl"><Shield className="h-7 w-7 text-emerald-600" /></div>
               <div>
                 <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>Access Governance</DialogTitle>
-                <DialogDescription>Configuring <b>{selectedUserForPerms?.full_name}</b> ({selectedUserForPerms?.role})</DialogDescription>
+                <DialogDescription>
+                  Configuring <b>{selectedUserForPerms?.full_name}</b> ({selectedUserForPerms?.role})
+                </DialogDescription>
               </div>
             </div>
             <Button variant="ghost" className="rounded-xl" onClick={() => setPermDialogOpen(false)}>Close</Button>
@@ -918,94 +902,64 @@ export default function Users() {
 
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
 
-              {/* Global Visibility */}
+              {/* ── Global Visibility ── */}
               <AccordionItem value="global" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Eye className="h-5 w-5 text-blue-500" />Global Visibility</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
-                  {[
-                    { key: 'can_view_all_tasks',              label: 'Universal Task Access',        desc: 'See tasks assigned to any user/dept' },
-                    { key: 'can_view_all_clients',            label: 'Master Client List',            desc: 'See all company legal entities' },
-                    { key: 'can_view_all_dsc',                label: 'DSC Vault Access',              desc: 'View all Digital Signatures' },
-                    { key: 'can_view_documents',              label: 'Document Library',              desc: 'Access physical document register' },
-                    { key: 'can_view_all_duedates',           label: 'Compliance Roadmap',            desc: 'View all upcoming statutory due dates' },
-                    { key: 'can_view_reports',                label: 'Analytics Dashboard',           desc: 'View performance and system reports' },
-                    { key: 'can_view_todo_dashboard',         label: 'Todo Dashboard',                desc: 'Access global team todo overview' },
-                    { key: 'can_view_audit_logs',             label: 'System Audit Trail',            desc: 'View activity logs and record histories' },
-                    { key: 'can_view_all_leads',              label: 'Leads Pipeline',                desc: 'View the global leads dashboard' },
-                    { key: 'can_view_user_page',              label: 'User Directory',                desc: 'View team members directory' },
-                    { key: 'can_view_selected_users_reports', label: 'Team Reports Access',           desc: 'View reports for selected users' },
-                    { key: 'can_view_staff_rankings',         label: 'Staff Rankings',                desc: 'View performance leaderboard' },
-                    { key: 'can_view_own_data',               label: 'View Own Data',                 desc: 'Access own attendance, tasks and reports' },
-                  ].map(p => (
-                    <div key={p.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
-                      <div className="pr-4">
-                        <p className="text-sm font-bold text-slate-700">{p.label}</p>
-                        <p className="text-[10px] text-slate-500">{p.desc}</p>
-                      </div>
-                      <Switch checked={!!permissions[p.key]} onCheckedChange={v => setPermissions(p => ({ ...p, [p.key]: v }))} />
-                    </div>
+                  {GLOBAL_PERMS.map(p => (
+                    <PermToggleRow
+                      key={p.key}
+                      permKey={p.key}
+                      label={p.label}
+                      desc={p.desc}
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                    />
                   ))}
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Operational Powers */}
+              {/* ── Operational Powers ── */}
               <AccordionItem value="ops" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Settings className="h-5 w-5 text-purple-500" />Operational Powers</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
-                  {[
-                    { key: 'can_assign_tasks',       label: 'Task Delegation',         desc: 'Assign tasks to other staff' },
-                    { key: 'can_assign_clients',     label: 'Client Assignment',       desc: 'Assign and reassign staff to clients' },
-                    { key: 'can_manage_users',       label: 'User Governance',         desc: 'Manage other team members and roles' },
-                    { key: 'can_view_attendance',    label: 'Attendance Management',   desc: 'Review punch timings and late reports' },
-                    { key: 'can_view_staff_activity',label: 'Staff Monitoring',        desc: 'View app usage and screen activity' },
-                    { key: 'can_send_reminders',     label: 'Automated Reminders',     desc: 'Trigger email/notification reminders' },
-                    { key: 'can_download_reports',   label: 'Export Data',             desc: 'Download CSV/PDF versions of reports' },
-                    { key: 'can_manage_settings',    label: 'System Settings',         desc: 'Modify global system configuration' },
-                    { key: 'can_delete_data',        label: 'Delete Records',          desc: 'Permanently delete data entries' },
-                    { key: 'can_delete_tasks',       label: 'Delete Tasks',            desc: 'Delete any task regardless of ownership' },
-                    { key: 'can_connect_email',      label: 'Connect Email Accounts',  desc: 'Link personal email via IMAP for event extraction' },
-                  ].map(p => (
-                    <div key={p.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
-                      <div className="pr-4">
-                        <p className="text-sm font-bold text-slate-700">{p.label}</p>
-                        <p className="text-[10px] text-slate-500">{p.desc}</p>
-                      </div>
-                      <Switch checked={!!permissions[p.key]} onCheckedChange={v => setPermissions(p => ({ ...p, [p.key]: v }))} />
-                    </div>
+                  {OPS_PERMS.map(p => (
+                    <PermToggleRow
+                      key={p.key}
+                      permKey={p.key}
+                      label={p.label}
+                      desc={p.desc}
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                    />
                   ))}
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Edit & Modification */}
+              {/* ── Edit & Modification ── */}
               <AccordionItem value="edits" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Edit className="h-5 w-5 text-orange-500" />Edit & Modification</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
-                  {[
-                    { key: 'can_edit_tasks',     label: 'Modify Tasks',     desc: 'Update/delete task definitions' },
-                    { key: 'can_edit_clients',   label: 'Modify Clients',   desc: 'Update client master data' },
-                    { key: 'can_edit_dsc',       label: 'Modify DSC',       desc: 'Update certificate details' },
-                    { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records' },
-                    { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory timelines' },
-                    { key: 'can_edit_users',     label: 'Modify Users',     desc: 'Update user profiles' },
-                  ].map(p => (
-                    <div key={p.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
-                      <div className="pr-4">
-                        <p className="text-sm font-bold text-slate-700">{p.label}</p>
-                        <p className="text-[10px] text-slate-500">{p.desc}</p>
-                      </div>
-                      <Switch checked={!!permissions[p.key]} onCheckedChange={v => setPermissions(p => ({ ...p, [p.key]: v }))} />
-                    </div>
+                  {EDIT_PERMS.map(p => (
+                    <PermToggleRow
+                      key={p.key}
+                      permKey={p.key}
+                      label={p.label}
+                      desc={p.desc}
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                    />
                   ))}
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Cross-User Visibility */}
+              {/* ── Cross-User Visibility ── */}
               <AccordionItem value="cross" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><UsersIcon className="h-5 w-5 text-emerald-500" />Cross-User Visibility</div>
@@ -1022,18 +976,21 @@ export default function Users() {
                       <p className="text-sm font-bold text-slate-800 px-1">Allowed {section.label} Visibility</p>
                       <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-2xl min-h-[50px]">
                         {users.filter(u => u.id !== selectedUserForPerms?.id).map(u => {
-                          const sel = permissions[section.key]?.includes(u.id);
+                          const sectionKey = section.key; // capture as string
+                          const sel = permissions[sectionKey]?.includes(u.id);
                           return (
                             <Badge key={u.id}
                               onClick={() => setPermissions(prev => ({
                                 ...prev,
-                                [section.key]: sel
-                                  ? prev[section.key].filter(id => id !== u.id)
-                                  : [...(prev[section.key] || []), u.id],
+                                [sectionKey]: sel
+                                  ? prev[sectionKey].filter(id => id !== u.id)
+                                  : [...(prev[sectionKey] || []), u.id],
                               }))}
                               className={`cursor-pointer px-3 py-1.5 rounded-lg border-2 transition-all ${
-                                sel ? 'bg-emerald-500 border-emerald-600 text-white scale-105 shadow-md'
-                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                                sel
+                                  ? 'bg-emerald-500 border-emerald-600 text-white scale-105 shadow-md'
+                                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                              }`}>
                               {u.full_name}
                             </Badge>
                           );
@@ -1045,7 +1002,7 @@ export default function Users() {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Assigned Portfolio */}
+              {/* ── Assigned Portfolio ── */}
               <AccordionItem value="clients" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
                   <div className="flex items-center gap-3"><Briefcase className="h-5 w-5 text-cyan-500" />Assigned Portfolio</div>
@@ -1060,14 +1017,15 @@ export default function Users() {
                     {clients
                       .filter(c => c.company_name.toLowerCase().includes(clientSearch.toLowerCase()))
                       .map(client => {
-                        const assigned = (permissions.assigned_clients || []).includes(client.id);
+                        const clientId = client.id; // capture as string
+                        const assigned = (permissions.assigned_clients || []).includes(clientId);
                         return (
-                          <div key={client.id}
+                          <div key={clientId}
                             onClick={() => setPermissions(prev => ({
                               ...prev,
                               assigned_clients: assigned
-                                ? prev.assigned_clients.filter(id => id !== client.id)
-                                : [...(prev.assigned_clients || []), client.id],
+                                ? prev.assigned_clients.filter(id => id !== clientId)
+                                : [...(prev.assigned_clients || []), clientId],
                             }))}
                             className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
                               assigned ? 'bg-emerald-50 border-emerald-400' : 'bg-white border-slate-100 hover:border-slate-200'}`}>
