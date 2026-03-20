@@ -359,12 +359,13 @@ const DashboardLayout = ({ children }) => {
       <header
         className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
         style={{
-          left:                offsetPx,
-          background:          isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
-          borderBottom:        isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
-          boxShadow:           '0 1px 8px rgba(0,0,0,0.06)',
-          backdropFilter:      'blur(12px)',
-          WebkitBackdropFilter:'blur(12px)',
+          left: offsetPx,
+          width: `calc(100% - ${offsetPx}px)`, // This ensures it stretches to the right edge
+          background: isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
+          borderBottom: isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
+          boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
         }}
       >
         <div className="flex items-center justify-between px-3 sm:px-5 md:px-7 h-12 sm:h-14">
