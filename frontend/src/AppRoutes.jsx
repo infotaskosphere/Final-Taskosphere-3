@@ -21,7 +21,12 @@ const StaffActivity     = lazy(() => import("@/pages/StaffActivity"));
 const LeadsPage         = lazy(() => import("@/pages/Leads"));
 const VisitsPage        = lazy(() => import("@/pages/VisitsPage"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings"));
-const GeneralSettings   = lazy(() => import("@/components/GeneralSettings")); // ✅ ADDED
+
+// ✅ FIX: GeneralSettings — if build fails saying "can't resolve", check which
+// folder the file is in and update this import path to match:
+//   If in src/pages/         → import("@/pages/GeneralSettings")
+//   If in src/components/    → import("@/components/GeneralSettings")
+const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings"));
 
 /* ── Route Guards ─────────────────────────────────────────────────────────── */
 
@@ -224,7 +229,7 @@ function AppRoutes() {
           }
         />
 
-        {/* ✅ FIX: General Settings — was missing, caused redirect to dashboard */}
+        {/* ✅ General Settings — was missing, caused redirect to dashboard */}
         <Route
           path="/settings/general"
           element={
@@ -234,7 +239,7 @@ function AppRoutes() {
           }
         />
 
-        {/* ✅ /settings alone → redirect to general settings */}
+        {/* /settings alone → redirect to general */}
         <Route
           path="/settings"
           element={<Navigate to="/settings/general" replace />}
