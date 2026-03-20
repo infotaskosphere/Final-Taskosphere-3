@@ -349,7 +349,7 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
           <Button
             onClick={handleConnect}
             disabled={loading}
-            className="flex-2 rounded-xl h-10 text-sm font-bold text-white px-6"
+            className="flex-1 rounded-xl h-10 text-sm font-bold text-white px-6"
             style={{ background: loading ? "#9CA3AF" : `linear-gradient(135deg, ${provider.color}, ${provider.color}CC)` }}
           >
             {loading
