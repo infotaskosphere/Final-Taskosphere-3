@@ -218,6 +218,22 @@ def mark_absent_users_task():
         if loop and not loop.is_closed():
             loop.close()
 
+    
+    # ── NEW: email connections index ──────────────────────────────────────
+        try:
+            # 1. DROP the old restrictive index that limits users to 1 Gmail
+            # Usually named 'user_id_1_provider_1'
+            await db.email_connections.drop_index("user_id_1_provider_1")
+        except Exception:
+            pass # Already dropped or named differently
+
+        # 2. CREATE the new index that allows multiple emails per user
+        await db.email_connections.create_index(
+            [("user_id", 1), ("email_address", 1)],
+            unique=True,
+            background=True
+        )
+
 
 @app.on_event("startup")
 async def startup_event():
