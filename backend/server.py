@@ -258,7 +258,7 @@ async def startup_event():
         await db.holidays.create_index("date", unique=True, background=True)
         # ── NEW: email connections index ──────────────────────────────────────
         await db.email_connections.create_index(
-            [("user_id", 1), ("provider", 1)],
+            [("user_id", 1), ("email_address", 1)],
             unique=True,
             background=True
         )
