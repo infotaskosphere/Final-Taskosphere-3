@@ -1,789 +1,749 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# backend/email_integration.py
-#
-# Pure IMAP — NO OAuth, NO Google Cloud Console, NO API keys required.
-#
-# How to connect Gmail:
-#   1. Enable 2-Step Verification on Google account
-#   2. Go to myaccount.google.com/apppasswords
-#   3. Generate App Password → select "Mail" → copy 16-char password
-#   4. Enter email + that password here → connects via imap.gmail.com:993
-#
-# Works the same for Outlook, Yahoo, iCloud, Zoho, Rediffmail, etc.
-# Multiple accounts per user are each stored as separate documents.
-# ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// EmailSettings.jsx
+// A full settings page where users can connect multiple email accounts
+// using App Passwords — NO OAuth, NO Google Cloud Console needed.
+//
+// Drop into your settings route:
+//   <Route path="/settings/email" element={<EmailSettings />} />
+//
+// Or embed inside your existing Settings page:
+//   import EmailSettings from "@/components/EmailSettings";
+//   <EmailSettings />
+// ═══════════════════════════════════════════════════════════════════════════════
 
-import re
-import asyncio
-import imaplib
-import email as email_lib
-import logging
-from email.header import decode_header
-from datetime import datetime, date, timezone, timedelta
-from typing import Optional, List, Dict, Any
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
+import api from "@/lib/api";
+import {
+  Mail, Plus, Trash2, CheckCircle2, AlertCircle, RefreshCw,
+  Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
+  Wifi, WifiOff, Edit2, Check, X, Info, Shield,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { format, parseISO } from "date-fns";
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+// ── Colours ───────────────────────────────────────────────────────────────────
+const C = { deepBlue: "#0D3B66", mediumBlue: "#1F6FB2", emerald: "#1FAF5A" };
 
-logger = logging.getLogger(__name__)
+const PROVIDER_COLORS = {
+  gmail:   "#EA4335",
+  outlook: "#0078D4",
+  yahoo:   "#720E9E",
+  icloud:  "#3B82F6",
+  other:   "#374151",
+};
 
-from backend.dependencies import db, get_current_user
-from backend.models import User
+const PROVIDER_ICONS = {
+  gmail:   "G",
+  outlook: "M",
+  yahoo:   "Y",
+  icloud:  "iC",
+  other:   "@",
+};
 
-router = APIRouter(prefix="/email", tags=["email"])
+// ── Quick provider buttons ────────────────────────────────────────────────────
+const QUICK_PROVIDERS = [
+  {
+    id: "gmail",
+    label: "Gmail",
+    color: "#EA4335",
+    icon: "G",
+    domain: "gmail.com",
+    imap_host: "imap.gmail.com",
+    imap_port: 993,
+    app_password_url: "https://myaccount.google.com/apppasswords",
+    steps: [
+      { num: 1, text: "Open", link: "https://myaccount.google.com", linkText: "myaccount.google.com" },
+      { num: 2, text: "Go to Security → 2-Step Verification → Enable it" },
+      { num: 3, text: "Search 'App passwords' in your Google Account" },
+      { num: 4, text: "App: Mail · Device: Other (name it Taskosphere) → Generate" },
+      { num: 5, text: "Copy the 16-character password and paste below" },
+    ],
+    note: "⚠️ 2-Step Verification must be enabled first.",
+    placeholder: "abcd efgh ijkl mnop",
+  },
+  {
+    id: "outlook",
+    label: "Outlook / Hotmail",
+    color: "#0078D4",
+    icon: "M",
+    domain: "outlook.com",
+    imap_host: "outlook.office365.com",
+    imap_port: 993,
+    app_password_url: "https://account.microsoft.com/security",
+    steps: [
+      { num: 1, text: "Open", link: "https://account.microsoft.com/security", linkText: "account.microsoft.com/security" },
+      { num: 2, text: "Click 'Advanced security options'" },
+      { num: 3, text: "Under App passwords → Create a new app password" },
+      { num: 4, text: "Copy the generated password and paste below" },
+    ],
+    note: "⚠️ Requires Microsoft account with 2-step verification on.",
+    placeholder: "xxxx xxxx xxxx xxxx",
+  },
+  {
+    id: "yahoo",
+    label: "Yahoo Mail",
+    color: "#720E9E",
+    icon: "Y",
+    domain: "yahoo.com",
+    imap_host: "imap.mail.yahoo.com",
+    imap_port: 993,
+    app_password_url: "https://login.yahoo.com/myaccount/security/",
+    steps: [
+      { num: 1, text: "Open", link: "https://login.yahoo.com/myaccount/security/", linkText: "Yahoo Account Security" },
+      { num: 2, text: "Click 'Generate app password'" },
+      { num: 3, text: "Select 'Other App' → enter Taskosphere → Get password" },
+      { num: 4, text: "Copy and paste the password below" },
+    ],
+    note: "⚠️ Do NOT use your Yahoo login password here.",
+    placeholder: "xxxx xxxx xxxx xxxx",
+  },
+  {
+    id: "icloud",
+    label: "iCloud Mail",
+    color: "#3B82F6",
+    icon: "iC",
+    domain: "icloud.com",
+    imap_host: "imap.mail.me.com",
+    imap_port: 993,
+    app_password_url: "https://appleid.apple.com",
+    steps: [
+      { num: 1, text: "Open", link: "https://appleid.apple.com", linkText: "appleid.apple.com" },
+      { num: 2, text: "Sign In & Security → App-Specific Passwords" },
+      { num: 3, text: "Click + → name it Taskosphere → Create" },
+      { num: 4, text: "Copy and paste the password below" },
+    ],
+    note: "⚠️ Apple ID must have 2FA enabled.",
+    placeholder: "xxxx-xxxx-xxxx-xxxx",
+  },
+  {
+    id: "other",
+    label: "Other Email",
+    color: "#374151",
+    icon: "@",
+    domain: "",
+    imap_host: "",
+    imap_port: 993,
+    app_password_url: "",
+    steps: [
+      { num: 1, text: "Ask your email provider for IMAP settings" },
+      { num: 2, text: "Typical host: imap.yourdomain.com · Port: 993" },
+      { num: 3, text: "Use your regular password or an app password if available" },
+    ],
+    note: "",
+    placeholder: "your email password",
+  },
+];
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# IMAP HOST AUTO-DETECTION
-# ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONNECT FORM  (shown per provider)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-IMAP_HOSTS: Dict[str, tuple] = {
-    "gmail":      ("imap.gmail.com", 993),
-    "googlemail": ("imap.gmail.com", 993),
-    "yahoo":      ("imap.mail.yahoo.com", 993),
-    "ymail":      ("imap.mail.yahoo.com", 993),
-    "outlook":    ("outlook.office365.com", 993),
-    "hotmail":    ("outlook.office365.com", 993),
-    "live":       ("outlook.office365.com", 993),
-    "msn":        ("outlook.office365.com", 993),
-    "icloud":     ("imap.mail.me.com", 993),
-    "me":         ("imap.mail.me.com", 993),
-    "zoho":       ("imap.zoho.com", 993),
-    "rediffmail": ("imap.rediffmail.com", 993),
-    "proton":     ("127.0.0.1", 1143),
+function ConnectForm({ provider, onSuccess, onCancel }) {
+  const [email, setEmail]       = useState(provider.domain ? `@${provider.domain}` : "");
+  const [password, setPassword] = useState("");
+  const [host, setHost]         = useState(provider.imap_host);
+  const [port, setPort]         = useState(provider.imap_port);
+  const [label, setLabel]       = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [showSteps, setShowSteps] = useState(true);
+  const [loading, setLoading]   = useState(false);
+
+  // Auto-fill email cursor position
+  const emailRef = React.useRef(null);
+  useEffect(() => {
+    if (provider.domain && emailRef.current) {
+      emailRef.current.setSelectionRange(0, 0);
+      emailRef.current.focus();
+    }
+  }, []);
+
+  const handleConnect = async () => {
+    const trimEmail = email.trim();
+    if (!trimEmail || !trimEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
+    if (!password) { toast.error("App Password is required"); return; }
+
+    setLoading(true);
+    try {
+      await api.post("/email/connections", {
+        email_address: trimEmail,
+        app_password: password,
+        imap_host: host || undefined,
+        imap_port: Number(port),
+        label: label || undefined,
+      });
+      toast.success(`✓ ${trimEmail} connected successfully!`);
+      onSuccess();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Connection failed. Check your credentials.";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="border rounded-2xl overflow-hidden"
+      style={{ borderColor: provider.color + "30" }}
+    >
+      {/* Provider header */}
+      <div className="flex items-center gap-3 px-5 py-4"
+        style={{ backgroundColor: provider.color + "12" }}>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base font-black text-white"
+          style={{ backgroundColor: provider.color }}>
+          {provider.icon}
+        </div>
+        <div>
+          <p className="font-bold text-slate-800">Connect {provider.label}</p>
+          <p className="text-xs text-slate-500">IMAP · App Password · No OAuth needed</p>
+        </div>
+        {provider.app_password_url && (
+          <a href={provider.app_password_url} target="_blank" rel="noopener noreferrer"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors hover:opacity-80"
+            style={{ color: provider.color, borderColor: provider.color + "40", backgroundColor: provider.color + "10" }}>
+            <ExternalLink className="w-3 h-3" />
+            Get App Password
+          </a>
+        )}
+      </div>
+
+      <div className="p-5 space-y-4">
+        {/* Step-by-step guide */}
+        {provider.steps.length > 0 && (
+          <div className="rounded-xl border border-slate-100 overflow-hidden">
+            <button
+              onClick={() => setShowSteps(s => !s)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-slate-400" />
+                How to get your App Password
+              </span>
+              {showSteps ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+            </button>
+            <AnimatePresence>
+              {showSteps && (
+                <motion.div
+                  initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-4 py-3 space-y-2.5 bg-white">
+                    {provider.steps.map(step => (
+                      <div key={step.num} className="flex items-start gap-3">
+                        <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white flex-shrink-0 mt-0.5"
+                          style={{ backgroundColor: provider.color }}>
+                          {step.num}
+                        </span>
+                        <p className="text-sm text-slate-600">
+                          {step.text}
+                          {step.link && (
+                            <> <a href={step.link} target="_blank" rel="noopener noreferrer"
+                              className="font-semibold underline" style={{ color: provider.color }}>
+                              {step.linkText}
+                            </a></>
+                          )}
+                        </p>
+                      </div>
+                    ))}
+                    {provider.note && (
+                      <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800 font-medium">
+                        {provider.note}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Form fields */}
+        <div className="grid grid-cols-1 gap-3">
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
+              Email Address
+            </label>
+            <input
+              ref={emailRef}
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder={`you@${provider.domain || "example.com"}`}
+              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 transition-shadow"
+              style={{ "--tw-ring-color": provider.color + "40" } as any}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
+              App Password <span className="font-normal text-slate-400 normal-case">(not your login password)</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showPass ? "text" : "password"}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleConnect()}
+                placeholder={provider.placeholder || "app password"}
+                className="w-full px-4 py-2.5 pr-11 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 font-mono transition-shadow"
+              />
+              <button
+                onClick={() => setShowPass(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
+              Friendly Name <span className="font-normal text-slate-400 normal-case">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={label}
+              onChange={e => setLabel(e.target.value)}
+              placeholder={`e.g. Work Gmail, Personal Yahoo`}
+              className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 transition-shadow"
+            />
+          </div>
+
+          {/* Custom IMAP host (only for "other") */}
+          {provider.id === "other" && (
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">IMAP Host</label>
+                <input
+                  type="text"
+                  value={host}
+                  onChange={e => setHost(e.target.value)}
+                  placeholder="imap.yourdomain.com"
+                  className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">Port</label>
+                <input
+                  type="number"
+                  value={port}
+                  onChange={e => setPort(Number(e.target.value))}
+                  className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" onClick={onCancel}
+            className="flex-1 rounded-xl h-10 text-sm font-semibold">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConnect}
+            disabled={loading}
+            className="flex-1 rounded-xl h-10 text-sm font-bold text-white px-6"
+            style={{ background: loading ? "#9CA3AF" : `linear-gradient(135deg, ${provider.color}, ${provider.color}CC)` }}
+          >
+            {loading
+              ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Testing & Connecting…</>
+              : <><Wifi className="w-4 h-4 mr-2" />Connect Account</>
+            }
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-100">
+          <Shield className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-xs text-green-700">
+            Your password is tested and stored securely. We only use it to read email subjects &amp; bodies for event extraction.
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
-def _detect_imap_host(email_address: str) -> Optional[tuple]:
-    """Auto-detect IMAP host from email domain."""
-    try:
-        domain = email_address.split("@")[1].lower()
-        # exact domain match first
-        for key, val in IMAP_HOSTS.items():
-            if domain == f"{key}.com" or domain == key:
-                return val
-        # subdomain match
-        for key, val in IMAP_HOSTS.items():
-            if key in domain:
-                return val
-    except Exception:
-        pass
-    return None
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONNECTED ACCOUNT CARD
+// ═══════════════════════════════════════════════════════════════════════════════
 
+function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelVal, setLabelVal]         = useState(conn.label || conn.email_address);
+  const [testing, setTesting]           = useState(false);
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PYDANTIC MODELS
-# ═══════════════════════════════════════════════════════════════════════════════
+  const color = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
+  const icon  = PROVIDER_ICONS[conn.provider] || PROVIDER_ICONS.other;
 
-class EmailConnectRequest(BaseModel):
-    email_address: str
-    app_password: str
-    imap_host: Optional[str] = None
-    imap_port: Optional[int] = 993
-    label: Optional[str] = None          # friendly name e.g. "Work Gmail"
+  const handleSaveLabel = async () => {
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal });
+      toast.success("Label updated");
+      setEditingLabel(false);
+    } catch {
+      toast.error("Failed to update label");
+    }
+  };
 
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      await onTest(conn.email_address);
+    } finally {
+      setTesting(false);
+    }
+  };
 
-class EmailConnectionUpdate(BaseModel):
-    label: Optional[str] = None
-    is_active: Optional[bool] = None
+  const hasError = !!conn.sync_error;
 
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      className="border rounded-2xl overflow-hidden transition-all"
+      style={{ borderColor: hasError ? "#FECACA" : conn.is_active ? color + "30" : "#E5E7EB" }}
+    >
+      {/* Card header */}
+      <div
+        className="flex items-center gap-3 px-5 py-4"
+        style={{ backgroundColor: hasError ? "#FEF2F2" : conn.is_active ? color + "08" : "#F9FAFB" }}
+      >
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
+          style={{ backgroundColor: conn.is_active ? color : "#9CA3AF" }}
+        >
+          {icon}
+        </div>
 
-class ExtractedEvent(BaseModel):
-    title: str
-    event_type: str
-    date: Optional[str] = None
-    time: Optional[str] = None
-    location: Optional[str] = None
-    organizer: Optional[str] = None
-    description: Optional[str] = None
-    urgency: str = "medium"
-    source_subject: str
-    source_from: str
-    source_date: str
-    source_account: Optional[str] = None
-    raw_snippet: Optional[str] = None
+        <div className="flex-1 min-w-0">
+          {editingLabel ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={labelVal}
+                onChange={e => setLabelVal(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(); if (e.key === "Escape") setEditingLabel(false); }}
+                className="flex-1 px-2 py-1 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <button onClick={handleSaveLabel} className="p-1 text-emerald-600 hover:text-emerald-700">
+                <Check className="w-4 h-4" />
+              </button>
+              <button onClick={() => setEditingLabel(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-slate-800 text-sm truncate">{conn.label || conn.email_address}</p>
+              <button onClick={() => setEditingLabel(true)}
+                className="p-0.5 text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">
+                <Edit2 className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-slate-400 truncate">{conn.email_address}</p>
+        </div>
 
+        {/* Status badge */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {hasError ? (
+            <span className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded-full">
+              <AlertCircle className="w-3 h-3" /> Error
+            </span>
+          ) : conn.is_active ? (
+            <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
+              <CheckCircle2 className="w-3 h-3" /> Active
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
+              <WifiOff className="w-3 h-3" /> Paused
+            </span>
+          )}
+        </div>
+      </div>
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONNECTION KEY HELPER
-# ═══════════════════════════════════════════════════════════════════════════════
+      {/* Error message */}
+      {hasError && (
+        <div className="mx-5 mt-3 p-3 rounded-xl bg-red-50 border border-red-100">
+          <p className="text-xs text-red-700 font-medium">{conn.sync_error}</p>
+        </div>
+      )}
 
-def _conn_key(user_id: str, email_address: str) -> str:
-    """Unique document key per user+email so multiple accounts coexist."""
-    return f"{user_id}::{email_address.lower().strip()}"
+      {/* Footer row */}
+      <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
+        <div className="text-xs text-slate-400">
+          {conn.last_synced
+            ? `Last synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")}`
+            : `Connected ${conn.connected_at ? format(parseISO(conn.connected_at), "MMM d, yyyy") : ""}`}
+          <span className="mx-1">·</span>
+          <span className="font-medium">{conn.imap_host}</span>
+        </div>
 
+        <div className="flex items-center gap-1">
+          {/* Test button */}
+          <button
+            onClick={handleTest}
+            disabled={testing}
+            title="Test connection"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all"
+          >
+            {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
+            Test
+          </button>
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EVENT EXTRACTION ENGINE
-# ═══════════════════════════════════════════════════════════════════════════════
+          {/* Pause/Resume toggle */}
+          <button
+            onClick={() => onToggle(conn.email_address, !conn.is_active)}
+            title={conn.is_active ? "Pause syncing" : "Resume syncing"}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all"
+          >
+            {conn.is_active ? "Pause" : "Resume"}
+          </button>
 
-_MONTH_MAP = {
-    "january": 1, "jan": 1, "february": 2, "feb": 2,
-    "march": 3, "mar": 3, "april": 4, "apr": 4,
-    "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
-    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10, "november": 11, "nov": 11,
-    "december": 12, "dec": 12,
+          {/* Disconnect */}
+          <button
+            onClick={() => onDisconnect(conn.email_address)}
+            title="Disconnect"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:scale-95 transition-all"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
-_EVENT_KEYWORDS = [
-    "meeting", "conference", "call", "hearing", "court", "tribunal",
-    "arbitration", "appointment", "interview", "review", "session",
-    "webinar", "seminar", "workshop", "visit", "inspection", "audit",
-    "presentation", "demo", "standup", "sync", "deadline", "due date",
-    "reminder", "follow-up", "followup", "discussion", "zoom", "teams",
-    "meet", "google meet", "skype", "video call", "online meeting",
-    "client visit", "site visit", "field visit", "customer meeting",
-    "show cause", "trademark", "ip hearing", "ipo", "patent",
-    "schedule", "invitation", "invite", "rsvp", "agenda",
-]
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN EmailSettings COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
 
-_URGENCY_HIGH = [
-    "urgent", "asap", "immediately", "important", "critical",
-    "priority", "action required", "respond by", "deadline",
-]
-_URGENCY_MED = ["please", "kindly", "request", "schedule", "plan", "upcoming"]
+export default function EmailSettings() {
+  const [connections, setConnections]   = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [activeForm, setActiveForm]     = useState(null);  // provider id or null
+  const [showAddOptions, setShowAddOptions] = useState(false);
 
-
-def _strip_html(html: str) -> str:
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style", "head", "meta", "link"]):
-            tag.decompose()
-        return soup.get_text(separator="\n")
-    except ImportError:
-        return re.sub(r"<[^>]+>", " ", html)
-
-
-def _parse_date_from_text(text: str) -> Optional[str]:
-    text = text.strip()
-    now = datetime.now()
-
-    m = re.search(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b", text)
-    if m:
-        try:
-            return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
-        except ValueError:
-            pass
-
-    m = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", text)
-    if m:
-        try:
-            return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
-        except ValueError:
-            pass
-
-    m = re.search(
-        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
-        r"(january|february|march|april|may|june|july|august|september|"
-        r"october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)"
-        r"(?:\s+(\d{4}))?\b",
-        text, re.IGNORECASE,
-    )
-    if m:
-        try:
-            yr = int(m.group(3)) if m.group(3) else now.year
-            mo = _MONTH_MAP.get(m.group(2).lower(), 0)
-            if mo:
-                return date(yr, mo, int(m.group(1))).isoformat()
-        except ValueError:
-            pass
-
-    m = re.search(
-        r"\b(january|february|march|april|may|june|july|august|september|"
-        r"october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)"
-        r"\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b",
-        text, re.IGNORECASE,
-    )
-    if m:
-        try:
-            mo = _MONTH_MAP.get(m.group(1).lower(), 0)
-            yr = int(m.group(3)) if m.group(3) else now.year
-            if mo:
-                return date(yr, mo, int(m.group(2))).isoformat()
-        except ValueError:
-            pass
-
-    try:
-        from dateutil import parser as du
-        return du.parse(text, fuzzy=True).date().isoformat()
-    except Exception:
-        return None
-
-
-def _parse_time_from_text(text: str) -> Optional[str]:
-    m = re.search(r"\b(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm|AM|PM)?\b", text)
-    if m:
-        h, mn = int(m.group(1)), int(m.group(2))
-        p = (m.group(3) or "").lower()
-        if p == "pm" and h != 12: h += 12
-        if p == "am" and h == 12: h = 0
-        return f"{h:02d}:{mn:02d}"
-    m = re.search(r"\b(\d{1,2})\s*(am|pm|AM|PM)\b", text)
-    if m:
-        h = int(m.group(1))
-        p = m.group(2).lower()
-        if p == "pm" and h != 12: h += 12
-        if p == "am" and h == 12: h = 0
-        return f"{h:02d}:00"
-    return None
-
-
-def _detect_event_type(text: str, subject: str) -> str:
-    c = (text + " " + subject).lower()
-    if any(k in c for k in ["hearing","court","tribunal","show cause","arbitration","ipo","patent","trademark"]):
-        return "hearing"
-    if any(k in c for k in ["visit","site visit","field visit","client visit","inspection"]):
-        return "visit"
-    if any(k in c for k in ["deadline","due date","last date","submit by","filing"]):
-        return "deadline"
-    if any(k in c for k in ["meeting","conference","call","zoom","teams","google meet","video"]):
-        return "meeting"
-    return "other"
-
-
-def _detect_urgency(text: str, subject: str) -> str:
-    c = (text + " " + subject).lower()
-    if any(k in c for k in _URGENCY_HIGH): return "urgent"
-    if any(k in c for k in _URGENCY_MED): return "medium"
-    return "low"
-
-
-def _extract_location(text: str) -> Optional[str]:
-    for pat in [
-        r"(?:venue|location|place|address|held at|at)\s*[:\-]?\s*([^\n,]{5,80})",
-        r"(?:zoom link|meet link|teams link|join at)\s*[:\-]?\s*(https?://[^\s]{10,120})",
-        r"(https?://(?:zoom\.us|teams\.microsoft|meet\.google)\S+)",
-    ]:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            return m.group(1).strip()[:120]
-    return None
-
-
-def _extract_organizer(text: str, from_addr: str) -> Optional[str]:
-    for pat in [
-        r"(?:organizer|organiser|hosted by|invited by)\s*[:\-]?\s*([A-Za-z\s\.]{3,50})",
-        r"([A-Za-z\s\.]{3,40})\s+(?:has invited|invites you|is inviting)",
-    ]:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            name = m.group(1).strip()
-            if len(name) > 3: return name
-    m = re.match(r"^([^<@]+)", from_addr)
-    if m:
-        return m.group(1).strip().strip('"') or None
-    return None
-
-
-def extract_events_from_email_body(
-    subject: str, body_text: str,
-    from_addr: str, email_date: str,
-    source_account: Optional[str] = None,
-) -> List[ExtractedEvent]:
-    lower_body = body_text.lower()
-    lower_subj = subject.lower()
-    if not any(kw in lower_body or kw in lower_subj for kw in _EVENT_KEYWORDS):
-        return []
-
-    chunks = re.split(r"[\n\r]{1,3}|(?<=[.!?])\s+", body_text)
-    events: List[ExtractedEvent] = []
-    seen_dates: set = set()
-
-    for chunk in chunks:
-        if len(chunk.strip()) < 8:
-            continue
-        dv = _parse_date_from_text(chunk)
-        if not dv or dv in seen_dates:
-            continue
-        try:
-            if date.fromisoformat(dv) < date.today() - timedelta(days=30):
-                continue
-        except Exception:
-            continue
-        seen_dates.add(dv)
-        clean_subj = re.sub(r"^(re:|fwd?:|fw:)\s*", "", subject, flags=re.IGNORECASE).strip()
-        ev_type = _detect_event_type(body_text, subject)
-        events.append(ExtractedEvent(
-            title=clean_subj or f"{ev_type.title()} on {dv}",
-            event_type=ev_type,
-            date=dv,
-            time=_parse_time_from_text(chunk) or _parse_time_from_text(body_text[:500]),
-            location=_extract_location(body_text),
-            organizer=_extract_organizer(body_text, from_addr),
-            description=body_text[:400].strip(),
-            urgency=_detect_urgency(body_text, subject),
-            source_subject=subject,
-            source_from=from_addr,
-            source_date=email_date,
-            source_account=source_account,
-            raw_snippet=chunk.strip()[:200],
-        ))
-
-    if not events:
-        dv = _parse_date_from_text(body_text[:800])
-        if dv:
-            clean_subj = re.sub(r"^(re:|fwd?:|fw:)\s*", "", subject, flags=re.IGNORECASE).strip()
-            ev_type = _detect_event_type(body_text, subject)
-            events.append(ExtractedEvent(
-                title=clean_subj or "Event",
-                event_type=ev_type,
-                date=dv,
-                time=_parse_time_from_text(body_text[:500]),
-                location=_extract_location(body_text),
-                organizer=_extract_organizer(body_text, from_addr),
-                description=body_text[:400].strip(),
-                urgency=_detect_urgency(body_text, subject),
-                source_subject=subject,
-                source_from=from_addr,
-                source_date=email_date,
-                source_account=source_account,
-                raw_snippet=body_text[:200].strip(),
-            ))
-    return events
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# IMAP FETCHER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _get_email_text(msg) -> str:
-    parts = []
-    if msg.is_multipart():
-        for part in msg.walk():
-            ct = part.get_content_type()
-            if "attachment" in str(part.get("Content-Disposition", "")):
-                continue
-            try:
-                raw = part.get_payload(decode=True).decode("utf-8", errors="replace")
-                if ct == "text/html":
-                    parts.append(_strip_html(raw))
-                elif ct == "text/plain":
-                    parts.append(raw)
-            except Exception:
-                pass
-    else:
-        try:
-            raw = msg.get_payload(decode=True).decode("utf-8", errors="replace")
-            parts.append(_strip_html(raw) if msg.get_content_type() == "text/html" else raw)
-        except Exception:
-            pass
-    return "\n".join(filter(None, parts))
-
-
-def _decode_header_value(val: str) -> str:
-    parts = decode_header(val or "")
-    return " ".join(
-        b.decode(enc or "utf-8", errors="replace") if isinstance(b, bytes) else str(b)
-        for b, enc in parts
-    )
-
-
-def fetch_events_via_imap(
-    email_address: str,
-    app_password: str,
-    imap_host: str,
-    imap_port: int,
-    days_back: int = 30,
-    max_emails: int = 100,
-) -> List[ExtractedEvent]:
-    """Connect to IMAP, fetch recent emails, extract events. Pure blocking — run in executor."""
-    try:
-        mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-        mail.login(email_address, app_password)
-    except imaplib.IMAP4.error as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Login failed for {email_address}: {str(exc)}",
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Cannot connect to {imap_host}: {str(exc)}",
-        )
-
-    mail.select("INBOX")
-    since = (datetime.now() - timedelta(days=days_back)).strftime("%d-%b-%Y")
-    st, msgs = mail.search(None, f'(SINCE "{since}")')
-    if st != "OK":
-        mail.logout()
-        return []
-
-    msg_ids = msgs[0].split()[-max_emails:]
-    all_events: List[ExtractedEvent] = []
-
-    for mid in reversed(msg_ids):
-        try:
-            st2, data = mail.fetch(mid, "(RFC822)")
-            if st2 != "OK":
-                continue
-            msg   = email_lib.message_from_bytes(data[0][1])
-            subj  = _decode_header_value(msg.get("Subject", ""))
-            frm   = _decode_header_value(msg.get("From", ""))
-            dt    = _decode_header_value(msg.get("Date", ""))
-            body  = _get_email_text(msg)
-            all_events.extend(
-                extract_events_from_email_body(subj, body, frm, dt, source_account=email_address)
-            )
-        except Exception as exc:
-            logger.warning(f"Parse error msg {mid} ({email_address}): {exc}")
-            continue
-
-    mail.logout()
-    return all_events
-
-
-def test_imap_connection(email_address: str, app_password: str, imap_host: str, imap_port: int) -> bool:
-    """Quick connection test — returns True on success, raises HTTPException on failure."""
-    try:
-        mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-        mail.login(email_address, app_password)
-        mail.logout()
-        return True
-    except imaplib.IMAP4.error as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Login failed: {str(exc)}. Make sure you're using an App Password, not your regular password.",
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Cannot connect to {imap_host}:{imap_port} — {str(exc)}",
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# API ROUTES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.get("/provider-info")
-async def get_provider_info():
-    """
-    Returns setup instructions for each supported email provider.
-    Frontend uses this to show the correct help text and auto-fill IMAP settings.
-    No auth required — public endpoint used on the settings page.
-    """
-    return {
-        "providers": [
-            {
-                "id": "gmail",
-                "label": "Gmail",
-                "color": "#EA4335",
-                "icon": "G",
-                "imap_host": "imap.gmail.com",
-                "imap_port": 993,
-                "domains": ["gmail.com", "googlemail.com"],
-                "steps": [
-                    "Go to myaccount.google.com",
-                    "Security → 2-Step Verification → turn ON",
-                    "Security → App passwords (search 'App passwords')",
-                    "Select app: Mail → Select device: Other → type 'Taskosphere'",
-                    "Copy the 16-character password shown",
-                    "Paste it in the App Password field below",
-                ],
-                "app_password_url": "https://myaccount.google.com/apppasswords",
-                "note": "Must have 2-Step Verification enabled first.",
-            },
-            {
-                "id": "outlook",
-                "label": "Outlook / Hotmail",
-                "color": "#0078D4",
-                "icon": "M",
-                "imap_host": "outlook.office365.com",
-                "imap_port": 993,
-                "domains": ["outlook.com", "hotmail.com", "live.com", "msn.com"],
-                "steps": [
-                    "Go to account.microsoft.com",
-                    "Security → Advanced security options",
-                    "App passwords → Create a new app password",
-                    "Copy the generated password",
-                    "Paste it in the App Password field below",
-                ],
-                "app_password_url": "https://account.microsoft.com/security",
-                "note": "Only available if 2-step verification is enabled.",
-            },
-            {
-                "id": "yahoo",
-                "label": "Yahoo Mail",
-                "color": "#720E9E",
-                "icon": "Y",
-                "imap_host": "imap.mail.yahoo.com",
-                "imap_port": 993,
-                "domains": ["yahoo.com", "yahoo.in", "ymail.com"],
-                "steps": [
-                    "Go to login.yahoo.com → My Account → Account Security",
-                    "Generate App Password",
-                    "Select app: Mail → Generate",
-                    "Copy the 16-character password",
-                    "Paste it in the App Password field below",
-                ],
-                "app_password_url": "https://login.yahoo.com/myaccount/security/",
-                "note": "Do NOT use your Yahoo login password.",
-            },
-            {
-                "id": "icloud",
-                "label": "iCloud Mail",
-                "color": "#3B82F6",
-                "icon": "iC",
-                "imap_host": "imap.mail.me.com",
-                "imap_port": 993,
-                "domains": ["icloud.com", "me.com", "mac.com"],
-                "steps": [
-                    "Go to appleid.apple.com",
-                    "Sign In & Security → App-Specific Passwords",
-                    "Click + to generate a new password",
-                    "Name it 'Taskosphere' → Create",
-                    "Copy the password shown",
-                ],
-                "app_password_url": "https://appleid.apple.com",
-                "note": "Requires Apple ID with 2FA enabled.",
-            },
-            {
-                "id": "other",
-                "label": "Other / Custom",
-                "color": "#374151",
-                "icon": "@",
-                "imap_host": "",
-                "imap_port": 993,
-                "domains": [],
-                "steps": [
-                    "Contact your email provider for IMAP settings",
-                    "Typical IMAP host: imap.yourdomain.com",
-                    "Typical port: 993 (SSL) or 143 (STARTTLS)",
-                    "Use your email password or an app-specific password",
-                ],
-                "app_password_url": "",
-                "note": "Enter your IMAP server host and port manually.",
-            },
-        ]
+  const loadConnections = useCallback(async () => {
+    try {
+      const res = await api.get("/email/connections");
+      setConnections(res.data?.connections || []);
+    } catch (err) {
+      console.error("Failed to load connections:", err);
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
+  useEffect(() => { loadConnections(); }, [loadConnections]);
 
-@router.post("/connections")
-async def add_email_connection(
-    payload: EmailConnectRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Connect an email account via IMAP App Password.
-    Auto-detects IMAP host from email domain.
-    Tests the connection before saving.
-    """
-    email_address = payload.email_address.lower().strip()
-
-    # Auto-detect IMAP host if not provided
-    imap_host = payload.imap_host
-    imap_port = payload.imap_port or 993
-
-    if not imap_host:
-        detected = _detect_imap_host(email_address)
-        if detected:
-            imap_host, imap_port = detected
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Cannot auto-detect IMAP server for '{email_address}'. "
-                    "Please enter the IMAP host manually."
-                ),
-            )
-
-    # Test connection before saving anything
-    test_imap_connection(email_address, payload.app_password, imap_host, imap_port)
-
-    # Detect provider label from domain
-    provider = "other"
-    try:
-        domain = email_address.split("@")[1].lower()
-        if "gmail" in domain or "googlemail" in domain:
-            provider = "gmail"
-        elif "outlook" in domain or "hotmail" in domain or "live" in domain or "msn" in domain:
-            provider = "outlook"
-        elif "yahoo" in domain or "ymail" in domain:
-            provider = "yahoo"
-        elif "icloud" in domain or "me.com" in domain or "mac.com" in domain:
-            provider = "icloud"
-    except Exception:
-        pass
-
-    conn_key = _conn_key(current_user.id, email_address)
-
-    await db.email_connections.update_one(
-        {"conn_id": conn_key},
-        {"$set": {
-            "conn_id": conn_key,
-            "user_id": current_user.id,
-            "provider": provider,
-            "method": "imap",
-            "email_address": email_address,
-            "label": payload.label or email_address,
-            "app_password_enc": payload.app_password,   # TODO: encrypt in production
-            "imap_host": imap_host,
-            "imap_port": imap_port,
-            "is_active": True,
-            "connected_at": datetime.now(timezone.utc).isoformat(),
-            "last_synced": None,
-            "sync_error": None,
-        }},
-        upsert=True,
-    )
-
-    logger.info(f"Email connected: user={current_user.id} email={email_address} host={imap_host}")
-    return {
-        "message": f"{email_address} connected successfully",
-        "provider": provider,
-        "imap_host": imap_host,
-        "imap_port": imap_port,
+  const handleDisconnect = async (emailAddress: string) => {
+    if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
+    try {
+      await api.delete(`/email/connections/${encodeURIComponent(emailAddress)}`);
+      setConnections(prev => prev.filter(c => c.email_address !== emailAddress));
+      toast.success(`${emailAddress} disconnected`);
+    } catch {
+      toast.error("Failed to disconnect");
     }
+  };
 
-
-@router.get("/connections")
-async def get_email_connections(current_user: User = Depends(get_current_user)):
-    """List all connected email accounts for the current user."""
-    conns = await db.email_connections.find(
-        {"user_id": current_user.id},
-        {"_id": 0, "app_password_enc": 0, "conn_id": 0},   # never return passwords
-    ).to_list(50)
-    return {"connections": conns, "total": len(conns)}
-
-
-@router.patch("/connections/{email_address:path}")
-async def update_email_connection(
-    email_address: str,
-    payload: EmailConnectionUpdate,
-    current_user: User = Depends(get_current_user),
-):
-    """Update label or active status of a connection."""
-    conn_key = _conn_key(current_user.id, email_address)
-    update   = {k: v for k, v in payload.model_dump().items() if v is not None}
-    if not update:
-        raise HTTPException(status_code=400, detail="Nothing to update")
-    result = await db.email_connections.update_one({"conn_id": conn_key}, {"$set": update})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    return {"message": "Updated"}
-
-
-@router.delete("/connections/{email_address:path}")
-async def delete_email_connection(
-    email_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Remove a connected email account."""
-    conn_key = _conn_key(current_user.id, email_address)
-    result   = await db.email_connections.delete_one({"conn_id": conn_key})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    return {"message": f"{email_address} disconnected"}
-
-
-@router.post("/connections/{email_address:path}/test")
-async def test_email_connection(
-    email_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Re-test an existing connection to verify it still works."""
-    conn_key = _conn_key(current_user.id, email_address)
-    conn = await db.email_connections.find_one({"conn_id": conn_key}, {"_id": 0})
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    try:
-        test_imap_connection(
-            conn["email_address"],
-            conn["app_password_enc"],
-            conn["imap_host"],
-            conn["imap_port"],
-        )
-        await db.email_connections.update_one(
-            {"conn_id": conn_key},
-            {"$set": {"sync_error": None, "last_tested": datetime.now(timezone.utc).isoformat()}},
-        )
-        return {"status": "ok", "message": "Connection is working"}
-    except HTTPException as exc:
-        await db.email_connections.update_one(
-            {"conn_id": conn_key},
-            {"$set": {"sync_error": exc.detail}},
-        )
-        raise
-
-
-@router.get("/fetch-events")
-async def fetch_email_events(
-    account: Optional[str]  = Query(None, description="Filter by specific email address"),
-    days_back: int  = Query(30, ge=1, le=90),
-    max_emails: int = Query(100, ge=5, le=500),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Fetch and extract events from all active connected email accounts in parallel.
-    Each account is fetched concurrently using asyncio + thread pool for IMAP.
-    """
-    query: Dict = {"user_id": current_user.id, "is_active": True}
-    if account:
-        query["email_address"] = account.lower().strip()
-
-    conns = await db.email_connections.find(query, {"_id": 0}).to_list(50)
-    if not conns:
-        raise HTTPException(
-            status_code=404,
-            detail="No active email accounts found. Connect an account in Email Settings first.",
-        )
-
-    loop = asyncio.get_event_loop()
-
-    async def _fetch_one(conn: dict):
-        ea = conn["email_address"]
-        try:
-            events = await loop.run_in_executor(
-                None,
-                lambda: fetch_events_via_imap(
-                    email_address=ea,
-                    app_password=conn["app_password_enc"],
-                    imap_host=conn["imap_host"],
-                    imap_port=conn.get("imap_port", 993),
-                    days_back=days_back,
-                    max_emails=max_emails,
-                ),
-            )
-            # Update last_synced
-            await db.email_connections.update_one(
-                {"conn_id": conn.get("conn_id", _conn_key(current_user.id, ea))},
-                {"$set": {"last_synced": datetime.now(timezone.utc).isoformat(), "sync_error": None}},
-            )
-            return events, None
-        except HTTPException as exc:
-            await db.email_connections.update_one(
-                {"conn_id": conn.get("conn_id", _conn_key(current_user.id, ea))},
-                {"$set": {"sync_error": exc.detail}},
-            )
-            return [], f"{ea}: {exc.detail}"
-        except Exception as exc:
-            logger.error(f"Fetch error {ea}: {exc}", exc_info=True)
-            return [], f"{ea}: unexpected error — {str(exc)}"
-
-    results = await asyncio.gather(*[_fetch_one(c) for c in conns])
-
-    all_events: List[ExtractedEvent] = []
-    errors: List[str] = []
-    for evts, err in results:
-        all_events.extend(evts)
-        if err:
-            errors.append(err)
-
-    # Deduplicate
-    seen: set = set()
-    unique: List[ExtractedEvent] = []
-    for ev in all_events:
-        key = (ev.title.lower(), ev.date, ev.time, ev.source_account)
-        if key not in seen:
-            seen.add(key)
-            unique.append(ev)
-
-    urgency_order = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
-    unique.sort(key=lambda e: (e.date or "9999-12-31", urgency_order.get(e.urgency, 3)))
-
-    return {
-        "events":           [ev.model_dump() for ev in unique],
-        "total":            len(unique),
-        "accounts_scanned": [c["email_address"] for c in conns],
-        "errors":           errors,
+  const handleTest = async (emailAddress: string) => {
+    try {
+      await api.post(`/email/connections/${encodeURIComponent(emailAddress)}/test`);
+      toast.success(`✓ ${emailAddress} is working`);
+      loadConnections();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Connection test failed");
+      loadConnections();
     }
+  };
+
+  const handleToggle = async (emailAddress: string, isActive: boolean) => {
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(emailAddress)}`, { is_active: isActive });
+      setConnections(prev =>
+        prev.map(c => c.email_address === emailAddress ? { ...c, is_active: isActive } : c)
+      );
+      toast.success(isActive ? "Account resumed" : "Account paused");
+    } catch {
+      toast.error("Failed to update");
+    }
+  };
+
+  const handleConnectSuccess = () => {
+    setActiveForm(null);
+    setShowAddOptions(false);
+    loadConnections();
+  };
+
+  const activeProvider = QUICK_PROVIDERS.find(p => p.id === activeForm);
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-4 space-y-8">
+
+      {/* ── Page header ── */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Email Accounts</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          Connect your email accounts to automatically extract meetings, hearings, and deadlines.
+          Uses IMAP — no OAuth or API keys required.
+        </p>
+      </div>
+
+      {/* ── How it works banner ── */}
+      <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-start gap-3">
+        <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+          <Info className="w-4 h-4 text-blue-600" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-blue-800 mb-1">How it works</p>
+          <p className="text-xs text-blue-700 leading-relaxed">
+            We connect to your inbox using IMAP (the same standard used by email apps like Outlook Desktop, Thunderbird, Apple Mail).
+            You generate a special <strong>App Password</strong> from your email provider — it's separate from your login password
+            and can be revoked anytime. We only read emails to extract event data; we never send emails or modify anything.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Connected accounts ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-slate-700">
+            Connected Accounts
+            {connections.length > 0 && (
+              <span className="ml-2 text-sm font-normal text-slate-400">({connections.length})</span>
+            )}
+          </h2>
+          {connections.length > 0 && (
+            <button
+              onClick={() => { setShowAddOptions(s => !s); setActiveForm(null); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
+              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
+            >
+              <Plus className="w-4 h-4" /> Add Account
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+          </div>
+        ) : connections.length === 0 && !showAddOptions && !activeForm ? (
+          /* Empty state */
+          <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
+              <Mail className="w-8 h-8 text-slate-400" />
+            </div>
+            <div>
+              <p className="font-semibold text-slate-700">No email accounts connected</p>
+              <p className="text-sm text-slate-400 mt-1">
+                Connect Gmail, Outlook, Yahoo or any IMAP email to extract meetings and events automatically.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddOptions(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white active:scale-95 transition-all"
+              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
+            >
+              <Plus className="w-4 h-4" /> Connect Your First Account
+            </button>
+          </div>
+        ) : (
+          <AnimatePresence>
+            {connections.map(conn => (
+              <ConnectedAccountCard
+                key={conn.email_address}
+                conn={conn}
+                onDisconnect={handleDisconnect}
+                onTest={handleTest}
+                onToggle={handleToggle}
+              />
+            ))}
+          </AnimatePresence>
+        )}
+      </div>
+
+      {/* ── Add account section ── */}
+      <AnimatePresence>
+        {(showAddOptions || connections.length === 0) && !activeForm && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="space-y-3"
+          >
+            <h2 className="text-base font-bold text-slate-700">
+              {connections.length === 0 ? "Choose your email provider" : "Add another account"}
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {QUICK_PROVIDERS.map(prov => (
+                <button
+                  key={prov.id}
+                  onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
+                  className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border-2 border-transparent hover:border-current transition-all active:scale-95 group"
+                  style={{ backgroundColor: prov.color + "08" }}
+                >
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black text-white"
+                    style={{ backgroundColor: prov.color }}
+                  >
+                    {prov.icon}
+                  </div>
+                  <span className="text-sm font-semibold text-slate-700 text-center leading-tight">
+                    {prov.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Connect form ── */}
+      <AnimatePresence>
+        {activeForm && activeProvider && (
+          <ConnectForm
+            key={activeForm}
+            provider={activeProvider}
+            onSuccess={handleConnectSuccess}
+            onCancel={() => {
+              setActiveForm(null);
+              if (connections.length === 0) setShowAddOptions(true);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Tips ── */}
+      {connections.length > 0 && !activeForm && (
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tips</p>
+          <ul className="space-y-1.5">
+            {[
+              "You can connect multiple accounts — events from all accounts appear together",
+              "If an account shows an error, click Test to diagnose or re-generate the App Password",
+              "Pause an account temporarily to stop it from being scanned without losing the connection",
+              "App Passwords can be revoked from your email provider anytime — your main password stays safe",
+            ].map((tip, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs text-slate-500">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                {tip}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+    </div>
+  );
+}
