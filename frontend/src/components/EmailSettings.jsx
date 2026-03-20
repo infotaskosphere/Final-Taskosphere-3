@@ -13,7 +13,7 @@ import {
   Mail, Plus, Trash2, CheckCircle2, AlertCircle,
   Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
   Wifi, WifiOff, Edit2, Check, X, Info, Shield,
-  RefreshCw, Calendar, Bell,
+  RefreshCw, Calendar, Bell, Eraser,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { format, parseISO } from "date-fns";
@@ -118,10 +118,8 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
 
   const emailRef = useRef(null);
 
-  // ── FIX: type="email" does NOT support setSelectionRange — use focus() only ──
   useEffect(() => {
     if (emailRef.current) {
-      // Small delay so the form is mounted before focusing
       const t = setTimeout(() => emailRef.current?.focus(), 50);
       return () => clearTimeout(t);
     }
@@ -161,7 +159,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       className="border rounded-2xl overflow-hidden"
       style={{ borderColor: provider.color + "30" }}
     >
-      {/* Provider header */}
       <div className="flex items-center gap-3 px-5 py-4"
         style={{ backgroundColor: provider.color + "12" }}>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base font-black text-white"
@@ -182,7 +179,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       </div>
 
       <div className="p-5 space-y-4">
-        {/* Step-by-step */}
         {provider.steps.length > 0 && (
           <div className="rounded-xl border border-slate-100 overflow-hidden">
             <button onClick={() => setShowSteps(s => !s)}
@@ -226,12 +222,9 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
           </div>
         )}
 
-        {/* Form fields */}
         <div className="grid grid-cols-1 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">Email Address</label>
-            {/* ── FIX: use type="text" with inputMode="email" to avoid the
-                setSelectionRange crash. type="email" blocks cursor manipulation. ── */}
             <input
               ref={emailRef}
               type="text"
@@ -277,7 +270,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
                 focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
           </div>
 
-          {/* Custom IMAP — only for "other" */}
           {provider.id === "other" && (
             <div className="grid grid-cols-3 gap-2">
               <div className="col-span-2">
@@ -295,7 +287,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
           )}
         </div>
 
-        {/* Actions */}
         <div className="flex gap-2 pt-1">
           <Button variant="outline" onClick={onCancel} className="flex-1 rounded-xl h-10 text-sm font-semibold">
             Cancel
@@ -362,7 +353,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
       className="border rounded-2xl overflow-hidden transition-all"
       style={{ borderColor: hasError ? "#FECACA" : conn.is_active ? color + "30" : "#E5E7EB" }}
     >
-      {/* Header */}
       <div className="flex items-center gap-3 px-5 py-4"
         style={{ backgroundColor: hasError ? "#FEF2F2" : conn.is_active ? color + "08" : "#F9FAFB" }}>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
@@ -391,7 +381,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
           <p className="text-xs text-slate-400 truncate">{conn.email_address}</p>
         </div>
 
-        {/* Status badge */}
         <div className="flex-shrink-0">
           {hasError ? (
             <span className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded-full">
@@ -409,14 +398,12 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
         </div>
       </div>
 
-      {/* Error detail */}
       {hasError && (
         <div className="mx-5 mt-3 p-3 rounded-xl bg-red-50 border border-red-100">
           <p className="text-xs text-red-700 font-medium">{conn.sync_error}</p>
         </div>
       )}
 
-      {/* What this account extracts */}
       <div className="mx-5 my-3 flex items-center gap-3">
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 border border-purple-100 text-xs font-semibold text-purple-700">
           <Bell className="w-3 h-3" /> Reminders
@@ -426,7 +413,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
         </div>
       </div>
 
-      {/* Footer */}
       <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
         <div className="text-xs text-slate-400">
           {conn.last_synced
@@ -437,28 +423,21 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync }) 
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Sync now */}
           <button onClick={handleSync} disabled={syncing} title="Sync now"
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all">
             {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Sync
           </button>
-
-          {/* Test */}
           <button onClick={handleTest} disabled={testing} title="Test connection"
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all">
             {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
             Test
           </button>
-
-          {/* Pause / Resume */}
           <button onClick={() => onToggle(conn.email_address, !conn.is_active)}
             title={conn.is_active ? "Pause syncing" : "Resume syncing"}
             className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 active:scale-95 transition-all">
             {conn.is_active ? "Pause" : "Resume"}
           </button>
-
-          {/* Disconnect */}
           <button onClick={() => onDisconnect(conn.email_address)} title="Disconnect"
             className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:scale-95 transition-all">
             <Trash2 className="w-3.5 h-3.5" />
@@ -479,6 +458,7 @@ export default function EmailSettings() {
   const [showAddOptions,  setShowAddOptions]  = useState(false);
   const [extractedEvents, setExtractedEvents] = useState([]);
   const [scanning,        setScanning]        = useState(false);
+  const [clearing,        setClearing]        = useState(false);
 
   const loadConnections = useCallback(async () => {
     try {
@@ -493,7 +473,6 @@ export default function EmailSettings() {
 
   useEffect(() => { loadConnections(); }, [loadConnections]);
 
-  // ── Disconnect ────────────────────────────────────────────────────────────
   const handleDisconnect = async (emailAddress) => {
     if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
     try {
@@ -503,7 +482,6 @@ export default function EmailSettings() {
     } catch { toast.error("Failed to disconnect"); }
   };
 
-  // ── Test ──────────────────────────────────────────────────────────────────
   const handleTest = async (emailAddress) => {
     try {
       await api.post(`/email/connections/${encodeURIComponent(emailAddress)}/test`);
@@ -515,7 +493,6 @@ export default function EmailSettings() {
     }
   };
 
-  // ── Pause / Resume ────────────────────────────────────────────────────────
   const handleToggle = async (emailAddress, isActive) => {
     try {
       await api.patch(`/email/connections/${encodeURIComponent(emailAddress)}`, { is_active: isActive });
@@ -526,10 +503,12 @@ export default function EmailSettings() {
     } catch { toast.error("Failed to update"); }
   };
 
-  // ── Manual sync for a single account ─────────────────────────────────────
   const handleSync = async (emailAddress) => {
     try {
-      const res = await api.get(`/email/extract-events?force_refresh=true&limit=50`);
+      // THE FIX: Higher timeout for manual sync too
+      const res = await api.get(`/email/extract-events?force_refresh=true&limit=50`, {
+        timeout: 60000 
+      });
       const events = (res.data || []).filter(e => e.email_account === emailAddress);
       toast.success(`✓ Synced ${emailAddress} — ${events.length} event(s) found`);
       loadConnections();
@@ -538,39 +517,43 @@ export default function EmailSettings() {
     }
   };
 
-  // ── Scan ALL accounts for reminders + visits ──────────────────────────────
   const handleScanAll = async () => {
-    if (connections.length === 0) { 
-      toast.error("No email accounts connected"); 
-      return; 
-    }
-    
+    if (connections.length === 0) { toast.error("No email accounts connected"); return; }
     setScanning(true);
     try {
-      // THE FIX: We pass a custom timeout (90 seconds) specifically for this 'heavy' request.
-      // This overrides the default 20s axios timeout.
       const res = await api.get("/email/extract-events?force_refresh=true&limit=100", {
         timeout: 90000 
       });
-      
       const events = res.data || [];
       setExtractedEvents(events);
-      
       if (events.length === 0) {
         toast.info("No upcoming events found in your inboxes");
       } else {
         toast.success(`✓ Found ${events.length} event(s) across ${connections.length} account(s)`);
       }
     } catch (err) {
-      // Check if it was a timeout error specifically
       if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
         toast.error("Scan taking too long. Check your internet or try syncing accounts individually.");
       } else {
         toast.error(err?.response?.data?.detail || "Scan failed");
       }
-      console.error("Scan Error:", err);
     } finally {
       setScanning(false);
+    }
+  };
+
+  // --- NEW FEATURE: CLEAR CACHE ---
+  const handleClearAll = async () => {
+    if (!window.confirm("This will clear all extracted events. This is useful if you are seeing inaccurate results or banking junk. Are you sure?")) return;
+    setClearing(true);
+    try {
+      await api.delete("/email/events/clear-all");
+      setExtractedEvents([]);
+      toast.success("Cache cleared. You can now run a fresh scan.");
+    } catch (err) {
+      toast.error("Failed to clear cache");
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -581,7 +564,7 @@ export default function EmailSettings() {
   };
 
   const activeProvider = QUICK_PROVIDERS.find(p => p.id === activeForm);
-  // ── Categorise extracted events ───────────────────────────────────────────
+
   const reminderEvents = extractedEvents.filter(e =>
     ["Trademark Hearing", "Court Hearing", "Deadline", "Appointment", "Other"].includes(e.event_type)
   );
@@ -591,8 +574,6 @@ export default function EmailSettings() {
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-4 space-y-8">
-
-      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Email Accounts</h1>
         <p className="text-sm text-slate-500 mt-1">
@@ -601,7 +582,6 @@ export default function EmailSettings() {
         </p>
       </div>
 
-      {/* How it works */}
       <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-start gap-3">
         <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
           <Info className="w-4 h-4 text-blue-600" />
@@ -617,7 +597,6 @@ export default function EmailSettings() {
         </div>
       </div>
 
-      {/* ── Connected accounts ── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-700">
@@ -629,14 +608,17 @@ export default function EmailSettings() {
           <div className="flex items-center gap-2">
             {connections.length > 0 && (
               <>
-                {/* Scan all */}
+                <Button onClick={handleClearAll} disabled={clearing} size="sm" variant="ghost"
+                  className="rounded-xl h-8 text-xs font-semibold text-slate-400 hover:text-red-500">
+                  {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Eraser className="w-3.5 h-3.5 mr-1" />}
+                  Reset Cache
+                </Button>
                 <Button onClick={handleScanAll} disabled={scanning} size="sm" variant="outline"
                   className="rounded-xl h-8 text-xs font-semibold border-purple-200 text-purple-700 hover:bg-purple-50">
                   {scanning
                     ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Scanning…</>
                     : <><RefreshCw className="w-3.5 h-3.5 mr-1" />Scan All</>}
                 </Button>
-                {/* Add another */}
                 <button onClick={() => { setShowAddOptions(s => !s); setActiveForm(null); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
                   style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}>
@@ -650,7 +632,6 @@ export default function EmailSettings() {
         {loading ? (
           <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
         ) : connections.length === 0 && !showAddOptions && !activeForm ? (
-          /* Empty state */
           <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
               <Mail className="w-8 h-8 text-slate-400" />
@@ -683,7 +664,6 @@ export default function EmailSettings() {
         )}
       </div>
 
-      {/* ── Extracted events panel ── */}
       <AnimatePresence>
         {extractedEvents.length > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -697,7 +677,6 @@ export default function EmailSettings() {
                 className="text-xs text-slate-400 hover:text-slate-600 font-semibold">Clear</button>
             </div>
 
-            {/* Reminders */}
             {reminderEvents.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -709,7 +688,6 @@ export default function EmailSettings() {
               </div>
             )}
 
-            {/* Visits */}
             {visitEvents.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -724,7 +702,6 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      {/* ── Provider picker ── */}
       <AnimatePresence>
         {(showAddOptions || connections.length === 0) && !activeForm && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
@@ -749,7 +726,6 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      {/* ── Connect form ── */}
       <AnimatePresence>
         {activeForm && activeProvider && (
           <ConnectForm
@@ -764,27 +740,24 @@ export default function EmailSettings() {
         )}
       </AnimatePresence>
 
-      {/* ── Tips ── */}
-      {connections.length > 0 && !activeForm && (
-        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tips</p>
-          <ul className="space-y-1.5">
-            {[
-              "Connect as many accounts as you need — events from all inboxes appear together",
-              "Click 'Scan All' to fetch the latest events from every connected account at once",
-              "Use 'Sync' on a single card to refresh just that account",
-              "If an account shows an error, click Test to diagnose or re-generate the App Password",
-              "Pause an account temporarily to stop scanning without losing the connection",
-              "App Passwords can be revoked from your email provider anytime — your main password stays safe",
-            ].map((tip, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-slate-500">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                {tip}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tips</p>
+        <ul className="space-y-1.5">
+          {[
+            "Connect as many accounts as you need — events from all inboxes appear together",
+            "Click 'Scan All' to fetch the latest events from every connected account at once",
+            "Use 'Reset Cache' if you see junk emails or want to force a completely clean scan",
+            "If an account shows an error, click Test to diagnose or re-generate the App Password",
+            "Pause an account temporarily to stop scanning without losing the connection",
+            "App Passwords can be revoked from your email provider anytime — your main password stays safe",
+          ].map((tip, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs text-slate-500">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              {tip}
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -811,7 +784,6 @@ function EventRow({ event, type }) {
         });
         toast.success(`✓ Reminder created: ${event.title}`);
       } else {
-        // Save as visit — adjust fields to match your visits API
         await api.post("/visits", {
           title:       event.title,
           visit_date:  event.date || new Date().toISOString().slice(0, 10),
