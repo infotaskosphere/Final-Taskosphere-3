@@ -50,6 +50,9 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": True,
         "can_delete_data": True,
         "can_delete_tasks": True,
+        # ── NEW ──
+        "can_connect_email": True,
+        "can_view_own_data": True,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -87,6 +90,9 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": True,
         "can_delete_data": False,
         "can_delete_tasks": False,
+        # ── NEW ──
+        "can_connect_email": True,
+        "can_view_own_data": True,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -124,6 +130,9 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": False,
         "can_delete_data": False,
         "can_delete_tasks": False,
+        # ── NEW ──
+        "can_connect_email": True,
+        "can_view_own_data": True,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -166,12 +175,19 @@ class UserPermissions(BaseModel):
     can_view_staff_rankings: bool = False
     can_delete_data: bool = False
     can_delete_tasks: bool = False
+    # ── NEW — must match frontend Users.jsx permission keys ──
+    can_connect_email: bool = True   # default True: every user can connect their own email
+    can_view_own_data: bool = True   # default True: every user can view their own data
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
     view_other_todos: List[str] = Field(default_factory=list)
     view_other_activity: List[str] = Field(default_factory=list)
     assigned_clients: List[str] = Field(default_factory=list)
+
+    # Allow extra fields coming from old DB documents so the server
+    # never raises ValidationError on unknown permission keys
+    model_config = ConfigDict(extra="ignore")
 
 
 class User(BaseModel):
@@ -183,14 +199,14 @@ class User(BaseModel):
     password: Optional[str] = None
     departments: List[str] = Field(default_factory=list)
     phone: Optional[str] = None
-    birthday: Optional[Any] = None # Flexible
+    birthday: Optional[Any] = None
     profile_picture: Optional[str] = None
     punch_in_time: Optional[str] = "10:30"
     grace_time: Optional[str] = "00:15"
     punch_out_time: Optional[str] = "19:00"
     telegram_id: Optional[int] = None
     permissions: UserPermissions = Field(default_factory=UserPermissions)
-    created_at: Optional[Any] = None # Flexible
+    created_at: Optional[Any] = None
     is_active: bool = True
     status: str = "pending_approval"
     approved_by: Optional[str] = None
@@ -307,7 +323,7 @@ class Task(TaskBase):
 
 
 # ======================
-# ATTENDANCE (REWRITTEN FOR STABILITY)
+# ATTENDANCE
 # ======================
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -315,8 +331,8 @@ class Attendance(BaseModel):
     user_id: str
     date: str
     status: str = "absent"
-    punch_in: Optional[Any] = None  # Changed to Any to prevent 500 error
-    punch_out: Optional[Any] = None # Changed to Any to prevent 500 error
+    punch_in: Optional[Any] = None
+    punch_out: Optional[Any] = None
     duration_minutes: Optional[int] = 0
     leave_reason: Optional[str] = None
     is_late: bool = False
@@ -333,10 +349,9 @@ class AttendanceCreate(BaseModel):
 
 
 # ======================
-# STAFF ACTIVITY (FIXED FOR 422 ERROR)
+# STAFF ACTIVITY
 # ======================
 class StaffActivityCreate(BaseModel):
-    # Added fields to match frontend POST request directly
     app_name: str = "Taskosphere Web"
     window_title: Optional[str] = None
     url: Optional[str] = None
@@ -344,7 +359,6 @@ class StaffActivityCreate(BaseModel):
     category: str = "productivity"
     duration_seconds: int = 0
     idle: Optional[bool] = False
-    # Original required field, defaulted to prevent 422 if frontend skips it
     activity_type: str = "active_time"
     description: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -379,7 +393,7 @@ class ActivityLogUpdate(BaseModel):
 
 
 # ======================
-# DSC MANAGEMENT (FIXED FOR 500 ERROR)
+# DSC MANAGEMENT
 # ======================
 class DSCBase(BaseModel):
     holder_name: str
@@ -387,8 +401,8 @@ class DSCBase(BaseModel):
     dsc_password: Optional[str] = None
     associated_with: Optional[str] = None
     entity_type: str = "firm"
-    issue_date: Any  # Changed to Any for database-to-json safety
-    expiry_date: Any # Changed to Any for database-to-json safety
+    issue_date: Any
+    expiry_date: Any
     notes: Optional[str] = None
     current_status: str = "IN"
     current_location: str = "with_company"
@@ -433,6 +447,7 @@ class MovementUpdateRequest(BaseModel):
     movement_type: str
     person_name: Optional[str] = None
     notes: Optional[str] = None
+
 
 # ======================
 # REMINDER MODELS
@@ -737,16 +752,17 @@ class HolidayResponse(BaseModel):
 class EmailConnection(BaseModel):
     model_config = ConfigDict(extra="ignore")
     user_id: str
-    provider: str  # e.g., "google", "microsoft", "yahoo", "custom_imap"
-    method: str    # e.g., "oauth", "imap"
+    provider: str
+    method: str
     email_address: Optional[str] = None
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
-    expires_at: Optional[str] = None  # ISO format datetime string
-    app_password_enc: Optional[str] = None # Encrypted app password for IMAP
+    expires_at: Optional[str] = None
+    app_password_enc: Optional[str] = None
     imap_host: Optional[str] = None
     imap_port: Optional[int] = None
-    connected_at: Optional[str] = None # ISO format datetime string
+    connected_at: Optional[str] = None
+
 
 class ExtractedEvent(BaseModel):
     title: str
