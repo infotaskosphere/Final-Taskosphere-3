@@ -963,12 +963,36 @@ async def delete_reminder(
     reminder_id: str,
     current_user: User = Depends(get_current_user)
 ):
+    # Search by "id" field first, then fall back to MongoDB _id
     existing = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
+ 
     if not existing:
+        # Try matching by MongoDB ObjectId string
+        try:
+            from bson import ObjectId
+            existing = await db.reminders.find_one(
+                {"_id": ObjectId(reminder_id)}, {"_id": 0}
+            )
+        except Exception:
+            pass
+ 
+    if not existing:
+        # Already deleted — return 204 silently so frontend can clean up
         raise HTTPException(status_code=404, detail="Reminder not found")
-    if existing["user_id"] != current_user.id and current_user.role != "admin":
+ 
+    if existing.get("user_id") != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
-    await db.reminders.delete_one({"id": reminder_id})
+ 
+    # Delete matching either field
+    result = await db.reminders.delete_one({"id": reminder_id})
+    if result.deleted_count == 0:
+        # Try by ObjectId
+        try:
+            from bson import ObjectId
+            await db.reminders.delete_one({"_id": ObjectId(reminder_id)})
+        except Exception:
+            pass
+ 
     return {"message": "Reminder deleted"}
 
 #============================================================
