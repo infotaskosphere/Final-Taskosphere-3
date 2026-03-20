@@ -2,7 +2,7 @@
 # email_integration.py
 # FastAPI router — IMAP email connection management + AI event extraction
 # Stack: FastAPI · MongoDB (motor) via db from backend.dependencies
-#        · OpenAI gpt-4o-mini · imaplib · no OAuth needed
+#         · Google Gemini 2.0 Flash-Lite · imaplib · no OAuth needed
 #
 # Features:
 #   - Connect multiple email accounts (Gmail, Outlook, Yahoo, iCloud, other)
@@ -41,15 +41,20 @@ try:
 except Exception:
     _fernet = None
 
-# Optional: OpenAI for richer event extraction.
-# Set OPENAI_API_KEY in Render env vars.
+# Updated: Google Gemini for richer event extraction.
+# Set GEMINI_API_KEY in Render env vars.
 # Falls back to regex heuristics if not set.
 try:
-    from openai import AsyncOpenAI
+    import google.generativeai as genai
     import os as _os2
-    _openai = AsyncOpenAI(api_key=_os2.environ.get("OPENAI_API_KEY", ""))
+    _gemini_key = _os2.environ.get("GEMINI_API_KEY", "")
+    if _gemini_key:
+        genai.configure(api_key=_gemini_key)
+        _gemini = genai.GenerativeModel('gemini-2.0-flash-lite')
+    else:
+        _gemini = None
 except Exception:
-    _openai = None
+    _gemini = None
 
 logger = logging.getLogger(__name__)
 
@@ -264,12 +269,12 @@ Return ONLY a valid JSON array. Each element must have exactly these keys:
   title        (string)
   event_type   (one of: Trademark Hearing, Court Hearing, Online Meeting,
                 Deadline, Appointment, Conference, Interview, Other)
-  date         (string yyyy-MM-dd or null)
-  time         (string HH:mm 24h or null)
-  location     (string or null)
-  organizer    (string or null)
-  description  (string max 120 chars or null)
-  urgency      (low | medium | high)
+  date          (string yyyy-MM-dd or null)
+  time          (string HH:mm 24h or null)
+  location      (string or null)
+  organizer     (string or null)
+  description   (string max 120 chars or null)
+  urgency       (low | medium | high)
 
 Rules:
 - Only extract REAL upcoming events/deadlines with clear dates.
@@ -282,25 +287,19 @@ Rules:
 async def _extract_events_from_email(
     subject: str, body: str, from_addr: str, msg_date: str
 ) -> List[Dict]:
-    """Use OpenAI if available, else fall back to regex."""
-    if _openai:
+    """Use Google Gemini if available, else fall back to regex."""
+    if _gemini:
         try:
-            prompt = f"From: {from_addr}\nDate: {msg_date}\nSubject: {subject}\n\nBody:\n{body}"
-            resp = await _openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": _AI_SYSTEM},
-                    {"role": "user",   "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=600,
-            )
-            raw = resp.choices[0].message.content.strip()
+            prompt = f"{_AI_SYSTEM}\n\nEmail Context:\nFrom: {from_addr}\nDate: {msg_date}\nSubject: {subject}\n\nBody:\n{body}"
+            # Use async generation
+            resp = await _gemini.generate_content_async(prompt)
+            raw = resp.text.strip()
+            # Clean possible markdown formatting from Gemini response
             raw = re.sub(r"^```[a-z]*\n?", "", raw)
             raw = re.sub(r"\n?```$", "", raw)
             return json.loads(raw)
         except Exception as exc:
-            logger.warning("OpenAI extraction failed: %s — using regex fallback", exc)
+            logger.warning("Gemini extraction failed: %s — using regex fallback", exc)
 
     return _regex_extract(subject, body, from_addr)
 
@@ -368,14 +367,14 @@ def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
     urgency = "high" if any(w in t for w in ["urgent", "immediately", "asap", "show cause", "final notice"]) else "medium"
 
     return [{
-        "title":       (subject[:120] or "Email Event"),
-        "event_type":  etype,
-        "date":        date_str,
-        "time":        time_str,
-        "location":    None,
-        "organizer":   from_addr[:100],
+        "title":        (subject[:120] or "Email Event"),
+        "event_type":   etype,
+        "date":         date_str,
+        "time":         time_str,
+        "location":     None,
+        "organizer":    from_addr[:100],
         "description": body[:120] if body else None,
-        "urgency":     urgency,
+        "urgency":      urgency,
     }]
 
 
@@ -566,11 +565,6 @@ async def extract_events(
     Extracts meetings, hearings, deadlines, and visits using AI (or regex).
     Results are cached in MongoDB — re-scan happens after 30 minutes or
     when force_refresh=true.
-
-    Frontend usage:
-      GET /api/email/extract-events
-      → returns list of events
-      → user picks one → frontend pre-fills reminder or visit form
     """
     connections = await db[COL_CONNECTIONS].find(
         {"user_id": str(current_user.id), "is_active": True}
@@ -729,14 +723,6 @@ async def importer_events(
     Lightweight endpoint for the EmailEventImporter modal.
     - First call: triggers a fresh IMAP scan
     - Subsequent calls: returns cached results (fast)
-    - Pass force_refresh=true to rescan
-
-    Frontend flow:
-      1. User clicks "From Email" in Attendance.jsx
-      2. EmailEventImporter modal calls GET /api/email/importer/events
-      3. User selects an event
-      4. handleEmailEventForReminder() pre-fills the reminder form
-         (or you can add a similar handler to pre-fill the visits form)
     """
     count = await db[COL_EVENTS].count_documents(
         {"user_id": str(current_user.id)}
