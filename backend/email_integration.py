@@ -4,13 +4,12 @@
 // using App Passwords — NO OAuth, NO Google Cloud Console needed.
 //
 // Drop into your settings route:
-//   <Route path="/settings/email" element={<EmailSettings />} />
+// <Route path="/settings/email" element={<EmailSettings />} />
 //
 // Or embed inside your existing Settings page:
-//   import EmailSettings from "@/components/EmailSettings";
-//   <EmailSettings />
+// import EmailSettings from "@/components/EmailSettings";
+// <EmailSettings />
 // ═══════════════════════════════════════════════════════════════════════════════
-
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -22,26 +21,22 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { format, parseISO } from "date-fns";
-
 // ── Colours ───────────────────────────────────────────────────────────────────
 const C = { deepBlue: "#0D3B66", mediumBlue: "#1F6FB2", emerald: "#1FAF5A" };
-
 const PROVIDER_COLORS = {
-  gmail:   "#EA4335",
+  gmail: "#EA4335",
   outlook: "#0078D4",
-  yahoo:   "#720E9E",
-  icloud:  "#3B82F6",
-  other:   "#374151",
+  yahoo: "#720E9E",
+  icloud: "#3B82F6",
+  other: "#374151",
 };
-
 const PROVIDER_ICONS = {
-  gmail:   "G",
+  gmail: "G",
   outlook: "M",
-  yahoo:   "Y",
-  icloud:  "iC",
-  other:   "@",
+  yahoo: "Y",
+  icloud: "iC",
+  other: "@",
 };
-
 // ── Quick provider buttons ────────────────────────────────────────────────────
 const QUICK_PROVIDERS = [
   {
@@ -135,21 +130,18 @@ const QUICK_PROVIDERS = [
     placeholder: "your email password",
   },
 ];
-
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONNECT FORM  (shown per provider)
+// CONNECT FORM (shown per provider)
 // ═══════════════════════════════════════════════════════════════════════════════
-
 function ConnectForm({ provider, onSuccess, onCancel }) {
-  const [email, setEmail]       = useState(provider.domain ? `@${provider.domain}` : "");
+  const [email, setEmail] = useState(provider.domain ? `@${provider.domain}` : "");
   const [password, setPassword] = useState("");
-  const [host, setHost]         = useState(provider.imap_host);
-  const [port, setPort]         = useState(provider.imap_port);
-  const [label, setLabel]       = useState("");
+  const [host, setHost] = useState(provider.imap_host);
+  const [port, setPort] = useState(provider.imap_port);
+  const [label, setLabel] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [showSteps, setShowSteps] = useState(true);
-  const [loading, setLoading]   = useState(false);
-
+  const [loading, setLoading] = useState(false);
   // Auto-fill email cursor position
   const emailRef = React.useRef(null);
   useEffect(() => {
@@ -158,12 +150,10 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       emailRef.current.focus();
     }
   }, []);
-
   const handleConnect = async () => {
     const trimEmail = email.trim();
     if (!trimEmail || !trimEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
     if (!password) { toast.error("App Password is required"); return; }
-
     setLoading(true);
     try {
       await api.post("/email/connections", {
@@ -182,7 +172,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
       setLoading(false);
     }
   };
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -211,7 +200,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
           </a>
         )}
       </div>
-
       <div className="p-5 space-y-4">
         {/* Step-by-step guide */}
         {provider.steps.length > 0 && (
@@ -261,7 +249,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
             </AnimatePresence>
           </div>
         )}
-
         {/* Form fields */}
         <div className="grid grid-cols-1 gap-3">
           <div>
@@ -278,7 +265,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               style={{ "--tw-ring-color": provider.color + "40" } as any}
             />
           </div>
-
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
               App Password <span className="font-normal text-slate-400 normal-case">(not your login password)</span>
@@ -300,7 +286,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               </button>
             </div>
           </div>
-
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
               Friendly Name <span className="font-normal text-slate-400 normal-case">(optional)</span>
@@ -313,7 +298,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
               className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 transition-shadow"
             />
           </div>
-
           {/* Custom IMAP host (only for "other") */}
           {provider.id === "other" && (
             <div className="grid grid-cols-3 gap-2">
@@ -339,7 +323,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
             </div>
           )}
         </div>
-
         {/* Actions */}
         <div className="flex gap-2 pt-1">
           <Button variant="outline" onClick={onCancel}
@@ -358,7 +341,6 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
             }
           </Button>
         </div>
-
         <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-100">
           <Shield className="w-4 h-4 text-green-600 flex-shrink-0" />
           <p className="text-xs text-green-700">
@@ -369,19 +351,15 @@ function ConnectForm({ provider, onSuccess, onCancel }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONNECTED ACCOUNT CARD
 // ═══════════════════════════════════════════════════════════════════════════════
-
 function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
   const [editingLabel, setEditingLabel] = useState(false);
-  const [labelVal, setLabelVal]         = useState(conn.label || conn.email_address);
-  const [testing, setTesting]           = useState(false);
-
+  const [labelVal, setLabelVal] = useState(conn.label || conn.email_address);
+  const [testing, setTesting] = useState(false);
   const color = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
-  const icon  = PROVIDER_ICONS[conn.provider] || PROVIDER_ICONS.other;
-
+  const icon = PROVIDER_ICONS[conn.provider] || PROVIDER_ICONS.other;
   const handleSaveLabel = async () => {
     try {
       await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal });
@@ -391,7 +369,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
       toast.error("Failed to update label");
     }
   };
-
   const handleTest = async () => {
     setTesting(true);
     try {
@@ -400,9 +377,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
       setTesting(false);
     }
   };
-
   const hasError = !!conn.sync_error;
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -422,7 +397,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
         >
           {icon}
         </div>
-
         <div className="flex-1 min-w-0">
           {editingLabel ? (
             <div className="flex items-center gap-2">
@@ -451,7 +425,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
           )}
           <p className="text-xs text-slate-400 truncate">{conn.email_address}</p>
         </div>
-
         {/* Status badge */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {hasError ? (
@@ -469,14 +442,12 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
           )}
         </div>
       </div>
-
       {/* Error message */}
       {hasError && (
         <div className="mx-5 mt-3 p-3 rounded-xl bg-red-50 border border-red-100">
           <p className="text-xs text-red-700 font-medium">{conn.sync_error}</p>
         </div>
       )}
-
       {/* Footer row */}
       <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
         <div className="text-xs text-slate-400">
@@ -486,7 +457,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
           <span className="mx-1">·</span>
           <span className="font-medium">{conn.imap_host}</span>
         </div>
-
         <div className="flex items-center gap-1">
           {/* Test button */}
           <button
@@ -498,7 +468,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
             {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
             Test
           </button>
-
           {/* Pause/Resume toggle */}
           <button
             onClick={() => onToggle(conn.email_address, !conn.is_active)}
@@ -507,7 +476,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
           >
             {conn.is_active ? "Pause" : "Resume"}
           </button>
-
           {/* Disconnect */}
           <button
             onClick={() => onDisconnect(conn.email_address)}
@@ -521,17 +489,14 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle }) {
     </motion.div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN EmailSettings COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-
 export default function EmailSettings() {
-  const [connections, setConnections]   = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [activeForm, setActiveForm]     = useState(null);  // provider id or null
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeForm, setActiveForm] = useState(null); // provider id or null
   const [showAddOptions, setShowAddOptions] = useState(false);
-
   const loadConnections = useCallback(async () => {
     try {
       const res = await api.get("/email/connections");
@@ -542,9 +507,7 @@ export default function EmailSettings() {
       setLoading(false);
     }
   }, []);
-
   useEffect(() => { loadConnections(); }, [loadConnections]);
-
   const handleDisconnect = async (emailAddress: string) => {
     if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
     try {
@@ -555,7 +518,6 @@ export default function EmailSettings() {
       toast.error("Failed to disconnect");
     }
   };
-
   const handleTest = async (emailAddress: string) => {
     try {
       await api.post(`/email/connections/${encodeURIComponent(emailAddress)}/test`);
@@ -566,7 +528,6 @@ export default function EmailSettings() {
       loadConnections();
     }
   };
-
   const handleToggle = async (emailAddress: string, isActive: boolean) => {
     try {
       await api.patch(`/email/connections/${encodeURIComponent(emailAddress)}`, { is_active: isActive });
@@ -578,18 +539,14 @@ export default function EmailSettings() {
       toast.error("Failed to update");
     }
   };
-
   const handleConnectSuccess = () => {
     setActiveForm(null);
     setShowAddOptions(false);
     loadConnections();
   };
-
   const activeProvider = QUICK_PROVIDERS.find(p => p.id === activeForm);
-
   return (
     <div className="max-w-2xl mx-auto py-8 px-4 space-y-8">
-
       {/* ── Page header ── */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Email Accounts</h1>
@@ -598,7 +555,6 @@ export default function EmailSettings() {
           Uses IMAP — no OAuth or API keys required.
         </p>
       </div>
-
       {/* ── How it works banner ── */}
       <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-start gap-3">
         <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
@@ -613,7 +569,6 @@ export default function EmailSettings() {
           </p>
         </div>
       </div>
-
       {/* ── Connected accounts ── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -633,7 +588,6 @@ export default function EmailSettings() {
             </button>
           )}
         </div>
-
         {loading ? (
           <div className="flex justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
@@ -672,7 +626,6 @@ export default function EmailSettings() {
           </AnimatePresence>
         )}
       </div>
-
       {/* ── Add account section ── */}
       <AnimatePresence>
         {(showAddOptions || connections.length === 0) && !activeForm && (
@@ -708,7 +661,6 @@ export default function EmailSettings() {
           </motion.div>
         )}
       </AnimatePresence>
-
       {/* ── Connect form ── */}
       <AnimatePresence>
         {activeForm && activeProvider && (
@@ -723,7 +675,6 @@ export default function EmailSettings() {
           />
         )}
       </AnimatePresence>
-
       {/* ── Tips ── */}
       {connections.length > 0 && !activeForm && (
         <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
@@ -743,7 +694,6 @@ export default function EmailSettings() {
           </ul>
         </div>
       )}
-
     </div>
   );
 }
