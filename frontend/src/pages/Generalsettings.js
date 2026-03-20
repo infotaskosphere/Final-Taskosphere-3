@@ -1,3 +1,8 @@
+// =============================================================================
+// GeneralSettings.jsx
+// Place this file at: src/pages/GeneralSettings.jsx
+// =============================================================================
+
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
@@ -76,31 +81,51 @@ export default function GeneralSettings() {
         {/* Avatar strip */}
         <div
           className="flex items-center gap-5 p-6"
-          style={{ background: `linear-gradient(135deg,${C.deepBlue}08,${C.mediumBlue}05)`, borderBottom: "1px solid #f1f5f9" }}
+          style={{
+            background: `linear-gradient(135deg,${C.deepBlue}08,${C.mediumBlue}05)`,
+            borderBottom: "1px solid #f1f5f9",
+          }}
         >
           <div className="relative">
             <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-100 ring-4 ring-white shadow-md">
               {profile.profile_picture ? (
-                <img src={profile.profile_picture} alt={profile.full_name} className="w-full h-full object-cover" />
+                <img
+                  src={profile.profile_picture}
+                  alt={profile.full_name}
+                  className="w-full h-full object-cover"
+                />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-white text-2xl font-black"
-                  style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}>
+                <div
+                  className="w-full h-full flex items-center justify-center text-white text-2xl font-black"
+                  style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}
+                >
                   {user?.full_name?.[0]?.toUpperCase() || "U"}
                 </div>
               )}
             </div>
-            <button type="button" onClick={() => fileRef.current?.click()}
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
               className="absolute -bottom-1.5 -right-1.5 w-8 h-8 bg-white rounded-xl shadow-lg
-                border border-slate-100 flex items-center justify-center hover:bg-slate-50 transition-colors">
+                border border-slate-100 flex items-center justify-center hover:bg-slate-50 transition-colors"
+            >
               <Camera className="w-3.5 h-3.5 text-slate-500" />
             </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhoto}
+            />
           </div>
           <div>
             <p className="font-bold text-slate-800 text-lg leading-tight">{user?.full_name}</p>
             <p className="text-sm text-slate-500 mt-0.5">{user?.email}</p>
-            <span className="inline-block mt-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-lg capitalize"
-              style={{ background: `${C.deepBlue}12`, color: C.deepBlue }}>
+            <span
+              className="inline-block mt-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-lg capitalize"
+              style={{ background: `${C.deepBlue}12`, color: C.deepBlue }}
+            >
               {user?.role}
             </span>
           </div>
@@ -108,54 +133,75 @@ export default function GeneralSettings() {
 
         {/* Fields */}
         <div className="p-6 space-y-4">
+
           {/* Full Name */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Full Name</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Full Name
+            </label>
             <div className="relative">
               <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-              <input type="text" value={profile.full_name}
+              <input
+                type="text"
+                value={profile.full_name}
                 onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))}
                 placeholder="Your full name"
                 className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white
-                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
+                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all"
+              />
             </div>
           </div>
 
           {/* Email read-only */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Email <span className="normal-case font-normal text-slate-400">(cannot be changed)</span>
+              Email{" "}
+              <span className="normal-case font-normal text-slate-400">(cannot be changed)</span>
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-              <input type="email" value={user?.email || ""} disabled
+              <input
+                type="email"
+                value={user?.email || ""}
+                disabled
                 className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200
-                  bg-slate-50 text-slate-400 cursor-not-allowed" />
+                  bg-slate-50 text-slate-400 cursor-not-allowed"
+              />
             </div>
           </div>
 
           {/* Phone */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Phone</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Phone
+            </label>
             <div className="relative">
               <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-              <input type="tel" value={profile.phone}
+              <input
+                type="tel"
+                value={profile.phone}
                 onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
                 placeholder="+91 00000 00000"
                 className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white
-                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
+                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all"
+              />
             </div>
           </div>
 
           {/* Birthday */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Birthday</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Birthday
+            </label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-              <input type="date" value={profile.birthday}
+              <input
+                type="date"
+                value={profile.birthday}
                 onChange={e => setProfile(p => ({ ...p, birthday: e.target.value }))}
                 className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-white
-                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all" />
+                  focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 transition-all"
+              />
             </div>
           </div>
 
@@ -168,13 +214,17 @@ export default function GeneralSettings() {
             </p>
           </div>
 
-          {/* Save */}
+          {/* Save button */}
           <div className="flex justify-end pt-1">
-            <motion.button type="submit" disabled={loading}
-              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+            <motion.button
+              type="submit"
+              disabled={loading}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold
                 text-white shadow-md transition-all disabled:opacity-60"
-              style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}>
+              style={{ background: `linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})` }}
+            >
               {loading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
                 : saved
@@ -183,6 +233,7 @@ export default function GeneralSettings() {
               }
             </motion.button>
           </div>
+
         </div>
       </motion.form>
     </div>
