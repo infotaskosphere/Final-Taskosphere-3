@@ -20,6 +20,8 @@ import {
   Sun,
   Moon,
   MapPin,
+  Settings,
+  Mail,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -65,6 +67,14 @@ const NAV_GROUPS = [
       { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
       { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
       { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
+    ],
+  },
+  {
+    id: 'settings',
+    dividerLabel: 'Settings',
+    items: [
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts' },
+      { path: '/settings',       icon: Settings, label: 'General Settings' },
     ],
   },
 ];
@@ -278,7 +288,6 @@ const DashboardLayout = ({ children }) => {
           <motion.button
             onClick={() => setCollapsed(prev => !prev)}
             className={`
-              hidden tablet-lg:flex lg:flex p-1.5 rounded-lg transition-all flex-shrink-0
               ${isDark
                 ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
                 : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
