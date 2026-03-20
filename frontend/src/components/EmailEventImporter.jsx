@@ -1,25 +1,13 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// EmailEventImporter.jsx  — drop-in component for Attendance & Visits pages
-//
-// Usage:
-//   <EmailEventImporter
-//     mode="reminder"          // "reminder" | "visit"
-//     onSelectEvent={(event) => { /* auto-fill your form */ }}
-//     onClose={() => setShowImporter(false)}
-//   />
-// ═══════════════════════════════════════════════════════════════════════════════
-
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, parseISO, isPast } from "date-fns";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
-  Mail, X, RefreshCw, Loader2, CheckCircle2, AlertCircle,
+  Mail, X, RefreshCw, Loader2, CheckCircle2,
   Clock, MapPin, User, Calendar, ChevronRight, Zap,
-  Link2, Unlink, Plus, Shield, Eye, EyeOff,
-  Google, Building2, Inbox,
+  Link2, Unlink, Plus, Shield, Eye, EyeOff, Inbox,
 } from "lucide-react";
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
@@ -29,7 +17,6 @@ const C = {
   emerald:    "#1FAF5A",
   amber:      "#F59E0B",
   red:        "#EF4444",
-  purple:     "#8B5CF6",
 };
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
@@ -89,7 +76,6 @@ const TYPE_ICONS = {
   other:    "📌",
 };
 
-// ── Animation presets ─────────────────────────────────────────────────────────
 const spring = { type: "spring", stiffness: 280, damping: 24 };
 const fadeUp = {
   hidden:  { opacity: 0, y: 12 },
@@ -97,53 +83,22 @@ const fadeUp = {
   exit:    { opacity: 0, y: -8, transition: { duration: 0.2 } },
 };
 
+// ── Helper: get stored JWT token ──────────────────────────────────────────────
+function getStoredToken() {
+  // Try common storage keys used by the app
+  return (
+    localStorage.getItem("access_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    sessionStorage.getItem("access_token") ||
+    sessionStorage.getItem("token") ||
+    ""
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SUB-COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════════
-
-function ProviderBadge({ provider, connected, onConnect, onDisconnect }) {
-  const meta = PROVIDERS.find(p => p.id === provider.provider) || {};
-  return (
-    <div
-      className="flex items-center gap-3 p-3 rounded-xl border transition-all"
-      style={{
-        borderColor: connected ? C.emerald + "50" : "#E5E7EB",
-        backgroundColor: connected ? "#F0FDF4" : "#FAFAFA",
-      }}
-    >
-      <div
-        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black text-white flex-shrink-0"
-        style={{ backgroundColor: meta.color || "#374151" }}
-      >
-        {meta.icon || "?"}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-slate-800 leading-none">{meta.label || provider.provider}</p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          {connected
-            ? `Connected ${provider.connected_at ? format(parseISO(provider.connected_at), "MMM d, yyyy") : ""}`
-            : "Not connected"}
-        </p>
-      </div>
-      {connected ? (
-        <button
-          onClick={() => onDisconnect(provider.provider)}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 border border-red-100 hover:bg-red-100 active:scale-95 transition-all"
-        >
-          <Unlink className="w-3 h-3" /> Disconnect
-        </button>
-      ) : (
-        <button
-          onClick={() => onConnect(provider.provider)}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white active:scale-95 transition-all hover:opacity-90"
-          style={{ backgroundColor: C.deepBlue }}
-        >
-          <Link2 className="w-3 h-3" /> Connect
-        </button>
-      )}
-    </div>
-  );
-}
 
 function EventCard({ event, mode, onSelect }) {
   const urgencyStyle = URGENCY_COLORS[event.urgency] || URGENCY_COLORS.medium;
@@ -233,15 +188,18 @@ function EventCard({ event, mode, onSelect }) {
 // ─── IMAP Connect Form ────────────────────────────────────────────────────────
 function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
   const meta = PROVIDERS.find(p => p.id === providerId) || {};
-  const [email, setEmail]     = useState("");
-  const [password, setPassword] = useState("");
-  const [host, setHost]       = useState(meta.imap_host || "");
-  const [port, setPort]       = useState(993);
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail]         = useState("");
+  const [password, setPassword]   = useState("");
+  const [host, setHost]           = useState(meta.imap_host || "");
+  const [port, setPort]           = useState(993);
+  const [showPass, setShowPass]   = useState(false);
+  const [loading, setLoading]     = useState(false);
 
   const handleConnect = async () => {
-    if (!email || !password) { toast.error("Email and app password are required"); return; }
+    if (!email || !password) {
+      toast.error("Email and app password are required");
+      return;
+    }
     setLoading(true);
     try {
       await api.post("/email/connect/imap", {
@@ -283,7 +241,9 @@ function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
       )}
 
       <div>
-        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Email Address</label>
+        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">
+          Email Address
+        </label>
         <input
           type="email"
           value={email}
@@ -314,10 +274,12 @@ function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
         </div>
       </div>
 
-      {(providerId === "other") && (
+      {providerId === "other" && (
         <div className="grid grid-cols-3 gap-2">
           <div className="col-span-2">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">IMAP Host</label>
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">
+              IMAP Host
+            </label>
             <input
               type="text"
               value={host}
@@ -327,7 +289,9 @@ function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
             />
           </div>
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Port</label>
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1">
+              Port
+            </label>
             <input
               type="number"
               value={port}
@@ -339,14 +303,23 @@ function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
       )}
 
       <div className="flex gap-2 pt-1">
-        <Button variant="outline" onClick={onCancel} className="flex-1 rounded-xl text-sm h-9">Cancel</Button>
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          className="flex-1 rounded-xl text-sm h-9"
+        >
+          Cancel
+        </Button>
         <Button
           onClick={handleConnect}
           disabled={loading}
           className="flex-1 rounded-xl text-sm h-9 text-white font-semibold"
           style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
         >
-          {loading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />Connecting…</> : "Connect"}
+          {loading
+            ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />Connecting…</>
+            : "Connect"
+          }
         </Button>
       </div>
     </motion.div>
@@ -358,19 +331,16 @@ function IMAPConnectForm({ providerId, onSuccess, onCancel }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function EmailEventImporter({ mode = "reminder", onSelectEvent, onClose }) {
-  // mode: "reminder" | "visit"
-
-  const [step, setStep]             = useState("accounts");   // "accounts" | "events"
-  const [connections, setConnections] = useState([]);
-  const [events, setEvents]         = useState([]);
-  const [loading, setLoading]       = useState(false);
-  const [fetching, setFetching]     = useState(false);
-  const [daysBack, setDaysBack]     = useState(30);
-  const [filterType, setFilterType] = useState("all");
+  const [step, setStep]                   = useState("accounts");
+  const [connections, setConnections]     = useState([]);
+  const [events, setEvents]               = useState([]);
+  const [loading, setLoading]             = useState(false);
+  const [fetching, setFetching]           = useState(false);
+  const [daysBack, setDaysBack]           = useState(30);
+  const [filterType, setFilterType]       = useState("all");
   const [connectingProvider, setConnectingProvider] = useState(null);
-  const [errors, setErrors]         = useState([]);
+  const [errors, setErrors]               = useState([]);
 
-  // Load connections on mount
   useEffect(() => {
     loadConnections();
   }, []);
@@ -387,11 +357,21 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
     }
   };
 
+  // ── KEY FIX: pass JWT token as query param so popup can authenticate ────────
   const handleOAuthConnect = (provider) => {
-    // Use the full backend URL so the OAuth redirect stays in the popup
-    const backendUrl = import.meta.env.VITE_API_URL?.replace("/api", "") 
-      || "https://final-taskosphere-backend.onrender.com";
-    const url = `${backendUrl}/api/email/auth/${provider}`;
+    const token = getStoredToken();
+    if (!token) {
+      toast.error("Session token not found. Please log in again.");
+      return;
+    }
+
+    const backendBase =
+      import.meta.env.VITE_API_URL?.replace("/api", "") ||
+      "https://final-taskosphere-backend.onrender.com";
+
+    // Pass token as query param — the backend reads it from Query(...) instead
+    // of the Authorization header (which popups cannot send)
+    const url = `${backendBase}/api/email/auth/${provider}?token=${encodeURIComponent(token)}`;
 
     const popup = window.open(url, "emailOAuth", "width=600,height=700,scrollbars=yes");
 
@@ -400,10 +380,9 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
       return;
     }
 
-    // Poll every 2s — check if popup closed (OAuth done) OR if connection appeared
+    // Poll every 2s — check if popup closed (OAuth done) or connection appeared
     const poll = setInterval(async () => {
       try {
-        // If popup was closed by the callback page
         if (popup.closed) {
           clearInterval(poll);
           const res = await api.get("/email/connections");
@@ -417,7 +396,7 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
           }
           return;
         }
-        // Also check if connection appeared while popup still open
+        // Also check while popup is still open (in case redirect closes it)
         const res = await api.get("/email/connections");
         const conns = res.data?.connections || [];
         const found = conns.find(c => c.provider === provider);
@@ -427,7 +406,9 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
           popup.close();
           toast.success(`✓ ${provider === "google" ? "Gmail" : "Outlook"} connected!`);
         }
-      } catch {}
+      } catch {
+        // Ignore cross-origin popup access errors while redirecting
+      }
     }, 2000);
 
     // Give up after 3 minutes
@@ -462,10 +443,10 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
       setEvents(res.data?.events || []);
       setErrors(res.data?.errors || []);
       setStep("events");
-      if (res.data?.events?.length === 0) {
-        toast.info("No meeting or event emails found in the last " + daysBack + " days.");
+      if ((res.data?.events || []).length === 0) {
+        toast.info(`No event emails found in the last ${daysBack} days.`);
       } else {
-        toast.success(`✓ Found ${res.data.events.length} event${res.data.events.length !== 1 ? "s" : ""} in your emails`);
+        toast.success(`✓ Found ${res.data.events.length} event${res.data.events.length !== 1 ? "s" : ""}`);
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to fetch events");
@@ -476,11 +457,9 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
 
   const handleSelectEvent = (event) => {
     onSelectEvent(event);
-    toast.success(`✓ Event imported — form auto-filled`);
+    toast.success("✓ Event imported — form auto-filled");
     onClose();
   };
-
-  const connectedProviders = new Set(connections.map(c => c.provider));
 
   const filteredEvents = filterType === "all"
     ? events
@@ -536,7 +515,10 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
               >
                 <span
                   className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black"
-                  style={{ backgroundColor: step === s ? "white" : "rgba(255,255,255,0.2)", color: step === s ? C.deepBlue : "white" }}
+                  style={{
+                    backgroundColor: step === s ? "white" : "rgba(255,255,255,0.2)",
+                    color: step === s ? C.deepBlue : "white",
+                  }}
                 >
                   {i + 1}
                 </span>
@@ -566,11 +548,12 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                 exit="exit"
                 className="p-6 space-y-4"
               >
+                {/* Privacy notice */}
                 <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 border border-blue-100">
                   <Shield className="w-4 h-4 text-blue-600 flex-shrink-0" />
                   <p className="text-xs text-blue-700">
-                    <strong>Privacy:</strong> We only read email subjects and bodies to extract event dates.
-                    No emails are stored on our servers — only extracted event data.
+                    <strong>Privacy:</strong> We only read email subjects and bodies to extract
+                    event dates. No emails are stored — only extracted event data.
                   </p>
                 </div>
 
@@ -584,50 +567,49 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                     {PROVIDERS.filter(p => p.method === "oauth").map(prov => {
                       const conn = connections.find(c => c.provider === prov.id);
                       return (
-                        <div key={prov.id}>
+                        <div
+                          key={prov.id}
+                          className="flex items-center gap-3 p-3 rounded-xl border transition-all"
+                          style={{
+                            borderColor: conn ? C.emerald + "50" : "#E5E7EB",
+                            backgroundColor: conn ? "#F0FDF4" : prov.bg,
+                          }}
+                        >
                           <div
-                            className="flex items-center gap-3 p-3 rounded-xl border transition-all"
-                            style={{
-                              borderColor: conn ? C.emerald + "50" : "#E5E7EB",
-                              backgroundColor: conn ? "#F0FDF4" : prov.bg,
-                            }}
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-base font-black text-white flex-shrink-0"
+                            style={{ backgroundColor: prov.color }}
                           >
-                            <div
-                              className="w-9 h-9 rounded-xl flex items-center justify-center text-base font-black text-white flex-shrink-0"
+                            {prov.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800">{prov.label}</p>
+                            <p className="text-xs text-slate-400">
+                              {conn
+                                ? `Connected ${conn.connected_at ? format(parseISO(conn.connected_at), "MMM d") : ""}`
+                                : prov.description}
+                            </p>
+                          </div>
+                          {conn ? (
+                            <div className="flex items-center gap-2">
+                              <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Connected
+                              </span>
+                              <button
+                                onClick={() => handleDisconnect(prov.id)}
+                                className="text-xs text-red-500 hover:text-red-700 underline"
+                              >
+                                Disconnect
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleOAuthConnect(prov.id)}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white active:scale-95 transition-all hover:opacity-90"
                               style={{ backgroundColor: prov.color }}
                             >
-                              {prov.icon}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-800">{prov.label}</p>
-                              <p className="text-xs text-slate-400">
-                                {conn
-                                  ? `Connected ${conn.connected_at ? format(parseISO(conn.connected_at), "MMM d") : ""}`
-                                  : prov.description}
-                              </p>
-                            </div>
-                            {conn ? (
-                              <div className="flex items-center gap-2">
-                                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Connected
-                                </span>
-                                <button
-                                  onClick={() => handleDisconnect(prov.id)}
-                                  className="text-xs text-red-500 hover:text-red-700 underline"
-                                >
-                                  Disconnect
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleOAuthConnect(prov.id)}
-                                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white active:scale-95 transition-all hover:opacity-90"
-                                style={{ backgroundColor: prov.color }}
-                              >
-                                <Link2 className="w-3.5 h-3.5" /> Connect
-                              </button>
-                            )}
-                          </div>
+                              <Link2 className="w-3.5 h-3.5" /> Connect
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -685,6 +667,7 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                           <AnimatePresence>
                             {isExpanding && (
                               <IMAPConnectForm
+                                key={prov.id}
                                 providerId={prov.id}
                                 onSuccess={() => {
                                   setConnectingProvider(null);
@@ -723,9 +706,10 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                   onClick={handleFetchEvents}
                   disabled={fetching || connections.length === 0}
                   className="w-full h-11 text-sm font-bold text-white rounded-xl active:scale-[0.98] transition-all"
-                  style={{ background: connections.length === 0
-                    ? "#9CA3AF"
-                    : `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})`
+                  style={{
+                    background: connections.length === 0
+                      ? "#9CA3AF"
+                      : `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})`,
                   }}
                 >
                   {fetching ? (
@@ -735,7 +719,9 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                   )}
                 </Button>
                 {connections.length === 0 && (
-                  <p className="text-center text-xs text-slate-400">Connect at least one email account above to scan</p>
+                  <p className="text-center text-xs text-slate-400">
+                    Connect at least one email account above to scan
+                  </p>
                 )}
               </motion.div>
             )}
@@ -750,7 +736,7 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                 exit="exit"
                 className="p-6 space-y-4"
               >
-                {/* Errors from providers */}
+                {/* Provider errors */}
                 {errors.length > 0 && (
                   <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
                     <p className="text-xs font-bold text-amber-800 mb-1">Some accounts had issues:</p>
@@ -767,7 +753,6 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                     {filterType !== "all" ? ` (${filterType})` : ""}
                   </p>
 
-                  {/* Type filter */}
                   <select
                     value={filterType}
                     onChange={e => setFilterType(e.target.value)}
@@ -779,7 +764,6 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                     ))}
                   </select>
 
-                  {/* Re-scan */}
                   <button
                     onClick={handleFetchEvents}
                     disabled={fetching}
@@ -804,14 +788,13 @@ export default function EmailEventImporter({ mode = "reminder", onSelectEvent, o
                   Click any event to auto-fill the {mode === "reminder" ? "reminder" : "visit"} form
                 </p>
 
-                {/* Event list */}
                 {filteredEvents.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 gap-3">
                     <Mail className="w-10 h-10 text-slate-200" />
                     <div className="text-center">
                       <p className="font-semibold text-slate-600">No events detected</p>
                       <p className="text-sm text-slate-400 mt-1">
-                        Try increasing the scan window or check if emails mention dates/times explicitly.
+                        Try increasing the scan window or check that emails mention dates explicitly.
                       </p>
                     </div>
                     <Button variant="outline" onClick={() => setStep("accounts")} className="rounded-xl">
