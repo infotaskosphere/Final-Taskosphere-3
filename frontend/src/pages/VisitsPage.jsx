@@ -7,6 +7,7 @@ import {
 } from "date-fns";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import EmailEventImporter from "@/components/EmailEventImporter";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
