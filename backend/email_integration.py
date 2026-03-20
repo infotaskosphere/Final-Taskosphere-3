@@ -653,54 +653,53 @@ async def add_connection(
     current_user=Depends(get_current_user)
 ):
     """
-    Connect a new email account via IMAP app password.
-    FIX v3: IMAP test runs in executor (non-blocking).
-    Returns 400 with clear message on login failure instead of 500.
+    Connect a new email account. 
+    Allows multiple accounts (e.g., multiple Gmails) for the same user.
     """
     try:
         host, port, provider = _infer_provider(body.email_address)
         host = body.imap_host or host
         port = body.imap_port or port
 
-        # Run blocking IMAP test in thread pool — never blocks the event loop
+        # 1. Test the IMAP connection before saving
         loop = asyncio.get_event_loop()
         error_msg = await loop.run_in_executor(
             None, _test_imap_sync, host, port, body.email_address, body.app_password
         )
 
         if error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
-            )
+            raise HTTPException(status_code=400, detail=error_msg)
 
+        # 2. Prepare the document
         doc = {
             "user_id":          str(current_user.id),
-            "email_address":    body.email_address,
+            "email_address":    body.email_address.strip().lower(),
             "app_password_enc": _encrypt(_clean_password(body.app_password)),
             "imap_host":        host,
             "imap_port":        port,
-            "label":            body.label,
+            "label":            body.label or f"{provider.capitalize()} Account",
             "provider":         provider,
             "is_active":        True,
             "connected_at":     datetime.now(timezone.utc).isoformat(),
         }
+
+        # 3. FIX: Match by user_id AND email_address to allow multiple accounts
         await db[COL_CONNECTIONS].update_one(
-            {"user_id": str(current_user.id), "email_address": body.email_address},
+            {
+                "user_id": str(current_user.id), 
+                "email_address": doc["email_address"]
+            },
             {"$set": doc},
             upsert=True
         )
+        
         return _conn_doc_to_out(doc)
 
     except HTTPException:
-        raise  # re-raise 400 as-is
+        raise
     except Exception as e:
-        logger.error(f"add_connection unexpected error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected server error: {type(e).__name__}: {e}"
-        )
-
+        logger.error(f"Multi-account add error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.patch("/connections/{email_address}")
 async def update_connection(
