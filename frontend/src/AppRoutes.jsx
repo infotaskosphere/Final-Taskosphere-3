@@ -19,7 +19,9 @@ const Users            = lazy(() => import("@/pages/Users"));
 const DueDates         = lazy(() => import("@/pages/DueDates"));
 const StaffActivity    = lazy(() => import("@/pages/StaffActivity"));
 const LeadsPage        = lazy(() => import("@/pages/Leads"));
-const VisitsPage       = lazy(() => import("@/pages/VisitsPage")); // ✅ ADDED
+const VisitsPage       = lazy(() => import("@/pages/VisitsPage"));
+const EmailSettings = lazy(() => import("@/components/EmailSettings"));
+
 
 
 /* Route Guards */
@@ -212,7 +214,15 @@ function AppRoutes() {
             </Permission>
           }
         />
-
+        {/* Email Account Settings */}
+        <Route
+          path="/settings/email"
+          element={
+            <Protected>
+              <EmailSettings />
+            </Protected>
+          }
+        />
         {/* ✅ Client Visits — accessible to all authenticated users */}
         <Route
           path="/visits"
