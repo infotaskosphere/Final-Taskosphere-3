@@ -219,21 +219,6 @@ def mark_absent_users_task():
             loop.close()
 
     
-    # ── NEW: email connections index ──────────────────────────────────────
-        try:
-            # 1. DROP the old restrictive index that limits users to 1 Gmail
-            # Usually named 'user_id_1_provider_1'
-            await db.email_connections.drop_index("user_id_1_provider_1")
-        except Exception:
-            pass # Already dropped or named differently
-
-        # 2. CREATE the new index that allows multiple emails per user
-        await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
-        )
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -260,6 +245,21 @@ async def startup_event():
         await db.visits.create_index("status")
         await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
         await db.notifications.create_index("created_at")
+
+    # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
+        try:
+            # Drop old rule (Unique User + Provider)
+            await db.email_connections.drop_index("user_id_1_provider_1")
+        except Exception:
+            pass 
+
+        # Create new rule (Unique User + Email Address)
+        await db.email_connections.create_index(
+            [("user_id", 1), ("email_address", 1)],
+            unique=True,
+            background=True
+        )
+        
         # Unique indexes — use background=True so they don't block startup if they already exist
         await db.attendance.create_index(
             [("user_id", 1), ("date", 1)],
