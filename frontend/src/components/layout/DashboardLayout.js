@@ -36,6 +36,10 @@ const COLORS = {
   lightGreen:  '#5CCB5F',
 };
 
+// ── Single source of truth for sidebar widths ─────────────────────────────────
+const SIDEBAR_EXPANDED  = 260;
+const SIDEBAR_COLLAPSED = 72;
+
 const NAV_GROUPS = [
   {
     id: 'core',
@@ -62,10 +66,10 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
-      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
-      { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
+      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity', permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports'                                              },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
+      { path: '/users',          icon: Users,      label: 'Users',          permission: 'can_view_user_page'    },
     ],
   },
   {
@@ -97,6 +101,10 @@ const DashboardLayout = ({ children }) => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('theme') === 'dark';
   });
+  // Track whether we're on desktop so header/content offset updates on resize
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= 1024
+  );
 
   useEffect(() => {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
@@ -110,7 +118,9 @@ const DashboardLayout = ({ children }) => {
   }, [collapsed]);
 
   const handleResize = useCallback(() => {
-    if (window.innerWidth < 1024) setCollapsed(false);
+    const desktop = window.innerWidth >= 1024;
+    setIsDesktop(desktop);
+    if (!desktop) setCollapsed(false);
   }, []);
 
   useEffect(() => {
@@ -150,11 +160,12 @@ const DashboardLayout = ({ children }) => {
   );
   const activeLabel = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
-  const sidebarWidth  = collapsed ? 'w-[72px]'   : 'w-[260px]';
-  // ── FIX: header is now fixed, so content needs top padding equal to header height ──
-  const contentMargin = collapsed
-    ? 'tablet-lg:ml-[72px] lg:ml-[72px]'
-    : 'tablet-lg:ml-[260px] lg:ml-[260px]';
+  // ── Derive sidebar pixel width from state ─────────────────────────────────
+  const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
+
+  // ── On desktop the header/content offset = sidebarPx.
+  //    On mobile the sidebar slides over the content, so offset = 0. ─────────
+  const offsetPx = isDesktop ? sidebarPx : 0;
 
   // ── Sidebar nav item ──────────────────────────────────────────────────────
   const NavItem = ({ item }) => {
@@ -192,19 +203,16 @@ const DashboardLayout = ({ children }) => {
               style={{ background: 'rgba(255,255,255,0.6)' }}
             />
           )}
-
           <Icon
             className={`flex-shrink-0 transition-colors ${
               collapsed ? 'h-5 w-5' : 'h-4 w-4'
             } ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`}
           />
-
           {!collapsed && (
             <span className="font-medium text-sm whitespace-nowrap tracking-tight">
               {item.label}
             </span>
           )}
-
           {collapsed && (
             <div className="
               absolute left-full ml-3 px-2.5 py-1.5
@@ -238,11 +246,11 @@ const DashboardLayout = ({ children }) => {
   return (
     <div className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}>
 
-      {/* ── Mobile Overlay ───────────────────────────────────────────────── */}
+      {/* ── Mobile Overlay ── */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
-            className="fixed inset-0 bg-black/50 z-40 tablet-lg:hidden lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -251,16 +259,16 @@ const DashboardLayout = ({ children }) => {
         )}
       </AnimatePresence>
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      {/* ── Sidebar ── */}
       <aside
         className={`
-          fixed top-0 left-0 h-full ${sidebarWidth}
-          z-50 flex flex-col
+          fixed top-0 left-0 h-full z-50 flex flex-col
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
         style={{
+          width:       sidebarPx,
           background:  isDark ? '#1e293b' : '#ffffff',
           borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
           boxShadow:   '4px 0 24px rgba(0,0,0,0.06)',
@@ -286,6 +294,7 @@ const DashboardLayout = ({ children }) => {
                 : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
               }
               ${collapsed ? 'absolute right-1 top-[18px]' : ''}
+              p-1 rounded-lg
             `}
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
@@ -341,17 +350,21 @@ const DashboardLayout = ({ children }) => {
         )}
       </aside>
 
-      {/* ── FIXED HEADER — sits above everything, never scrolls away ─────── */}
+      {/* ── HEADER ───────────────────────────────────────────────────────────
+          KEY FIX: NO Tailwind margin class here at all.
+          Only inline `left` controls the offset — driven by offsetPx (0 on
+          mobile, sidebarPx on desktop). `right: 0` is the default for a
+          fixed element so the header always stretches to the screen edge.
+      ── */}
       <header
-        className={`fixed top-0 right-0 z-40 ${contentMargin} transition-all duration-300 ease-in-out`}
+        className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
         style={{
+          left:                offsetPx,
           background:          isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
           borderBottom:        isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
           boxShadow:           '0 1px 8px rgba(0,0,0,0.06)',
           backdropFilter:      'blur(12px)',
           WebkitBackdropFilter:'blur(12px)',
-          // stretch to fill the right portion of screen
-          left: collapsed ? '72px' : '260px',
         }}
       >
         <div className="flex items-center justify-between px-3 sm:px-5 md:px-7 h-12 sm:h-14">
@@ -362,14 +375,14 @@ const DashboardLayout = ({ children }) => {
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(prev => !prev)}
-              className={`tablet-lg:hidden lg:hidden h-8 w-8 sm:h-9 sm:w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
+              className={`lg:hidden h-8 w-8 sm:h-9 sm:w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
             >
               <Menu className="h-4 w-4" />
             </Button>
           </motion.div>
 
           {/* Breadcrumb */}
-          <div className="hidden tablet-lg:flex lg:flex items-center gap-2">
+          <div className="hidden lg:flex items-center gap-2">
             {(() => {
               const active = visibleNavItems.find(i => i.path === location.pathname);
               if (!active) return null;
@@ -448,7 +461,6 @@ const DashboardLayout = ({ children }) => {
                 </motion.div>
               </motion.button>
 
-              {/* Dropdown */}
               <AnimatePresence>
                 {userMenuOpen && (
                   <motion.div
@@ -519,8 +531,18 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main Content — pt-12/pt-14 offsets the fixed header height ──── */}
-      <div className={`${contentMargin} transition-all duration-300 ease-in-out min-h-screen flex flex-col pt-12 sm:pt-14`}>
+      {/* ── Main Content ─────────────────────────────────────────────────────
+          Margin-left = offsetPx (same value header uses) so content never
+          hides under the sidebar.
+          Padding-top = 56px (h-14) so content never hides under the header.
+      ── */}
+      <div
+        className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
+        style={{
+          marginLeft: offsetPx,
+          paddingTop: 56,
+        }}
+      >
         <main className="flex-1 p-5 md:p-7">
           <div className="max-w-[1400px] mx-auto">
             {children}
