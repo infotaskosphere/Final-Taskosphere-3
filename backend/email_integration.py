@@ -657,6 +657,7 @@ async def add_connection(
     Allows multiple accounts (e.g., multiple Gmails) for the same user.
     """
     try:
+        # 0. Infer provider and setup host/port
         host, port, provider = _infer_provider(body.email_address)
         host = body.imap_host or host
         port = body.imap_port or port
@@ -668,26 +669,32 @@ async def add_connection(
         )
 
         if error_msg:
-            raise HTTPException(status_code=400, detail=error_msg)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail=error_msg
+            )
 
-        # 2. Prepare the document
+        # 2. Prepare the document with cleaned data
+        clean_email = body.email_address.strip().lower()
         doc = {
             "user_id":          str(current_user.id),
-            "email_address":    body.email_address.strip().lower(),
+            "email_address":    clean_email,
             "app_password_enc": _encrypt(_clean_password(body.app_password)),
             "imap_host":        host,
             "imap_port":        port,
-            "label":            body.label or f"{provider.capitalize()} Account",
+            "label":            body.label or f"{provider.capitalize()} ({clean_email})",
             "provider":         provider,
             "is_active":        True,
             "connected_at":     datetime.now(timezone.utc).isoformat(),
         }
 
-        # 3. FIX: Match by user_id AND email_address to allow multiple accounts
+        # 3. CRITICAL FIX: Match by BOTH user_id AND email_address
+        # This allows multiple accounts (e.g., Manthan + Gmail1 and Manthan + Gmail2)
+        # without triggering the MongoDB DuplicateKeyError.
         await db[COL_CONNECTIONS].update_one(
             {
                 "user_id": str(current_user.id), 
-                "email_address": doc["email_address"]
+                "email_address": clean_email
             },
             {"$set": doc},
             upsert=True
@@ -699,8 +706,10 @@ async def add_connection(
         raise
     except Exception as e:
         logger.error(f"Multi-account add error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Failed to connect email: {str(e)}"
+        )
 @router.patch("/connections/{email_address}")
 async def update_connection(
     email_address: str,
