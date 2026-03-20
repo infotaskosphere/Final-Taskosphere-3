@@ -540,19 +540,35 @@ export default function EmailSettings() {
 
   // ── Scan ALL accounts for reminders + visits ──────────────────────────────
   const handleScanAll = async () => {
-    if (connections.length === 0) { toast.error("No email accounts connected"); return; }
+    if (connections.length === 0) { 
+      toast.error("No email accounts connected"); 
+      return; 
+    }
+    
     setScanning(true);
     try {
-      const res = await api.get("/email/extract-events?force_refresh=true&limit=100");
+      // THE FIX: We pass a custom timeout (90 seconds) specifically for this 'heavy' request.
+      // This overrides the default 20s axios timeout.
+      const res = await api.get("/email/extract-events?force_refresh=true&limit=100", {
+        timeout: 90000 
+      });
+      
       const events = res.data || [];
       setExtractedEvents(events);
+      
       if (events.length === 0) {
         toast.info("No upcoming events found in your inboxes");
       } else {
         toast.success(`✓ Found ${events.length} event(s) across ${connections.length} account(s)`);
       }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Scan failed");
+      // Check if it was a timeout error specifically
+      if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
+        toast.error("Scan taking too long. Check your internet or try syncing accounts individually.");
+      } else {
+        toast.error(err?.response?.data?.detail || "Scan failed");
+      }
+      console.error("Scan Error:", err);
     } finally {
       setScanning(false);
     }
@@ -565,7 +581,6 @@ export default function EmailSettings() {
   };
 
   const activeProvider = QUICK_PROVIDERS.find(p => p.id === activeForm);
-
   // ── Categorise extracted events ───────────────────────────────────────────
   const reminderEvents = extractedEvents.filter(e =>
     ["Trademark Hearing", "Court Hearing", "Deadline", "Appointment", "Other"].includes(e.event_type)
