@@ -1,10 +1,3 @@
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# backend/email_integration.py
-# Supports: Gmail OAuth2, Outlook OAuth2, Yahoo/any IMAP (app password)
-# Extracts meetings, hearings, court dates, visits, events from emails
-# ═══════════════════════════════════════════════════════════════════════════════
-
 import os
 import re
 import json
@@ -21,11 +14,12 @@ from io import BytesIO
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from jose import JWTError, jwt
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from backend.dependencies import db, get_current_user
+from backend.dependencies import db, get_current_user, SECRET_KEY, ALGORITHM
 from backend.models import User
 
 router = APIRouter(prefix="/email", tags=["email"])
@@ -99,6 +93,41 @@ class ExtractedEvent(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# HELPER: validate token from query param (used by OAuth popup endpoints)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _validate_token_param(token: str) -> str:
+    """
+    Decode and validate a JWT passed as a query parameter.
+    Returns the user_id (sub claim) on success.
+    Raises HTTP 401 on failure.
+
+    This is used by OAuth start endpoints because browser popups opened via
+    window.open() cannot send Authorization headers — the token is passed in
+    the URL as ?token=<jwt> instead.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing token. Please log in again.",
+        )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload.",
+            )
+        return user_id
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {str(e)}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # EVENT EXTRACTION ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -135,14 +164,12 @@ _URGENCY_MED = [
 def _strip_html(html: str) -> str:
     """Remove HTML tags and return plain text."""
     try:
-        # Try beautifulsoup if available
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "head", "meta", "link"]):
             tag.decompose()
         return soup.get_text(separator="\n")
     except ImportError:
-        # Fallback: simple regex
         return re.sub(r"<[^>]+>", " ", html)
 
 
@@ -431,10 +458,16 @@ def fetch_events_via_imap(
         mail.login(email_address, app_password)
     except imaplib.IMAP4.error as e:
         logger.error(f"IMAP login failed for {email_address} ({provider}): {e}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"IMAP login failed: {str(e)}. Use an App Password, not your regular password.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"IMAP login failed: {str(e)}. Use an App Password, not your regular password.",
+        )
     except Exception as e:
         logger.error(f"IMAP connection error for {email_address} ({provider}): {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"IMAP connection error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"IMAP connection error: {str(e)}",
+        )
 
     mail.select("INBOX")
     since_date = (datetime.now() - timedelta(days=days_back)).strftime("%d-%b-%Y")
@@ -452,7 +485,7 @@ def fetch_events_via_imap(
         try:
             status_code, data = mail.fetch(mid, "(RFC822)")
             if status_code != "OK":
-                logger.warning(f"IMAP fetch failed for message ID {mid} ({email_address}, {provider}): {status_code}")
+                logger.warning(f"IMAP fetch failed for message ID {mid} ({email_address}): {status_code}")
                 continue
             raw = data[0][1]
             msg = email_lib.message_from_bytes(raw)
@@ -475,10 +508,27 @@ def fetch_events_via_imap(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/auth/google")
-async def google_auth_start(current_user: User = Depends(get_current_user)):
+async def google_auth_start(token: str = Query(..., description="JWT access token passed by popup")):
+    """
+    Start Google OAuth flow.
+
+    FIX: Accepts the JWT as a query param (?token=...) instead of an
+    Authorization header, because browser popups opened via window.open()
+    cannot send custom HTTP headers — every attempt returns 'Not authenticated'.
+
+    The frontend passes the stored JWT in the popup URL:
+        window.open(`/api/email/auth/google?token=${accessToken}`)
+    """
     if not GOOGLE_CLIENT_ID:
         logger.error("GOOGLE_CLIENT_ID not configured.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID in .env")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID in .env",
+        )
+
+    # Validate token and extract user_id to use as OAuth state
+    user_id = _validate_token_param(token)
+
     scope = " ".join(GOOGLE_SCOPES)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth"
@@ -488,13 +538,17 @@ async def google_auth_start(current_user: User = Depends(get_current_user)):
         f"&scope={scope}"
         f"&access_type=offline"
         f"&prompt=consent"
-        f"&state={current_user.id}"
+        f"&state={user_id}"
     )
     return RedirectResponse(url)
 
 
 @router.get("/auth/google/callback")
 async def google_auth_callback(code: str, state: str):
+    """
+    Google OAuth2 callback. Exchanges code for tokens and stores connection.
+    The `state` param carries the user_id set during the auth start step.
+    """
     async with httpx.AsyncClient() as client:
         try:
             token_resp = await client.post(
@@ -507,13 +561,19 @@ async def google_auth_callback(code: str, state: str):
                     "grant_type": "authorization_code",
                 },
             )
-            token_resp.raise_for_status() # Raise an exception for 4xx or 5xx responses
+            token_resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"Google token exchange failed: {e.response.text}")
-            raise HTTPException(status_code=e.response.status_code, detail=f"Token exchange failed: {e.response.text}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Token exchange failed: {e.response.text}",
+            )
         except httpx.RequestError as e:
             logger.error(f"Google token exchange request error: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during token exchange: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Network error during token exchange: {e}",
+            )
 
     tokens = token_resp.json()
     await db.email_connections.update_one(
@@ -524,7 +584,9 @@ async def google_auth_callback(code: str, state: str):
             "method": "oauth",
             "access_token": tokens.get("access_token"),
             "refresh_token": tokens.get("refresh_token"),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))).isoformat(),
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+            ).isoformat(),
             "connected_at": datetime.now(timezone.utc).isoformat(),
         }},
         upsert=True,
@@ -547,14 +609,22 @@ async def _refresh_google_token(user_id: str, refresh_token: str) -> str:
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"Google token refresh failed for user {user_id}: {e.response.text}")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token refresh failed. Please reconnect Gmail.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google token refresh failed. Please reconnect Gmail.",
+            )
         except httpx.RequestError as e:
             logger.error(f"Google token refresh request error for user {user_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during token refresh: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Network error during token refresh: {e}",
+            )
 
     tokens = resp.json()
     new_access = tokens["access_token"]
-    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))).isoformat()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+    ).isoformat()
     await db.email_connections.update_one(
         {"user_id": user_id, "provider": "google"},
         {"$set": {"access_token": new_access, "expires_at": expires_at}},
@@ -563,9 +633,14 @@ async def _refresh_google_token(user_id: str, refresh_token: str) -> str:
 
 
 async def _get_valid_google_token(user_id: str) -> str:
-    conn = await db.email_connections.find_one({"user_id": user_id, "provider": "google"}, {"_id": 0})
+    conn = await db.email_connections.find_one(
+        {"user_id": user_id, "provider": "google"}, {"_id": 0}
+    )
     if not conn:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Gmail not connected. Please connect via OAuth first.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Gmail not connected. Please connect via OAuth first.",
+        )
     expires_at = datetime.fromisoformat(conn["expires_at"])
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -580,7 +655,9 @@ def _extract_gmail_body(payload: dict) -> str:
     if mime_type == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
-            parts_text.append(base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace"))
+            parts_text.append(
+                base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+            )
     elif mime_type == "text/html":
         data = payload.get("body", {}).get("data", "")
         if data:
@@ -591,25 +668,38 @@ def _extract_gmail_body(payload: dict) -> str:
     return "\n".join(filter(None, parts_text))
 
 
-async def fetch_events_via_gmail_api(user_id: str, days_back: int = 30, max_emails: int = 50) -> List[ExtractedEvent]:
+async def fetch_events_via_gmail_api(
+    user_id: str, days_back: int = 30, max_emails: int = 50
+) -> List[ExtractedEvent]:
     access_token = await _get_valid_google_token(user_id)
     headers = {"Authorization": f"Bearer {access_token}"}
     since_epoch = int((datetime.now() - timedelta(days=days_back)).timestamp())
 
     async with httpx.AsyncClient(timeout=30) as client:
         try:
-            params = {"q": f"after:{since_epoch}", "maxResults": max_emails, "labelIds": "INBOX"}
+            params = {
+                "q": f"after:{since_epoch}",
+                "maxResults": max_emails,
+                "labelIds": "INBOX",
+            }
             list_resp = await client.get(
                 "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers=headers, params=params,
+                headers=headers,
+                params=params,
             )
             list_resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"Gmail API list messages failed for user {user_id}: {e.response.text}")
-            raise HTTPException(status_code=e.response.status_code, detail=f"Gmail API error: {e.response.text}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Gmail API error: {e.response.text}",
+            )
         except httpx.RequestError as e:
             logger.error(f"Gmail API list messages request error for user {user_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during Gmail API call: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Network error during Gmail API call: {e}",
+            )
 
         messages = list_resp.json().get("messages", [])
         all_events: List[ExtractedEvent] = []
@@ -627,7 +717,10 @@ async def fetch_events_via_gmail_api(user_id: str, days_back: int = 30, max_emai
                 headers_list = payload.get("headers", [])
 
                 def _hdr(name):
-                    return next((h["value"] for h in headers_list if h["name"].lower() == name.lower()), "")
+                    return next(
+                        (h["value"] for h in headers_list if h["name"].lower() == name.lower()),
+                        "",
+                    )
 
                 subject   = _hdr("Subject")
                 from_addr = _hdr("From")
@@ -636,11 +729,15 @@ async def fetch_events_via_gmail_api(user_id: str, days_back: int = 30, max_emai
                 events = extract_events_from_email_body(subject, body_text, from_addr, date_str)
                 all_events.extend(events)
             except httpx.HTTPStatusError as e:
-                logger.warning(f"Gmail API fetch message {msg_meta.get('id')} failed for user {user_id}: {e.response.text}")
-                continue # Continue to next message if one fails
+                logger.warning(
+                    f"Gmail API fetch message {msg_meta.get('id')} failed for user {user_id}: {e.response.text}"
+                )
+                continue
             except httpx.RequestError as e:
-                logger.warning(f"Gmail API fetch message {msg_meta.get('id')} request error for user {user_id}: {e}")
-                continue # Continue to next message if one fails
+                logger.warning(
+                    f"Gmail API fetch message {msg_meta.get('id')} request error for user {user_id}: {e}"
+                )
+                continue
             except Exception as e:
                 logger.warning(f"Gmail parse error for {msg_meta.get('id')} (user {user_id}): {e}")
 
@@ -652,10 +749,24 @@ async def fetch_events_via_gmail_api(user_id: str, days_back: int = 30, max_emai
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/auth/microsoft")
-async def microsoft_auth_start(current_user: User = Depends(get_current_user)):
+async def microsoft_auth_start(token: str = Query(..., description="JWT access token passed by popup")):
+    """
+    Start Microsoft OAuth flow.
+
+    FIX: Same as Google — accepts the JWT as a query param (?token=...) instead
+    of an Authorization header, because browser popups opened via window.open()
+    cannot send custom HTTP headers.
+    """
     if not MICROSOFT_CLIENT_ID:
         logger.error("MICROSOFT_CLIENT_ID not configured.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID in .env")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID in .env",
+        )
+
+    # Validate token and extract user_id to use as OAuth state
+    user_id = _validate_token_param(token)
+
     scope = " ".join(MICROSOFT_SCOPES)
     url = (
         "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
@@ -663,13 +774,17 @@ async def microsoft_auth_start(current_user: User = Depends(get_current_user)):
         f"&response_type=code"
         f"&redirect_uri={MICROSOFT_REDIRECT_URI}"
         f"&scope={scope}"
-        f"&state={current_user.id}"
+        f"&state={user_id}"
     )
     return RedirectResponse(url)
 
 
 @router.get("/auth/microsoft/callback")
 async def microsoft_auth_callback(code: str, state: str):
+    """
+    Microsoft OAuth2 callback. Exchanges code for tokens and stores connection.
+    The `state` param carries the user_id set during the auth start step.
+    """
     async with httpx.AsyncClient() as client:
         try:
             token_resp = await client.post(
@@ -685,10 +800,16 @@ async def microsoft_auth_callback(code: str, state: str):
             token_resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"Microsoft token exchange failed: {e.response.text}")
-            raise HTTPException(status_code=e.response.status_code, detail=f"Microsoft token error: {e.response.text}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Microsoft token error: {e.response.text}",
+            )
         except httpx.RequestError as e:
             logger.error(f"Microsoft token exchange request error: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during token exchange: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Network error during token exchange: {e}",
+            )
 
     tokens = token_resp.json()
     await db.email_connections.update_one(
@@ -699,7 +820,9 @@ async def microsoft_auth_callback(code: str, state: str):
             "method": "oauth",
             "access_token": tokens.get("access_token"),
             "refresh_token": tokens.get("refresh_token"),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))).isoformat(),
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+            ).isoformat(),
             "connected_at": datetime.now(timezone.utc).isoformat(),
         }},
         upsert=True,
@@ -708,9 +831,14 @@ async def microsoft_auth_callback(code: str, state: str):
 
 
 async def _get_valid_microsoft_token(user_id: str) -> str:
-    conn = await db.email_connections.find_one({"user_id": user_id, "provider": "microsoft"}, {"_id": 0})
+    conn = await db.email_connections.find_one(
+        {"user_id": user_id, "provider": "microsoft"}, {"_id": 0}
+    )
     if not conn:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Outlook not connected. Please connect first.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Outlook not connected. Please connect first.",
+        )
     expires_at = datetime.fromisoformat(conn["expires_at"])
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -724,32 +852,39 @@ async def _get_valid_microsoft_token(user_id: str) -> str:
                         "client_secret": MICROSOFT_CLIENT_SECRET,
                         "refresh_token": conn["refresh_token"],
                         "grant_type": "refresh_token",
-                        "scope": " ".join(MICROSOFT_SCOPES), # Ensure scopes are included for refresh token flow
+                        "scope": " ".join(MICROSOFT_SCOPES),
                     },
                 )
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
                 logger.error(f"Microsoft token refresh failed for user {user_id}: {e.response.text}")
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Microsoft token refresh failed. Please reconnect Outlook.")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Microsoft token refresh failed. Please reconnect Outlook.",
+                )
             except httpx.RequestError as e:
                 logger.error(f"Microsoft token refresh request error for user {user_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during token refresh: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Network error during token refresh: {e}",
+                )
 
         tokens = resp.json()
         new_access = tokens["access_token"]
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))).isoformat()
+        expires_at_new = (
+            datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+        ).isoformat()
         await db.email_connections.update_one(
             {"user_id": user_id, "provider": "microsoft"},
-            {"$set": {
-                "access_token": new_access,
-                "expires_at": expires_at,
-            }},
+            {"$set": {"access_token": new_access, "expires_at": expires_at_new}},
         )
         return new_access
     return conn["access_token"]
 
 
-async def fetch_events_via_outlook_api(user_id: str, days_back: int = 30, max_emails: int = 50) -> List[ExtractedEvent]:
+async def fetch_events_via_outlook_api(
+    user_id: str, days_back: int = 30, max_emails: int = 50
+) -> List[ExtractedEvent]:
     access_token = await _get_valid_microsoft_token(user_id)
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
     since = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00Z")
@@ -769,10 +904,16 @@ async def fetch_events_via_outlook_api(user_id: str, days_back: int = 30, max_em
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.error(f"Outlook API list messages failed for user {user_id}: {e.response.text}")
-            raise HTTPException(status_code=e.response.status_code, detail=f"Outlook API error: {e.response.text}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Outlook API error: {e.response.text}",
+            )
         except httpx.RequestError as e:
             logger.error(f"Outlook API list messages request error for user {user_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Network error during Outlook API call: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Network error during Outlook API call: {e}",
+            )
 
         messages = resp.json().get("value", [])
         all_events: List[ExtractedEvent] = []
@@ -799,18 +940,25 @@ async def fetch_events_via_outlook_api(user_id: str, days_back: int = 30, max_em
 
 @router.get("/connections")
 async def get_email_connections(current_user: User = Depends(get_current_user)):
+    """Return all email connections for the current user (excludes sensitive fields)."""
     conns = await db.email_connections.find(
         {"user_id": current_user.id},
-        {"_id": 0, "access_token": 0, "refresh_token": 0, "app_password_enc": 0} # Exclude sensitive data
+        {"_id": 0, "access_token": 0, "refresh_token": 0, "app_password_enc": 0},
     ).to_list(10)
     return {"connections": conns}
 
 
 @router.delete("/connections/{provider}")
 async def disconnect_email(provider: str, current_user: User = Depends(get_current_user)):
-    result = await db.email_connections.delete_one({"user_id": current_user.id, "provider": provider})
+    """Remove a stored email connection for the given provider."""
+    result = await db.email_connections.delete_one(
+        {"user_id": current_user.id, "provider": provider}
+    )
     if result.deleted_count == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No connection found for provider {provider}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No connection found for provider '{provider}'",
+        )
     return {"message": f"{provider} disconnected successfully"}
 
 
@@ -819,36 +967,58 @@ async def connect_imap(
     payload: IMAPConnectRequest,
     current_user: User = Depends(get_current_user),
 ):
-    # Determine IMAP host and port
+    """Connect a Yahoo / custom IMAP account using an app password."""
     host = payload.imap_host
     port = payload.imap_port
 
     if not host:
-        key = payload.provider.lower().split("@")[-1].split(".")[0] # e.g., "gmail.com" -> "gmail"
+        key = payload.provider.lower().split("@")[-1].split(".")[0]
         host_port = IMAP_HOSTS.get(key)
         if host_port:
             host = host_port[0]
             port = host_port[1]
         else:
             logger.warning(f"Cannot auto-detect IMAP host for provider '{payload.provider}'.")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot auto-detect IMAP host for '{payload.provider}'. Please supply imap_host and imap_port.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot auto-detect IMAP host for '{payload.provider}'. "
+                    "Please supply imap_host and imap_port."
+                ),
+            )
 
     if not host or not port:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="IMAP host and port are required.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="IMAP host and port are required.",
+        )
 
+    # Test connection before saving
     try:
-        # Test IMAP connection
         mail = imaplib.IMAP4_SSL(host, port)
         mail.login(payload.email_address, payload.app_password)
         mail.logout()
     except imaplib.IMAP4.error as e:
-        logger.error(f"IMAP connection test failed for {payload.email_address} ({payload.provider}): {e}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"IMAP connection failed: {str(e)}. Please check your email address, app password, host, and port. For Gmail/Yahoo, ensure you are using an App Password.")
+        logger.error(
+            f"IMAP connection test failed for {payload.email_address} ({payload.provider}): {e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                f"IMAP connection failed: {str(e)}. "
+                "Please check your email address, app password, host, and port. "
+                "For Gmail/Yahoo, ensure you are using an App Password."
+            ),
+        )
     except Exception as e:
-        logger.error(f"Unexpected IMAP connection error for {payload.email_address} ({payload.provider}): {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred during IMAP connection: {str(e)}")
+        logger.error(
+            f"Unexpected IMAP connection error for {payload.email_address} ({payload.provider}): {e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred during IMAP connection: {str(e)}",
+        )
 
-    # Save connection details to DB
     await db.email_connections.update_one(
         {"user_id": current_user.id, "provider": payload.provider},
         {"$set": {
@@ -856,7 +1026,7 @@ async def connect_imap(
             "provider": payload.provider,
             "method": "imap",
             "email_address": payload.email_address,
-            "app_password_enc": payload.app_password, # In a real app, encrypt this!
+            "app_password_enc": payload.app_password,  # encrypt in production
             "imap_host": host,
             "imap_port": port,
             "connected_at": datetime.now(timezone.utc).isoformat(),
@@ -873,26 +1043,33 @@ async def fetch_email_events(
     max_emails: int = Query(50, ge=5, le=200),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Fetch and extract events from all connected email accounts (or a specific provider).
+    Returns deduplicated, date-sorted list of ExtractedEvent objects.
+    """
     conns_query = {"user_id": current_user.id}
     if provider:
         conns_query["provider"] = provider
 
     conns = await db.email_connections.find(conns_query, {"_id": 0}).to_list(10)
     if not conns:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No email accounts connected. Please connect at least one email account first.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No email accounts connected. Please connect at least one email account first.",
+        )
 
     all_events: List[ExtractedEvent] = []
     errors: List[str] = []
 
     for conn in conns:
-        prov = conn["provider"]
-        method = conn.get("method", "oauth") # Default to oauth if not specified
+        prov   = conn["provider"]
+        method = conn.get("method", "oauth")
         try:
             if prov == "google" and method == "oauth":
                 events = await fetch_events_via_gmail_api(current_user.id, days_back, max_emails)
             elif prov == "microsoft" and method == "oauth":
                 events = await fetch_events_via_outlook_api(current_user.id, days_back, max_emails)
-            elif method == "imap": # Handle all IMAP connections, including Yahoo
+            elif method == "imap":
                 events = fetch_events_via_imap(
                     provider=prov,
                     email_address=conn["email_address"],
@@ -903,33 +1080,38 @@ async def fetch_email_events(
                     max_emails=max_emails,
                 )
             else:
-                errors.append(f"{prov}: Unsupported connection method '{method}' or provider '{prov}'.")
+                errors.append(
+                    f"{prov}: Unsupported connection method '{method}' or provider '{prov}'."
+                )
                 continue
             all_events.extend(events)
         except HTTPException as e:
             errors.append(f"{prov}: {e.detail}")
         except Exception as e:
-            logger.error(f"Email fetch error for {prov} (user {current_user.id}): {e}", exc_info=True)
+            logger.error(
+                f"Email fetch error for {prov} (user {current_user.id}): {e}", exc_info=True
+            )
             errors.append(f"{prov}: An unexpected error occurred: {str(e)}")
 
+    # Deduplicate on (title, date, time, location)
     seen = set()
     unique_events = []
     for ev in all_events:
-        # Using a tuple of (title, date, time, location) for a more robust uniqueness check
         key = (ev.title.lower(), ev.date, ev.time, ev.location)
         if key not in seen:
             seen.add(key)
             unique_events.append(ev)
 
+    # Sort by date asc, then urgency
     urgency_order = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
     unique_events.sort(key=lambda e: (
-        e.date or "9999-12-31", # Sort by date, then urgency
+        e.date or "9999-12-31",
         urgency_order.get(e.urgency, 3),
     ))
 
     return {
         "events": [ev.model_dump() for ev in unique_events],
         "total": len(unique_events),
-        "providers_scanned": list(set([c["provider"] for c in conns])),
+        "providers_scanned": list({c["provider"] for c in conns}),
         "errors": errors,
     }
