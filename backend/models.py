@@ -50,7 +50,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": True,
         "can_delete_data": True,
         "can_delete_tasks": True,
-        # ── NEW ──
         "can_connect_email": True,
         "can_view_own_data": True,
         "view_other_tasks": [],
@@ -90,7 +89,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": True,
         "can_delete_data": False,
         "can_delete_tasks": False,
-        # ── NEW ──
         "can_connect_email": True,
         "can_view_own_data": True,
         "view_other_tasks": [],
@@ -130,7 +128,6 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_view_staff_rankings": False,
         "can_delete_data": False,
         "can_delete_tasks": False,
-        # ── NEW ──
         "can_connect_email": True,
         "can_view_own_data": True,
         "view_other_tasks": [],
@@ -175,9 +172,8 @@ class UserPermissions(BaseModel):
     can_view_staff_rankings: bool = False
     can_delete_data: bool = False
     can_delete_tasks: bool = False
-    # ── NEW — must match frontend Users.jsx permission keys ──
-    can_connect_email: bool = True   # default True: every user can connect their own email
-    can_view_own_data: bool = True   # default True: every user can view their own data
+    can_connect_email: bool = True
+    can_view_own_data: bool = True
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -185,8 +181,6 @@ class UserPermissions(BaseModel):
     view_other_activity: List[str] = Field(default_factory=list)
     assigned_clients: List[str] = Field(default_factory=list)
 
-    # Allow extra fields coming from old DB documents so the server
-    # never raises ValidationError on unknown permission keys
     model_config = ConfigDict(extra="ignore")
 
 
@@ -732,18 +726,21 @@ class PerformanceMetric(BaseModel):
 
 
 # ======================
-# HOLIDAY MODELS
+# HOLIDAY MODELS  ← FIXED
 # ======================
 class HolidayCreate(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
+    type: str = "manual"            # ✅ ADDED — server.py accesses holiday.type
 
 
 class HolidayResponse(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
+    status: str = "confirmed"       # ✅ ADDED — server.py returns status in response
+    type: Optional[str] = "manual"  # ✅ ADDED — consistent with HolidayCreate
 
 
 # ======================
