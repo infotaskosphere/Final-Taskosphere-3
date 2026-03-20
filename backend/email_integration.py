@@ -16,6 +16,7 @@ import email
 import email.header
 import re
 import json
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -561,11 +562,10 @@ async def extract_events(
     force_refresh: bool = Query(default=False),
 ):
     """
-    Scan all active IMAP inboxes for the current user.
-    Extracts meetings, hearings, deadlines, and visits using AI (or regex).
-    Results are cached in MongoDB — re-scan happens after 30 minutes or
-    when force_refresh=true.
+    Scan all active IMAP inboxes for the current user in parallel.
+    Uses a thread executor for synchronous IMAP calls to prevent timeouts.
     """
+    # 1. Get all active connections for this user
     connections = await db[COL_CONNECTIONS].find(
         {"user_id": str(current_user.id), "is_active": True}
     ).to_list(length=50)
@@ -573,12 +573,12 @@ async def extract_events(
     if not connections:
         return []
 
-    all_events: List[ExtractedEventOut] = []
-
-    for conn in connections:
+    # 2. Define a worker function to process a single account
+    async def process_account(conn) -> List[ExtractedEventOut]:
         email_addr = conn["email_address"]
-
-        # 30-minute cache: return stored events unless force_refresh
+        account_events = []
+        
+        # --- Cache Logic (30-minute window) ---
         if not force_refresh and conn.get("last_synced"):
             try:
                 last = datetime.fromisoformat(conn["last_synced"])
@@ -587,18 +587,24 @@ async def extract_events(
                     cached = await db[COL_EVENTS].find(
                         {"user_id": str(current_user.id), "email_account": email_addr}
                     ).sort("_id", -1).limit(limit).to_list(length=limit)
-                    all_events.extend(_doc_to_out(d) for d in cached)
-                    continue
+                    return [_doc_to_out(d) for d in cached]
             except Exception:
                 pass
 
-        # Scan IMAP inbox
+        # --- IMAP Scan (The Blocking Part) ---
+        # We run _scan_mailbox in a thread pool to avoid blocking the main event loop
         try:
             password = _decrypt(conn["app_password_enc"])
-            raw_emails = _scan_mailbox(
-                conn["imap_host"], conn["imap_port"],
-                email_addr, password,
-                max_msgs=50,
+            loop = asyncio.get_event_loop()
+            
+            raw_emails = await loop.run_in_executor(
+                None,  # Uses default ThreadPoolExecutor
+                _scan_mailbox,
+                conn["imap_host"],
+                conn["imap_port"],
+                email_addr,
+                password,
+                50  # max_msgs
             )
         except Exception as exc:
             err = str(exc)[:255]
@@ -606,24 +612,25 @@ async def extract_events(
             await db[COL_CONNECTIONS].update_one(
                 {"_id": conn["_id"]}, {"$set": {"sync_error": err}}
             )
-            continue
+            return []
 
-        # Extract events from each email
+        # --- Extraction and Storage ---
         seen_ids: set = set()
         for raw in raw_emails:
             mid = raw.get("message_id", "")
             if mid:
-                if mid in seen_ids:
-                    continue
+                if mid in seen_ids: continue
                 seen_ids.add(mid)
-                # Already in cache?
+                
+                # Check cache by Message-ID to avoid redundant AI calls
                 exists = await db[COL_EVENTS].find_one(
                     {"user_id": str(current_user.id), "message_id": mid}
                 )
                 if exists:
-                    all_events.append(_doc_to_out(exists))
+                    account_events.append(_doc_to_out(exists))
                     continue
 
+            # Run AI Extraction (this is already async)
             try:
                 extracted = await _extract_events_from_email(
                     raw["subject"], raw["body"],
@@ -633,6 +640,7 @@ async def extract_events(
                 logger.debug("Extraction error msg %s: %s", mid, exc)
                 continue
 
+            # Save newly found events to DB
             for ev in extracted:
                 doc = {
                     "user_id":        str(current_user.id),
@@ -654,9 +662,9 @@ async def extract_events(
                 }
                 result = await db[COL_EVENTS].insert_one(doc)
                 doc["id"] = str(result.inserted_id)
-                all_events.append(_doc_to_out(doc))
+                account_events.append(_doc_to_out(doc))
 
-        # Update last_synced
+        # Update last_synced timestamp for this account
         await db[COL_CONNECTIONS].update_one(
             {"_id": conn["_id"]},
             {"$set": {
@@ -664,11 +672,23 @@ async def extract_events(
                 "sync_error":  None,
             }},
         )
+        return account_events
 
-    # Sort by date descending, nulls last
+    # 3. Execute all account tasks in parallel using asyncio.gather
+    tasks = [process_account(conn) for conn in connections]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 4. Flatten the results and filter out any exceptions
+    all_events: List[ExtractedEventOut] = []
+    for res in results:
+        if isinstance(res, list):
+            all_events.extend(res)
+        elif isinstance(res, Exception):
+            logger.error(f"Task encountered an error: {res}")
+
+    # 5. Final Sort by date descending
     all_events.sort(key=lambda e: e.date or "0000-00-00", reverse=True)
     return all_events[:limit]
-
 
 @router.get("/events", response_model=List[ExtractedEventOut])
 async def list_cached_events(
