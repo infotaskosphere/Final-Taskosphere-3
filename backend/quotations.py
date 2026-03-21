@@ -521,19 +521,26 @@ async def delete_quotation(quotation_id: str, current_user: User = Depends(get_c
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
-    """Build a professional quotation PDF using fpdf2."""
+    """
+    Build a professional quotation PDF using fpdf2.
+    Compatible with fpdf2 >= 2.7 — uses new_x/new_y instead of deprecated ln=True/False.
+    """
     from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
     import base64, tempfile, os
 
     DEEP_BLUE  = (13, 59, 102)
     MED_BLUE   = (31, 111, 178)
     LIGHT_BLUE = (224, 242, 254)
-    EMERALD    = (31, 175, 90)
     DARK_TEXT  = (30, 41, 59)
     MUTED      = (100, 116, 139)
 
+    # ── Helper aliases for readability ──────────────────────────────────────
+    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}   # move to next line
+    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}     # stay on same line
+
     class PDF(FPDF):
-        def header(self): pass   # handled manually
+        def header(self): pass
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
@@ -545,39 +552,37 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.add_page()
     W = pdf.w - 28    # usable width (14mm margins each side)
 
-    # ── Logo + Company block ─────────────────────────────────────────────────
+    # ── Logo ─────────────────────────────────────────────────────────────────
     logo_b64 = company.get("logo_base64", "")
-    logo_printed = False
     if logo_b64:
         try:
-            # strip data-URI prefix
             raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
             img_bytes = base64.b64decode(raw)
-            suffix = ".png" if logo_b64.startswith("data:image/png") else ".jpg"
+            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             tmp.write(img_bytes); tmp.close()
             pdf.image(tmp.name, x=14, y=12, h=18)
-            logo_printed = True
             os.unlink(tmp.name)
         except Exception:
             pass
 
+    # ── Company block ─────────────────────────────────────────────────────────
     pdf.set_xy(14, 32)
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, company.get("name", ""), ln=True)
+    pdf.cell(0, 6, company.get("name", ""), **NL)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
     if company.get("address"):
-        pdf.multi_cell(W // 2, 4, company.get("address", ""), ln=True)
+        pdf.multi_cell(W // 2, 4, company.get("address", ""))
     contact_parts = []
-    if company.get("phone"):  contact_parts.append(f"Ph: {company['phone']}")
-    if company.get("email"):  contact_parts.append(f"E: {company['email']}")
-    if company.get("website"):contact_parts.append(company["website"])
+    if company.get("phone"):   contact_parts.append(f"Ph: {company['phone']}")
+    if company.get("email"):   contact_parts.append(f"E: {company['email']}")
+    if company.get("website"): contact_parts.append(company["website"])
     if contact_parts:
-        pdf.cell(0, 4, "  |  ".join(contact_parts), ln=True)
+        pdf.cell(0, 4, "  |  ".join(contact_parts), **NL)
     if company.get("gstin"):
-        pdf.cell(0, 4, f"GSTIN: {company['gstin']}", ln=True)
+        pdf.cell(0, 4, f"GSTIN: {company['gstin']}", **NL)
 
     # ── QUOTATION Title band ─────────────────────────────────────────────────
     band_y = 62
@@ -586,14 +591,14 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_xy(14, band_y + 1.5)
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(W, 7, "QUOTATION", align="C", ln=True)
+    pdf.cell(W, 7, "QUOTATION", align="C", **NL)
 
     # ── Meta row ─────────────────────────────────────────────────────────────
     pdf.set_xy(14, band_y + 13)
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}")
-    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", ln=True)
+    pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
 
     # ── Client block ─────────────────────────────────────────────────────────
     cl_y = pdf.get_y() + 4
@@ -602,30 +607,29 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_xy(16, cl_y + 2)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 5, "To:", ln=True)
+    pdf.cell(0, 5, "To:", **NL)
     pdf.set_x(16)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, q.get("client_name", ""), ln=True)
+    pdf.cell(0, 5, q.get("client_name", ""), **NL)
     pdf.set_x(16)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
     if q.get("client_address"):
-        pdf.cell(0, 4, q.get("client_address", ""), ln=True)
+        pdf.cell(0, 4, str(q.get("client_address", ""))[:80], **NL)
     if q.get("client_email") or q.get("client_phone"):
         pdf.set_x(16)
-        pdf.cell(0, 4, "  ".join(filter(None, [q.get("client_email",""), q.get("client_phone","")])), ln=True)
+        pdf.cell(0, 4, "  ".join(filter(None, [q.get("client_email",""), q.get("client_phone","")])), **NL)
 
     # ── Subject ──────────────────────────────────────────────────────────────
     pdf.set_xy(14, cl_y + 26)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
     subject = q.get("subject") or f"Quotation for {q.get('service','')}"
-    pdf.cell(0, 5, f"Subject: {subject}", ln=True)
+    pdf.cell(0, 5, f"Subject: {subject}", **NL)
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:", ln=True)
+    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:")
 
     # ── Scope of Work ────────────────────────────────────────────────────────
     scope = q.get("scope_of_work", [])
@@ -633,15 +637,15 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.ln(3)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Scope of Work / Services", ln=True)
+        pdf.cell(0, 6, "Scope of Work / Services", **NL)
         pdf.set_draw_color(*MED_BLUE)
         pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
         pdf.ln(1)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*DARK_TEXT)
         for item in scope:
-            pdf.cell(6, 5, chr(149))
-            pdf.cell(0, 5, str(item), ln=True)
+            pdf.cell(6, 5, "-", **CONT)
+            pdf.cell(0, 5, str(item), **NL)
 
     # ── Items Table ──────────────────────────────────────────────────────────
     items = q.get("items", [])
@@ -649,54 +653,59 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Quotation Details", ln=True)
+        pdf.cell(0, 6, "Quotation Details", **NL)
         pdf.set_draw_color(*MED_BLUE)
         pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
         pdf.ln(1)
 
-        # Table header
+        col_w = [12, W - 60, 48]
+
+        # Header row
         pdf.set_fill_color(*DEEP_BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 9)
-        col_w = [12, W - 60, 48]
-        pdf.cell(col_w[0], 7, "Sr.", align="C", fill=True)
-        pdf.cell(col_w[1], 7, "Description", fill=True)
-        pdf.cell(col_w[2], 7, "Amount (Rs.)", align="R", fill=True, ln=True)
+        pdf.cell(col_w[0], 7, "Sr.",          align="C", fill=True, **CONT)
+        pdf.cell(col_w[1], 7, "Description",               fill=True, **CONT)
+        pdf.cell(col_w[2], 7, "Amount (Rs.)", align="R", fill=True, **NL)
 
-        # Table rows
+        # Data rows
         for idx, item in enumerate(items, 1):
-            pdf.set_fill_color(245, 249, 255) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+            if idx % 2 == 0:
+                pdf.set_fill_color(245, 249, 255)
+            else:
+                pdf.set_fill_color(255, 255, 255)
             pdf.set_text_color(*DARK_TEXT)
             pdf.set_font("Helvetica", "", 9)
-            row_h = 7
-            pdf.cell(col_w[0], row_h, str(idx), align="C", fill=True)
-            pdf.cell(col_w[1], row_h, str(item.get("description", "")), fill=True)
             amt = item.get("amount", 0)
-            pdf.cell(col_w[2], row_h, f"Rs. {amt:,.2f}", align="R", fill=True, ln=True)
+            desc = str(item.get("description", ""))[:60]
+            pdf.cell(col_w[0], 7, str(idx),               align="C", fill=True, **CONT)
+            pdf.cell(col_w[1], 7, desc,                               fill=True, **CONT)
+            pdf.cell(col_w[2], 7, f"Rs. {amt:,.2f}",      align="R", fill=True, **NL)
 
-        # Subtotal
+        # Subtotal row
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_fill_color(*LIGHT_BLUE)
         pdf.set_text_color(*DARK_TEXT)
-        pdf.cell(col_w[0] + col_w[1], 7, "Sub Total", align="R", fill=True)
-        pdf.cell(col_w[2], 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, ln=True)
+        pdf.cell(col_w[0] + col_w[1], 7, "Sub Total", align="R", fill=True, **CONT)
+        pdf.cell(col_w[2], 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, **NL)
 
         gst_rate = q.get("gst_rate", 18)
-        if gst_rate > 0:
-            pdf.cell(col_w[0] + col_w[1], 7, f"GST @ {gst_rate}%", align="R", fill=True)
-            pdf.cell(col_w[2], 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, ln=True)
+        if gst_rate and float(gst_rate) > 0:
+            pdf.cell(col_w[0] + col_w[1], 7, f"GST @ {gst_rate}%", align="R", fill=True, **CONT)
+            pdf.cell(col_w[2], 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, **NL)
 
+        # Total row
         pdf.set_fill_color(*DEEP_BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(col_w[0] + col_w[1], 8, "TOTAL PAYABLE", align="R", fill=True)
-        pdf.cell(col_w[2], 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, ln=True)
+        pdf.cell(col_w[0] + col_w[1], 8, "TOTAL PAYABLE", align="R", fill=True, **CONT)
+        pdf.cell(col_w[2], 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, **NL)
 
     # ── Terms & Conditions ───────────────────────────────────────────────────
     pdf.ln(5)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, "Terms & Conditions", ln=True)
+    pdf.cell(0, 6, "Terms & Conditions", **NL)
     pdf.set_draw_color(*MED_BLUE)
     pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
     pdf.ln(1)
@@ -716,41 +725,38 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         terms.append(f"{i}. {t}")
 
     for term in terms:
-        pdf.multi_cell(W, 5, term, ln=True)
+        pdf.multi_cell(W, 5, str(term))
 
     # ── Bank Details ─────────────────────────────────────────────────────────
-    if any([company.get("bank_account_no"), company.get("bank_name")]):
+    if company.get("bank_account_no") or company.get("bank_name"):
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Bank Details", ln=True)
+        pdf.cell(0, 6, "Bank Details", **NL)
         pdf.set_draw_color(*MED_BLUE)
         pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
         pdf.ln(1)
-        pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*DARK_TEXT)
         half = W / 2
-        rows = [
+        for label, val in [
             ("Account Name", company.get("bank_account_name", "")),
             ("Bank Name",    company.get("bank_name", "")),
             ("Account No",   company.get("bank_account_no", "")),
             ("IFSC Code",    company.get("bank_ifsc", "")),
-        ]
-        for label, val in rows:
+        ]:
             pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(half * 0.45, 5, f"{label}:", ln=False)
+            pdf.cell(half * 0.45, 5, f"{label}:", **CONT)
             pdf.set_font("Helvetica", "", 9)
-            pdf.cell(half * 0.55, 5, str(val), ln=True)
+            pdf.cell(half * 0.55, 5, str(val), **NL)
 
     # ── Signature block ──────────────────────────────────────────────────────
     pdf.ln(8)
     sig_b64 = company.get("signature_base64", "")
     if sig_b64:
         try:
-            raw  = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
             img_bytes = base64.b64decode(raw)
-            suffix = ".png"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             tmp.write(img_bytes); tmp.close()
             pdf.image(tmp.name, x=14, y=pdf.get_y(), h=14)
             pdf.ln(16)
@@ -764,37 +770,43 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.line(14, pdf.get_y(), 80, pdf.get_y())
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, f"For {company.get('name', 'Company')}", ln=True)
+    pdf.cell(0, 5, f"For {company.get('name', 'Company')}", **NL)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
-    pdf.cell(0, 4, "Authorized Signatory", ln=True)
+    pdf.cell(0, 4, "Authorized Signatory", **NL)
     pdf.ln(4)
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 4, "We look forward to working with you.", ln=True)
+    pdf.cell(0, 4, "We look forward to working with you.", **NL)
 
     if q.get("notes"):
         pdf.ln(4)
         pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(*MUTED)
-        pdf.multi_cell(W, 4, f"Note: {q['notes']}", ln=True)
+        pdf.multi_cell(W, 4, f"Note: {q['notes']}")
 
     out = BytesIO()
-    out.write(pdf.output(dest="S").encode("latin1"))
+    out.write(pdf.output())
     out.seek(0)
     return out
 
 
 def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
-    """Build a document checklist PDF."""
+    """
+    Build a document checklist PDF using fpdf2.
+    Compatible with fpdf2 >= 2.7 — uses new_x/new_y instead of deprecated ln=True/False.
+    """
     from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
     import base64, tempfile, os
 
     DEEP_BLUE  = (13, 59, 102)
     MED_BLUE   = (31, 111, 178)
     LIGHT_BLUE = (224, 242, 254)
-    EMERALD    = (31, 175, 90)
     DARK_TEXT  = (30, 41, 59)
     MUTED      = (100, 116, 139)
+
+    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
+    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}
 
     class PDF(FPDF):
         def header(self): pass
@@ -809,7 +821,7 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.add_page()
     W = pdf.w - 28
 
-    # Logo
+    # ── Logo ─────────────────────────────────────────────────────────────────
     logo_b64 = company.get("logo_base64", "")
     if logo_b64:
         try:
@@ -826,101 +838,104 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_xy(14, 30)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, company.get("name", ""), ln=True)
+    pdf.cell(0, 6, company.get("name", ""), **NL)
 
-    # Title band
+    # ── Title band ────────────────────────────────────────────────────────────
     band_y = 50
     pdf.set_fill_color(*DEEP_BLUE)
     pdf.rect(14, band_y, W, 10, "F")
     pdf.set_xy(14, band_y + 1.5)
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", ln=True)
+    pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", **NL)
 
-    # Client info
+    # ── Client info block ─────────────────────────────────────────────────────
     pdf.set_xy(14, band_y + 14)
     pdf.set_fill_color(*LIGHT_BLUE)
     pdf.rect(14, band_y + 14, W, 20, "F")
     pdf.set_xy(16, band_y + 16)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(W / 2, 5, f"Client Name: {q.get('client_name', '')}", ln=False)
-    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", ln=True)
+    pdf.cell(W / 2, 5, f"Client Name: {q.get('client_name', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
     pdf.set_x(16)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(W / 2, 5, f"Service: {q.get('service', '')}", ln=False)
-    pdf.cell(W / 2, 5, f"Ref: {q.get('quotation_no', '')}", align="R", ln=True)
+    pdf.cell(W / 2, 5, f"Service: {q.get('service', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Ref: {q.get('quotation_no', '')}", align="R", **NL)
     pdf.set_x(16)
     pdf.set_text_color(*MUTED)
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", ln=True)
+    pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", **NL)
 
-    # Build checklist
-    service  = q.get("service", "Other / Custom Service")
+    # ── Checklist table ───────────────────────────────────────────────────────
+    service   = q.get("service", "Other / Custom Service")
     base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
-    extras   = q.get("extra_checklist_items", [])
-    all_docs = base_docs + extras
+    extras    = q.get("extra_checklist_items", [])
+    all_docs  = base_docs + extras
 
     pdf.ln(6)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, "Required Documents", ln=True)
+    pdf.cell(0, 6, "Required Documents", **NL)
     pdf.set_draw_color(*MED_BLUE)
     pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
     pdf.ln(2)
 
-    # Table header
     col_sr   = 12
     col_doc  = W - 62
     col_recv = 22
     col_rem  = W - col_sr - col_doc - col_recv
 
+    # Header
     pdf.set_fill_color(*DEEP_BLUE)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 8)
-    pdf.cell(col_sr,   7, "Sr.", align="C", fill=True)
-    pdf.cell(col_doc,  7, "Document Name", fill=True)
-    pdf.cell(col_recv, 7, "Received", align="C", fill=True)
-    pdf.cell(col_rem,  7, "Remarks", fill=True, ln=True)
+    pdf.cell(col_sr,   7, "Sr.",           align="C", fill=True, **CONT)
+    pdf.cell(col_doc,  7, "Document Name",             fill=True, **CONT)
+    pdf.cell(col_recv, 7, "Received",      align="C", fill=True, **CONT)
+    pdf.cell(col_rem,  7, "Remarks",                   fill=True, **NL)
 
+    # Rows
     for idx, doc_name in enumerate(all_docs, 1):
-        fill_color = (245, 249, 255) if idx % 2 == 0 else (255, 255, 255)
-        pdf.set_fill_color(*fill_color)
+        if idx % 2 == 0:
+            pdf.set_fill_color(245, 249, 255)
+        else:
+            pdf.set_fill_color(255, 255, 255)
         pdf.set_text_color(*DARK_TEXT)
         pdf.set_font("Helvetica", "", 8)
-        row_h = 8
-        pdf.cell(col_sr,   row_h, str(idx), align="C", fill=True)
-        pdf.cell(col_doc,  row_h, str(doc_name), fill=True)
-        pdf.cell(col_recv, row_h, "",  align="C", fill=True, border=1)
-        pdf.cell(col_rem,  row_h, "",  fill=True,  border=1, ln=True)
+        pdf.cell(col_sr,   8, str(idx),          align="C", fill=True, **CONT)
+        pdf.cell(col_doc,  8, str(doc_name)[:60],           fill=True, **CONT)
+        pdf.cell(col_recv, 8, "",                 align="C", fill=True, border=1, **CONT)
+        pdf.cell(col_rem,  8, "",                            fill=True, border=1, **NL)
 
-    # Checked by
+    # ── Checked by ────────────────────────────────────────────────────────────
     pdf.ln(8)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
     half = W / 2
-    pdf.cell(half, 5, "Checked By: _______________________", ln=False)
-    pdf.cell(half, 5, "Signature: _______________________", align="R", ln=True)
+    pdf.cell(half, 5, "Checked By: _______________________", **CONT)
+    pdf.cell(half, 5, "Signature: _______________________", align="R", **NL)
 
-    # Client confirmation
+    # ── Client confirmation block ─────────────────────────────────────────────
     pdf.ln(10)
+    confirm_y = pdf.get_y()
     pdf.set_fill_color(*LIGHT_BLUE)
-    pdf.rect(14, pdf.get_y(), W, 22, "F")
-    pdf.set_xy(16, pdf.get_y() + 2)
+    pdf.rect(14, confirm_y, W, 22, "F")
+    pdf.set_xy(16, confirm_y + 2)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 5, "Client Confirmation", ln=True)
+    pdf.cell(0, 5, "Client Confirmation", **NL)
     pdf.set_x(16)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "I confirm that the above documents have been submitted / will be submitted.", ln=True)
+    pdf.cell(0, 5, "I confirm that the above documents have been submitted / will be submitted.", **NL)
     pdf.set_x(16)
-    pdf.cell(0, 5, "", ln=True)
+    pdf.cell(0, 5, "", **NL)
     pdf.set_x(16)
-    pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", ln=True)
+    pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", **NL)
 
     out = BytesIO()
-    out.write(pdf.output(dest="S").encode("latin1"))
+    out.write(pdf.output())
     out.seek(0)
     return out
 
