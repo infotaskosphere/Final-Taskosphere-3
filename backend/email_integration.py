@@ -1364,39 +1364,64 @@ async def importer_events(
 
 @router.get("/attendance/today-summary")
 async def attendance_today_summary(current_user=Depends(get_current_user)):
-    today = datetime.now(IST).strftime("%Y-%m-%d")
-    week_later = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
+    try:
+        # Check if current_user is a class object or a dictionary
+        if hasattr(current_user, "id"):
+            u_id = str(current_user.id)
+        elif isinstance(current_user, dict):
+            u_id = str(current_user.get("_id") or current_user.get("id"))
+        else:
+            u_id = str(current_user)
 
-    visits = await db["visits"].find({
-        "user_id":    str(current_user.id),
-        "visit_date": today,
-    }).to_list(20)
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        week_later = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
 
-    reminders = await db["reminders"].find({
-        "user_id":      str(current_user.id),
-        "is_dismissed": False,
-        "remind_at":    {"$gte": today, "$lte": week_later + "T23:59:59"},
-    }).sort("remind_at", 1).to_list(10)
+        # Query using the verified u_id
+        visits = await db["visits"].find({
+            "user_id": u_id,
+            "visit_date": today,
+        }).to_list(length=20)
 
-    return {
-        "today": today,
-        "visits_today": [
-            {"title": v.get("title"), "status": v.get("status"), "notes": v.get("notes")}
-            for v in visits
-        ],
-        "upcoming_reminders": [
-            {"title": r.get("title"), "remind_at": r.get("remind_at")}
-            for r in reminders
-        ],
-    }
+        reminders = await db["reminders"].find({
+            "user_id": u_id,
+            "is_dismissed": False,
+            "remind_at": {"$gte": today, "$lte": week_later + "T23:59:59"},
+        }).sort("remind_at", 1).to_list(length=10)
+
+        return {
+            "today": today,
+            "visits_today": [
+                {"title": v.get("title"), "status": v.get("status"), "notes": v.get("notes")}
+                for v in visits
+            ],
+            "upcoming_reminders": [
+                {"title": r.get("title"), "remind_at": r.get("remind_at")}
+                for r in reminders
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Error in attendance summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/holidays/upcoming")
 async def upcoming_holidays(current_user=Depends(get_current_user)):
-    today = datetime.now(IST).strftime("%Y-%m-%d")
-    events = await db[COL_EVENTS].find({
-        "user_id":    str(current_user.id),
-        "date":       {"$gte": today},
-        "event_type": {"$in": ["Court Hearing", "Trademark Hearing", "Deadline"]},
-    }).sort("date", 1).limit(10).to_list(10)
-    return {"events": [_doc_to_out(e).dict() for e in events]}
+    try:
+        if hasattr(current_user, "id"):
+            u_id = str(current_user.id)
+        elif isinstance(current_user, dict):
+            u_id = str(current_user.get("_id") or current_user.get("id"))
+        else:
+            u_id = str(current_user)
+
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        events = await db[COL_EVENTS].find({
+            "user_id": u_id,
+            "date": {"$gte": today},
+            "event_type": {"$in": ["Court Hearing", "Trademark Hearing", "Deadline"]},
+        }).sort("date", 1).limit(10).to_list(length=10)
+        
+        return {"events": [_doc_to_out(e).dict() for e in events]}
+    except Exception as e:
+        logger.error(f"Error in upcoming holidays: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
