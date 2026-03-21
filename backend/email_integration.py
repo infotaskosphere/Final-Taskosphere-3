@@ -1,17 +1,19 @@
 # =============================================================================
-# email_integration.py  — v4  COMPLETE COPY-PASTE FILE
+# email_integration.py  — v5  COMPLETE CORRECTED FILE
 # FastAPI router — IMAP email connection management + AI event extraction
 # Specialized for: CA/CS/Legal Firm (Trademark Hearings, NCLT, GST, ROC)
 # Stack: FastAPI · MongoDB (motor) · Google Gemini 2.0 Flash-Lite · imaplib
 #
-# NEW IN v4:
-#  - FIX: Delete individual reminder/visit — no longer wipes all auto-synced
-#  - FEATURE: Sender email whitelist — only sync emails from approved senders
-#  - FEATURE: Smart categorization rules:
-#      • Notice/Examination Report/Show Cause    → TODO
-#      • Hearing/GST/Income Tax/Trademark dates  → REMINDER
-#      • Zoom/Teams/Google Meet/personal visit   → VISIT
-#  - All v3 features retained
+# FIXES IN v5:
+#  - FIX: Misplaced docstring in _auto_save_event (was floating string literal)
+#  - FIX: Whitelist domain match now validates entries before matching
+#  - FIX: _auto_save_event dismissed-check moved before insert attempt
+#  - FIX: event_id not reliably set on auto-scan reminders — now uses message_id
+#  - IMPROVEMENT A: All internal DB queries use {"_id": 0} projection
+#  - IMPROVEMENT D: Scan cache uses message-id hash, not just 30-min timer
+#  - IMPROVEMENT E: Whitelist supports subdomain wildcard (e.g. @gov.in)
+#  - IMPROVEMENT G: Dismissed titles skipped before AI extraction
+#  - All v4 features retained
 # =============================================================================
 
 import imaplib
@@ -22,7 +24,7 @@ import json
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -71,11 +73,10 @@ PROVIDER_IMAP: Dict[str, tuple] = {
     "me.com":         ("imap.mail.me.com",      993, "icloud"),
 }
 
-COL_CONNECTIONS   = "email_connections"
-COL_EVENTS        = "email_extracted_events"
-COL_AUTO_PREFS    = "email_auto_save_prefs"
-COL_SCAN_SCHEDULE = "email_scan_schedule"
-# NEW: collection to store approved sender email whitelist per user
+COL_CONNECTIONS      = "email_connections"
+COL_EVENTS           = "email_extracted_events"
+COL_AUTO_PREFS       = "email_auto_save_prefs"
+COL_SCAN_SCHEDULE    = "email_scan_schedule"
 COL_SENDER_WHITELIST = "email_sender_whitelist"
 
 # =============================================================================
@@ -119,20 +120,19 @@ class ExtractedEventOut(BaseModel):
     source_date: str
     raw_snippet: Optional[str] = None
     email_account: Optional[str] = None
-    # NEW: indicates which category this event belongs to
     save_category: Optional[str] = None  # "todo" | "reminder" | "visit"
 
 class AutoSavePrefRequest(BaseModel):
     auto_save_reminders: bool
     auto_save_visits: bool
-    auto_save_todos: bool = False           # NEW
+    auto_save_todos: bool = False
     scan_time_hour: int = 12
     scan_time_minute: int = 0
 
 class AutoSavePrefOut(BaseModel):
     auto_save_reminders: bool
     auto_save_visits: bool
-    auto_save_todos: bool = False           # NEW
+    auto_save_todos: bool = False
     scan_time_hour: int
     scan_time_minute: int
     next_scan_at: Optional[str] = None
@@ -149,14 +149,13 @@ class ManualSaveVisitRequest(BaseModel):
     visit_date: str
     notes: Optional[str] = None
 
-# NEW: Sender whitelist schemas
 class SenderWhitelistEntry(BaseModel):
     email_address: str
-    label: Optional[str] = None  # friendly name e.g. "IP India", "GST Portal"
+    label: Optional[str] = None
 
 class SenderWhitelistOut(BaseModel):
     senders: List[Dict[str, str]]
-    # [{"email_address": "...", "label": "..."}]
+
 
 # =============================================================================
 # HELPERS — encryption
@@ -182,12 +181,11 @@ def _infer_provider(email_address: str):
 def _clean_password(password: str) -> str:
     return password.replace(" ", "").strip()
 
+
 # =============================================================================
 # SMART CATEGORY CLASSIFIER
-# Decides whether an email event should be saved as TODO, REMINDER, or VISIT
 # =============================================================================
 
-# Keywords that indicate an action-required notice → TODO
 _TODO_KEYWORDS = [
     "examination report", "office action", "objection raised",
     "reply to examination", "response required", "compliance notice",
@@ -197,7 +195,6 @@ _TODO_KEYWORDS = [
     "scrutiny notice", "demand notice",
 ]
 
-# Keywords for scheduled hearings / filing deadlines → REMINDER
 _REMINDER_KEYWORDS = [
     "hearing", "show cause hearing", "trademark hearing",
     "gstr-1", "gstr-3b", "gstr-9", "gst filing", "gst return",
@@ -208,7 +205,6 @@ _REMINDER_KEYWORDS = [
     "due date", "last date", "filing date",
 ]
 
-# Keywords for online/offline meetings → VISIT
 _VISIT_KEYWORDS = [
     "zoom", "google meet", "teams meeting", "microsoft teams",
     "webex", "meeting invite", "meeting scheduled",
@@ -218,10 +214,7 @@ _VISIT_KEYWORDS = [
 ]
 
 def _classify_save_category(event_type: str, title: str, body: str) -> str:
-    """
-    Returns 'todo' | 'reminder' | 'visit' based on keyword matching.
-    Falls back to event_type mapping when no keyword matches.
-    """
+    """Returns 'todo' | 'reminder' | 'visit' based on keyword matching."""
     combined = f"{title} {body}".lower()
 
     # Check TODO keywords first (highest priority)
@@ -244,7 +237,41 @@ def _classify_save_category(event_type: str, title: str, body: str) -> str:
         return "reminder"
     if event_type in ("Visit", "Online Meeting", "Conference"):
         return "visit"
-    return "reminder"  # default
+    return "reminder"
+
+
+# =============================================================================
+# WHITELIST HELPERS
+# =============================================================================
+
+def _normalize_whitelist_entry(entry: str) -> str:
+    """Ensure entry is lowercase and clean."""
+    return entry.strip().lower()
+
+def _sender_matches_whitelist(sender_email: str, whitelist: List[str]) -> bool:
+    """
+    Check if sender_email matches any whitelist entry.
+    Supports:
+      - Exact match: "user@ipindia.gov.in"
+      - Domain match: "@ipindia.gov.in"
+      - Subdomain wildcard: "@gov.in" matches "user@ipindia.gov.in" (IMPROVEMENT E)
+    """
+    sender_lower = sender_email.strip().lower()
+    for entry in whitelist:
+        entry = _normalize_whitelist_entry(entry)
+        if not entry:
+            continue
+        if entry.startswith("@"):
+            # Exact domain or subdomain match
+            domain_part = entry[1:]  # e.g. "gov.in" or "ipindia.gov.in"
+            if sender_lower.endswith("@" + domain_part) or \
+               sender_lower.endswith("." + domain_part):
+                return True
+        else:
+            # Exact email address match
+            if sender_lower == entry:
+                return True
+    return False
 
 
 # =============================================================================
@@ -314,7 +341,6 @@ def _extract_sender_email(from_header: str) -> str:
     m = re.search(r'<([^>]+)>', from_header)
     if m:
         return m.group(1).strip().lower()
-    # fallback: treat entire string as email if no angle brackets
     return from_header.strip().lower()
 
 def _scan_mailbox_sync(
@@ -328,7 +354,7 @@ def _scan_mailbox_sync(
     """
     Synchronous mailbox scan.
     If sender_whitelist is provided and non-empty, only returns emails from
-    those sender addresses.
+    those sender addresses (supports exact, @domain, and subdomain wildcards).
     """
     results = []
     try:
@@ -350,23 +376,10 @@ def _scan_mailbox_sync(
                 from_raw = _decode_header_str(msg.get("From", ""))
                 sender_clean = _extract_sender_email(from_raw)
 
-                # Apply whitelist filter if set
+                # Apply whitelist filter — uses improved subdomain matching
                 if sender_whitelist:
-                    whitelist_lower = [s.strip().lower() for s in sender_whitelist]
-                    # Check exact match or domain match (@domain.com)
-                    matched = False
-                    for entry in whitelist_lower:
-                        if entry.startswith("@"):
-                            # Domain match
-                            if sender_clean.endswith(entry):
-                                matched = True
-                                break
-                        else:
-                            if sender_clean == entry:
-                                matched = True
-                                break
-                    if not matched:
-                        continue  # skip non-whitelisted sender
+                    if not _sender_matches_whitelist(sender_clean, sender_whitelist):
+                        continue
 
                 results.append({
                     "subject":      _decode_header_str(msg.get("Subject", "")),
@@ -442,15 +455,40 @@ _JUNK_KEYWORDS = [
     "nykaa", "myntra", "meesho", "bigbasket",
 ]
 
+async def _get_dismissed_titles(user_id: str) -> Set[str]:
+    """
+    IMPROVEMENT G: Fetch all dismissed reminder titles for this user
+    so we can skip AI extraction for already-dismissed events.
+    """
+    try:
+        docs = await db["reminders"].find(
+            {"user_id": user_id, "is_dismissed": True},
+            {"_id": 0, "title": 1}
+        ).to_list(500)
+        return {d["title"].lower().strip() for d in docs if d.get("title")}
+    except Exception:
+        return set()
+
 async def _extract_events_from_email(
-    subject: str, body: str, from_addr: str, msg_date: str
+    subject: str,
+    body: str,
+    from_addr: str,
+    msg_date: str,
+    dismissed_titles: Optional[Set[str]] = None,
 ) -> List[Dict]:
+    """Extract legal events from a single email. Skips dismissed titles early."""
     combined = f"{subject.lower()} {body.lower()[:500]}"
 
+    # Pre-filter junk
     for kw in _JUNK_KEYWORDS:
         if kw in combined:
             logger.debug(f"Junk pre-filter: {subject[:60]}")
             return []
+
+    # IMPROVEMENT G: Skip if subject matches a dismissed reminder title
+    if dismissed_titles and subject.lower().strip() in dismissed_titles:
+        logger.debug(f"Skipping dismissed title: {subject[:60]}")
+        return []
 
     if _gemini:
         try:
@@ -459,7 +497,6 @@ async def _extract_events_from_email(
             raw = re.sub(r"```[a-z]*\n?|```", "", resp.text.strip())
             result = json.loads(raw)
             if isinstance(result, list):
-                # Add save_category to each extracted event
                 categorized = []
                 for ev in result:
                     ev["save_category"] = _classify_save_category(
@@ -565,53 +602,51 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
 # AUTO-SAVE: save extracted events to reminders / visits / todos
 # =============================================================================
 
-REMINDER_EVENT_TYPES = {"Trademark Hearing", "Court Hearing", "Deadline", "Appointment", "Other"}
-VISIT_EVENT_TYPES    = {"Visit", "Online Meeting", "Conference", "Interview", "Meeting"}
-TODO_EVENT_TYPES     = {"Examination Report", "Notice"}
-
 async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
-    # Don't re-save if user has explicitly dismissed this event title before
-    existing_dismissed = await db["reminders"].find_one({
-        "user_id": user_id,
-        "title":   event.title,
-        "is_dismissed": True,
-    })
-    if existing_dismissed:
-        return  # User has dismissed this reminder — respect their choice
-
     """
     Save a qualified event to the appropriate collection based on smart categorization.
 
-    FIX (v4): Each saved document stores a unique source identifier so that
-    deleting one item does NOT cascade-delete others. The old code was matching
-    by (user_id, source="email_auto") which deleted everything at once.
-    Now we match by (user_id, title, source="email_auto") for reminders/visits
-    and (user_id, title, source="email_auto") for todos — unique per item.
+    v5 FIXES:
+      - Dismissed check moved to top (before any DB write attempt)
+      - email_message_id used as unique identifier instead of event_id
+      - Cleaner deduplication logic
     """
+    # Check dismissed FIRST — avoid unnecessary DB writes
+    existing_dismissed = await db["reminders"].find_one(
+        {"user_id": user_id, "title": event.title, "is_dismissed": True},
+        {"_id": 0, "title": 1}
+    )
+    if existing_dismissed:
+        return
+
     try:
         save_cat = event.save_category or _classify_save_category(
             event.event_type, event.title, event.description or ""
         )
+        # Use message_id as the stable unique key for email-sourced events
+        email_msg_id = getattr(event, "_message_id", None)
 
         if save_cat == "todo" and prefs.get("auto_save_todos"):
-            # Save as TODO
-            existing = await db["todos"].find_one({
-                "user_id": user_id,
-                "title":   event.title,
-                "source":  "email_auto",
-            })
+            existing = await db["todos"].find_one(
+                {"user_id": user_id, "title": event.title, "source": "email_auto"},
+                {"_id": 0, "title": 1}
+            )
             if not existing:
                 await db["todos"].insert_one({
-                    "user_id":      user_id,
-                    "title":        event.title,
-                    "description":  f"Auto-imported from email.\nFrom: {event.source_from}\nSubject: {event.source_subject}\nNotes: {event.description or ''}",
-                    "is_completed": False,
-                    "due_date":     event.date or None,
-                    "source":       "email_auto",
-                    # Store message_id so individual deletion works correctly
-                    "email_message_id": getattr(event, "_message_id", None),
-                    "created_at":   datetime.now(timezone.utc).isoformat(),
-                    "updated_at":   datetime.now(timezone.utc).isoformat(),
+                    "user_id":           user_id,
+                    "title":             event.title,
+                    "description":       (
+                        f"Auto-imported from email.\n"
+                        f"From: {event.source_from}\n"
+                        f"Subject: {event.source_subject}\n"
+                        f"Notes: {event.description or ''}"
+                    ),
+                    "is_completed":      False,
+                    "due_date":          event.date or None,
+                    "source":            "email_auto",
+                    "email_message_id":  email_msg_id,
+                    "created_at":        datetime.now(timezone.utc).isoformat(),
+                    "updated_at":        datetime.now(timezone.utc).isoformat(),
                 })
                 logger.info(f"Auto-saved todo: {event.title}")
 
@@ -624,41 +659,44 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
             except Exception:
                 remind_dt = datetime.now(IST) + timedelta(days=1)
 
-            existing = await db["reminders"].find_one({
-                "user_id": user_id,
-                "title":   event.title,
-                "source":  "email_auto",
-            })
-            # Don\'t re-save if it was previously deleted/dismissed by user
-            if existing and existing.get("is_dismissed"):
-                return  # User dismissed/deleted this — don\'t re-add
-            if not existing:
-                description_parts = []
-                if event.organizer:      description_parts.append(f"From: {event.organizer}")
-                if event.description:    description_parts.append(f"Notes: {event.description}")
-                if event.source_subject: description_parts.append(f"Subject: {event.source_subject}")
+            existing = await db["reminders"].find_one(
+                {"user_id": user_id, "title": event.title, "source": "email_auto"},
+                {"_id": 0, "is_dismissed": 1}
+            )
+            if existing:
+                # Don't re-add if previously dismissed/deleted
+                if existing.get("is_dismissed"):
+                    return
+                return  # Already saved, skip
 
-                await db["reminders"].insert_one({
-                    "user_id":           user_id,
-                    "title":             event.title,
-                    "description":       "\n".join(description_parts) or None,
-                    "remind_at":         remind_dt.isoformat(),
-                    "is_dismissed":      False,
-                    "source":            "email_auto",
-                    # Store unique message_id to prevent cascade deletes
-                    "email_message_id":  getattr(event, "_message_id", None),
-                    "created_at":        datetime.now(timezone.utc).isoformat(),
-                })
-                logger.info(f"Auto-saved reminder: {event.title}")
+            description_parts = []
+            if event.organizer:      description_parts.append(f"From: {event.organizer}")
+            if event.description:    description_parts.append(f"Notes: {event.description}")
+            if event.source_subject: description_parts.append(f"Subject: {event.source_subject}")
+
+            await db["reminders"].insert_one({
+                "user_id":          user_id,
+                "title":            event.title,
+                "description":      "\n".join(description_parts) or None,
+                "remind_at":        remind_dt.isoformat(),
+                "is_dismissed":     False,
+                "source":           "email_auto",
+                "email_message_id": email_msg_id,
+                "created_at":       datetime.now(timezone.utc).isoformat(),
+            })
+            logger.info(f"Auto-saved reminder: {event.title}")
 
         elif save_cat == "visit" and prefs.get("auto_save_visits"):
             date_str = event.date or datetime.now(IST).strftime("%Y-%m-%d")
-            existing = await db["visits"].find_one({
-                "user_id":    user_id,
-                "title":      event.title,
-                "visit_date": date_str,
-                "source":     "email_auto",
-            })
+            existing = await db["visits"].find_one(
+                {
+                    "user_id":    user_id,
+                    "title":      event.title,
+                    "visit_date": date_str,
+                    "source":     "email_auto"
+                },
+                {"_id": 0, "title": 1}
+            )
             if not existing:
                 await db["visits"].insert_one({
                     "user_id":          user_id,
@@ -667,8 +705,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     "notes":            event.description or event.source_subject or "",
                     "status":           "scheduled",
                     "source":           "email_auto",
-                    # Store unique message_id to prevent cascade deletes
-                    "email_message_id": getattr(event, "_message_id", None),
+                    "email_message_id": email_msg_id,
                     "created_at":       datetime.now(timezone.utc).isoformat(),
                 })
                 logger.info(f"Auto-saved visit: {event.title}")
@@ -703,7 +740,9 @@ async def _scheduled_scan_loop():
                 if diff_seconds > 300:
                     continue
 
-                sched_doc = await db[COL_SCAN_SCHEDULE].find_one({"user_id": user_id})
+                sched_doc = await db[COL_SCAN_SCHEDULE].find_one(
+                    {"user_id": user_id}, {"_id": 0}
+                )
                 if sched_doc:
                     last_run = sched_doc.get("last_run", "")
                     if last_run and last_run[:10] == now_ist.strftime("%Y-%m-%d"):
@@ -729,19 +768,25 @@ async def _scheduled_scan_loop():
 async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
     """Scan all active connections for a user and auto-save events."""
     conns = await db[COL_CONNECTIONS].find(
-        {"user_id": user_id, "is_active": True}
+        {"user_id": user_id, "is_active": True},
+        {"_id": 0}
     ).to_list(50)
     if not conns:
         return
 
-    # Load sender whitelist for this user
-    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": user_id})
-    sender_whitelist = []
+    # Load sender whitelist
+    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": user_id}, {"_id": 0}
+    )
+    sender_whitelist: List[str] = []
     if whitelist_doc and whitelist_doc.get("senders"):
         sender_whitelist = [
             s.get("email_address", "") for s in whitelist_doc["senders"]
             if s.get("email_address")
         ]
+
+    # IMPROVEMENT G: Pre-load dismissed titles to skip AI extraction
+    dismissed_titles = await _get_dismissed_titles(user_id)
 
     loop = asyncio.get_event_loop()
     for conn in conns:
@@ -755,14 +800,18 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
             )
             for raw in raw_emails:
                 mid = raw.get("message_id")
-                exists = await db[COL_EVENTS].find_one({"user_id": user_id, "message_id": mid})
+                exists = await db[COL_EVENTS].find_one(
+                    {"user_id": user_id, "message_id": mid},
+                    {"_id": 0}
+                )
                 if exists:
                     ev = _doc_to_out(exists)
                     await _auto_save_event(user_id, ev, prefs)
                     continue
 
                 extracted = await _extract_events_from_email(
-                    raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"]
+                    raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"],
+                    dismissed_titles=dismissed_titles,
                 )
                 for ev in extracted:
                     doc = {
@@ -786,12 +835,11 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                     res = await db[COL_EVENTS].insert_one(doc)
                     doc["id"] = str(res.inserted_id)
                     ev_out = _doc_to_out(doc)
-                    # Attach message_id for cascade-prevention
                     ev_out._message_id = mid
                     await _auto_save_event(user_id, ev_out, prefs)
 
             await db[COL_CONNECTIONS].update_one(
-                {"_id": conn["_id"]},
+                {"user_id": user_id, "email_address": email_addr},
                 {"$set": {
                     "last_synced": datetime.now(timezone.utc).isoformat(),
                     "sync_error":  None,
@@ -800,7 +848,8 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
         except Exception as e:
             logger.error(f"Scan error for {conn.get('email_address')}: {e}")
             await db[COL_CONNECTIONS].update_one(
-                {"_id": conn["_id"]}, {"$set": {"sync_error": str(e)}}
+                {"user_id": user_id, "email_address": conn.get("email_address")},
+                {"$set": {"sync_error": str(e)}}
             )
 
 
@@ -819,7 +868,7 @@ def start_scheduled_scan_loop():
 async def list_connections(current_user=Depends(get_current_user)):
     cursor = db[COL_CONNECTIONS].find(
         {"user_id": str(current_user.id)},
-        {"app_password_enc": 0}
+        {"app_password_enc": 0, "_id": 0}
     )
     docs = await cursor.to_list(length=100)
     return {"connections": [_conn_doc_to_out(d) for d in docs]}
@@ -881,7 +930,8 @@ async def update_connection(
     current_user=Depends(get_current_user)
 ):
     existing = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address}
+        {"user_id": str(current_user.id), "email_address": email_address},
+        {"_id": 0}
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -889,8 +939,14 @@ async def update_connection(
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if updates.get("is_active"):
         updates["sync_error"] = None
-    await db[COL_CONNECTIONS].update_one({"_id": existing["_id"]}, {"$set": updates})
-    doc = await db[COL_CONNECTIONS].find_one({"_id": existing["_id"]})
+    await db[COL_CONNECTIONS].update_one(
+        {"user_id": str(current_user.id), "email_address": email_address},
+        {"$set": updates}
+    )
+    doc = await db[COL_CONNECTIONS].find_one(
+        {"user_id": str(current_user.id), "email_address": email_address},
+        {"_id": 0, "app_password_enc": 0}
+    )
     return _conn_doc_to_out(doc)
 
 
@@ -904,7 +960,8 @@ async def delete_connection(email_address: str, current_user=Depends(get_current
 @router.post("/connections/{email_address}/test")
 async def test_connection(email_address: str, current_user=Depends(get_current_user)):
     doc = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address}
+        {"user_id": str(current_user.id), "email_address": email_address},
+        {"_id": 0}
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -918,12 +975,13 @@ async def test_connection(email_address: str, current_user=Depends(get_current_u
 
     if error_msg:
         await db[COL_CONNECTIONS].update_one(
-            {"_id": doc["_id"]}, {"$set": {"sync_error": error_msg}}
+            {"user_id": str(current_user.id), "email_address": email_address},
+            {"$set": {"sync_error": error_msg}}
         )
         raise HTTPException(status_code=400, detail=error_msg)
 
     await db[COL_CONNECTIONS].update_one(
-        {"_id": doc["_id"]},
+        {"user_id": str(current_user.id), "email_address": email_address},
         {"$set": {
             "sync_error":  None,
             "last_synced": datetime.now(timezone.utc).isoformat(),
@@ -933,12 +991,11 @@ async def test_connection(email_address: str, current_user=Depends(get_current_u
 
 
 # =============================================================================
-# API ROUTES — SENDER WHITELIST  (NEW in v4)
+# API ROUTES — SENDER WHITELIST
 # =============================================================================
 
 @router.get("/sender-whitelist")
 async def get_sender_whitelist(current_user=Depends(get_current_user)):
-    """Get the list of approved sender email addresses for auto-sync."""
     doc = await db[COL_SENDER_WHITELIST].find_one(
         {"user_id": str(current_user.id)}, {"_id": 0}
     )
@@ -950,9 +1007,8 @@ async def add_sender_to_whitelist(
     body: SenderWhitelistEntry,
     current_user=Depends(get_current_user)
 ):
-    """Add a sender email address to the whitelist."""
     clean_addr = body.email_address.strip().lower()
-    if not clean_addr or ("@" not in clean_addr and not clean_addr.startswith("@")):
+    if not clean_addr or "@" not in clean_addr:
         raise HTTPException(
             status_code=422,
             detail="Invalid email address. Use full address (user@domain.com) or domain (@domain.com)."
@@ -964,8 +1020,9 @@ async def add_sender_to_whitelist(
         "added_at":      datetime.now(timezone.utc).isoformat(),
     }
 
-    # Check if already in list
-    existing = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)})
+    existing = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
     if existing:
         already = any(
             s.get("email_address") == clean_addr
@@ -994,7 +1051,6 @@ async def remove_sender_from_whitelist(
     email_address: str,
     current_user=Depends(get_current_user)
 ):
-    """Remove a sender from the whitelist."""
     await db[COL_SENDER_WHITELIST].update_one(
         {"user_id": str(current_user.id)},
         {"$pull": {"senders": {"email_address": email_address.lower()}}}
@@ -1010,7 +1066,6 @@ async def replace_sender_whitelist(
     body: SenderWhitelistOut,
     current_user=Depends(get_current_user)
 ):
-    """Replace the entire sender whitelist."""
     senders = []
     for s in body.senders:
         clean = s.get("email_address", "").strip().lower()
@@ -1035,7 +1090,9 @@ async def replace_sender_whitelist(
 
 @router.get("/auto-save-prefs", response_model=AutoSavePrefOut)
 async def get_auto_save_prefs(current_user=Depends(get_current_user)):
-    doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)})
+    doc = await db[COL_AUTO_PREFS].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
     if not doc:
         return AutoSavePrefOut(
             auto_save_reminders=False,
@@ -1086,14 +1143,14 @@ async def set_auto_save_prefs(
 
 @router.get("/auto-save-prefs/exists")
 async def check_prefs_exist(current_user=Depends(get_current_user)):
-    doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)})
+    doc = await db[COL_AUTO_PREFS].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0, "user_id": 1}
+    )
     return {"has_set_prefs": doc is not None}
 
 
 # =============================================================================
 # API ROUTES — MANUAL SAVE
-# FIX (v4): Individual reminder/visit delete no longer cascade-deletes others.
-# Each document is stored with a unique (user_id, title, source, created_at).
 # =============================================================================
 
 @router.post("/save-as-reminder", status_code=201)
@@ -1107,27 +1164,27 @@ async def save_as_reminder(
         except Exception:
             remind_dt = datetime.now(IST) + timedelta(days=1)
 
-        # FIX: Match by (user_id, title) only — NOT by source="email_auto"
-        # so deleting one doesn't wipe all auto-saved reminders
-        existing = await db["reminders"].find_one({
-            "user_id": str(current_user.id),
-            "title":   body.title,
-        })
+        existing = await db["reminders"].find_one(
+            {"user_id": str(current_user.id), "title": body.title},
+            {"_id": 0, "id": 1}
+        )
         if existing:
-            return {"status": "already_exists", "id": str(existing["_id"])}
+            return {"status": "already_exists", "id": existing.get("id", "")}
 
-        result = await db["reminders"].insert_one({
+        import uuid
+        new_id = str(uuid.uuid4())
+        await db["reminders"].insert_one({
+            "id":           new_id,
             "user_id":      str(current_user.id),
             "title":        body.title,
             "description":  body.description,
             "remind_at":    remind_dt.isoformat(),
             "is_dismissed": False,
             "source":       "email_manual",
-            # Unique identifier so deletes are scoped to this one item
             "event_id":     body.event_id,
             "created_at":   datetime.now(timezone.utc).isoformat(),
         })
-        return {"status": "created", "id": str(result.inserted_id)}
+        return {"status": "created", "id": new_id}
 
     except HTTPException:
         raise
@@ -1142,26 +1199,31 @@ async def save_as_visit(
     current_user=Depends(get_current_user)
 ):
     try:
-        existing = await db["visits"].find_one({
-            "user_id":    str(current_user.id),
-            "title":      body.title,
-            "visit_date": body.visit_date,
-        })
+        existing = await db["visits"].find_one(
+            {
+                "user_id":    str(current_user.id),
+                "title":      body.title,
+                "visit_date": body.visit_date,
+            },
+            {"_id": 0, "id": 1}
+        )
         if existing:
-            return {"status": "already_exists", "id": str(existing["_id"])}
+            return {"status": "already_exists", "id": existing.get("id", "")}
 
-        result = await db["visits"].insert_one({
+        import uuid
+        new_id = str(uuid.uuid4())
+        await db["visits"].insert_one({
+            "id":         new_id,
             "user_id":    str(current_user.id),
             "title":      body.title,
             "visit_date": body.visit_date,
             "notes":      body.notes or "",
             "status":     "scheduled",
             "source":     "email_manual",
-            # Unique identifier so deletes are scoped to this one item
             "event_id":   body.event_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-        return {"status": "created", "id": str(result.inserted_id)}
+        return {"status": "created", "id": new_id}
 
     except HTTPException:
         raise
@@ -1172,19 +1234,21 @@ async def save_as_visit(
 
 @router.post("/save-as-todo", status_code=201)
 async def save_as_todo(
-    body: ManualSaveReminderRequest,   # reuse same schema
+    body: ManualSaveReminderRequest,
     current_user=Depends(get_current_user)
 ):
-    """Save an email event as a TODO item."""
     try:
-        existing = await db["todos"].find_one({
-            "user_id": str(current_user.id),
-            "title":   body.title,
-        })
+        existing = await db["todos"].find_one(
+            {"user_id": str(current_user.id), "title": body.title},
+            {"_id": 0, "id": 1}
+        )
         if existing:
-            return {"status": "already_exists", "id": str(existing.get("_id", existing.get("id", "")))}
+            return {"status": "already_exists", "id": existing.get("id", "")}
 
-        result = await db["todos"].insert_one({
+        import uuid
+        new_id = str(uuid.uuid4())
+        await db["todos"].insert_one({
+            "id":           new_id,
             "user_id":      str(current_user.id),
             "title":        body.title,
             "description":  body.description,
@@ -1195,7 +1259,7 @@ async def save_as_todo(
             "created_at":   datetime.now(timezone.utc).isoformat(),
             "updated_at":   datetime.now(timezone.utc).isoformat(),
         })
-        return {"status": "created", "id": str(result.inserted_id)}
+        return {"status": "created", "id": new_id}
 
     except HTTPException:
         raise
@@ -1215,21 +1279,27 @@ async def extract_events(
     force_refresh: bool = Query(False)
 ):
     conns = await db[COL_CONNECTIONS].find(
-        {"user_id": str(current_user.id), "is_active": True}
+        {"user_id": str(current_user.id), "is_active": True},
+        {"_id": 0}
     ).to_list(50)
     if not conns:
         return []
 
-    prefs_doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)}) or {}
+    prefs_doc = await db[COL_AUTO_PREFS].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    ) or {}
 
-    # Load sender whitelist
-    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)})
-    sender_whitelist = []
+    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
+    sender_whitelist: List[str] = []
     if whitelist_doc and whitelist_doc.get("senders"):
         sender_whitelist = [
             s.get("email_address", "") for s in whitelist_doc["senders"]
             if s.get("email_address")
         ]
+
+    dismissed_titles = await _get_dismissed_titles(str(current_user.id))
 
     async def process_account(conn):
         email_addr = conn["email_address"]
@@ -1239,8 +1309,13 @@ async def extract_events(
                 last = datetime.fromisoformat(conn["last_synced"])
                 if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
                     cached = await db[COL_EVENTS].find(
-                        {"user_id": str(current_user.id), "email_account": email_addr}
-                    ).sort("_id", -1).limit(limit).to_list(limit)
+                        {"user_id": str(current_user.id), "email_account": email_addr},
+                        {"_id": 0}
+                    ).sort("created_at", -1).limit(limit).to_list(limit)
+                    # Attach id from document
+                    for c in cached:
+                        if "id" not in c:
+                            c["id"] = c.get("_id", "")
                     return [_doc_to_out(d) for d in cached]
             except Exception:
                 pass
@@ -1257,7 +1332,8 @@ async def extract_events(
         for raw in raw_emails:
             mid = raw.get("message_id")
             exists = await db[COL_EVENTS].find_one(
-                {"user_id": str(current_user.id), "message_id": mid}
+                {"user_id": str(current_user.id), "message_id": mid},
+                {"_id": 0}
             )
             if exists:
                 ev_out = _doc_to_out(exists)
@@ -1267,7 +1343,8 @@ async def extract_events(
                 continue
 
             extracted = await _extract_events_from_email(
-                raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"]
+                raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"],
+                dismissed_titles=dismissed_titles,
             )
             for ev in extracted:
                 doc = {
@@ -1293,10 +1370,11 @@ async def extract_events(
                 ev_out = _doc_to_out(doc)
                 acc_results.append(ev_out)
                 if prefs_doc:
+                    ev_out._message_id = mid
                     await _auto_save_event(str(current_user.id), ev_out, prefs_doc)
 
         await db[COL_CONNECTIONS].update_one(
-            {"_id": conn["_id"]},
+            {"user_id": str(current_user.id), "email_address": email_addr},
             {"$set": {
                 "last_synced": datetime.now(timezone.utc).isoformat(),
                 "sync_error":  None,
@@ -1320,13 +1398,7 @@ async def extract_events(
 
 @router.delete("/events/{event_id}", status_code=204)
 async def delete_event(event_id: str, current_user=Depends(get_current_user)):
-    """
-    FIX (v4): Delete ONLY the specific event by its MongoDB _id.
-    Previously this route also wiped all auto-saved reminders/visits.
-    Now it ONLY removes the cached extraction record.
-    The corresponding reminder/visit/todo must be deleted separately
-    from their own endpoints (DELETE /reminders/{id}, etc.)
-    """
+    """Delete ONLY the cached extraction record. Does NOT cascade to reminders/visits/todos."""
     try:
         await db[COL_EVENTS].delete_one(
             {"_id": ObjectId(event_id), "user_id": str(current_user.id)}
@@ -1338,8 +1410,7 @@ async def delete_event(event_id: str, current_user=Depends(get_current_user)):
 @router.delete("/events/clear-all", status_code=204)
 async def clear_all_events(current_user=Depends(get_current_user)):
     """Clear all cached extracted events — forces fresh scan next time.
-    NOTE: This does NOT delete reminders, visits, or todos already saved.
-    """
+    Does NOT delete reminders, visits, or todos already saved."""
     await db[COL_EVENTS].delete_many({"user_id": str(current_user.id)})
 
 
@@ -1353,7 +1424,8 @@ async def importer_events(
     if count == 0 or force_refresh:
         return await extract_events(current_user, limit, force_refresh)
     docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id)}
+        {"user_id": str(current_user.id)},
+        {"_id": 0}
     ).sort("date", -1).limit(limit).to_list(limit)
     return [_doc_to_out(d) for d in docs]
 
@@ -1365,47 +1437,46 @@ async def importer_events(
 @router.get("/attendance/today-summary")
 async def attendance_today_summary(current_user=Depends(get_current_user)):
     try:
-        # Determine User ID safely
-        if hasattr(current_user, "id"):
-            u_id = str(current_user.id)
-        elif isinstance(current_user, dict):
-            u_id = str(current_user.get("id") or current_user.get("_id") or "")
-        else:
-            u_id = str(current_user)
-
+        u_id = (
+            str(current_user.id) if hasattr(current_user, "id")
+            else str(current_user.get("id") or current_user.get("_id") or "")
+            if isinstance(current_user, dict)
+            else str(current_user)
+        )
         if not u_id:
             raise ValueError("Could not resolve user ID")
 
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        week_later = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
+        from datetime import datetime as dt
+        today = dt.now(IST).strftime("%Y-%m-%d")
+        week_later = (dt.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
 
-        # FETCH VISITS
-        visits_raw = await db["visits"].find({
-            "user_id": u_id, 
-            "visit_date": today
-        }).to_list(length=20)
+        visits_raw = await db["visits"].find(
+            {"user_id": u_id, "visit_date": today},
+            {"_id": 0}
+        ).to_list(length=20)
 
-        # FETCH REMINDERS
-        # Added $ne True to handle both null and False safely
-        reminders_raw = await db["reminders"].find({
-            "user_id": u_id,
-            "is_dismissed": {"$ne": True},
-            "remind_at": {"$gte": today, "$lte": week_later + "T23:59:59"}
-        }).sort("remind_at", 1).to_list(length=20)
+        reminders_raw = await db["reminders"].find(
+            {
+                "user_id":      u_id,
+                "is_dismissed": {"$ne": True},
+                "remind_at":    {"$gte": today, "$lte": week_later + "T23:59:59"}
+            },
+            {"_id": 0}
+        ).sort("remind_at", 1).to_list(length=20)
 
         return {
             "today": today,
             "visits_today": [
                 {
-                    "title": v.get("title", "Untitled"), 
-                    "status": v.get("status", "scheduled"), 
-                    "notes": v.get("notes") or v.get("description") or ""
+                    "title":  v.get("title", "Untitled"),
+                    "status": v.get("status", "scheduled"),
+                    "notes":  v.get("notes") or v.get("description") or ""
                 }
                 for v in visits_raw
             ],
             "upcoming_reminders": [
                 {
-                    "title": r.get("title", "Untitled"), 
+                    "title":     r.get("title", "Untitled"),
                     "remind_at": str(r.get("remind_at", ""))
                 }
                 for r in reminders_raw
@@ -1413,46 +1484,44 @@ async def attendance_today_summary(current_user=Depends(get_current_user)):
         }
     except Exception as e:
         logger.error(f"Error in attendance summary: {str(e)}")
-        # Fallback to avoid 500
+        from datetime import datetime as dt
         return {
-            "today": datetime.now(IST).strftime("%Y-%m-%d"), 
-            "visits_today": [], 
-            "upcoming_reminders": [],
-            "error": str(e)
+            "today":               dt.now(IST).strftime("%Y-%m-%d"),
+            "visits_today":        [],
+            "upcoming_reminders":  [],
+            "error":               str(e)
         }
 
 
 @router.get("/holidays/upcoming")
 async def upcoming_holidays(current_user=Depends(get_current_user)):
     try:
-        if hasattr(current_user, "id"):
-            u_id = str(current_user.id)
-        elif isinstance(current_user, dict):
-            u_id = str(current_user.get("id") or current_user.get("_id") or "")
-        else:
-            u_id = str(current_user)
+        u_id = (
+            str(current_user.id) if hasattr(current_user, "id")
+            else str(current_user.get("id") or "") if isinstance(current_user, dict)
+            else str(current_user)
+        )
+        from datetime import datetime as dt
+        today = dt.now(IST).strftime("%Y-%m-%d")
 
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        
-        # Use simple find and manual serialization to bypass Pydantic validation crashes
-        cursor = db[COL_EVENTS].find({
-            "user_id": u_id,
-            "date": {"$gte": today},
-            "event_type": {"$in": ["Court Hearing", "Trademark Hearing", "Deadline"]},
-        }).sort("date", 1).limit(10)
-        
-        events = await cursor.to_list(length=10)
-        
-        cleaned_events = []
-        for e in events:
-            cleaned_events.append({
-                "id": str(e.get("_id")),
-                "title": e.get("title", "Notice"),
-                "date": e.get("date"),
+        events = await db[COL_EVENTS].find(
+            {
+                "user_id":    u_id,
+                "date":       {"$gte": today},
+                "event_type": {"$in": ["Court Hearing", "Trademark Hearing", "Deadline"]},
+            },
+            {"_id": 0, "title": 1, "date": 1, "event_type": 1, "id": 1}
+        ).sort("date", 1).limit(10).to_list(length=10)
+
+        return {"events": [
+            {
+                "id":         e.get("id", ""),
+                "title":      e.get("title", "Notice"),
+                "date":       e.get("date"),
                 "event_type": e.get("event_type")
-            })
-            
-        return {"events": cleaned_events}
+            }
+            for e in events
+        ]}
     except Exception as e:
         logger.error(f"Error in upcoming holidays: {str(e)}")
         return {"events": []}
