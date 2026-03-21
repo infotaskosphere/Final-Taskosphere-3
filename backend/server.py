@@ -13,6 +13,7 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from backend.reminders import router as reminders_router
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
@@ -920,35 +921,72 @@ async def reject_user(user_id: str, current_user: User = Depends(require_admin))
 def normalize_reminder_doc(doc: dict) -> dict:
     """
     Ensure every reminder document has a string `id` field and no ObjectId fields.
- 
-    *** BUG FIX v5 ***
-    The previous version converted _id to id but never removed _id.
-    MongoDB ObjectId is not JSON-serializable, causing a 500 on GET /reminders.
-    Fix: pop _id after converting it.
+    BUG FIX v5: pop _id after converting it — was missing, caused 500 on GET /reminders.
     """
     if not doc:
         return doc
     doc = dict(doc)
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
-        doc.pop("_id")           # ← THIS WAS MISSING — caused the 500 error
+        doc.pop("_id")
     elif "id" not in doc:
-        doc["id"] = ""           # Ensure id field always exists
- 
-    # Normalize datetime fields to ISO strings
+        doc["id"] = ""
     for field in ["remind_at", "created_at", "updated_at"]:
         if field in doc and doc[field] and hasattr(doc[field], "isoformat"):
             doc[field] = doc[field].isoformat()
     return doc
- 
 
-# REMINDER ROUTES
-# ==========================================================@api_router.post("/reminders")
+
+@api_router.post("/reminders")
 async def create_reminder(
     data: ReminderCreate,
     current_user: User = Depends(get_current_user)
 ):
-    """Create a reminder for the current user."""
+    """Create a reminder. Handles multiple date formats from the frontend."""
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+
+    # Parse remind_at — handles ISO, "23-03-2026 11:30 AM", datetime object
+    remind_dt = None
+    raw = data.remind_at
+
+    if isinstance(raw, datetime):
+        remind_dt = raw if raw.tzinfo else raw.replace(tzinfo=IST)
+    else:
+        raw_str = str(raw).strip()
+        # ISO variants
+        for fmt in [
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+        ]:
+            try:
+                remind_dt = datetime.strptime(
+                    raw_str.replace("Z", "").split("+")[0].split(".")[0], fmt
+                ).replace(tzinfo=IST)
+                break
+            except ValueError:
+                continue
+        # DD-MM-YYYY variants (frontend date-time picker)
+        if not remind_dt:
+            for fmt in [
+                "%d-%m-%Y %I:%M %p",
+                "%d-%m-%Y %H:%M",
+                "%d/%m/%Y %I:%M %p",
+                "%d/%m/%Y %H:%M",
+            ]:
+                try:
+                    remind_dt = datetime.strptime(raw_str, fmt).replace(tzinfo=IST)
+                    break
+                except ValueError:
+                    continue
+        # Last resort: tomorrow 10 AM
+        if not remind_dt:
+            remind_dt = (datetime.now(IST) + timedelta(days=1)).replace(
+                hour=10, minute=0, second=0, microsecond=0
+            )
+
     import uuid
     reminder_id = str(uuid.uuid4())
     reminder = {
@@ -956,19 +994,17 @@ async def create_reminder(
         "user_id":      current_user.id,
         "title":        data.title,
         "description":  data.description,
-        "remind_at":    (
-            data.remind_at.isoformat()
-            if isinstance(data.remind_at, datetime)
-            else str(data.remind_at)
-        ),
+        "remind_at":    remind_dt.isoformat(),
         "is_dismissed": False,
+        "urgency":      "medium",
+        "source":       "manual",
         "created_at":   datetime.now(timezone.utc).isoformat(),
     }
     await db.reminders.insert_one(reminder)
-    reminder.pop("_id", None)   # Remove ObjectId added by insert_one
+    reminder.pop("_id", None)
     return reminder
- 
- 
+
+
 @api_router.get("/reminders")
 async def get_reminders(
     user_id: Optional[str] = None,
@@ -980,64 +1016,55 @@ async def get_reminders(
         query = {"user_id": user_id}
     else:
         query = {"user_id": current_user.id}
- 
-    # Use projection {"_id": 0} so MongoDB never returns ObjectId at all.
-    # normalize_reminder_doc handles the id field from the string "id" field.
-    reminders = await db.reminders.find(query).sort("remind_at", 1).to_list(500)
+
+    reminders = await db.reminders.find(
+        query, {"_id": 0}
+    ).sort("remind_at", 1).to_list(500)
     return [normalize_reminder_doc(doc) for doc in reminders]
- 
- 
+
+
 @api_router.patch("/reminders/{reminder_id}")
 async def update_reminder(
     reminder_id: str,
     updates: dict,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a reminder — handles both ObjectId (_id) and string id formats."""
     user_id = str(current_user.id)
     updated = None
- 
-    # Strategy 1: Match by MongoDB ObjectId (_id field)
+
     if ObjectId.is_valid(reminder_id):
         result = await db.reminders.update_one(
             {"_id": ObjectId(reminder_id), "user_id": user_id},
             {"$set": updates}
         )
         if result.matched_count > 0:
-            updated = await db.reminders.find_one({"_id": ObjectId(reminder_id)})
- 
-    # Strategy 2: Match by string `id` field
+            updated = await db.reminders.find_one(
+                {"_id": ObjectId(reminder_id)}, {"_id": 0}
+            )
+
     if not updated:
         result = await db.reminders.update_one(
             {"id": reminder_id, "user_id": user_id},
             {"$set": updates}
         )
         if result.matched_count > 0:
-            updated = await db.reminders.find_one({"id": reminder_id})
- 
+            updated = await db.reminders.find_one(
+                {"id": reminder_id}, {"_id": 0}
+            )
+
     if not updated:
         raise HTTPException(status_code=404, detail="Reminder not found")
- 
+
     return normalize_reminder_doc(updated)
- 
- 
+
+
 @api_router.delete("/reminders/{reminder_id}")
 async def delete_reminder(
     reminder_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Delete a reminder by ID.
- 
-    *** BUG FIX v5 ***
-    Strategy 3 in the old code used an invalid MongoDB query:
-      {"_id": reminder_id (string)}  when ObjectId.is_valid is False
-    MongoDB can't match a string against an ObjectId field → always fails.
- 
-    New Strategy 3: dismiss by string `id` field OR by user_id+title fallback.
-    """
     user_id = str(current_user.id)
- 
+
     # Strategy 1: Delete by MongoDB ObjectId (_id)
     if ObjectId.is_valid(reminder_id):
         result = await db.reminders.delete_one(
@@ -1045,24 +1072,23 @@ async def delete_reminder(
         )
         if result.deleted_count > 0:
             return {"status": "deleted"}
- 
+
     # Strategy 2: Delete by string `id` field
     result = await db.reminders.delete_one(
         {"id": reminder_id, "user_id": user_id}
     )
     if result.deleted_count > 0:
         return {"status": "deleted"}
- 
-    # Strategy 3 (FIXED): Mark as dismissed by string id field only.
-    # This handles auto-saved reminders that may have string UUIDs as id.
+
+    # Strategy 3: Soft dismiss by string id
     update_result = await db.reminders.update_one(
         {"id": reminder_id, "user_id": user_id},
         {"$set": {"is_dismissed": True}}
     )
     if update_result.modified_count > 0:
         return {"status": "dismissed"}
- 
-    # Strategy 4: If ObjectId valid, try dismissing by _id
+
+    # Strategy 4: Soft dismiss by ObjectId
     if ObjectId.is_valid(reminder_id):
         update_result = await db.reminders.update_one(
             {"_id": ObjectId(reminder_id), "user_id": user_id},
@@ -1070,7 +1096,7 @@ async def delete_reminder(
         )
         if update_result.modified_count > 0:
             return {"status": "dismissed"}
- 
+
     raise HTTPException(status_code=404, detail="Reminder not found")
 #============================================================
 # USER MANAGEMENT
@@ -4694,6 +4720,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
     )
 
 # Api Router
+api_router.include_router(reminders_router)
 api_router.include_router(visits_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
