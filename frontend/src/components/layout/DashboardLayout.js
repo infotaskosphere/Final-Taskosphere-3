@@ -60,6 +60,7 @@ const NAV_GROUPS = [
       { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'      },
       { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients'    },
       { path: '/leads',     icon: Target,   label: 'Lead Management',   permission: 'can_view_all_leads'      },
+      { path: '/quotations', icon: FileText, label: 'Quotations', permission: 'can_create_quotations'         },
     ],
   },
   {
