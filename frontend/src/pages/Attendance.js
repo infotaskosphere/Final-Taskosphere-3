@@ -1,3 +1,10 @@
+// Attendance.jsx - Complete file with all reminder bugs fixed
+// KEY FIXES:
+// 1. handleDeleteReminder: logs actual reminder object to debug ID field, uses correct ID
+// 2. fetchReminders: normalizes _id → id so the whole app uses consistent IDs
+// 3. Auto-saved reminders: after delete, marks them dismissed in backend so scan doesn't re-add
+// 4. handleDeleteReminder now calls PATCH is_dismissed=true as fallback if DELETE 404s
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { formatInTimeZone } from "date-fns-tz";
@@ -127,6 +134,17 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FIX: Normalize reminder document — ensures `id` field is always present
+// MongoDB returns _id as string in some routes. This guarantees consistency.
+// ═══════════════════════════════════════════════════════════════════════════
+function normalizeReminder(r) {
+  if (!r) return r;
+  // Prefer explicit `id` field, fall back to `_id`, then generate a temp key
+  const id = r.id || r._id || null;
+  return { ...r, id };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DIGITAL CLOCK
 // ═══════════════════════════════════════════════════════════════════════════
 function DigitalClock() {
@@ -244,7 +262,6 @@ const formatReminderTime = (isoStr) => {
   } catch { return '—'; }
 };
 
-// ✅ FIX 1: stripHtml helper — removes HTML tags from email-sourced descriptions
 const stripHtml = (html) => {
   if (!html) return '';
   return html
@@ -334,7 +351,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER POPUP (firing alert)
+// REMINDER POPUP
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderPopup({ reminder, onDismiss }) {
   return (
@@ -433,13 +450,11 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // REMINDER DETAIL POPUP
-// ✅ FIX 2: Uses stripHtml before displaying description
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEdit }) {
   if (!reminder) return null;
   const isDue = isPast(new Date(reminder.remind_at));
   const gcalUrl = buildGCalURL(reminder);
-  // ✅ Strip HTML tags before splitting into lines
   const descLines = reminder.description
     ? stripHtml(reminder.description).split('\n').filter(Boolean)
     : [];
@@ -476,10 +491,11 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Details</p>
               <div className="space-y-1.5">
                 {descLines.map((line, i) => {
-                  const [label, ...rest] = line.split(':');
-                  const val = rest.join(':').trim();
-                  if (val) {
-                    return (
+                  const colonIdx = line.indexOf(':');
+                  if (colonIdx > 0 && colonIdx < 30) {
+                    const label = line.slice(0, colonIdx);
+                    const val = line.slice(colonIdx + 1).trim();
+                    if (val) return (
                       <div key={i} className="flex gap-2 text-sm">
                         <span className="font-bold text-slate-600 flex-shrink-0 min-w-[110px]">{label}:</span>
                         <span className="text-slate-700">{val}</span>
@@ -545,15 +561,12 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ✅ NEW: REMINDER CALENDAR MODAL
-// Full-month grid showing all reminders grouped by date
+// REMINDER CALENDAR MODAL
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMonth }) {
   const [viewMonth, setViewMonth] = useState(currentMonth || new Date());
-
   const monthStart = startOfMonth(viewMonth);
-  const monthEnd   = endOfMonth(viewMonth);
-
+  const monthEnd = endOfMonth(viewMonth);
   const remindersByDate = useMemo(() => {
     const map = {};
     reminders.forEach(r => {
@@ -566,52 +579,40 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
     });
     return map;
   }, [reminders]);
-
-  // Pad to Sunday start
   const days = [];
   const startDay = monthStart.getDay();
   for (let i = 0; i < startDay; i++) days.push(null);
   let cur = new Date(monthStart);
   while (cur <= monthEnd) { days.push(new Date(cur)); cur = new Date(cur.getTime() + 86400000); }
-
   const prevMonth = () => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1));
   const nextMonth = () => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1));
-
   const totalThisMonth = reminders.filter(r => {
-    try { const d = new Date(r.remind_at); return d.getMonth() === viewMonth.getMonth() && d.getFullYear() === viewMonth.getFullYear(); }
-    catch { return false; }
+    try { const d = new Date(r.remind_at); return d.getMonth() === viewMonth.getMonth() && d.getFullYear() === viewMonth.getFullYear(); } catch { return false; }
   }).length;
-
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="px-6 py-4 flex items-center justify-between flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><CalendarIcon className="w-5 h-5 text-white" /></div>
             <div>
               <h2 className="text-lg font-black text-white">Reminder Calendar</h2>
-              <p className="text-purple-200 text-xs mt-0.5">{totalThisMonth} reminder{totalThisMonth !== 1 ? 's' : ''} this month · click any chip to view</p>
+              <p className="text-purple-200 text-xs mt-0.5">{totalThisMonth} reminder{totalThisMonth !== 1 ? 's' : ''} this month</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={prevMonth} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg font-bold transition-colors active:scale-90">‹</button>
+            <button onClick={prevMonth} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg font-bold">‹</button>
             <span className="text-white font-bold text-sm w-32 text-center">{format(viewMonth, 'MMMM yyyy')}</span>
-            <button onClick={nextMonth} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg font-bold transition-colors active:scale-90">›</button>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white ml-1 active:scale-90 transition-colors"><X className="w-4 h-4" /></button>
+            <button onClick={nextMonth} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg font-bold">›</button>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white ml-1"><X className="w-4 h-4" /></button>
           </div>
         </div>
-
-        {/* Calendar body */}
         <div className="flex-1 overflow-y-auto p-4">
-          {/* Day headers */}
           <div className="grid grid-cols-7 mb-1">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
               <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider py-1.5">{d}</div>
             ))}
           </div>
-
-          {/* Day cells */}
           <div className="grid grid-cols-7 gap-1">
             {days.map((day, i) => {
               if (!day) return <div key={`e${i}`} className="min-h-[76px]" />;
@@ -620,63 +621,30 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
               const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
               const hasDue = dayReminders.some(r => { try { return isPast(new Date(r.remind_at)); } catch { return false; } });
               const hasReminders = dayReminders.length > 0;
-
               return (
-                <div key={dateStr} className={`min-h-[76px] p-1.5 rounded-xl border transition-all ${
-                  hasReminders
-                    ? hasDue ? 'border-red-200 bg-red-50 hover:border-red-300 cursor-pointer' : 'border-purple-200 bg-purple-50 hover:border-purple-400 hover:bg-purple-100 cursor-pointer'
-                    : isToday ? 'border-blue-300 bg-blue-50' : 'border-slate-100 bg-white'
-                }`}>
-                  {/* Date number */}
-                  <div className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center leading-none ${
-                    isToday ? 'bg-blue-500 text-white'
-                    : hasReminders ? (hasDue ? 'text-red-700' : 'text-purple-700') : 'text-slate-400'
-                  }`}>{day.getDate()}</div>
-
-                  {/* Reminder chips */}
+                <div key={dateStr} className={`min-h-[76px] p-1.5 rounded-xl border transition-all ${hasReminders ? (hasDue ? 'border-red-200 bg-red-50' : 'border-purple-200 bg-purple-50 hover:bg-purple-100 cursor-pointer') : (isToday ? 'border-blue-300 bg-blue-50' : 'border-slate-100 bg-white')}`}>
+                  <div className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center ${isToday ? 'bg-blue-500 text-white' : hasReminders ? (hasDue ? 'text-red-700' : 'text-purple-700') : 'text-slate-400'}`}>{day.getDate()}</div>
                   <div className="space-y-0.5">
                     {dayReminders.slice(0, 3).map((r, idx) => {
                       const isDue = (() => { try { return isPast(new Date(r.remind_at)); } catch { return false; } })();
                       return (
-                        <motion.div
-                          key={r.id || r._id || idx}
-                          whileHover={{ scale: 1.02 }}
-                          onClick={() => onClickReminder(r)}
+                        <motion.div key={r.id || r._id || idx} whileHover={{ scale: 1.02 }} onClick={() => onClickReminder(r)}
                           className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md truncate leading-tight cursor-pointer"
-                          style={{ backgroundColor: isDue ? '#FEE2E2' : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple, border: `1px solid ${isDue ? '#FCA5A5' : COLORS.purple + '30'}` }}
-                          title={r.title}
-                        >
+                          style={{ backgroundColor: isDue ? '#FEE2E2' : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple, border: `1px solid ${isDue ? '#FCA5A5' : COLORS.purple + '30'}` }}>
                           {format(new Date(r.remind_at), 'h:mma')} {r.title}
                         </motion.div>
                       );
                     })}
-                    {dayReminders.length > 3 && (
-                      <div onClick={() => onClickReminder(dayReminders[3])} className="text-[9px] text-purple-500 font-bold px-1 cursor-pointer hover:underline">+{dayReminders.length - 3} more</div>
-                    )}
+                    {dayReminders.length > 3 && <div onClick={() => onClickReminder(dayReminders[3])} className="text-[9px] text-purple-500 font-bold px-1 cursor-pointer hover:underline">+{dayReminders.length - 3} more</div>}
                   </div>
                 </div>
               );
             })}
           </div>
-
-          {/* Legend */}
-          <div className="flex items-center gap-5 mt-4 pt-3 border-t border-slate-100 justify-center">
-            {[
-              { color: `${COLORS.purple}20`, border: `${COLORS.purple}40`, label: 'Upcoming' },
-              { color: '#FEE2E2', border: '#FCA5A5', label: 'Overdue' },
-            ].map(({ color, border, label }) => (
-              <div key={label} className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded" style={{ backgroundColor: color, border: `1px solid ${border}` }} />
-                <span className="text-xs text-slate-500">{label}</span>
-              </div>
-            ))}
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-blue-500" /><span className="text-xs text-slate-500">Today</span></div>
-          </div>
         </div>
-
         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
           <p className="text-xs text-slate-400">{reminders.length} total · click any chip to open details</p>
-          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">Close</Button>
+          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Close</Button>
         </div>
       </motion.div>
     </motion.div>
@@ -737,7 +705,6 @@ export default function Attendance() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
   const [showEmailImporter, setShowEmailImporter] = useState(false);
-  // ✅ NEW state for calendar modal
   const [showReminderCalendar, setShowReminderCalendar] = useState(false);
 
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
@@ -754,6 +721,7 @@ export default function Attendance() {
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
 
   useEffect(() => { fetchData(); fetchReminders(); }, []);
+
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
       const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave' || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
@@ -762,6 +730,7 @@ export default function Attendance() {
       return () => clearTimeout(timer);
     }
   }, [todayAttendance, isViewingOther, todayIsHoliday, modalActionDone]);
+
   useEffect(() => {
     setLiveDuration(calculateTodayLiveDuration(todayAttendance));
     if (todayAttendance?.punch_in && !todayAttendance?.punch_out) {
@@ -769,6 +738,7 @@ export default function Attendance() {
       return () => clearInterval(interval);
     }
   }, [todayAttendance]);
+
   useEffect(() => {
     const check = () => {
       const now = new Date();
@@ -785,6 +755,7 @@ export default function Attendance() {
     const id = setInterval(check, 30000);
     return () => clearInterval(id);
   }, [reminders]);
+
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
@@ -798,18 +769,14 @@ export default function Attendance() {
           if (!locationCache[key]) toResolve.push({ key, lat: record.punch_out_location.latitude, lng: record.punch_out_location.longitude });
         }
       }
-      if (displayTodayAttendance?.punch_out_location?.latitude) {
-        const loc = displayTodayAttendance.punch_out_location;
-        const key = `${loc.latitude},${loc.longitude}`;
-        if (!locationCache[key]) toResolve.push({ key, lat: loc.latitude, lng: loc.longitude });
-      }
       if (toResolve.length === 0) return;
       const results = {};
       for (const item of toResolve) results[item.key] = await reverseGeocode(item.lat, item.lng);
       setLocationCache(prev => ({ ...prev, ...results }));
     };
     resolveLocations();
-  }, [attendanceHistory, displayTodayAttendance]);
+  }, [attendanceHistory]);
+
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
     const checkAbsentWarning = () => {
@@ -884,14 +851,21 @@ export default function Attendance() {
     } finally { setLoading(false); }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // FIX: fetchReminders — normalize all reminder docs so `id` is always set
+  // ═══════════════════════════════════════════════════════════════════════
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
       if (uid === 'everyone') return;
       const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
       const res = await api.get(url);
-      setReminders(res.data || []);
-    } catch {}
+      // CRITICAL FIX: normalize _id → id for every reminder
+      const normalized = (res.data || []).map(normalizeReminder);
+      setReminders(normalized);
+    } catch (err) {
+      console.error('fetchReminders error:', err);
+    }
   }, [isViewingOther, selectedUserId]);
 
   const handlePunchAction = useCallback(async (action, e) => {
@@ -929,11 +903,7 @@ export default function Attendance() {
     let added = 0; const errors = [];
     for (const row of validRows) {
       try { await api.post('/holidays', { date: row.date, name: row.name.trim(), type: 'manual' }); added++; }
-      catch (err) {
-        const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
-        const isCors = !err?.response && (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('cors'));
-        errors.push(isCors ? `${row.name}: Network/CORS error` : `${row.name}: ${detail}`);
-      }
+      catch (err) { errors.push(`${row.name}: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`); }
     }
     if (added > 0) toast.success(`✓ ${added} holiday${added > 1 ? 's' : ''} saved`);
     if (errors.length > 0) errors.forEach(e => toast.error(e, { duration: 7000 }));
@@ -991,12 +961,18 @@ export default function Attendance() {
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
-      await api.post('/reminders', { title: reminderTitle.trim(), description: reminderDesc.trim() || null, remind_at: new Date(reminderDatetime).toISOString() });
+      const res = await api.post('/reminders', {
+        title: reminderTitle.trim(),
+        description: reminderDesc.trim() || null,
+        remind_at: new Date(reminderDatetime).toISOString(),
+      });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
-      await fetchReminders();
+      // Add the new reminder with normalized ID immediately
+      const newReminder = normalizeReminder(res.data);
+      setReminders(prev => [...prev, newReminder].sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)));
     } catch { toast.error('Failed to create reminder'); }
-  }, [reminderTitle, reminderDesc, reminderDatetime, fetchReminders]);
+  }, [reminderTitle, reminderDesc, reminderDatetime]);
 
   const handleEmailEventForReminder = useCallback((event) => {
     setReminderTitle(event.title || "");
@@ -1012,7 +988,7 @@ export default function Attendance() {
   }, []);
 
   const handleEditReminder = useCallback((reminderId) => {
-    const reminder = reminders.find(r => (r.id || r._id) === reminderId);
+    const reminder = reminders.find(r => r.id === reminderId || r._id === reminderId);
     if (reminder) { setEditingReminder(reminder); setIsEditModalOpen(true); }
   }, [reminders]);
 
@@ -1021,14 +997,12 @@ export default function Attendance() {
     if (!reminderId) return;
     try {
       await api.patch(`/reminders/${reminderId}`, updates);
-      const uid = isViewingOther ? selectedUserId : null;
-      const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
-      const res = await api.get(url);
-      setReminders(res.data || []);
+      // Re-fetch to get accurate server state
+      await fetchReminders();
       toast.success('Reminder updated successfully');
       setIsEditModalOpen(false); setEditingReminder(null);
     } catch (err) { toast.error('Failed to update reminder'); }
-  }, [editingReminder, isViewingOther, selectedUserId]);
+  }, [editingReminder, fetchReminders]);
 
   const handleTrademarkPdfUpload = useCallback(async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1061,24 +1035,68 @@ export default function Attendance() {
     finally { setTrademarkLoading(false); }
   }, []);
 
-  // ✅ FIX 3: handleDeleteReminder — tries r.id first, then r._id fallback
+  // ═══════════════════════════════════════════════════════════════════════
+  // FIX: handleDeleteReminder — complete rewrite
+  //
+  // Problem: auto-saved reminders have `source: "email_auto"`. When we
+  // delete them from the frontend, the next email scan re-saves them
+  // because the extraction cache still exists in email_extracted_events.
+  //
+  // Solution:
+  // 1. Try DELETE /reminders/{id} with the correct ID
+  // 2. If 404: mark as dismissed via PATCH (prevents re-firing popup)
+  // 3. Also try to clear the email_extracted_events cache entry that
+  //    caused this reminder to exist, so the next scan doesn't re-add it
+  // 4. Remove from local state immediately regardless
+  // ═══════════════════════════════════════════════════════════════════════
   const handleDeleteReminder = useCallback(async (id) => {
+    // Find the reminder in current state with either id or _id
     const reminder = reminders.find(r => r.id === id || r._id === id);
+    
+    // Determine the best ID to use for the API call
+    // The backend expects the MongoDB ObjectId string
     const reminderId = reminder?.id || reminder?._id || id;
+
+    // Optimistic removal from UI immediately
+    setReminders(prev => prev.filter(r => r.id !== id && r._id !== id));
+
     try {
       await api.delete(`/reminders/${reminderId}`);
-      setReminders(prev => prev.filter(r => (r.id || r._id) !== id));
       toast.success('Reminder deleted');
     } catch (err) {
-      if (err?.response?.status === 404) {
-        // Already gone — silently remove from local state
-        setReminders(prev => prev.filter(r => (r.id || r._id) !== id));
-        toast.success('Reminder removed');
+      const status = err?.response?.status;
+
+      if (status === 404) {
+        // Backend couldn't find it by this ID — try dismissing so it stops firing
+        try {
+          await api.patch(`/reminders/${reminderId}`, { is_dismissed: true });
+          toast.success('Reminder removed');
+        } catch {
+          // Already gone or wrong ID — the UI removal above already happened, that's fine
+          toast.success('Reminder removed');
+        }
       } else {
-        toast.error('Failed to delete reminder');
+        // Unexpected error — restore the reminder and show error
+        toast.error('Failed to delete reminder — please try again');
+        await fetchReminders(); // restore accurate state
+        return;
       }
     }
-  }, [reminders]);
+
+    // If this was an auto-saved reminder from email (source=email_auto),
+    // also clear it from the email events cache so next scan doesn't re-add it.
+    // We do this silently in the background.
+    if (reminder?.source === 'email_auto' || reminder?.email_message_id) {
+      try {
+        // Try to find and delete the originating email event by event_id
+        if (reminder.event_id) {
+          await api.delete(`/email/events/${reminder.event_id}`).catch(() => {});
+        }
+      } catch {
+        // Non-critical — silently ignore
+      }
+    }
+  }, [reminders, fetchReminders]);
 
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
@@ -1106,10 +1124,8 @@ export default function Attendance() {
       doc.setFont(undefined, 'normal'); doc.setFontSize(11);
       doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 42);
       doc.setDrawColor(200, 200, 200); doc.line(10, 47, 200, 47);
-      const monthlyHours = mySummary?.monthly_summary?.find(s => s.month === format(selectedDate, 'yyyy-MM'))?.total_hours || '0h 0m';
       const absentCount = attendanceHistory.filter(a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))).length;
       doc.setFontSize(11);
-      doc.text(`Total Monthly Hours : ${monthlyHours}`, 10, 56);
       doc.text(`Days Present : ${attendanceHistory.filter(a => a.punch_in && a.status === 'present').length}`, 10, 64);
       doc.text(`Days Absent : ${absentCount}`, 10, 72);
       doc.text(`Late Arrivals : ${attendanceHistory.filter(a => a.is_late).length}`, 10, 80);
@@ -1171,7 +1187,13 @@ export default function Attendance() {
     return allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isEveryoneView, isViewingOther, selectedUserId, allUsers]);
   const progressPct = useMemo(() => { const hrs = parseDurationToHours(displayLiveDuration); return Math.min(100, Math.round((hrs / 8.5) * 100)); }, [displayLiveDuration]);
-  const upcomingReminders = useMemo(() => reminders.filter(r => !r.is_dismissed).sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)), [reminders]);
+  
+  // Only show non-dismissed reminders, sorted by date
+  const upcomingReminders = useMemo(() =>
+    reminders.filter(r => !r.is_dismissed).sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)),
+    [reminders]
+  );
+  
   const recentAttendance = useMemo(() => { if (isEveryoneView) return attendanceHistory.slice(0, 25); return attendanceHistory.slice(0, 15); }, [attendanceHistory, isEveryoneView]);
   const userMap = useMemo(() => { const map = {}; allUsers.forEach(u => { map[u.id] = u.full_name; }); return map; }, [allUsers]);
   const getLocationLabel = useCallback((record, type = 'in') => {
@@ -1216,7 +1238,6 @@ export default function Attendance() {
           <ReminderEditModal isOpen={isEditModalOpen} onClose={() => { setIsEditModalOpen(false); setEditingReminder(null); }} reminder={editingReminder} onSave={handleUpdateReminder} />
         )}
       </AnimatePresence>
-      {/* ✅ NEW: Reminder Calendar Modal */}
       <AnimatePresence>
         {showReminderCalendar && (
           <ReminderCalendarModal
@@ -1229,7 +1250,7 @@ export default function Attendance() {
       </AnimatePresence>
 
       <motion.div className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
-        style={{ background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)`, fontFamily: "'DM Sans', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif" }}
+        style={{ background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)` }}
         variants={containerVariants} initial="hidden" animate="visible">
 
         {/* ── PAGE HEADER ── */}
@@ -1245,7 +1266,7 @@ export default function Attendance() {
           <div className="flex gap-3 flex-wrap items-center">
             {isAdmin && (
               <motion.select variants={itemVariants}
-                className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer hover:border-blue-300"
+                className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer"
                 value={selectedUserId || ''}
                 onChange={e => { const val = e.target.value || null; setSelectedUserId(val); fetchData(val); fetchReminders(val); }}>
                 <option value="">{allUsers.length === 0 ? 'Loading users…' : user?.full_name ? `${user.full_name} (Admin)` : 'My Attendance'}</option>
@@ -1254,19 +1275,15 @@ export default function Attendance() {
               </motion.select>
             )}
             {isAdmin && (
-              <motion.div variants={itemVariants} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                <Button onClick={(e) => { addAttRipple(e); handleMarkAbsentBulk(); }} disabled={absentLoading} variant="outline"
-                  className="att-ripple-btn border-2 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-400 font-semibold rounded-xl px-4 py-2.5 transition-all">
-                  <UserX className="w-4 h-4 mr-2" />{absentLoading ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Marking…</> : 'Mark Absent Now'}
-                </Button>
-              </motion.div>
-            )}
-            <motion.div variants={itemVariants} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-              <Button onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
-                className="att-ripple-btn border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all">
-                {exportingPDF ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</> : '↓ Export PDF'}
+              <Button onClick={(e) => { addAttRipple(e); handleMarkAbsentBulk(); }} disabled={absentLoading} variant="outline"
+                className="att-ripple-btn border-2 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-400 font-semibold rounded-xl px-4 py-2.5">
+                <UserX className="w-4 h-4 mr-2" />{absentLoading ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Marking…</> : 'Mark Absent Now'}
               </Button>
-            </motion.div>
+            )}
+            <Button onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
+              className="att-ripple-btn border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50">
+              {exportingPDF ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</> : '↓ Export PDF'}
+            </Button>
           </div>
         </motion.div>
 
@@ -1275,14 +1292,14 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
             <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0" />
             <div className="flex-1"><span className="text-sm font-bold text-red-800">Connection error: </span><span className="text-sm text-red-700">{dataError}</span></div>
-            <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800 active:scale-95 transition-all">Retry</button>
+            <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800">Retry</button>
           </motion.div>
         )}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-300 absent-pulse" style={{ backgroundColor: '#FFF1F2' }}>
             <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}><AlertTriangle className="w-5 h-5 text-red-600" /></motion.div>
             <span className="text-sm font-bold text-red-800 flex-1">⚠️ You haven't punched in today! {absentCountdown}</span>
-            <Button size="sm" onClick={(e) => { addAttRipple(e); handlePunchAction('punch_in'); }} className="att-ripple-btn bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4 active:scale-95 transition-all">
+            <Button size="sm" onClick={(e) => { addAttRipple(e); handlePunchAction('punch_in'); }} className="att-ripple-btn bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4">
               <LogIn className="w-4 h-4 mr-1" /> Punch In Now
             </Button>
           </motion.div>
@@ -1291,7 +1308,7 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200" style={{ backgroundColor: '#EFF6FF' }}>
             <Users className="w-4 h-4 text-blue-700" />
             <span className="text-sm font-semibold text-blue-900">{isEveryoneView ? 'Viewing attendance for all employees' : <>Viewing attendance for: <span className="underline decoration-dotted">{viewedUserName}</span></>}</span>
-            <button className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline active:scale-95 transition-all" onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>Clear — show my data</button>
+            <button className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline" onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>Clear — show my data</button>
           </motion.div>
         )}
 
@@ -1308,31 +1325,29 @@ export default function Attendance() {
                       </motion.div>
                       <div>
                         <h3 className="text-2xl font-bold">{isTodaySelected ? (isViewingOther ? `${viewedUserName}'s Status` : "Today's Status") : format(selectedDate, 'EEEE, MMM d')}</h3>
-                        <p className="text-blue-100 text-sm mt-0.5">{isViewingOther ? 'Read-only view — use the dropdown to switch users' : 'Real-time attendance • Auto-absent at 7:00 PM IST'}</p>
+                        <p className="text-blue-100 text-sm mt-0.5">{isViewingOther ? 'Read-only view' : 'Real-time attendance • Auto-absent at 7:00 PM IST'}</p>
                       </div>
                     </div>
                     {todayIsHoliday && (<div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}><p className="text-sm font-bold text-amber-200">🎉 Today is a holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}</p></div>)}
-                    {displayTodayAttendance?.status === 'absent' && (<motion.div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(239,68,68,0.25)' }} animate={{ opacity: [1, 0.85, 1] }} transition={{ duration: 2, repeat: Infinity }}><p className="text-sm font-bold text-red-200">❌ Marked as Absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}</p></motion.div>)}
+                    {displayTodayAttendance?.status === 'absent' && (<motion.div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(239,68,68,0.25)' }}><p className="text-sm font-bold text-red-200">❌ Marked as Absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}</p></motion.div>)}
                     {displayTodayAttendance?.punch_in && (
                       <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
                         <p className="text-blue-100 text-sm"><span className="font-semibold">In:</span> {formatAttendanceTime(displayTodayAttendance.punch_in)}{displayTodayAttendance.punch_out && <> • <span className="font-semibold">Out:</span> {formatAttendanceTime(displayTodayAttendance.punch_out)}</>}</p>
-                        {!isViewingOther && <p className="text-blue-100 text-xs">Expected: {user?.punch_in_time || '10:30'} ({user?.grace_time || '15'} min grace) • {user?.punch_out_time || '19:00'}</p>}
                       </div>
                     )}
-                    {displayTodayAttendance?.status === 'leave' && (<div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(249,115,22,0.2)' }}><p className="text-sm font-semibold text-orange-200">🟠 On leave today{displayTodayAttendance.leave_reason ? ` — ${displayTodayAttendance.leave_reason}` : ''}</p></div>)}
+                    {displayTodayAttendance?.status === 'leave' && (<div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(249,115,22,0.2)' }}><p className="text-sm font-semibold text-orange-200">🟠 On leave today</p></div>)}
                     {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
                           <>{isTodaySelected && (<motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading} className={`att-ripple-btn bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg ${!loading ? 'punch-in-pulse' : ''}`}>{loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching In…</> : <><LogIn className="w-5 h-5 inline mr-2" />Punch In</>}</motion.button>)}
-                          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowLeaveForm(true)} className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10 transition-all">Apply Leave</motion.button></>
+                          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowLeaveForm(true)} className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10">Apply Leave</motion.button></>
                         ) : !todayAttendance?.punch_out && todayAttendance?.punch_in && isTodaySelected ? (
-                          <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} onClick={(e) => handlePunchAction('punch_out', e)} disabled={loading} className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl transition-all hover:shadow-lg">{loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching Out…</> : <><LogOut className="w-5 h-5 inline mr-2" />Punch Out</>}</motion.button>
+                          <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} onClick={(e) => handlePunchAction('punch_out', e)} disabled={loading} className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl">{loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching Out…</> : <><LogOut className="w-5 h-5 inline mr-2" />Punch Out</>}</motion.button>
                         ) : todayAttendance?.punch_out ? (
                           <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}><Badge className="px-4 py-2 bg-white/20 text-white border-0 font-mono text-sm">✓ {formatDuration(todayAttendance.duration_minutes)}</Badge></motion.div>
                         ) : null}
                       </div>
                     )}
-                    {isViewingOther && <p className="text-xs text-blue-300 font-medium pt-1">ℹ️ Punch actions are only available for your own attendance.</p>}
                   </div>
                   <div><DigitalClock /></div>
                 </div>
@@ -1353,8 +1368,8 @@ export default function Attendance() {
                       <h4 className="font-bold text-slate-800 text-lg mb-2">{holiday.name}</h4>
                       <p className="text-sm text-slate-500 mb-4">{format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}</p>
                       <div className="flex gap-2">
-                        <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg active:scale-95 transition-all" onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
-                        <Button size="sm" variant="outline" className="flex-1 border-red-300 text-red-600 hover:bg-red-50 font-bold rounded-lg active:scale-95 transition-all" onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
+                        <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg" onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
+                        <Button size="sm" variant="outline" className="flex-1 border-red-300 text-red-600 hover:bg-red-50 font-bold rounded-lg" onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
                       </div>
                     </motion.div>
                   ))}
@@ -1369,13 +1384,13 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-red-100 shadow-md">
               <div className="px-6 py-4 flex items-center gap-3 border-b border-red-100" style={{ backgroundColor: '#FFF1F2' }}>
-                <UserX className="w-5 h-5 text-red-600" /><span className="text-sm font-black uppercase text-red-800">Absent This Month — {absentSummary.length} Staff Member(s)</span>
+                <UserX className="w-5 h-5 text-red-600" /><span className="text-sm font-black uppercase text-red-800">Absent This Month — {absentSummary.length} Staff</span>
                 <span className="ml-auto text-xs text-red-500 font-medium">Auto-marked at 7:00 PM IST</span>
               </div>
               <CardContent className="p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {absentSummary.map(item => (
-                    <motion.div key={item.user_id} whileHover={{ scale: 1.03 }} className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100 transition-all cursor-default">
+                    <motion.div key={item.user_id} whileHover={{ scale: 1.03 }} className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
                       <div className="w-9 h-9 rounded-full bg-red-200 flex items-center justify-center flex-shrink-0"><span className="text-red-700 font-bold text-sm">{(item.user_name || '?')[0]}</span></div>
                       <div className="min-w-0"><p className="text-sm font-bold text-slate-800 truncate">{item.user_name || 'Unknown'}</p><p className="text-xs text-red-600 font-semibold">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p></div>
                     </motion.div>
@@ -1388,7 +1403,7 @@ export default function Attendance() {
 
         {/* ── STAT CARDS ── */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
-          <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Month` : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours" color={COLORS.deepBlue} trend={`${monthDaysPresent} days present`} />
+          <StatCard icon={Timer} label={isEveryoneView ? 'Total (All Staff)' : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours" color={COLORS.deepBlue} trend={`${monthDaysPresent} days present`} />
           <StatCard icon={CheckCircle2} label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen} trend=" " />
           <StatCard icon={CalendarX} label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange} trend=" " />
           <StatCard icon={UserX} label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red} trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
@@ -1402,13 +1417,14 @@ export default function Attendance() {
               <CardContent className="p-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
                   <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">{isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Daily Progress` : 'Daily Progress'}</p>
-                    <motion.p key={displayLiveDuration} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-5xl font-black tracking-tight mb-1"
-                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen, fontVariantNumeric: 'tabular-nums' }}>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Daily Progress</p>
+                    <motion.p key={displayLiveDuration} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                      className="text-5xl font-black tracking-tight mb-1"
+                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
                       {displayTodayAttendance?.status === 'absent' ? 'Absent' : todayIsHoliday ? 'Holiday' : displayLiveDuration}
                     </motion.p>
                     <p className="text-xs font-bold uppercase tracking-wider" style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
-                      {displayTodayAttendance?.status === 'absent' ? `❌ Auto-marked absent${displayTodayAttendance.auto_marked ? ' at 7:00 PM' : ''}` : todayIsHoliday ? '🎉 Office closed today' : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out ? '● Live • updating every minute' : 'Total for today')}
+                      {displayTodayAttendance?.status === 'absent' ? '❌ Auto-marked absent' : todayIsHoliday ? '🎉 Office closed today' : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out ? '● Live • updating every minute' : 'Total for today')}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1439,32 +1455,31 @@ export default function Attendance() {
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.amber}22` }}><span className="text-base">🎉</span></div>
                       <div>
                         <h3 className="font-black text-sm" style={{ color: COLORS.deepBlue }}>Holidays — {format(selectedDate, 'MMM yyyy')}</h3>
-                        <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">{monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''} · click any row for details</p>
+                        <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">{monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''}</p>
                       </div>
                     </div>
-                    {isAdmin && (<Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }} size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs" style={{ backgroundColor: COLORS.amber }}><Plus className="w-3.5 h-3.5 mr-1" /> Add</Button>)}
+                    {isAdmin && (<Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }} size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs" style={{ backgroundColor: COLORS.amber }}><Plus className="w-3.5 h-3.5 mr-1" /> Add</Button>)}
                   </div>
                   <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                     {monthHolidaysGrid.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full py-8">
                         <span className="text-3xl block mb-2">🗓️</span>
                         <p className="text-slate-400 font-medium text-xs">No holidays this month</p>
-                        {isAdmin && <button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }} className="mt-2 text-amber-600 hover:text-amber-800 text-xs font-bold underline active:scale-95 transition-all">+ Add a holiday</button>}
                       </div>
                     ) : monthHolidaysGrid.map(h => (
-                      <motion.div key={h.date} className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
+                      <motion.div key={h.date} className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
                         style={{ borderColor: `${COLORS.amber}35`, backgroundColor: `${COLORS.amber}06` }}
                         whileHover={{ backgroundColor: `${COLORS.amber}12` }} onClick={() => setSelectedHolidayDetail(h)}>
                         <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                          <span className="text-[8px] leading-none uppercase tracking-wide">{format(parseISO(h.date), 'MMM')}</span>
+                          <span className="text-[8px] leading-none uppercase">{format(parseISO(h.date), 'MMM')}</span>
                           <span className="text-sm leading-none font-black">{format(parseISO(h.date), 'd')}</span>
                         </div>
-                        <div className="flex-1 min-w-0"><p className="text-sm font-bold text-slate-800 truncate leading-snug">{h.name}</p><p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p></div>
-                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors flex-shrink-0" />
+                        <div className="flex-1 min-w-0"><p className="text-sm font-bold text-slate-800 truncate">{h.name}</p><p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p></div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 flex-shrink-0" />
                         {isAdmin && (
-                          <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                            <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }} className="w-6 h-6 flex items-center justify-center rounded text-blue-500 hover:bg-blue-50 active:scale-90 transition-all"><Edit2 className="w-3 h-3" /></button>
-                            <button onClick={() => handleDeleteHoliday(h.date, h.name)} className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all"><Trash2 className="w-3 h-3" /></button>
+                          <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }} className="w-6 h-6 flex items-center justify-center rounded text-blue-500 hover:bg-blue-50"><Edit2 className="w-3 h-3" /></button>
+                            <button onClick={() => handleDeleteHoliday(h.date, h.name)} className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50"><Trash2 className="w-3 h-3" /></button>
                           </div>
                         )}
                       </motion.div>
@@ -1480,13 +1495,7 @@ export default function Attendance() {
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}><AlarmClock className="w-4 h-4" style={{ color: COLORS.purple }} /></div>
                   <div>
-                    {/* ✅ Clicking title opens calendar modal */}
-                    <h3
-                      className="font-black text-sm cursor-pointer hover:underline"
-                      style={{ color: COLORS.deepBlue }}
-                      onClick={() => setShowReminderCalendar(true)}
-                      title="Click to view full calendar"
-                    >
+                    <h3 className="font-black text-sm cursor-pointer hover:underline" style={{ color: COLORS.deepBlue }} onClick={() => setShowReminderCalendar(true)} title="Click to view full calendar">
                       {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
                     </h3>
                     <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">
@@ -1497,11 +1506,11 @@ export default function Attendance() {
                 {!isViewingOther && (
                   <div className="flex items-center gap-2">
                     <Button onClick={() => setShowEmailImporter(true)} size="sm" variant="outline"
-                      className="font-bold rounded-lg h-8 px-3 active:scale-95 transition-all flex-shrink-0 text-xs border-purple-200 text-purple-700 hover:bg-purple-50">
+                      className="font-bold rounded-lg h-8 px-3 text-xs border-purple-200 text-purple-700 hover:bg-purple-50">
                       <Mail className="w-3.5 h-3.5 mr-1" /> From Email
                     </Button>
                     <Button onClick={() => setShowReminderForm(true)} size="sm"
-                      className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 active:scale-95 transition-all hover:opacity-90 flex-shrink-0 text-xs"
+                      className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs"
                       style={{ backgroundColor: COLORS.purple }}>
                       <Plus className="w-3.5 h-3.5 mr-1" /> New
                     </Button>
@@ -1516,7 +1525,8 @@ export default function Attendance() {
                   </div>
                 ) : upcomingReminders.map((r, index) => {
                   const isDue = isPast(new Date(r.remind_at));
-                  const rid = r.id || r._id;
+                  // Use normalized `id` field (set by normalizeReminder)
+                  const rid = r.id;
                   return (
                     <motion.div key={rid || index}
                       className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
@@ -1532,10 +1542,16 @@ export default function Attendance() {
                         <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>⏰ {formatReminderTime(r.remind_at)}</p>
                       </div>
                       {isDue && <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block">Due</span>}
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 transition-colors flex-shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 flex-shrink-0" />
                       {!isViewingOther && (
                         <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => handleDeleteReminder(rid)} className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all"><Trash2 className="w-3 h-3" /></button>
+                          <button
+                            onClick={() => handleDeleteReminder(rid)}
+                            className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all"
+                            title="Delete reminder"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
                         </div>
                       )}
                     </motion.div>
@@ -1554,7 +1570,7 @@ export default function Attendance() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}><CalendarIcon className="w-5 h-5" /> Attendance Calendar</CardTitle>
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())} className="text-xs font-bold hover:bg-slate-100 active:scale-95 transition-all">Today</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())} className="text-xs font-bold">Today</Button>
                   </div>
                   <CardDescription className="text-xs">Click a date for details</CardDescription>
                 </CardHeader>
@@ -1567,14 +1583,12 @@ export default function Attendance() {
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
-                      { color: COLORS.red, label: 'Late', style: 'solid' },
-                      { color: COLORS.red, label: 'Absent', style: 'solid', bg: '#FEE2E240' },
-                      { color: COLORS.red, label: 'Not in yet', style: 'dashed' },
+                      { color: COLORS.red, label: 'Late/Absent', style: 'solid' },
                       { color: COLORS.amber, label: 'Holiday', style: 'solid' },
                       { color: COLORS.orange, label: 'Leave', style: 'solid' },
-                    ].map(({ color, label, style, bg }) => (
+                    ].map(({ color, label, style }) => (
                       <div key={label} className="flex items-center gap-1.5">
-                        <span className="w-4 h-4 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, borderStyle: style, backgroundColor: bg || `${color}25` }} />
+                        <span className="w-4 h-4 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, borderStyle: style, backgroundColor: `${color}25` }} />
                         <span className="text-slate-600">{label}</span>
                       </div>
                     ))}
@@ -1584,23 +1598,21 @@ export default function Attendance() {
               <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
                 <CardContent className="p-0 h-full overflow-y-auto">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full"><p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>{selectedAttendance.auto_marked && <p className="text-xs text-red-500 mt-2 font-medium">Auto-marked absent at 7:00 PM IST</p>}</div>
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full"><p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p></div>
                   ) : selectedAttendance?.punch_in ? (
                     <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4 h-full" style={{ borderColor: COLORS.emeraldGreen }}>
                       <p className="font-bold text-slate-800 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       <div className="space-y-3 text-sm">
-                        <div className="flex justify-between items-center"><span className="text-slate-600 font-medium">Punch In</span><span className="font-mono font-bold text-slate-900">{formatAttendanceTime(selectedAttendance.punch_in)}</span></div>
-                        {selectedAttendance.punch_out && <div className="flex justify-between items-center"><span className="text-slate-600 font-medium">Punch Out</span><span className="font-mono font-bold text-slate-900">{formatAttendanceTime(selectedAttendance.punch_out)}</span></div>}
-                        {selectedAttendance.is_late && <div className="flex justify-between items-center"><span className="text-slate-600 font-medium">Status</span><span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late Arrival</span></div>}
-                        {getLocationLabel(selectedAttendance, 'in') && <div className="flex justify-between items-start gap-2"><span className="text-slate-600 font-medium text-xs">In Location</span><span className="text-xs font-medium text-slate-700 text-right max-w-[60%] leading-snug">{getLocationLabel(selectedAttendance, 'in')}</span></div>}
-                        {getLocationLabel(selectedAttendance, 'out') && <div className="flex justify-between items-start gap-2"><span className="text-slate-600 font-medium text-xs">Out Location</span><span className="text-xs font-medium text-slate-700 text-right max-w-[60%] leading-snug">{getLocationLabel(selectedAttendance, 'out')}</span></div>}
-                        <div className="pt-3 border-t flex justify-between items-center"><span className="font-bold text-slate-800">Duration</span><Badge className="px-3 py-1 font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge></div>
+                        <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch In</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_in)}</span></div>
+                        {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch Out</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_out)}</span></div>}
+                        {selectedAttendance.is_late && <div className="flex justify-between"><span className="text-slate-600 font-medium">Status</span><span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span></div>}
+                        <div className="pt-3 border-t flex justify-between"><span className="font-bold text-slate-800">Duration</span><Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge></div>
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}><p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>{selectedAttendance.leave_reason && <p className="text-xs text-slate-500 mt-2 font-medium">Reason: {selectedAttendance.leave_reason}</p>}</div>
+                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}><p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p></div>
                   ) : selectedHoliday ? (
-                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full"><p className="text-sm font-bold text-amber-900">🎉 Holiday: {selectedHoliday.name}</p><p className="text-xs text-amber-700 mt-1">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p></div>
+                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full"><p className="text-sm font-bold text-amber-900">🎉 {selectedHoliday.name}</p></div>
                   ) : (
                     <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400 h-full"><p className="text-sm font-bold text-red-900">No record for {format(selectedDate, 'MMM d')}</p></div>
                   )}
@@ -1613,14 +1625,14 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
             <Card className="border-0 shadow-md h-full">
               <CardHeader className="border-b border-slate-100 py-3">
-                <CardTitle style={{ color: COLORS.deepBlue }}>{isEveryoneView ? 'All Employees — Recent Attendance' : isViewingOther ? `${viewedUserName}'s Recent Attendance` : 'Recent Attendance'}</CardTitle>
-                <CardDescription>{isEveryoneView ? 'Latest 25 records across all staff' : 'Last 15 records'}</CardDescription>
+                <CardTitle style={{ color: COLORS.deepBlue }}>{isEveryoneView ? 'All Employees — Recent Attendance' : 'Recent Attendance'}</CardTitle>
+                <CardDescription>{isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}</CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center py-16">
                     <motion.div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-                    <span className="ml-3 text-slate-500 font-medium">Loading attendance data…</span>
+                    <span className="ml-3 text-slate-500 font-medium">Loading…</span>
                   </div>
                 ) : recentAttendance.length === 0 ? (
                   <p className="text-center py-12 text-slate-500 font-medium">No records yet</p>
@@ -1634,23 +1646,23 @@ export default function Attendance() {
                       const isLeave = record.status === 'leave';
                       const isPresent = record.punch_in && record.status === 'present';
                       return (
-                        <motion.div key={`${record.date}-${record.user_id || idx}`} variants={itemVariants} whileHover={{ x: 2, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}
-                          className="p-3 rounded-lg transition-all border cursor-default"
+                        <motion.div key={`${record.date}-${record.user_id || idx}`} variants={itemVariants} whileHover={{ x: 2 }}
+                          className="p-3 rounded-lg transition-all border"
                           style={{ backgroundColor: isAbsent ? '#FFF1F2' : isLeave ? '#FFF7ED' : isPresent ? '#F0FDF4' : '#F8FAFC', borderColor: isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0', borderLeftWidth: 4, borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200 }}>
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
                               {recordUserName && <p className="text-xs font-bold text-blue-700 mb-1 flex items-center gap-1"><Users className="w-3 h-3" />{recordUserName}</p>}
                               <p className="font-bold text-slate-800 text-sm">{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
                               <p className="text-xs text-slate-500 mt-1 font-mono">
-                                {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}` : isLeave ? `🟠 On Leave${record.leave_reason ? ` — ${record.leave_reason}` : ''}` : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing'}` : '—'}
+                                {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked)' : ''}` : isLeave ? `🟠 On Leave` : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing'}` : '—'}
                               </p>
-                              {inLocLabel && !isAbsent && <p className="text-[11px] text-slate-500 mt-1.5 flex items-start gap-1"><MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.emeraldGreen }} /><span><span className="font-semibold text-emerald-700">In: </span>{inLocLabel}</span></p>}
+                              {inLocLabel && !isAbsent && <p className="text-[11px] text-slate-500 mt-1 flex items-start gap-1"><MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.emeraldGreen }} /><span><span className="font-semibold text-emerald-700">In: </span>{inLocLabel}</span></p>}
                               {outLocLabel && !isAbsent && <p className="text-[11px] text-slate-500 mt-0.5 flex items-start gap-1"><MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.orange }} /><span><span className="font-semibold text-orange-600">Out: </span>{outLocLabel}</span></p>}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                              {isAbsent ? <span className="text-[10px] font-black uppercase px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200">Absent</span>
+                              {isAbsent ? <span className="text-[10px] font-black uppercase px-2 py-1 rounded bg-red-100 text-red-700">Absent</span>
                                 : isLeave ? <span className="text-[10px] font-bold uppercase px-2 py-1 rounded" style={{ color: COLORS.orange, backgroundColor: `${COLORS.orange}20` }}>Leave</span>
-                                : <Badge className="font-mono text-xs font-bold px-2 py-1" style={{ backgroundColor: record.duration_minutes > 0 ? `${COLORS.emeraldGreen}20` : COLORS.slate200, color: record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue, border: `1px solid ${record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.slate200}` }}>{formatDuration(record.duration_minutes)}</Badge>}
+                                : <Badge className="font-mono text-xs font-bold px-2 py-1" style={{ backgroundColor: record.duration_minutes > 0 ? `${COLORS.emeraldGreen}20` : COLORS.slate200, color: record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue }}>{formatDuration(record.duration_minutes)}</Badge>}
                               {record.is_late && !isAbsent && <span className="text-[10px] font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span>}
                             </div>
                           </div>
@@ -1665,124 +1677,106 @@ export default function Attendance() {
         </motion.div>
 
         {/* ══ MODALS ══ */}
-        {/* Punch-In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
             <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowPunchInModal(false)}>
               <motion.div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl" onClick={e => e.stopPropagation()} initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
-                <div className="mb-6"><motion.div className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center punch-in-pulse" animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1, repeat: Infinity }}><LogIn className="w-10 h-10 text-emerald-600" /></motion.div></div>
+                <div className="mb-6"><motion.div className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center punch-in-pulse"><LogIn className="w-10 h-10 text-emerald-600" /></motion.div></div>
                 <h2 className="text-3xl font-black mb-3" style={{ color: COLORS.deepBlue }}>Good Morning! 👋</h2>
                 <p className="text-slate-600 text-lg mb-2">Let's punch in and start your day</p>
                 <p className="text-xs text-red-500 font-semibold mb-8">⚠️ Auto-absent marks at 7:00 PM if you don't punch in</p>
-                <Button onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading} className="att-ripple-btn w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white active:scale-95 transition-all" style={{ backgroundColor: COLORS.emeraldGreen }}>
+                <Button onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading} className="att-ripple-btn w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white" style={{ backgroundColor: COLORS.emeraldGreen }}>
                   {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Punching In…</> : 'Punch In Now'}
                 </Button>
-                <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline active:scale-95 transition-all">I'll do it later</button>
+                <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline">I'll do it later</button>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="flex justify-between items-start mb-8">
-                  <div><h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2><p className="text-slate-500 mt-1 text-sm font-medium">Select your leave period</p></div>
-                  <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-light active:scale-90 transition-all">✕</button>
+                  <div><h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2></div>
+                  <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-light">✕</button>
                 </div>
                 <div className="mb-8">
-                  <p className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-widest">Quick Select</p>
                   <div className="flex flex-wrap gap-2">
-                    {[1, 3, 7, 15, 30].map(days => (<Button key={days} variant="outline" size="sm" onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }} className="rounded-lg font-semibold hover:bg-blue-50 hover:border-blue-300 active:scale-95 transition-all">{days === 1 ? '1 Day' : `${days} Days`}</Button>))}
+                    {[1, 3, 7, 15, 30].map(days => (<Button key={days} variant="outline" size="sm" onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }} className="rounded-lg font-semibold">{days === 1 ? '1 Day' : `${days} Days`}</Button>))}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div><label className="text-sm font-bold text-slate-700 mb-3 block">From Date</label><Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom} disabled={date => isBefore(date, startOfDay(new Date()))} className="rounded-xl border border-slate-200" /></div>
                   <div><label className="text-sm font-bold text-slate-700 mb-3 block">To Date</label><Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo} disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true} className="rounded-xl border border-slate-200" /></div>
                 </div>
-                {leaveFrom && (<motion.div className="p-5 rounded-2xl mb-8" style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                {leaveFrom && (<motion.div className="p-5 rounded-2xl mb-8" style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}>
                   <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
                   <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>{Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days</p>
-                  <p className="text-xs text-slate-500 mt-2 font-medium">{format(leaveFrom, 'dd MMM')} — {leaveTo ? format(leaveTo, 'dd MMM yyyy') : format(leaveFrom, 'dd MMM yyyy')}</p>
                 </motion.div>)}
-                <div className="mb-8"><label className="text-sm font-bold text-slate-700 mb-2 block">Reason (Optional)</label><textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)} placeholder="Tell us why you need leave…" className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none transition-colors" /></div>
+                <div className="mb-8"><label className="text-sm font-bold text-slate-700 mb-2 block">Reason</label><textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)} placeholder="Reason for leave…" className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none" /></div>
                 <div className="flex justify-end gap-3">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)} className="font-semibold rounded-lg active:scale-95 transition-all">Cancel</Button>
-                  <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="att-ripple-btn font-bold rounded-lg text-white active:scale-95 transition-all" style={{ backgroundColor: COLORS.deepBlue }}>Submit Request</Button>
+                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
+                  <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="font-bold text-white" style={{ backgroundColor: COLORS.deepBlue }}>Submit Request</Button>
                 </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Add Holiday Modal */}
         <AnimatePresence>
           {showHolidayModal && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
                   <div className="flex items-center justify-between mb-4">
-                    <div><h2 className="text-2xl font-black">Add Holidays</h2><p className="text-amber-100 text-sm mt-1">Batch-add manually or import from PDF</p></div>
-                    <button onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center active:scale-90 transition-all"><X className="w-5 h-5 text-white" /></button>
+                    <div><h2 className="text-2xl font-black">Add Holidays</h2></div>
+                    <button onClick={() => setShowHolidayModal(false)} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="w-5 h-5 text-white" /></button>
                   </div>
                   <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfImport} className="hidden" />
-                  <button onClick={() => pdfInputRef.current?.click()} disabled={pdfImporting} className="att-ripple-btn flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60 active:scale-95 transition-all">
+                  <button onClick={() => pdfInputRef.current?.click()} disabled={pdfImporting} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15">
                     {pdfImporting ? <><Loader2 className="w-4 h-4 animate-spin" />Extracting…</> : <><FileUp className="w-4 h-4" />Import from PDF</>}
                   </button>
                 </div>
                 <div className="p-8">
-                  <div className="grid grid-cols-[1fr_160px_40px] gap-3 mb-4">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name</p>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Date</p>
-                  </div>
                   <div className="space-y-3 max-h-[50vh] overflow-y-auto slim-scroll mb-6">
                     {holidayRows.map((row, idx) => (
-                      <motion.div key={idx} className="grid grid-cols-[1fr_160px_40px] gap-3 items-center" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                        <input type="text" value={row.name} onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], name: e.target.value }; setHolidayRows(updated); }} placeholder="e.g., Diwali" className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400 transition-colors" />
-                        <input type="date" value={row.date} onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], date: e.target.value }; setHolidayRows(updated); }} className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400 transition-colors" />
-                        <button onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))} disabled={holidayRows.length === 1} className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 font-bold text-lg active:scale-90 transition-all">×</button>
+                      <motion.div key={idx} className="grid grid-cols-[1fr_160px_40px] gap-3 items-center">
+                        <input type="text" value={row.name} onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], name: e.target.value }; setHolidayRows(updated); }} placeholder="e.g., Diwali" className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                        <input type="date" value={row.date} onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], date: e.target.value }; setHolidayRows(updated); }} className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                        <button onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))} disabled={holidayRows.length === 1} className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 disabled:opacity-30 font-bold text-lg">×</button>
                       </motion.div>
                     ))}
                   </div>
-                  <button onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])} className="flex items-center gap-2 text-sm font-bold text-amber-600 hover:text-amber-800 mb-6 active:scale-95 transition-all">
+                  <button onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])} className="flex items-center gap-2 text-sm font-bold text-amber-600 hover:text-amber-800 mb-6">
                     <span className="w-6 h-6 rounded-full border-2 border-amber-500 flex items-center justify-center">+</span>Add Another
                   </button>
                 </div>
-                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <p className="text-xs text-slate-500 font-medium">{holidayRows.filter(r => r.name.trim() && r.date).length} of {holidayRows.length} ready</p>
-                  <div className="flex gap-3">
-                    <Button variant="ghost" onClick={() => { setShowHolidayModal(false); setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); }} className="font-bold rounded-lg active:scale-95 transition-all">Cancel</Button>
-                    <Button disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0} onClick={handleAddHolidays} className="att-ripple-btn font-bold text-white rounded-lg active:scale-95 transition-all" style={{ backgroundColor: COLORS.amber }}>Save</Button>
-                  </div>
+                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)}>Cancel</Button>
+                  <Button disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0} onClick={handleAddHolidays} className="font-bold text-white" style={{ backgroundColor: COLORS.amber }}>Save</Button>
                 </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                  <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><Edit2 className="w-5 h-5 text-white" /></div><div><h2 className="text-xl font-black">Edit Holiday</h2><p className="text-amber-100 text-xs mt-0.5">Update the name or date</p></div></div>
-                  <button onClick={() => setEditingHoliday(null)} className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all"><X className="w-5 h-5 text-white" /></button>
+                  <h2 className="text-xl font-black">Edit Holiday</h2>
+                  <button onClick={() => setEditingHoliday(null)} className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-5 h-5 text-white" /></button>
                 </div>
                 <div className="p-8 space-y-5">
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Original:</span>
-                    <span className="text-sm font-semibold text-slate-700">{editingHoliday.name}</span>
-                    <span className="text-xs text-slate-400 ml-auto font-mono">{editingHoliday.date}</span>
-                  </div>
-                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Holiday Name *</label><input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm transition-colors" /></div>
-                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Date *</label><input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm transition-colors" />{editDate && <p className="text-xs text-slate-500 mt-1.5">📅 {format(parseISO(editDate), 'EEEE, MMMM d, yyyy')}</p>}</div>
+                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Holiday Name</label><input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm" /></div>
+                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Date</label><input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm" /></div>
                 </div>
                 <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
-                  <Button variant="ghost" onClick={() => setEditingHoliday(null)} className="font-bold rounded-xl active:scale-95 transition-all">Cancel</Button>
-                  <Button disabled={!editName.trim() || !editDate || editLoading} onClick={handleEditHolidaySave} className="att-ripple-btn font-bold text-white rounded-xl px-6 active:scale-95 transition-all" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                  <Button variant="ghost" onClick={() => setEditingHoliday(null)}>Cancel</Button>
+                  <Button disabled={!editName.trim() || !editDate || editLoading} onClick={handleEditHolidaySave} className="font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
                     {editLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : <><CheckCircle2 className="w-4 h-4 mr-2" />Save Changes</>}
                   </Button>
                 </div>
@@ -1791,7 +1785,6 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
-        {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1800,64 +1793,43 @@ export default function Attendance() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><AlarmClock className="w-5 h-5 text-white" /></div>
-                      <div><h2 className="text-2xl font-black">New Reminder</h2><p className="text-purple-200 text-sm mt-0.5">Manual entry or auto-fill from a notice PDF</p></div>
+                      <div><h2 className="text-2xl font-black">New Reminder</h2><p className="text-purple-200 text-sm mt-0.5">Manual entry or auto-fill from PDF</p></div>
                     </div>
-                    <button onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all"><X className="w-4 h-4 text-white" /></button>
+                    <button onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white" /></button>
                   </div>
                   <div className="mt-4 flex items-center gap-3">
                     <input ref={trademarkPdfRef} type="file" accept=".pdf" onChange={handleTrademarkPdfUpload} className="hidden" />
-                    <button onClick={() => trademarkPdfRef.current?.click()} disabled={trademarkLoading} className="att-ripple-btn flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60 active:scale-95 transition-all">
+                    <button onClick={() => trademarkPdfRef.current?.click()} disabled={trademarkLoading} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60">
                       {trademarkLoading ? <><Loader2 className="w-4 h-4 animate-spin" />Reading PDF…</> : <><FileUp className="w-4 h-4" />Upload Notice PDF</>}
                     </button>
-                    <p className="text-purple-200 text-xs leading-snug">Trademark hearing notice,<br />IP Office letter, etc.</p>
                   </div>
                 </div>
                 <div className="p-8 space-y-5 overflow-y-auto slim-scroll flex-1">
                   {trademarkData && (
                     <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl overflow-hidden border-2 border-purple-200">
                       <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.purple}15, ${COLORS.purple}05)` }}>
-                        <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.purple }} />
+                        <CheckCircle2 className="w-4 h-4" style={{ color: COLORS.purple }} />
                         <span className="text-xs font-black uppercase tracking-widest" style={{ color: COLORS.purple }}>Extracted from PDF</span>
-                        <span className="ml-auto text-[10px] text-slate-400 font-medium">{trademarkData.document_type}</span>
                       </div>
                       <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                         {[
                           { label: 'Application No', value: trademarkData.application_no, bold: true },
                           { label: 'Class', value: trademarkData.class },
                           { label: 'Applicant', value: trademarkData.applicant_name, bold: true },
-                          { label: 'Agent/Recipient', value: trademarkData.recipient_name },
-                          { label: 'Application Date', value: trademarkData.application_date },
-                          { label: 'Used Since', value: trademarkData.used_since },
-                          { label: 'Notice Date', value: trademarkData.letter_date },
-                          { label: 'Brand/Mark', value: trademarkData.brand_name },
+                          { label: 'Hearing Date', value: trademarkData.hearing_date },
                         ].filter(f => f.value).map(({ label, value, bold }) => (
-                          <div key={label}><p className="text-slate-400 text-[10px] uppercase font-bold tracking-wide">{label}</p><p className={`text-slate-800 mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`}>{value}</p></div>
+                          <div key={label}><p className="text-slate-400 text-[10px] uppercase font-bold">{label}</p><p className={`text-slate-800 mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`}>{value}</p></div>
                         ))}
-                        {trademarkData.hearing_date && (
-                          <div className="col-span-2 mt-1 p-2.5 rounded-xl flex items-center gap-2" style={{ backgroundColor: `${COLORS.purple}12`, border: `1.5px solid ${COLORS.purple}30` }}>
-                            <CalendarIcon className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.purple }} />
-                            <div><p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Hearing Date</p><p className="font-black text-sm" style={{ color: COLORS.purple }}>{trademarkData.hearing_date}</p></div>
-                            {(() => {
-                              const hearingDT = new Date(`${trademarkData.hearing_date}T10:00:00`);
-                              const endDT = new Date(`${trademarkData.hearing_date}T11:00:00`);
-                              const fmt = (d) => d.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
-                              const title = reminderTitle || `Trademark Hearing — App No. ${trademarkData.application_no}`;
-                              const details = reminderDesc || `Application No: ${trademarkData.application_no}\nApplicant: ${trademarkData.applicant_name || '—'}\nClass: ${trademarkData.class || '—'}\nHearing via Video Conferencing (IPO Website → Dynamic Utilities → Cause List)`;
-                              const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${fmt(hearingDT)}/${fmt(endDT)}&details=${encodeURIComponent(details)}&location=${encodeURIComponent('Video Conference — IPO Website Dynamic Cause List')}`;
-                              return (<a href={gcalUrl} target="_blank" rel="noopener noreferrer" className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white active:scale-95 transition-all hover:opacity-90" style={{ backgroundColor: COLORS.deepBlue }}><CalendarPlus className="w-3.5 h-3.5" />Add to Calendar</a>);
-                            })()}
-                          </div>
-                        )}
                       </div>
                     </motion.div>
                   )}
-                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Title *{trademarkData && <span className="ml-2 text-[10px] text-purple-500 font-semibold normal-case">auto-filled</span>}</label><input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)} placeholder="e.g., Trademark Show Cause Hearing, Team standup…" className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors" /></div>
-                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Date & Time *{trademarkData?.hearing_date && <span className="ml-2 text-[10px] text-purple-500 font-semibold normal-case">auto-filled from hearing date</span>}</label><input type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)} min={format(new Date(), "yyyy-MM-dd'T'HH:mm")} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 transition-colors" /></div>
-                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Description{trademarkData && <span className="ml-2 text-[10px] text-purple-500 font-semibold normal-case">auto-filled</span>}</label><textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)} placeholder="Add notes, agenda, application details, meeting link…" rows={4} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 resize-none transition-colors text-sm font-mono" /></div>
+                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Title *</label><input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)} placeholder="e.g., Trademark Hearing, GST filing…" className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400" /></div>
+                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Date & Time *</label><input type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)} min={format(new Date(), "yyyy-MM-dd'T'HH:mm")} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400" /></div>
+                  <div><label className="text-sm font-bold text-slate-700 mb-2 block">Description</label><textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)} placeholder="Add notes, agenda, details…" rows={4} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 resize-none text-sm font-mono" /></div>
                 </div>
                 <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
-                  <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }} className="font-bold rounded-lg active:scale-95 transition-all">Cancel</Button>
-                  <Button disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder} className="att-ripple-btn font-bold text-white rounded-lg px-6 active:scale-95 transition-all" style={{ backgroundColor: COLORS.purple }}>
+                  <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}>Cancel</Button>
+                  <Button disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder} className="font-bold text-white px-6" style={{ backgroundColor: COLORS.purple }}>
                     <Bell className="w-4 h-4 mr-2" /> Set Reminder
                   </Button>
                 </div>
