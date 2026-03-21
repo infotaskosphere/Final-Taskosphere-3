@@ -22,6 +22,7 @@ import {
   MapPin,
   Settings,
   Mail,
+  Receipt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -56,11 +57,11 @@ const NAV_GROUPS = [
     id: 'records',
     dividerLabel: 'Records',
     items: [
-      { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'        },
-      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'      },
-      { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients'    },
-      { path: '/leads',     icon: Target,   label: 'Lead Management',   permission: 'can_view_all_leads'      },
-      { path: '/quotations', icon: FileText, label: 'Quotations', permission: 'can_create_quotations'         },
+      { path: '/dsc',        icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'        },
+      { path: '/documents',  icon: FileText, label: 'Document Register', permission: 'can_view_documents'      },
+      { path: '/clients',    icon: Users,    label: 'Clients',           permission: 'can_view_all_clients'    },
+      { path: '/leads',      icon: Target,   label: 'Lead Management',   permission: 'can_view_all_leads'      },
+      { path: '/quotations', icon: Receipt,  label: 'Quotations',        permission: 'can_create_quotations'   },
     ],
   },
   {
@@ -77,8 +78,8 @@ const NAV_GROUPS = [
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'  },
-      { path: '/settings',       icon: Settings, label: 'General Settings'},
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
+      { path: '/settings',       icon: Settings, label: 'General Settings' },
     ],
   },
 ];
@@ -102,7 +103,6 @@ const DashboardLayout = ({ children }) => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('theme') === 'dark';
   });
-  // Track whether we're on desktop so header/content offset updates on resize
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.innerWidth >= 1024
   );
@@ -161,12 +161,8 @@ const DashboardLayout = ({ children }) => {
   );
   const activeLabel = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
-  // ── Derive sidebar pixel width from state ─────────────────────────────────
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
-
-  // ── On desktop the header/content offset = sidebarPx.
-  //    On mobile the sidebar slides over the content, so offset = 0. ─────────
-  const offsetPx = isDesktop ? sidebarPx : 0;
+  const offsetPx  = isDesktop ? sidebarPx : 0;
 
   // ── Sidebar nav item ──────────────────────────────────────────────────────
   const NavItem = ({ item }) => {
@@ -214,6 +210,7 @@ const DashboardLayout = ({ children }) => {
               {item.label}
             </span>
           )}
+          {/* Tooltip when collapsed */}
           {collapsed && (
             <div className="
               absolute left-full ml-3 px-2.5 py-1.5
@@ -351,21 +348,16 @@ const DashboardLayout = ({ children }) => {
         )}
       </aside>
 
-      {/* ── HEADER ───────────────────────────────────────────────────────────
-          KEY FIX: NO Tailwind margin class here at all.
-          Only inline `left` controls the offset — driven by offsetPx (0 on
-          mobile, sidebarPx on desktop). `right: 0` is the default for a
-          fixed element so the header always stretches to the screen edge.
-      ── */}
+      {/* ── HEADER ── */}
       <header
         className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
         style={{
-          left: offsetPx,
-          width: `calc(100% - ${offsetPx}px)`, // This ensures it stretches to the right edge
-          background: isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
+          left:         offsetPx,
+          width:        `calc(100% - ${offsetPx}px)`,
+          background:   isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
           borderBottom: isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
-          boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
-          backdropFilter: 'blur(12px)',
+          boxShadow:    '0 1px 8px rgba(0,0,0,0.06)',
+          backdropFilter:       'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
         }}
       >
@@ -533,11 +525,7 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main Content ─────────────────────────────────────────────────────
-          Margin-left = offsetPx (same value header uses) so content never
-          hides under the sidebar.
-          Padding-top = 56px (h-14) so content never hides under the header.
-      ── */}
+      {/* ── Main Content ── */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{
