@@ -21,6 +21,7 @@ const StaffActivity     = lazy(() => import("@/pages/StaffActivity"));
 const LeadsPage         = lazy(() => import("@/pages/Leads"));
 const VisitsPage        = lazy(() => import("@/pages/VisitsPage"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings"));
+const Quotations        = lazy(() => import("@/pages/Quotations"));
 
 // ✅ FIX: GeneralSettings — if build fails saying "can't resolve", check which
 // folder the file is in and update this import path to match:
@@ -252,6 +253,16 @@ function AppRoutes() {
             <Protected>
               <VisitsPage />
             </Protected>
+          }
+        />
+
+        {/* Quotations — permission gated */}
+        <Route
+          path="/quotations"
+          element={
+            <Permission permission="can_create_quotations">
+              <Quotations />
+            </Permission>
           }
         />
 
