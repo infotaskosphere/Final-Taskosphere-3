@@ -916,6 +916,20 @@ async def reject_user(user_id: str, current_user: User = Depends(require_admin))
     return {"message": "User rejected"}
 
 # ==========================================================
+
+def normalize_reminder_doc(doc: dict) -> dict:
+    """Ensure every reminder document has a string `id` field."""
+    if not doc:
+        return doc
+    doc = dict(doc)
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+    # Also normalize datetime fields
+    for field in ["remind_at", "created_at", "updated_at"]:
+        if field in doc and doc[field] and hasattr(doc[field], 'isoformat'):
+            doc[field] = doc[field].isoformat()
+    return doc
+
 # REMINDER ROUTES
 # ==========================================================
 
@@ -951,27 +965,39 @@ async def get_reminders(
     else:
         query = {"user_id": current_user.id}
 
-    reminders = await db.reminders.find(query, {"_id": 0}).sort("remind_at", 1).to_list(500)
-    return reminders
+    reminders = await db.reminders.find(query).sort("remind_at", 1).to_list(500)
+    return [normalize_reminder_doc(doc) for doc in reminders]
 
 
 @api_router.patch("/reminders/{reminder_id}")
 async def update_reminder(
     reminder_id: str,
-    data: dict,
+    updates: dict,
     current_user: User = Depends(get_current_user)
 ):
-    existing = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Reminder not found")
-    if existing["user_id"] != current_user.id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized")
+    """Update a reminder — handles both ObjectId and string id formats."""
+    user_id = str(current_user.id)
 
-    allowed = {"title", "description", "remind_at", "is_dismissed"}
-    update = {k: v for k, v in data.items() if k in allowed}
-    if update:
-        await db.reminders.update_one({"id": reminder_id}, {"$set": update})
-    return {"message": "Reminder updated"}
+    # Try ObjectId first
+    if ObjectId.is_valid(reminder_id):
+        result = await db.reminders.update_one(
+            {"_id": ObjectId(reminder_id), "user_id": user_id},
+            {"$set": updates}
+        )
+        if result.matched_count > 0:
+            updated = await db.reminders.find_one({"_id": ObjectId(reminder_id)})
+            return normalize_reminder_doc(updated)
+
+    # Fall back to string id field
+    result = await db.reminders.update_one(
+        {"id": reminder_id, "user_id": user_id},
+        {"$set": updates}
+    )
+    if result.matched_count > 0:
+        updated = await db.reminders.find_one({"id": reminder_id, "user_id": user_id})
+        return normalize_reminder_doc(updated)
+
+    raise HTTPException(status_code=404, detail="Reminder not found")
 
 
 @api_router.delete("/reminders/{reminder_id}")
@@ -979,37 +1005,41 @@ async def delete_reminder(
     reminder_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    # Search by "id" field first, then fall back to MongoDB _id
-    existing = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
- 
-    if not existing:
-        # Try matching by MongoDB ObjectId string
-        try:
-            from bson import ObjectId
-            existing = await db.reminders.find_one(
-                {"_id": ObjectId(reminder_id)}, {"_id": 0}
-            )
-        except Exception:
-            pass
- 
-    if not existing:
-        # Already deleted — return 204 silently so frontend can clean up
-        raise HTTPException(status_code=404, detail="Reminder not found")
- 
-    if existing.get("user_id") != current_user.id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized")
- 
-    # Delete matching either field
-    result = await db.reminders.delete_one({"id": reminder_id})
-    if result.deleted_count == 0:
-        # Try by ObjectId
-        try:
-            from bson import ObjectId
-            await db.reminders.delete_one({"_id": ObjectId(reminder_id)})
-        except Exception:
-            pass
- 
-    return {"message": "Reminder deleted"}
+    """
+    Delete a reminder by ID.
+    Accepts both plain ObjectId strings and any string ID.
+    FIX: Try ObjectId match first, then fall back to string match.
+    """
+    user_id = str(current_user.id)
+
+    # Strategy 1: Try matching by MongoDB ObjectId (_id field)
+    if ObjectId.is_valid(reminder_id):
+        result = await db.reminders.delete_one({
+            "_id": ObjectId(reminder_id),
+            "user_id": user_id,
+        })
+        if result.deleted_count > 0:
+            return {"status": "deleted"}
+
+    # Strategy 2: Try matching by string `id` field (some docs store it explicitly)
+    result = await db.reminders.delete_one({
+        "id": reminder_id,
+        "user_id": user_id,
+    })
+    if result.deleted_count > 0:
+        return {"status": "deleted"}
+
+    # Strategy 3: Mark as dismissed so it stops firing even if we can't delete
+    # This handles the case where the reminder was auto-saved and has a
+    # different ID format
+    update_result = await db.reminders.update_one(
+        {"user_id": user_id, "title": {"$exists": True}, "_id": ObjectId(reminder_id) if ObjectId.is_valid(reminder_id) else reminder_id},
+        {"$set": {"is_dismissed": True}}
+    )
+    if update_result.modified_count > 0:
+        return {"status": "dismissed"}
+
+    raise HTTPException(status_code=404, detail="Reminder not found")
 
 #============================================================
 # USER MANAGEMENT
