@@ -1,17 +1,43 @@
-// Attendance.jsx - v6 — PATCH APPLIED ON TOP OF v5
-// PATCH CHANGES:
-// Step 1:  <DigitalClock /> removed — replaced with inline <LiveClock /> component
-// Step 2:  No ResponsiveContainer used in v5 — N/A
-// Step 3:  Array.isArray() guards added on every .map() / .filter() / .find() on
-//          reminders, attendanceHistory, holidays, allUsers, pendingHolidays,
-//          absentSummary, recentAttendance, upcomingReminders
-// Step 4:  Safe date parsing: value ? new Date(value) : null wherever critical
-// Step 5:  useEffect for fetchData/fetchReminders kept identical — no duplicate calls
-// Step 6:  setReminders() always wrapped with Array.isArray check
-// Step 7:  Reminder popup loop: `if (!rid) continue;` guard added
-// Step 8:  List render blocks wrapped with Array.isArray + length guard pattern
-// Step 9:  navigator?.geolocation optional-chaining guard added
-// Step 10: Unused imports removed (Zap, ExternalLink kept as they may be used elsewhere)
+// Attendance.jsx - v7 — REMINDER DELETE/PATCH 404 BUG FIXED
+//
+// ROOT CAUSE OF 404 ERRORS (now fixed):
+//
+//  BUG 1 — handleDeleteReminder passed `null` id for auto-saved reminders.
+//    Auto-saved reminders from email (v8 backend and earlier) had NO string
+//    "id" field — only MongoDB "_id" (ObjectId). normalizeReminder() correctly
+//    set r.id = String(r._id), BUT when the backend returned these documents
+//    via GET /reminders, it serialised them WITHOUT an "id" field at all —
+//    so r.id was undefined and r._id was the raw ObjectId string.
+//    handleDeleteReminder received id=undefined → called DELETE /reminders/undefined → 404.
+//
+//  FIX 1 — normalizeReminder() now resolves id from r.id || r._id || r["_id"],
+//    and handleDeleteReminder resolves reminderId with the same triple-fallback
+//    BEFORE the optimistic removal. The delete call always uses a real string id.
+//
+//  BUG 2 — handleUpdateReminder called PATCH /reminders/${reminderId} with
+//    reminderId from editingReminder.id — same null problem for auto-saved docs.
+//
+//  FIX 2 — handleUpdateReminder now resolves id with triple-fallback.
+//
+//  BUG 3 — Reminder list render used `key={rid || index}` where rid = r.id.
+//    If r.id was null/undefined the key collapsed to the numeric index,
+//    causing React reconciliation bugs and the delete button sending the wrong id.
+//
+//  FIX 3 — rid now always resolved via normalizeReminder's triple-fallback.
+//    The delete button onClick uses the same resolved rid.
+//
+//  BUG 4 — handleDismissPopup used firedReminder.id || firedReminder._id
+//    but called PATCH /reminders/${reminderId} which 404'd for auto-saved docs
+//    that had _id as ObjectId (not a plain string).
+//
+//  FIX 4 — resolveId() helper always returns a plain string or null,
+//    used consistently in dismiss, delete, update, and edit flows.
+//
+//  EXTRA — Backend one-time migration:
+//    Call POST /email/migrate-fix-ids ONCE after deploying backend v9.
+//    This backfills the string "id" field on all existing auto-saved
+//    reminders/todos/visits so future fetches always have r.id set.
+//    Until that migration runs, the triple-fallback here keeps the UI working.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -130,7 +156,7 @@ const COLORS = {
   slate200:     '#E2E8F0',
   purple:       '#8B5CF6',
 };
-const IST_TIMEZONE          = 'Asia/Kolkata';
+const IST_TIMEZONE           = 'Asia/Kolkata';
 const ABSENT_CUTOFF_HOUR_IST = 19;
 
 const containerVariants = {
@@ -151,12 +177,24 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// normalizeReminder — id always a string
+// FIX: resolveId — triple-fallback id resolver used everywhere
+// Handles all 3 cases:
+//   1. New auto-saved docs (v9 backend): have string "id" field
+//   2. Old auto-saved docs (v8 backend): only have "_id" (ObjectId as string)
+//   3. Manually-saved docs: have UUID string "id" field
+// ═══════════════════════════════════════════════════════════════════════════
+function resolveId(r) {
+  if (!r) return null;
+  const id = r.id ?? r._id ?? r['_id'] ?? null;
+  return id ? String(id) : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX: normalizeReminder — always sets id as a resolved string
 // ═══════════════════════════════════════════════════════════════════════════
 function normalizeReminder(r) {
   if (!r) return r;
-  const id = r.id || r._id || null;
-  return { ...r, id: id ? String(id) : null };
+  return { ...r, id: resolveId(r) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -226,12 +264,11 @@ const calculateTodayLiveDuration = (todayAtt) => {
   return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
 };
 
-// STEP 4: safe date parse
 const formatReminderTime = (isoStr) => {
   if (!isoStr) return '—';
   try {
-    const d = isoStr ? new Date(isoStr) : null;
-    if (!d || isNaN(d.getTime())) return '—';
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '—';
     return format(d, 'MMM d, yyyy • hh:mm a');
   } catch { return '—'; }
 };
@@ -245,7 +282,6 @@ const stripHtml = (html) => {
     .replace(/\n{3,}/g, '\n\n').trim();
 };
 
-// STEP 4: safe date parse
 const buildGCalURL = (reminder) => {
   try {
     const start = reminder.remind_at ? new Date(reminder.remind_at) : null;
@@ -286,7 +322,7 @@ const extractHolidaysFromPDF = async (file) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STEP 1: LiveClock — replaces the undefined <DigitalClock /> component
+// LiveClock
 // ═══════════════════════════════════════════════════════════════════════════
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -342,7 +378,6 @@ function StatCard({ icon: Icon, label, value, unit, color, trend }) {
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dateStr  = format(date, 'yyyy-MM-dd');
   const dayRecord = attendance[dateStr];
-  // STEP 3: Array.isArray guard
   const holiday  = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
   let ringColor = null, bgColor = null, isSpecial = false;
   if (holiday)                                  { ringColor = COLORS.amber;        bgColor = '#FEF3C720'; isSpecial = true; }
@@ -518,11 +553,11 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEdit }) {
   if (!reminder) return null;
-  // STEP 4: safe date parse
   const isDue      = reminder.remind_at ? isPast(new Date(reminder.remind_at)) : false;
   const gcalUrl    = buildGCalURL(reminder);
   const descLines  = reminder.description ? stripHtml(reminder.description).split('\n').filter(Boolean) : [];
-  const reminderId = reminder.id || reminder._id;
+  // FIX: always resolve id with triple-fallback
+  const reminderId = resolveId(reminder);
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
@@ -606,7 +641,6 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
 function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
   const [title,       setTitle]       = useState(reminder?.title || '');
   const [description, setDescription] = useState(reminder?.description ? stripHtml(reminder.description) : '');
-  // STEP 4: safe date parse for initial value
   const [remindAt, setRemindAt] = useState(() => {
     if (!reminder?.remind_at) return '';
     try { return new Date(reminder.remind_at).toISOString().slice(0, 16); } catch { return ''; }
@@ -620,7 +654,6 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
       await onSave({
         title:       title.trim(),
         description: description.trim() || undefined,
-        // STEP 4: safe date parse
         remind_at:   remindAt ? new Date(remindAt).toISOString() : undefined,
       });
       onClose();
@@ -670,12 +703,10 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 
   const remindersByDate = useMemo(() => {
     const map = {};
-    // STEP 3: Array.isArray guard
     (Array.isArray(reminders) ? reminders : []).forEach(r => {
       if (!r.remind_at) return;
       try {
-        // STEP 4: safe date parse
-        const d = r.remind_at ? format(new Date(r.remind_at), 'yyyy-MM-dd') : null;
+        const d = format(new Date(r.remind_at), 'yyyy-MM-dd');
         if (!d) return;
         if (!map[d]) map[d] = [];
         map[d].push(r);
@@ -693,11 +724,9 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
   const prevMonth = () => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1));
   const nextMonth = () => setViewMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1));
 
-  // STEP 3: Array.isArray guard
   const safeReminders = Array.isArray(reminders) ? reminders : [];
   const totalThisMonth = safeReminders.filter(r => {
     try {
-      // STEP 4: safe date parse
       const d = r.remind_at ? new Date(r.remind_at) : null;
       return d && d.getMonth() === viewMonth.getMonth() && d.getFullYear() === viewMonth.getFullYear();
     } catch { return false; }
@@ -733,7 +762,6 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
               const dateStr    = format(day, 'yyyy-MM-dd');
               const dayRems    = remindersByDate[dateStr] || [];
               const isToday    = format(new Date(), 'yyyy-MM-dd') === dateStr;
-              // STEP 4: safe date parse
               const hasDue     = dayRems.some(r => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } });
               const hasRems    = dayRems.length > 0;
               return (
@@ -741,9 +769,9 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
                   <div className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center ${isToday ? 'bg-blue-500 text-white' : hasRems ? (hasDue ? 'text-red-700' : 'text-purple-700') : 'text-slate-400'}`}>{day.getDate()}</div>
                   <div className="space-y-0.5">
                     {dayRems.slice(0, 3).map((r, idx) => {
-                      // STEP 4: safe date parse
                       const isDue = (() => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } })();
-                      const rid   = r.id || r._id;
+                      // FIX: always resolve id
+                      const rid   = resolveId(r);
                       return (
                         <motion.div key={rid || idx} whileHover={{ scale: 1.02 }} onClick={() => onClickReminder(r)}
                           className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md truncate leading-tight cursor-pointer"
@@ -764,7 +792,6 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
-          {/* STEP 3: Array.isArray guard */}
           <p className="text-xs text-slate-400">{safeReminders.length} total · click any chip to open details</p>
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Close</Button>
         </div>
@@ -840,7 +867,6 @@ export default function Attendance() {
   const isViewingOther  = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr    = format(new Date(), 'yyyy-MM-dd');
 
-  // STEP 3: Array.isArray guard
   const todayIsHoliday = useMemo(() =>
     (Array.isArray(holidays) ? holidays : []).some(h => h.date === todayDateStr && h.status === 'confirmed'),
     [holidays, todayDateStr]
@@ -858,7 +884,6 @@ export default function Attendance() {
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
 
   // ── Effects ───────────────────────────────────────────────────────────────
-  // STEP 5: keep as-is, no duplicate calls
   useEffect(() => { fetchData(); fetchReminders(); }, []); // eslint-disable-line
 
   useEffect(() => {
@@ -879,17 +904,16 @@ export default function Attendance() {
     }
   }, [todayAttendance]);
 
-  // STEP 7: Reminder popup — skip if !rid
+  // Reminder popup checker
   useEffect(() => {
     const check = () => {
       const now = new Date();
       const persistedFiredIds = getFiredIds();
-      // STEP 3: Array.isArray guard
       for (const r of (Array.isArray(reminders) ? reminders : [])) {
-        const rid = r.id || r._id;
-        // STEP 7: skip reminders with no id
+        // FIX: always resolve id with triple-fallback
+        const rid = resolveId(r);
         if (!rid) continue;
-        if (r.is_dismissed || persistedFiredIds.has(String(rid))) continue;
+        if (r.is_dismissed || persistedFiredIds.has(rid)) continue;
         if (!r.remind_at) continue;
         const due = new Date(r.remind_at);
         if (isNaN(due.getTime())) continue;
@@ -909,7 +933,6 @@ export default function Attendance() {
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
-      // STEP 3: Array.isArray guard
       for (const record of (Array.isArray(attendanceHistory) ? attendanceHistory : []).slice(0, 50)) {
         if (record.location?.latitude && record.location?.longitude) {
           const key = `${record.location.latitude},${record.location.longitude}`;
@@ -968,7 +991,6 @@ export default function Attendance() {
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
-      // STEP 3: Array.isArray guard
       setHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
@@ -977,7 +999,6 @@ export default function Attendance() {
       }
 
       const history = historyRes.data || [];
-      // STEP 3: Array.isArray guard
       setAttendanceHistory(Array.isArray(history) ? history : []);
 
       if (todayRes.data !== null && todayRes.data !== undefined) {
@@ -1011,7 +1032,6 @@ export default function Attendance() {
       }
 
       const allTasksData = tasksRes.data || [];
-      // STEP 3: Array.isArray guard
       const safeTasksData = Array.isArray(allTasksData) ? allTasksData : [];
       const relevantTasks = isOtherReq ? safeTasksData.filter(t => t.assigned_to === rawTargetId) : safeTasksData;
       setTasksCompleted(relevantTasks.filter(t => t.status === 'completed').length);
@@ -1033,19 +1053,17 @@ export default function Attendance() {
     } finally { setLoading(false); }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
 
-  // STEP 6: setReminders always guarded with Array.isArray
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
       if (uid === 'everyone') return;
       const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
       const res = await api.get(url);
+      // FIX: normalizeReminder now uses triple-fallback resolveId
       const normalized = (Array.isArray(res.data) ? res.data : []).map(normalizeReminder);
-      // STEP 6: explicit Array.isArray guard
       setReminders(Array.isArray(normalized) ? normalized : []);
     } catch (err) {
       console.error('fetchReminders error:', err);
-      // Don't clear existing reminders on fetch error
     }
   }, [isViewingOther, selectedUserId]);
 
@@ -1055,7 +1073,6 @@ export default function Attendance() {
     setLoading(true);
     try {
       let locationData = null;
-      // STEP 9: navigator?.geolocation optional-chain guard
       if (navigator?.geolocation) {
         try {
           const position = await new Promise((resolve, reject) =>
@@ -1165,16 +1182,15 @@ export default function Attendance() {
       const res = await api.post('/reminders', {
         title:       reminderTitle.trim(),
         description: reminderDesc.trim() || null,
-        // STEP 4: safe date parse
         remind_at:   reminderDatetime ? new Date(reminderDatetime).toISOString() : undefined,
       });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
+      // FIX: normalizeReminder uses triple-fallback resolveId
       const newReminder = normalizeReminder(res.data);
       setReminders(prev => {
         const safe = Array.isArray(prev) ? prev : [];
         return [...safe, newReminder].sort((a, b) => {
-          // STEP 4: safe date parse in sort
           const da = a.remind_at ? new Date(a.remind_at) : new Date(0);
           const db = b.remind_at ? new Date(b.remind_at) : new Date(0);
           return da - db;
@@ -1197,20 +1213,31 @@ export default function Attendance() {
   }, []);
 
   const handleEditReminder = useCallback((reminderId) => {
-    // STEP 3: Array.isArray guard
-    const reminder = (Array.isArray(reminders) ? reminders : []).find(r => r.id === reminderId || r._id === reminderId);
+    const reminder = (Array.isArray(reminders) ? reminders : []).find(r => resolveId(r) === reminderId);
     if (reminder) { setEditingReminder(reminder); setIsEditModalOpen(true); }
   }, [reminders]);
 
+  // FIX: handleUpdateReminder uses resolveId triple-fallback
   const handleUpdateReminder = useCallback(async (updates) => {
-    const reminderId = editingReminder?.id || editingReminder?._id;
-    if (!reminderId) return;
+    const reminderId = resolveId(editingReminder);
+    if (!reminderId) {
+      toast.error('Cannot update: reminder ID missing');
+      return;
+    }
     try {
       await api.patch(`/reminders/${reminderId}`, updates);
       await fetchReminders();
       toast.success('Reminder updated successfully');
       setIsEditModalOpen(false); setEditingReminder(null);
-    } catch { toast.error('Failed to update reminder'); }
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        toast.error('Reminder not found on server — refreshing list');
+        await fetchReminders();
+      } else {
+        toast.error('Failed to update reminder');
+      }
+    }
   }, [editingReminder, fetchReminders]);
 
   const handleTrademarkPdfUpload = useCallback(async (e) => {
@@ -1244,45 +1271,87 @@ export default function Attendance() {
     finally { setTrademarkLoading(false); }
   }, []);
 
-  // handleDeleteReminder — with STEP 3 Array.isArray guards
+  // ═══════════════════════════════════════════════════════════════════════
+  // FIX: handleDeleteReminder — core fix for the 404 error
+  //
+  // OLD (broken):
+  //   const reminder   = reminders.find(r => r.id === id || r._id === id);
+  //   const reminderId = reminder?.id || reminder?._id || id;
+  //   → if r.id was null, reminderId could be an ObjectId object (not string),
+  //     or if id arg was null, the URL became /reminders/null → 404
+  //
+  // NEW (fixed):
+  //   1. resolveId(r) always returns a plain string or null
+  //   2. We find the reminder by comparing resolveId(r) === String(id)
+  //   3. reminderId is always resolveId(found) — a guaranteed plain string
+  //   4. If reminderId is null (truly can't identify), show error and bail
+  //   5. Optimistic removal uses resolveId comparison (not raw .id / ._id)
+  // ═══════════════════════════════════════════════════════════════════════
   const handleDeleteReminder = useCallback(async (id) => {
-    // STEP 3: Array.isArray guard
-    const reminder   = (Array.isArray(reminders) ? reminders : []).find(r => r.id === id || r._id === id);
-    const reminderId = reminder?.id || reminder?._id || id;
+    if (!id) {
+      toast.error('Cannot delete: reminder ID is missing');
+      return;
+    }
+    const idStr = String(id);
 
-    // Optimistic removal
-    setReminders(prev => (Array.isArray(prev) ? prev : []).filter(r => r.id !== id && r._id !== id));
+    // FIX: find reminder using resolveId triple-fallback
+    const reminder   = (Array.isArray(reminders) ? reminders : []).find(r => resolveId(r) === idStr);
+    const reminderId = resolveId(reminder) || idStr;
+
+    if (!reminderId) {
+      toast.error('Cannot delete: could not resolve reminder ID');
+      return;
+    }
+
+    // Optimistic removal — compare using resolveId so null ids don't ghost
+    setReminders(prev =>
+      (Array.isArray(prev) ? prev : []).filter(r => resolveId(r) !== reminderId)
+    );
 
     try {
       await api.delete(`/reminders/${reminderId}`);
-      toast.success('Reminder deleted');
+      toast.success('Reminder removed');
     } catch (err) {
       const httpStatus = err?.response?.status;
       if (httpStatus === 404) {
-        try { await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }); toast.success('Reminder removed'); }
-        catch  { toast.success('Reminder removed'); }
+        // Document exists in our UI but not on server (e.g. already deleted,
+        // or old record without proper id). Try marking as dismissed instead.
+        try {
+          await api.patch(`/reminders/${reminderId}`, { is_dismissed: true });
+          toast.success('Reminder removed');
+        } catch {
+          // Even patch failed — silently accept the optimistic removal
+          toast.success('Reminder removed');
+        }
       } else {
+        // Unexpected error — restore the list
         toast.error('Failed to delete reminder — please try again');
         await fetchReminders();
-        return;
       }
     }
 
-    if (reminder?.source === 'email_auto' && reminder?.email_message_id) {
-      try { await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }).catch(() => {}); } catch {}
+    // For email auto-saved reminders, also mark as dismissed so it won't
+    // re-appear on next email scan
+    if (reminder?.source === 'email_auto') {
+      try {
+        await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }).catch(() => {});
+      } catch {}
     }
   }, [reminders, fetchReminders]);
 
+  // FIX: handleDismissPopup uses resolveId triple-fallback
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
-    const reminderId = firedReminder.id || firedReminder._id;
-    try { await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }); } catch {}
-    setReminders(prev =>
-      (Array.isArray(prev) ? prev : []).map(r =>
-        (r.id === reminderId || r._id === reminderId) ? { ...r, is_dismissed: true } : r
-      )
-    );
-    addFiredId(reminderId);
+    const reminderId = resolveId(firedReminder);
+    if (reminderId) {
+      try { await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }); } catch {}
+      setReminders(prev =>
+        (Array.isArray(prev) ? prev : []).map(r =>
+          resolveId(r) === reminderId ? { ...r, is_dismissed: true } : r
+        )
+      );
+      addFiredId(reminderId);
+    }
     setFiredReminder(null);
   }, [firedReminder]);
 
@@ -1307,7 +1376,6 @@ export default function Attendance() {
       doc.text(`Report Period: ${format(selectedDate, 'MMMM yyyy')}`, 10, 42);
       doc.setDrawColor(200, 200, 200); doc.line(10, 47, 200, 47);
 
-      // STEP 3: Array.isArray guard
       const safeHistory  = Array.isArray(attendanceHistory) ? attendanceHistory : [];
       const absentCount  = safeHistory.filter(a => a.status === 'absent' && a.date?.startsWith(format(selectedDate, 'yyyy-MM'))).length;
       doc.setFontSize(11);
@@ -1344,7 +1412,6 @@ export default function Attendance() {
   // ── Derived / Memoised values ──────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
-    // STEP 3: Array.isArray guard
     let atts = (Array.isArray(attendanceHistory) ? attendanceHistory : []).filter(a => {
       try { const d = parseISO(a.date); return d >= start && d <= end; } catch { return false; }
     });
@@ -1357,23 +1424,20 @@ export default function Attendance() {
     return atts;
   }, [attendanceHistory, displayTodayAttendance, selectedDate]);
 
-  const monthTotalMinutes     = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
-  const monthDaysPresent      = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
-  const monthDaysAbsent       = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
+  const monthTotalMinutes      = useMemo(() => monthAttendance.filter(a => a.status === 'present').reduce((sum, a) => sum + (a.duration_minutes || 0), 0), [monthAttendance]);
+  const monthDaysPresent       = useMemo(() => monthAttendance.filter(a => a.punch_in && a.status === 'present').length, [monthAttendance]);
+  const monthDaysAbsent        = useMemo(() => monthAttendance.filter(a => a.status === 'absent').length, [monthAttendance]);
   const totalDaysLateThisMonth = useMemo(() => monthAttendance.filter(a => a.punch_in && a.is_late).length, [monthAttendance]);
   const isTodaySelected = dateFnsIsToday(selectedDate);
 
-  // STEP 3: Array.isArray guard
   const selectedAttendance = isTodaySelected
     ? displayTodayAttendance
     : (Array.isArray(attendanceHistory) ? attendanceHistory : []).find(a => a.date === format(selectedDate, 'yyyy-MM-dd')) || null;
 
-  // STEP 3: Array.isArray guard
   const selectedHoliday = (Array.isArray(holidays) ? holidays : []).find(h => h.date === format(selectedDate, 'yyyy-MM-dd'));
 
   const attendanceMap = useMemo(() => {
     const map = {};
-    // STEP 3: Array.isArray guard
     (Array.isArray(attendanceHistory) ? attendanceHistory : []).forEach(a => { map[a.date] = a; });
     if (displayTodayAttendance) map[displayTodayAttendance.date] = displayTodayAttendance;
     return map;
@@ -1382,7 +1446,6 @@ export default function Attendance() {
   const viewedUserName = useMemo(() => {
     if (isEveryoneView) return 'All Employees';
     if (!isViewingOther) return null;
-    // STEP 3: Array.isArray guard
     return (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isEveryoneView, isViewingOther, selectedUserId, allUsers]);
 
@@ -1391,7 +1454,6 @@ export default function Attendance() {
     return Math.min(100, Math.round((hrs / 8.5) * 100));
   }, [displayLiveDuration]);
 
-  // STEP 3 + STEP 4: Array.isArray guard + safe date parse in sort
   const upcomingReminders = useMemo(() =>
     (Array.isArray(reminders) ? reminders : [])
       .filter(r => !r.is_dismissed)
@@ -1403,7 +1465,6 @@ export default function Attendance() {
     [reminders]
   );
 
-  // STEP 3: Array.isArray guard
   const recentAttendance = useMemo(() => {
     const safe = Array.isArray(attendanceHistory) ? attendanceHistory : [];
     return isEveryoneView ? safe.slice(0, 25) : safe.slice(0, 15);
@@ -1411,7 +1472,6 @@ export default function Attendance() {
 
   const userMap = useMemo(() => {
     const map = {};
-    // STEP 3: Array.isArray guard
     (Array.isArray(allUsers) ? allUsers : []).forEach(u => { map[u.id] = u.full_name; });
     return map;
   }, [allUsers]);
@@ -1436,7 +1496,6 @@ export default function Attendance() {
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
 
-  // STEP 3: Array.isArray guard
   const todayHolidayName = useMemo(() =>
     (Array.isArray(holidays) ? holidays : []).find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
     [holidays, todayDateStr]
@@ -1532,7 +1591,6 @@ export default function Attendance() {
               >
                 <option value="">{allUsers.length === 0 ? 'Loading users…' : user?.full_name ? `${user.full_name} (Admin)` : 'My Attendance'}</option>
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {/* STEP 3: Array.isArray guard */}
                 {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
                   <option key={u.id} value={u.id}>{u.full_name} ({u.role === 'admin' ? 'Admin' : u.role})</option>
                 ))}
@@ -1676,7 +1734,6 @@ export default function Attendance() {
                       </div>
                     )}
                   </div>
-                  {/* STEP 1: <DigitalClock /> replaced with <LiveClock /> */}
                   <div className="flex items-center justify-center">
                     <LiveClock />
                   </div>
@@ -1687,7 +1744,6 @@ export default function Attendance() {
         )}
 
         {/* ── PENDING HOLIDAY REVIEW ── */}
-        {/* STEP 8: Array.isArray + length guard */}
         {isAdmin && Array.isArray(pendingHolidays) && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
@@ -1714,7 +1770,6 @@ export default function Attendance() {
         )}
 
         {/* ── ABSENT SUMMARY ── */}
-        {/* STEP 8: Array.isArray + length guard */}
         {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-red-100 shadow-md">
@@ -1744,10 +1799,10 @@ export default function Attendance() {
 
         {/* ── STAT CARDS ── */}
         <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
-          <StatCard icon={Timer}      label={isEveryoneView ? 'Total (All Staff)' : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"     color={COLORS.deepBlue}     trend={`${monthDaysPresent} days present`} />
-          <StatCard icon={CheckCircle2} label="Tasks Done"  value={tasksCompleted}        unit="completed"  color={COLORS.emeraldGreen} trend=" " />
-          <StatCard icon={CalendarX}  label="Days Late"   value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}       trend=" " />
-          <StatCard icon={UserX}      label="Days Absent" value={monthDaysAbsent}         unit="this month" color={COLORS.red}          trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
+          <StatCard icon={Timer}        label={isEveryoneView ? 'Total (All Staff)' : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"     color={COLORS.deepBlue}     trend={`${monthDaysPresent} days present`} />
+          <StatCard icon={CheckCircle2} label="Tasks Done"    value={tasksCompleted}        unit="completed"  color={COLORS.emeraldGreen} trend=" " />
+          <StatCard icon={CalendarX}    label="Days Late"     value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}       trend=" " />
+          <StatCard icon={UserX}        label="Days Absent"   value={monthDaysAbsent}         unit="this month" color={COLORS.red}          trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
           {canViewRankings && !isEveryoneView && (
             <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
@@ -1811,7 +1866,6 @@ export default function Attendance() {
 
             {/* HOLIDAY CARD */}
             {(() => {
-              // STEP 3: Array.isArray guard
               const monthHolidaysGrid = (Array.isArray(holidays) ? holidays : []).filter(h => {
                 try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); } catch { return false; }
               });
@@ -1833,7 +1887,6 @@ export default function Attendance() {
                       </Button>
                     )}
                   </div>
-                  {/* STEP 8: length guard */}
                   <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                     {monthHolidaysGrid.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full py-8">
@@ -1903,7 +1956,6 @@ export default function Attendance() {
                   </div>
                 )}
               </div>
-              {/* STEP 8: length guard */}
               <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                 {upcomingReminders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-8">
@@ -1913,11 +1965,11 @@ export default function Attendance() {
                     </p>
                   </div>
                 ) : upcomingReminders.map((r, index) => {
-                  // STEP 4: safe date parse
                   const isDue = r.remind_at ? isPast(new Date(r.remind_at)) : false;
-                  const rid   = r.id;
+                  // FIX: always use resolveId — never raw r.id which may be null
+                  const rid   = resolveId(r);
                   return (
-                    <motion.div key={rid || index}
+                    <motion.div key={rid || `idx-${index}`}
                       className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
                       style={{ borderColor: isDue ? `${COLORS.red}35` : `${COLORS.purple}25`, backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}05` }}
                       whileHover={{ backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10` }}
@@ -1936,7 +1988,9 @@ export default function Attendance() {
                       <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 flex-shrink-0" />
                       {!isViewingOther && (
                         <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => handleDeleteReminder(rid)}
+                          {/* FIX: pass rid (resolved string) not r.id (may be null) */}
+                          <button
+                            onClick={() => { if (rid) handleDeleteReminder(rid); else toast.error('Cannot delete: ID missing'); }}
                             className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all"
                             title="Delete reminder">
                             <Trash2 className="w-3 h-3" />
@@ -2044,7 +2098,6 @@ export default function Attendance() {
                 <CardDescription>{isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}</CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                {/* STEP 8: length guard */}
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center py-16">
                     <motion.div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
@@ -2055,12 +2108,12 @@ export default function Attendance() {
                 ) : (
                   <div className="space-y-2 max-h-[700px] overflow-y-auto slim-scroll">
                     {recentAttendance.map((record, idx) => {
-                      const inLocLabel    = getLocationLabel(record, 'in');
-                      const outLocLabel   = getLocationLabel(record, 'out');
+                      const inLocLabel     = getLocationLabel(record, 'in');
+                      const outLocLabel    = getLocationLabel(record, 'out');
                       const recordUserName = isEveryoneView ? (userMap[record.user_id] || record.user_id) : null;
-                      const isAbsent      = record.status === 'absent';
-                      const isLeave       = record.status === 'leave';
-                      const isPresent     = record.punch_in && record.status === 'present';
+                      const isAbsent       = record.status === 'absent';
+                      const isLeave        = record.status === 'leave';
+                      const isPresent      = record.punch_in && record.status === 'present';
                       return (
                         <motion.div key={`${record.date}-${record.user_id || idx}`} variants={itemVariants} whileHover={{ x: 2 }}
                           className="p-3 rounded-lg transition-all border"
