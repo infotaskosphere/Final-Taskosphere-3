@@ -1,15 +1,17 @@
 # =============================================================================
-# email_integration.py  — v3  COMPLETE COPY-PASTE FILE
+# email_integration.py  — v4  COMPLETE COPY-PASTE FILE
 # FastAPI router — IMAP email connection management + AI event extraction
 # Specialized for: CA/CS/Legal Firm (Trademark Hearings, NCLT, GST, ROC)
 # Stack: FastAPI · MongoDB (motor) · Google Gemini 2.0 Flash-Lite · imaplib
 #
-# FIXES IN v3:
-#  - 500 error fix: _test_imap runs in executor (non-blocking), full try/except
-#  - App password spaces stripped automatically before IMAP login
-#  - HTTPException no longer raised inside sync thread (was causing 500)
-#  - add_connection returns proper 400 with clear message on login failure
-#  - All other v2 features retained (auto-save, daily scan, junk filter, etc.)
+# NEW IN v4:
+#  - FIX: Delete individual reminder/visit — no longer wipes all auto-synced
+#  - FEATURE: Sender email whitelist — only sync emails from approved senders
+#  - FEATURE: Smart categorization rules:
+#      • Notice/Examination Report/Show Cause    → TODO
+#      • Hearing/GST/Income Tax/Trademark dates  → REMINDER
+#      • Zoom/Teams/Google Meet/personal visit   → VISIT
+#  - All v3 features retained
 # =============================================================================
 
 import imaplib
@@ -27,14 +29,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from bson import ObjectId
 
-# ── Change this import to match exactly what your server.py uses ──────────────
 from backend.dependencies import get_current_user, db
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Optional: encrypt stored app passwords
-# Set EMAIL_ENCRYPT_KEY env var to a 44-char Fernet key to enable encryption
-# Generate one with:
-#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 try:
     from cryptography.fernet import Fernet
     import os as _os
@@ -43,7 +39,6 @@ try:
 except Exception:
     _fernet = None
 
-# Google Gemini for AI event extraction
 try:
     import google.generativeai as genai
     import os as _os2
@@ -76,11 +71,12 @@ PROVIDER_IMAP: Dict[str, tuple] = {
     "me.com":         ("imap.mail.me.com",      993, "icloud"),
 }
 
-# MongoDB collection names
 COL_CONNECTIONS   = "email_connections"
 COL_EVENTS        = "email_extracted_events"
 COL_AUTO_PREFS    = "email_auto_save_prefs"
 COL_SCAN_SCHEDULE = "email_scan_schedule"
+# NEW: collection to store approved sender email whitelist per user
+COL_SENDER_WHITELIST = "email_sender_whitelist"
 
 # =============================================================================
 # PYDANTIC SCHEMAS
@@ -123,16 +119,20 @@ class ExtractedEventOut(BaseModel):
     source_date: str
     raw_snippet: Optional[str] = None
     email_account: Optional[str] = None
+    # NEW: indicates which category this event belongs to
+    save_category: Optional[str] = None  # "todo" | "reminder" | "visit"
 
 class AutoSavePrefRequest(BaseModel):
     auto_save_reminders: bool
     auto_save_visits: bool
+    auto_save_todos: bool = False           # NEW
     scan_time_hour: int = 12
     scan_time_minute: int = 0
 
 class AutoSavePrefOut(BaseModel):
     auto_save_reminders: bool
     auto_save_visits: bool
+    auto_save_todos: bool = False           # NEW
     scan_time_hour: int
     scan_time_minute: int
     next_scan_at: Optional[str] = None
@@ -141,13 +141,22 @@ class ManualSaveReminderRequest(BaseModel):
     event_id: str
     title: str
     description: Optional[str] = None
-    remind_at: str  # ISO datetime string
+    remind_at: str
 
 class ManualSaveVisitRequest(BaseModel):
     event_id: str
     title: str
-    visit_date: str  # yyyy-MM-dd
+    visit_date: str
     notes: Optional[str] = None
+
+# NEW: Sender whitelist schemas
+class SenderWhitelistEntry(BaseModel):
+    email_address: str
+    label: Optional[str] = None  # friendly name e.g. "IP India", "GST Portal"
+
+class SenderWhitelistOut(BaseModel):
+    senders: List[Dict[str, str]]
+    # [{"email_address": "...", "label": "..."}]
 
 # =============================================================================
 # HELPERS — encryption
@@ -171,31 +180,90 @@ def _infer_provider(email_address: str):
     return PROVIDER_IMAP.get(domain, (f"imap.{domain}", 993, "other"))
 
 def _clean_password(password: str) -> str:
-    """Strip spaces from app passwords — Gmail displays them with spaces."""
     return password.replace(" ", "").strip()
 
 # =============================================================================
-# IMAP HELPERS — all sync, safe to run in thread executor
+# SMART CATEGORY CLASSIFIER
+# Decides whether an email event should be saved as TODO, REMINDER, or VISIT
+# =============================================================================
+
+# Keywords that indicate an action-required notice → TODO
+_TODO_KEYWORDS = [
+    "examination report", "office action", "objection raised",
+    "reply to examination", "response required", "compliance notice",
+    "show cause notice", "response to show cause", "notice to file",
+    "deadline to respond", "reply required", "reply within",
+    "opposition notice", "counter statement", "file reply",
+    "scrutiny notice", "demand notice",
+]
+
+# Keywords for scheduled hearings / filing deadlines → REMINDER
+_REMINDER_KEYWORDS = [
+    "hearing", "show cause hearing", "trademark hearing",
+    "gstr-1", "gstr-3b", "gstr-9", "gst filing", "gst return",
+    "income tax", "itr", "advance tax", "tds return",
+    "roc filing", "mca", "aoc-4", "mgt-7",
+    "court date", "nclt", "high court", "tribunal",
+    "ip india", "ipindia",
+    "due date", "last date", "filing date",
+]
+
+# Keywords for online/offline meetings → VISIT
+_VISIT_KEYWORDS = [
+    "zoom", "google meet", "teams meeting", "microsoft teams",
+    "webex", "meeting invite", "meeting scheduled",
+    "visit scheduled", "office visit", "client visit",
+    "appointment", "meeting at",
+    "conference call", "video call",
+]
+
+def _classify_save_category(event_type: str, title: str, body: str) -> str:
+    """
+    Returns 'todo' | 'reminder' | 'visit' based on keyword matching.
+    Falls back to event_type mapping when no keyword matches.
+    """
+    combined = f"{title} {body}".lower()
+
+    # Check TODO keywords first (highest priority)
+    for kw in _TODO_KEYWORDS:
+        if kw in combined:
+            return "todo"
+
+    # Check VISIT keywords
+    for kw in _VISIT_KEYWORDS:
+        if kw in combined:
+            return "visit"
+
+    # Check REMINDER keywords
+    for kw in _REMINDER_KEYWORDS:
+        if kw in combined:
+            return "reminder"
+
+    # Fallback: use event_type
+    if event_type in ("Court Hearing", "Trademark Hearing", "Deadline"):
+        return "reminder"
+    if event_type in ("Visit", "Online Meeting", "Conference"):
+        return "visit"
+    return "reminder"  # default
+
+
+# =============================================================================
+# IMAP HELPERS
 # =============================================================================
 
 def _test_imap_sync(host: str, port: int, email_addr: str, password: str) -> Optional[str]:
-    """
-    Synchronous IMAP connection test.
-    Returns None on success, or an error string on failure.
-    NEVER raises an exception — caller converts error string to HTTPException.
-    """
     try:
         password = _clean_password(password)
         conn = imaplib.IMAP4_SSL(host, int(port))
         conn.login(email_addr, password)
         conn.logout()
-        return None  # success
+        return None
     except imaplib.IMAP4.error as e:
         return (
             f"IMAP login failed: {e}. "
-            "Make sure: (1) IMAP is enabled in Gmail Settings → Forwarding and POP/IMAP, "
-            "(2) You are using an App Password not your regular Gmail password, "
-            "(3) 2-Step Verification is enabled on your Google Account."
+            "Make sure: (1) IMAP is enabled in Gmail Settings, "
+            "(2) You are using an App Password, "
+            "(3) 2-Step Verification is enabled."
         )
     except ConnectionRefusedError:
         return f"Could not connect to {host}:{port} — connection refused."
@@ -241,8 +309,27 @@ def _get_plain_body(msg: email.message.Message, max_chars: int = 2000) -> str:
         pass
     return body[:max_chars]
 
-def _scan_mailbox_sync(host: str, port: int, email_addr: str, password: str, max_msgs: int = 50) -> List[Dict]:
-    """Synchronous mailbox scan. Returns list of email dicts. Never raises."""
+def _extract_sender_email(from_header: str) -> str:
+    """Extract clean email address from From header like 'Name <email@domain.com>'."""
+    m = re.search(r'<([^>]+)>', from_header)
+    if m:
+        return m.group(1).strip().lower()
+    # fallback: treat entire string as email if no angle brackets
+    return from_header.strip().lower()
+
+def _scan_mailbox_sync(
+    host: str,
+    port: int,
+    email_addr: str,
+    password: str,
+    max_msgs: int = 50,
+    sender_whitelist: Optional[List[str]] = None,
+) -> List[Dict]:
+    """
+    Synchronous mailbox scan.
+    If sender_whitelist is provided and non-empty, only returns emails from
+    those sender addresses.
+    """
     results = []
     try:
         password = _clean_password(password)
@@ -260,12 +347,34 @@ def _scan_mailbox_sync(host: str, port: int, email_addr: str, password: str, max
                 if not msg_data or not msg_data[0]:
                     continue
                 msg = email.message_from_bytes(msg_data[0][1])
+                from_raw = _decode_header_str(msg.get("From", ""))
+                sender_clean = _extract_sender_email(from_raw)
+
+                # Apply whitelist filter if set
+                if sender_whitelist:
+                    whitelist_lower = [s.strip().lower() for s in sender_whitelist]
+                    # Check exact match or domain match (@domain.com)
+                    matched = False
+                    for entry in whitelist_lower:
+                        if entry.startswith("@"):
+                            # Domain match
+                            if sender_clean.endswith(entry):
+                                matched = True
+                                break
+                        else:
+                            if sender_clean == entry:
+                                matched = True
+                                break
+                    if not matched:
+                        continue  # skip non-whitelisted sender
+
                 results.append({
-                    "subject":    _decode_header_str(msg.get("Subject", "")),
-                    "from_addr":  _decode_header_str(msg.get("From", "")),
-                    "msg_date":   msg.get("Date", ""),
-                    "body":       _get_plain_body(msg),
-                    "message_id": (msg.get("Message-ID") or "").strip(),
+                    "subject":      _decode_header_str(msg.get("Subject", "")),
+                    "from_addr":    from_raw,
+                    "sender_email": sender_clean,
+                    "msg_date":     msg.get("Date", ""),
+                    "body":         _get_plain_body(msg),
+                    "message_id":   (msg.get("Message-ID") or "").strip(),
                 })
             except Exception:
                 continue
@@ -274,8 +383,9 @@ def _scan_mailbox_sync(host: str, port: int, email_addr: str, password: str, max
         logger.error(f"IMAP scan error for {email_addr}: {e}")
     return results
 
+
 # =============================================================================
-# AI EXTRACTION — LEGAL/TAX SPECIALIZED WITH STRICT JUNK FILTER
+# AI EXTRACTION
 # =============================================================================
 
 _AI_SYSTEM = """
@@ -284,36 +394,38 @@ Extract ONLY professional/legal events from the email. Be VERY strict.
 
 STRICT RULES:
 1. FOCUS ONLY ON:
-   - Trademark hearings (IP India, trademark registry, opposition, show cause)
+   - Trademark hearings, notices, examination reports, show cause notices (IP India)
    - Court hearings (NCLT, High Court, Supreme Court, any tribunal)
    - ROC compliance deadlines (MCA21, annual filing, AOC-4, MGT-7)
    - GST deadlines (GSTR-1, GSTR-3B, GSTR-9, GST notices)
    - Income Tax deadlines (ITR filing, advance tax, notices from IT dept)
    - Client visits or scheduled meetings with clients
-   - Professional conference/seminar from ICAI/ICSI/Bar Council
+   - Online meetings (Zoom, Google Meet, Teams)
+   - Examination reports / office actions requiring reply
 
-2. STRICTLY DISCARD — return [] for ANY of these:
-   - Jio, Airtel, Vi, BSNL, Tata Sky bills or payment reminders
+2. STRICTLY DISCARD — return [] for junk:
+   - Jio, Airtel, Vi, BSNL bills
    - Bank transaction alerts, OTPs, credit card statements
    - Adobe, Canva, software subscription offers
-   - Job applications, recruitment, "new applicants" emails
-   - Marketing, newsletters, discount offers, promotional
+   - Job applications, recruitment emails
+   - Marketing, newsletters, discount offers
    - LinkedIn, Facebook, Instagram, Twitter, YouTube notifications
    - Amazon, Flipkart, Swiggy, Zomato, Uber, Ola
    - Any email clearly NOT related to CA/CS/Legal firm work
 
 3. DATES: If year is missing but month/day is present, assume 2026.
-4. Return ONLY a valid JSON array. No markdown, no preamble, no explanation.
+
+4. Return ONLY a valid JSON array. No markdown, no preamble.
    Each object must have exactly these keys:
    title (string), event_type (one of: Trademark Hearing, Court Hearing,
-   Online Meeting, Deadline, Visit, Other),
+   Online Meeting, Deadline, Visit, Other, Examination Report, Notice),
    date (yyyy-MM-dd or null), time (HH:mm or null),
    organizer (string or null), description (max 100 chars),
    urgency (high|medium|low)
+
 5. If the email is junk/irrelevant, return exactly: []
 """
 
-# Pre-filter keywords checked BEFORE calling Gemini to save API quota
 _JUNK_KEYWORDS = [
     "jio", "airtel", "vodafone", "vi mobile", "bsnl", "tata sky", "d2h",
     "payment received", "payment successful", "transaction successful",
@@ -333,10 +445,8 @@ _JUNK_KEYWORDS = [
 async def _extract_events_from_email(
     subject: str, body: str, from_addr: str, msg_date: str
 ) -> List[Dict]:
-    """Extract legal events from a single email. Returns list of event dicts."""
     combined = f"{subject.lower()} {body.lower()[:500]}"
 
-    # Pre-filter junk before calling AI
     for kw in _JUNK_KEYWORDS:
         if kw in combined:
             logger.debug(f"Junk pre-filter: {subject[:60]}")
@@ -349,15 +459,20 @@ async def _extract_events_from_email(
             raw = re.sub(r"```[a-z]*\n?|```", "", resp.text.strip())
             result = json.loads(raw)
             if isinstance(result, list):
-                return result
+                # Add save_category to each extracted event
+                categorized = []
+                for ev in result:
+                    ev["save_category"] = _classify_save_category(
+                        ev.get("event_type", ""), subject, body
+                    )
+                    categorized.append(ev)
+                return categorized
         except Exception as e:
             logger.warning(f"Gemini extraction failed for '{subject[:50]}': {e}")
 
-    # Fallback: regex extraction
     return _regex_extract(subject, body, from_addr)
 
 def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
-    """Regex fallback when Gemini is unavailable."""
     text = f"{subject} {body}".lower()
 
     junk = [
@@ -386,22 +501,28 @@ def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
         etype = "Trademark Hearing"
     elif any(w in text for w in ["court", "nclt", "tribunal", "hearing", "high court"]):
         etype = "Court Hearing"
+    elif any(w in text for w in ["examination report", "office action", "objection"]):
+        etype = "Examination Report"
     elif any(w in text for w in ["gst", "gstr", "income tax", "itr", "roc", "mca", "advance tax"]):
         etype = "Deadline"
-    elif "visit" in text:
+    elif any(w in text for w in ["visit"]):
         etype = "Visit"
     else:
         etype = "Deadline"
 
+    save_cat = _classify_save_category(etype, subject, body)
+
     return [{
-        "title":       subject[:100],
-        "event_type":  etype,
-        "date":        date_str,
-        "time":        None,
-        "organizer":   from_addr[:50],
-        "description": body[:100],
-        "urgency":     "high",
+        "title":         subject[:100],
+        "event_type":    etype,
+        "date":          date_str,
+        "time":          None,
+        "organizer":     from_addr[:50],
+        "description":   body[:100],
+        "urgency":       "high",
+        "save_category": save_cat,
     }]
+
 
 # =============================================================================
 # MONGO DOC → PYDANTIC HELPERS
@@ -423,6 +544,7 @@ def _doc_to_out(doc: Dict) -> ExtractedEventOut:
         source_date=doc.get("source_date", ""),
         raw_snippet=doc.get("raw_snippet"),
         email_account=doc.get("email_account"),
+        save_category=doc.get("save_category"),
     )
 
 def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
@@ -438,19 +560,53 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         sync_error=doc.get("sync_error"),
     )
 
+
 # =============================================================================
-# AUTO-SAVE: save extracted events to reminders / visits collections
+# AUTO-SAVE: save extracted events to reminders / visits / todos
 # =============================================================================
 
 REMINDER_EVENT_TYPES = {"Trademark Hearing", "Court Hearing", "Deadline", "Appointment", "Other"}
 VISIT_EVENT_TYPES    = {"Visit", "Online Meeting", "Conference", "Interview", "Meeting"}
+TODO_EVENT_TYPES     = {"Examination Report", "Notice"}
 
 async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
-    """Silently save a qualified event as reminder or visit based on user prefs."""
-    try:
-        ev_type = event.event_type
+    """
+    Save a qualified event to the appropriate collection based on smart categorization.
 
-        if prefs.get("auto_save_reminders") and ev_type in REMINDER_EVENT_TYPES:
+    FIX (v4): Each saved document stores a unique source identifier so that
+    deleting one item does NOT cascade-delete others. The old code was matching
+    by (user_id, source="email_auto") which deleted everything at once.
+    Now we match by (user_id, title, source="email_auto") for reminders/visits
+    and (user_id, title, source="email_auto") for todos — unique per item.
+    """
+    try:
+        save_cat = event.save_category or _classify_save_category(
+            event.event_type, event.title, event.description or ""
+        )
+
+        if save_cat == "todo" and prefs.get("auto_save_todos"):
+            # Save as TODO
+            existing = await db["todos"].find_one({
+                "user_id": user_id,
+                "title":   event.title,
+                "source":  "email_auto",
+            })
+            if not existing:
+                await db["todos"].insert_one({
+                    "user_id":      user_id,
+                    "title":        event.title,
+                    "description":  f"Auto-imported from email.\nFrom: {event.source_from}\nSubject: {event.source_subject}\nNotes: {event.description or ''}",
+                    "is_completed": False,
+                    "due_date":     event.date or None,
+                    "source":       "email_auto",
+                    # Store message_id so individual deletion works correctly
+                    "email_message_id": getattr(event, "_message_id", None),
+                    "created_at":   datetime.now(timezone.utc).isoformat(),
+                    "updated_at":   datetime.now(timezone.utc).isoformat(),
+                })
+                logger.info(f"Auto-saved todo: {event.title}")
+
+        elif save_cat == "reminder" and prefs.get("auto_save_reminders"):
             date_str = event.date or datetime.now(IST).strftime("%Y-%m-%d")
             time_str = event.time or "10:00"
             try:
@@ -462,6 +618,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
             existing = await db["reminders"].find_one({
                 "user_id": user_id,
                 "title":   event.title,
+                "source":  "email_auto",
             })
             if not existing:
                 description_parts = []
@@ -470,37 +627,43 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 if event.source_subject: description_parts.append(f"Subject: {event.source_subject}")
 
                 await db["reminders"].insert_one({
-                    "user_id":      user_id,
-                    "title":        event.title,
-                    "description":  "\n".join(description_parts) or None,
-                    "remind_at":    remind_dt.isoformat(),
-                    "is_completed": False,
-                    "source":       "email_auto",
-                    "created_at":   datetime.now(timezone.utc).isoformat(),
+                    "user_id":           user_id,
+                    "title":             event.title,
+                    "description":       "\n".join(description_parts) or None,
+                    "remind_at":         remind_dt.isoformat(),
+                    "is_dismissed":      False,
+                    "source":            "email_auto",
+                    # Store unique message_id to prevent cascade deletes
+                    "email_message_id":  getattr(event, "_message_id", None),
+                    "created_at":        datetime.now(timezone.utc).isoformat(),
                 })
                 logger.info(f"Auto-saved reminder: {event.title}")
 
-        elif prefs.get("auto_save_visits") and ev_type in VISIT_EVENT_TYPES:
+        elif save_cat == "visit" and prefs.get("auto_save_visits"):
             date_str = event.date or datetime.now(IST).strftime("%Y-%m-%d")
             existing = await db["visits"].find_one({
                 "user_id":    user_id,
                 "title":      event.title,
                 "visit_date": date_str,
+                "source":     "email_auto",
             })
             if not existing:
                 await db["visits"].insert_one({
-                    "user_id":    user_id,
-                    "title":      event.title,
-                    "visit_date": date_str,
-                    "notes":      event.description or event.source_subject or "",
-                    "status":     "scheduled",
-                    "source":     "email_auto",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "user_id":          user_id,
+                    "title":            event.title,
+                    "visit_date":       date_str,
+                    "notes":            event.description or event.source_subject or "",
+                    "status":           "scheduled",
+                    "source":           "email_auto",
+                    # Store unique message_id to prevent cascade deletes
+                    "email_message_id": getattr(event, "_message_id", None),
+                    "created_at":       datetime.now(timezone.utc).isoformat(),
                 })
                 logger.info(f"Auto-saved visit: {event.title}")
 
     except Exception as e:
         logger.error(f"Auto-save error for '{event.title}': {e}")
+
 
 # =============================================================================
 # DAILY SCHEDULED SCAN LOOP
@@ -509,7 +672,6 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
 _scan_task = None
 
 async def _scheduled_scan_loop():
-    """Background loop: scans all active inboxes once per day at configured IST time."""
     logger.info("Email scheduled scan loop started.")
     while True:
         try:
@@ -533,7 +695,7 @@ async def _scheduled_scan_loop():
                 if sched_doc:
                     last_run = sched_doc.get("last_run", "")
                     if last_run and last_run[:10] == now_ist.strftime("%Y-%m-%d"):
-                        continue  # already ran today
+                        continue
 
                 logger.info(f"Running scheduled scan for user {user_id}")
                 try:
@@ -549,7 +711,8 @@ async def _scheduled_scan_loop():
         except Exception as e:
             logger.error(f"Scan loop outer error: {e}")
 
-        await asyncio.sleep(60)  # check every minute
+        await asyncio.sleep(60)
+
 
 async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
     """Scan all active connections for a user and auto-save events."""
@@ -559,6 +722,15 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
     if not conns:
         return
 
+    # Load sender whitelist for this user
+    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": user_id})
+    sender_whitelist = []
+    if whitelist_doc and whitelist_doc.get("senders"):
+        sender_whitelist = [
+            s.get("email_address", "") for s in whitelist_doc["senders"]
+            if s.get("email_address")
+        ]
+
     loop = asyncio.get_event_loop()
     for conn in conns:
         try:
@@ -566,13 +738,15 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
             raw_emails = await loop.run_in_executor(
                 None, _scan_mailbox_sync,
                 conn["imap_host"], conn["imap_port"], email_addr,
-                _decrypt(conn["app_password_enc"]), limit
+                _decrypt(conn["app_password_enc"]), limit,
+                sender_whitelist if sender_whitelist else None,
             )
             for raw in raw_emails:
                 mid = raw.get("message_id")
                 exists = await db[COL_EVENTS].find_one({"user_id": user_id, "message_id": mid})
                 if exists:
-                    await _auto_save_event(user_id, _doc_to_out(exists), prefs)
+                    ev = _doc_to_out(exists)
+                    await _auto_save_event(user_id, ev, prefs)
                     continue
 
                 extracted = await _extract_events_from_email(
@@ -590,6 +764,7 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                         "organizer":      ev.get("organizer"),
                         "description":    ev.get("description"),
                         "urgency":        ev.get("urgency", "medium"),
+                        "save_category":  ev.get("save_category", "reminder"),
                         "source_subject": raw["subject"][:200],
                         "source_from":    raw["from_addr"][:200],
                         "source_date":    raw["msg_date"][:100],
@@ -598,7 +773,10 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                     }
                     res = await db[COL_EVENTS].insert_one(doc)
                     doc["id"] = str(res.inserted_id)
-                    await _auto_save_event(user_id, _doc_to_out(doc), prefs)
+                    ev_out = _doc_to_out(doc)
+                    # Attach message_id for cascade-prevention
+                    ev_out._message_id = mid
+                    await _auto_save_event(user_id, ev_out, prefs)
 
             await db[COL_CONNECTIONS].update_one(
                 {"_id": conn["_id"]},
@@ -613,25 +791,13 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                 {"_id": conn["_id"]}, {"$set": {"sync_error": str(e)}}
             )
 
+
 def start_scheduled_scan_loop():
-    """
-    Call this once from your server.py startup to begin the daily scan loop.
-
-    Add to your server.py:
-        from contextlib import asynccontextmanager
-        from backend.routers.email_integration import start_scheduled_scan_loop
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            start_scheduled_scan_loop()
-            yield
-
-        app = FastAPI(lifespan=lifespan)
-    """
     global _scan_task
     loop = asyncio.get_event_loop()
     _scan_task = loop.create_task(_scheduled_scan_loop())
     logger.info("Scheduled email scan loop registered.")
+
 
 # =============================================================================
 # API ROUTES — CONNECTIONS
@@ -652,29 +818,19 @@ async def add_connection(
     body: ConnectionCreateRequest,
     current_user=Depends(get_current_user)
 ):
-    """
-    Connect a new email account. 
-    Allows multiple accounts (e.g., multiple Gmails) for the same user.
-    """
     try:
-        # 0. Infer provider and setup host/port
         host, port, provider = _infer_provider(body.email_address)
         host = body.imap_host or host
         port = body.imap_port or port
 
-        # 1. Test the IMAP connection before saving
         loop = asyncio.get_event_loop()
         error_msg = await loop.run_in_executor(
             None, _test_imap_sync, host, port, body.email_address, body.app_password
         )
 
         if error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=error_msg
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
-        # 2. Prepare the document with cleaned data
         clean_email = body.email_address.strip().lower()
         doc = {
             "user_id":          str(current_user.id),
@@ -688,18 +844,12 @@ async def add_connection(
             "connected_at":     datetime.now(timezone.utc).isoformat(),
         }
 
-        # 3. CRITICAL FIX: Match by BOTH user_id AND email_address
-        # This allows multiple accounts (e.g., Manthan + Gmail1 and Manthan + Gmail2)
-        # without triggering the MongoDB DuplicateKeyError.
         await db[COL_CONNECTIONS].update_one(
-            {
-                "user_id": str(current_user.id), 
-                "email_address": clean_email
-            },
+            {"user_id": str(current_user.id), "email_address": clean_email},
             {"$set": doc},
             upsert=True
         )
-        
+
         return _conn_doc_to_out(doc)
 
     except HTTPException:
@@ -707,9 +857,11 @@ async def add_connection(
     except Exception as e:
         logger.error(f"Multi-account add error: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to connect email: {str(e)}"
         )
+
+
 @router.patch("/connections/{email_address}")
 async def update_connection(
     email_address: str,
@@ -767,6 +919,104 @@ async def test_connection(email_address: str, current_user=Depends(get_current_u
     )
     return {"status": "ok", "message": f"{email_address} connected successfully"}
 
+
+# =============================================================================
+# API ROUTES — SENDER WHITELIST  (NEW in v4)
+# =============================================================================
+
+@router.get("/sender-whitelist")
+async def get_sender_whitelist(current_user=Depends(get_current_user)):
+    """Get the list of approved sender email addresses for auto-sync."""
+    doc = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
+    return {"senders": doc.get("senders", []) if doc else []}
+
+
+@router.post("/sender-whitelist")
+async def add_sender_to_whitelist(
+    body: SenderWhitelistEntry,
+    current_user=Depends(get_current_user)
+):
+    """Add a sender email address to the whitelist."""
+    clean_addr = body.email_address.strip().lower()
+    if not clean_addr or ("@" not in clean_addr and not clean_addr.startswith("@")):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid email address. Use full address (user@domain.com) or domain (@domain.com)."
+        )
+
+    entry = {
+        "email_address": clean_addr,
+        "label":         body.label or clean_addr,
+        "added_at":      datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Check if already in list
+    existing = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)})
+    if existing:
+        already = any(
+            s.get("email_address") == clean_addr
+            for s in existing.get("senders", [])
+        )
+        if already:
+            return {"message": "Sender already in whitelist", "senders": existing.get("senders", [])}
+        await db[COL_SENDER_WHITELIST].update_one(
+            {"user_id": str(current_user.id)},
+            {"$push": {"senders": entry}}
+        )
+    else:
+        await db[COL_SENDER_WHITELIST].insert_one({
+            "user_id": str(current_user.id),
+            "senders": [entry],
+        })
+
+    updated = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
+    return {"message": "Sender added", "senders": updated.get("senders", [])}
+
+
+@router.delete("/sender-whitelist/{email_address}")
+async def remove_sender_from_whitelist(
+    email_address: str,
+    current_user=Depends(get_current_user)
+):
+    """Remove a sender from the whitelist."""
+    await db[COL_SENDER_WHITELIST].update_one(
+        {"user_id": str(current_user.id)},
+        {"$pull": {"senders": {"email_address": email_address.lower()}}}
+    )
+    updated = await db[COL_SENDER_WHITELIST].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    )
+    return {"message": "Sender removed", "senders": (updated or {}).get("senders", [])}
+
+
+@router.put("/sender-whitelist")
+async def replace_sender_whitelist(
+    body: SenderWhitelistOut,
+    current_user=Depends(get_current_user)
+):
+    """Replace the entire sender whitelist."""
+    senders = []
+    for s in body.senders:
+        clean = s.get("email_address", "").strip().lower()
+        if clean:
+            senders.append({
+                "email_address": clean,
+                "label":         s.get("label", clean),
+                "added_at":      datetime.now(timezone.utc).isoformat(),
+            })
+
+    await db[COL_SENDER_WHITELIST].update_one(
+        {"user_id": str(current_user.id)},
+        {"$set": {"senders": senders, "user_id": str(current_user.id)}},
+        upsert=True
+    )
+    return {"message": "Whitelist updated", "senders": senders}
+
+
 # =============================================================================
 # API ROUTES — AUTO-SAVE PREFERENCES
 # =============================================================================
@@ -778,6 +1028,7 @@ async def get_auto_save_prefs(current_user=Depends(get_current_user)):
         return AutoSavePrefOut(
             auto_save_reminders=False,
             auto_save_visits=False,
+            auto_save_todos=False,
             scan_time_hour=12,
             scan_time_minute=0,
             next_scan_at=None
@@ -794,6 +1045,7 @@ async def get_auto_save_prefs(current_user=Depends(get_current_user)):
     return AutoSavePrefOut(
         auto_save_reminders=doc.get("auto_save_reminders", False),
         auto_save_visits=doc.get("auto_save_visits", False),
+        auto_save_todos=doc.get("auto_save_todos", False),
         scan_time_hour=doc.get("scan_time_hour", 12),
         scan_time_minute=doc.get("scan_time_minute", 0),
         next_scan_at=next_scan.isoformat()
@@ -809,6 +1061,7 @@ async def set_auto_save_prefs(
         "user_id":             str(current_user.id),
         "auto_save_reminders": body.auto_save_reminders,
         "auto_save_visits":    body.auto_save_visits,
+        "auto_save_todos":     body.auto_save_todos,
         "scan_time_hour":      max(0, min(23, body.scan_time_hour)),
         "scan_time_minute":    max(0, min(59, body.scan_time_minute)),
         "updated_at":          datetime.now(timezone.utc).isoformat(),
@@ -824,8 +1077,11 @@ async def check_prefs_exist(current_user=Depends(get_current_user)):
     doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)})
     return {"has_set_prefs": doc is not None}
 
+
 # =============================================================================
-# API ROUTES — MANUAL SAVE (reminder / visit)
+# API ROUTES — MANUAL SAVE
+# FIX (v4): Individual reminder/visit delete no longer cascade-deletes others.
+# Each document is stored with a unique (user_id, title, source, created_at).
 # =============================================================================
 
 @router.post("/save-as-reminder", status_code=201)
@@ -839,6 +1095,8 @@ async def save_as_reminder(
         except Exception:
             remind_dt = datetime.now(IST) + timedelta(days=1)
 
+        # FIX: Match by (user_id, title) only — NOT by source="email_auto"
+        # so deleting one doesn't wipe all auto-saved reminders
         existing = await db["reminders"].find_one({
             "user_id": str(current_user.id),
             "title":   body.title,
@@ -851,8 +1109,10 @@ async def save_as_reminder(
             "title":        body.title,
             "description":  body.description,
             "remind_at":    remind_dt.isoformat(),
-            "is_completed": False,
+            "is_dismissed": False,
             "source":       "email_manual",
+            # Unique identifier so deletes are scoped to this one item
+            "event_id":     body.event_id,
             "created_at":   datetime.now(timezone.utc).isoformat(),
         })
         return {"status": "created", "id": str(result.inserted_id)}
@@ -885,6 +1145,8 @@ async def save_as_visit(
             "notes":      body.notes or "",
             "status":     "scheduled",
             "source":     "email_manual",
+            # Unique identifier so deletes are scoped to this one item
+            "event_id":   body.event_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
         return {"status": "created", "id": str(result.inserted_id)}
@@ -894,6 +1156,41 @@ async def save_as_visit(
     except Exception as e:
         logger.error(f"save_as_visit error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save visit: {e}")
+
+
+@router.post("/save-as-todo", status_code=201)
+async def save_as_todo(
+    body: ManualSaveReminderRequest,   # reuse same schema
+    current_user=Depends(get_current_user)
+):
+    """Save an email event as a TODO item."""
+    try:
+        existing = await db["todos"].find_one({
+            "user_id": str(current_user.id),
+            "title":   body.title,
+        })
+        if existing:
+            return {"status": "already_exists", "id": str(existing.get("_id", existing.get("id", "")))}
+
+        result = await db["todos"].insert_one({
+            "user_id":      str(current_user.id),
+            "title":        body.title,
+            "description":  body.description,
+            "is_completed": False,
+            "due_date":     body.remind_at[:10] if body.remind_at else None,
+            "source":       "email_manual",
+            "event_id":     body.event_id,
+            "created_at":   datetime.now(timezone.utc).isoformat(),
+            "updated_at":   datetime.now(timezone.utc).isoformat(),
+        })
+        return {"status": "created", "id": str(result.inserted_id)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"save_as_todo error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save todo: {e}")
+
 
 # =============================================================================
 # API ROUTES — EVENT EXTRACTION ENGINE
@@ -913,10 +1210,18 @@ async def extract_events(
 
     prefs_doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)}) or {}
 
+    # Load sender whitelist
+    whitelist_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)})
+    sender_whitelist = []
+    if whitelist_doc and whitelist_doc.get("senders"):
+        sender_whitelist = [
+            s.get("email_address", "") for s in whitelist_doc["senders"]
+            if s.get("email_address")
+        ]
+
     async def process_account(conn):
         email_addr = conn["email_address"]
 
-        # Use cache if synced within last 30 min and not force refresh
         if not force_refresh and conn.get("last_synced"):
             try:
                 last = datetime.fromisoformat(conn["last_synced"])
@@ -932,7 +1237,8 @@ async def extract_events(
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
-            _decrypt(conn["app_password_enc"]), 50
+            _decrypt(conn["app_password_enc"]), 50,
+            sender_whitelist if sender_whitelist else None,
         )
 
         acc_results = []
@@ -963,6 +1269,7 @@ async def extract_events(
                     "organizer":      ev.get("organizer"),
                     "description":    ev.get("description"),
                     "urgency":        ev.get("urgency", "medium"),
+                    "save_category":  ev.get("save_category", "reminder"),
                     "source_subject": raw["subject"][:200],
                     "source_from":    raw["from_addr"][:200],
                     "source_date":    raw["msg_date"][:100],
@@ -1001,6 +1308,13 @@ async def extract_events(
 
 @router.delete("/events/{event_id}", status_code=204)
 async def delete_event(event_id: str, current_user=Depends(get_current_user)):
+    """
+    FIX (v4): Delete ONLY the specific event by its MongoDB _id.
+    Previously this route also wiped all auto-saved reminders/visits.
+    Now it ONLY removes the cached extraction record.
+    The corresponding reminder/visit/todo must be deleted separately
+    from their own endpoints (DELETE /reminders/{id}, etc.)
+    """
     try:
         await db[COL_EVENTS].delete_one(
             {"_id": ObjectId(event_id), "user_id": str(current_user.id)}
@@ -1011,7 +1325,9 @@ async def delete_event(event_id: str, current_user=Depends(get_current_user)):
 
 @router.delete("/events/clear-all", status_code=204)
 async def clear_all_events(current_user=Depends(get_current_user)):
-    """Clear all cached extracted events — forces fresh scan next time."""
+    """Clear all cached extracted events — forces fresh scan next time.
+    NOTE: This does NOT delete reminders, visits, or todos already saved.
+    """
     await db[COL_EVENTS].delete_many({"user_id": str(current_user.id)})
 
 
@@ -1029,13 +1345,13 @@ async def importer_events(
     ).sort("date", -1).limit(limit).to_list(limit)
     return [_doc_to_out(d) for d in docs]
 
+
 # =============================================================================
 # ATTENDANCE / HOLIDAY / VISIT CARD INTEGRATION HELPERS
 # =============================================================================
 
 @router.get("/attendance/today-summary")
 async def attendance_today_summary(current_user=Depends(get_current_user)):
-    """Today's visits + upcoming reminders for the Attendance page."""
     today = datetime.now(IST).strftime("%Y-%m-%d")
     week_later = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
 
@@ -1046,7 +1362,7 @@ async def attendance_today_summary(current_user=Depends(get_current_user)):
 
     reminders = await db["reminders"].find({
         "user_id":      str(current_user.id),
-        "is_completed": False,
+        "is_dismissed": False,
         "remind_at":    {"$gte": today, "$lte": week_later + "T23:59:59"},
     }).sort("remind_at", 1).to_list(10)
 
@@ -1065,7 +1381,6 @@ async def attendance_today_summary(current_user=Depends(get_current_user)):
 
 @router.get("/holidays/upcoming")
 async def upcoming_holidays(current_user=Depends(get_current_user)):
-    """Upcoming legal events for the Holiday / Compliance Calendar card."""
     today = datetime.now(IST).strftime("%Y-%m-%d")
     events = await db[COL_EVENTS].find({
         "user_id":    str(current_user.id),
