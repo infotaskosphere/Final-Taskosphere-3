@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+  DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -20,8 +20,8 @@ import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye,
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
-  Mail, Phone, Calendar, Camera, Download, LayoutDashboard,
-  Clock, UserCheck, UserX, AlertCircle, KeyRound,
+  Mail, Phone, Calendar, Camera, Clock, UserCheck, UserX,
+  AlertCircle, KeyRound, Receipt,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -46,6 +46,7 @@ const DEPARTMENTS = [
   { value: 'OTHER', label: 'OTHER', color: '#475569' },
 ];
 
+// ── Single source of truth for all permission defaults ─────────────────────
 const DEFAULT_ROLE_PERMISSIONS = {
   admin: {
     can_view_all_tasks: true, can_view_all_clients: true, can_view_all_dsc: true,
@@ -59,6 +60,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: true, can_manage_settings: true, can_assign_clients: true,
     can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
     can_connect_email: true, can_view_own_data: true,
+    can_create_quotations: true,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -74,6 +76,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true,
+    can_create_quotations: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -89,6 +92,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true,
+    can_create_quotations: false,
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -106,6 +110,7 @@ const EMPTY_PERMISSIONS = {
   can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false,
+  can_create_quotations: false,
   assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
@@ -123,7 +128,8 @@ const DeptPill = ({ dept, size = 'sm' }) => {
   const info = DEPARTMENTS.find(d => d.value === dept);
   if (!info) return null;
   return (
-    <span className={`inline-flex items-center font-semibold rounded-full ${size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}
+    <span
+      className={`inline-flex items-center font-semibold rounded-full ${size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}
       style={{ background: `${info.color}15`, color: info.color, border: `1px solid ${info.color}30` }}>
       {info.label}
     </span>
@@ -277,10 +283,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
   );
 };
 
-// ── Permission toggle row — extracted to avoid closure issues ─────────────────
-// CRITICAL: permKey is captured as a plain string, NOT inside an object.
-// This prevents the `p.key` shadowing bug where `p` was the prev-state
-// object and `p.key` was always `undefined`.
+// ── Permission toggle row ─────────────────────────────────────────────────────
 const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) => (
   <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
     <div className="pr-4">
@@ -290,7 +293,6 @@ const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) =>
     <Switch
       checked={!!permissions[permKey]}
       onCheckedChange={(val) =>
-        // ✅ FIX: `permKey` is closed over as a string — never shadows prev state
         setPermissions(prev => ({ ...prev, [permKey]: val }))
       }
     />
@@ -302,20 +304,20 @@ const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) =>
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Users() {
   const { user, refreshUser } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const perms = user?.permissions || {};
+  const isAdmin              = user?.role === 'admin';
+  const perms                = user?.permissions || {};
   const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
   const canEditUsers         = isAdmin || !!perms.can_manage_users;
   const canManagePermissions = isAdmin;
 
   const [users,   setUsers]   = useState([]);
   const [clients, setClients] = useState([]);
-  const [searchQuery,  setSearchQuery]  = useState('');
-  const [activeTab,    setActiveTab]    = useState('all');
-  const [dialogOpen,   setDialogOpen]   = useState(false);
-  const [permDialogOpen, setPermDialogOpen] = useState(false);
-  const [selectedUser,        setSelectedUser]        = useState(null);
-  const [selectedUserForPerms, setSelectedUserForPerms] = useState(null);
+  const [searchQuery,     setSearchQuery]     = useState('');
+  const [activeTab,       setActiveTab]       = useState('all');
+  const [dialogOpen,      setDialogOpen]      = useState(false);
+  const [permDialogOpen,  setPermDialogOpen]  = useState(false);
+  const [selectedUser,          setSelectedUser]          = useState(null);
+  const [selectedUserForPerms,  setSelectedUserForPerms]  = useState(null);
   const [approvingId, setApprovingId] = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [clientSearch, setClientSearch] = useState('');
@@ -353,7 +355,6 @@ export default function Users() {
   const fetchPermissions = async (userId) => {
     try {
       const res = await api.get(`/users/${userId}/permissions`);
-      // Merge with EMPTY_PERMISSIONS so every key always exists
       setPermissions({ ...EMPTY_PERMISSIONS, ...(res.data || {}) });
     } catch {
       toast.error('Using default permission template');
@@ -440,14 +441,19 @@ export default function Users() {
         toast.success('✓ User updated successfully');
       } else {
         await api.post('/auth/register', {
-          full_name: formData.full_name.trim(), email: formData.email.trim(),
-          password: formData.password, role: formData.role,
-          departments: formData.departments, phone: formData.phone || null,
-          birthday: formData.birthday || null,
-          punch_in_time: formData.punch_in_time, grace_time: formData.grace_time,
-          punch_out_time: formData.punch_out_time,
-          telegram_id: formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
-          is_active: false, status: 'pending_approval',
+          full_name:     formData.full_name.trim(),
+          email:         formData.email.trim(),
+          password:      formData.password,
+          role:          formData.role,
+          departments:   formData.departments,
+          phone:         formData.phone || null,
+          birthday:      formData.birthday || null,
+          punch_in_time: formData.punch_in_time,
+          grace_time:    formData.grace_time,
+          punch_out_time:formData.punch_out_time,
+          telegram_id:   formData.telegram_id !== '' ? Number(formData.telegram_id) : null,
+          is_active:     false,
+          status:        'pending_approval',
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -476,7 +482,6 @@ export default function Users() {
     setPermDialogOpen(true);
   };
 
-  // ── Save permissions — builds clean payload ──────────────────────────────
   const handleSavePermissions = async () => {
     if (!canManagePermissions) { toast.error('Only administrators can update permissions'); return; }
     setLoading(true);
@@ -553,32 +558,33 @@ export default function Users() {
   // ── Permission accordion sections ─────────────────────────────────────────
   const GLOBAL_PERMS = [
     { key: 'can_view_all_tasks',              label: 'Universal Task Access',        desc: 'See tasks assigned to any user/dept' },
-    { key: 'can_view_all_clients',            label: 'Master Client List',            desc: 'See all company legal entities' },
-    { key: 'can_view_all_dsc',                label: 'DSC Vault Access',              desc: 'View all Digital Signatures' },
-    { key: 'can_view_documents',              label: 'Document Library',              desc: 'Access physical document register' },
-    { key: 'can_view_all_duedates',           label: 'Compliance Roadmap',            desc: 'View all upcoming statutory due dates' },
-    { key: 'can_view_reports',                label: 'Analytics Dashboard',           desc: 'View performance and system reports' },
-    { key: 'can_view_todo_dashboard',         label: 'Todo Dashboard',                desc: 'Access global team todo overview' },
-    { key: 'can_view_audit_logs',             label: 'System Audit Trail',            desc: 'View activity logs and record histories' },
-    { key: 'can_view_all_leads',              label: 'Leads Pipeline',                desc: 'View the global leads dashboard' },
-    { key: 'can_view_user_page',              label: 'User Directory',                desc: 'View team members directory' },
-    { key: 'can_view_selected_users_reports', label: 'Team Reports Access',           desc: 'View reports for selected users' },
-    { key: 'can_view_staff_rankings',         label: 'Staff Rankings',                desc: 'View performance leaderboard' },
-    { key: 'can_view_own_data',               label: 'View Own Data',                 desc: 'Access own attendance, tasks and reports' },
+    { key: 'can_view_all_clients',            label: 'Master Client List',           desc: 'See all company legal entities' },
+    { key: 'can_view_all_dsc',                label: 'DSC Vault Access',             desc: 'View all Digital Signatures' },
+    { key: 'can_view_documents',              label: 'Document Library',             desc: 'Access physical document register' },
+    { key: 'can_view_all_duedates',           label: 'Compliance Roadmap',           desc: 'View all upcoming statutory due dates' },
+    { key: 'can_view_reports',                label: 'Analytics Dashboard',          desc: 'View performance and system reports' },
+    { key: 'can_view_todo_dashboard',         label: 'Todo Dashboard',               desc: 'Access global team todo overview' },
+    { key: 'can_view_audit_logs',             label: 'System Audit Trail',           desc: 'View activity logs and record histories' },
+    { key: 'can_view_all_leads',              label: 'Leads Pipeline',               desc: 'View the global leads dashboard' },
+    { key: 'can_view_user_page',              label: 'User Directory',               desc: 'View team members directory' },
+    { key: 'can_view_selected_users_reports', label: 'Team Reports Access',          desc: 'View reports for selected users' },
+    { key: 'can_view_staff_rankings',         label: 'Staff Rankings',               desc: 'View performance leaderboard' },
+    { key: 'can_view_own_data',               label: 'View Own Data',                desc: 'Access own attendance, tasks and reports' },
+    { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and WhatsApp share professional quotations' },
   ];
 
   const OPS_PERMS = [
-    { key: 'can_assign_tasks',       label: 'Task Delegation',        desc: 'Assign tasks to other staff' },
-    { key: 'can_assign_clients',     label: 'Client Assignment',      desc: 'Assign and reassign staff to clients' },
-    { key: 'can_manage_users',       label: 'User Governance',        desc: 'Manage other team members and roles' },
-    { key: 'can_view_attendance',    label: 'Attendance Management',  desc: 'Review punch timings and late reports' },
-    { key: 'can_view_staff_activity',label: 'Staff Monitoring',       desc: 'View app usage and screen activity' },
-    { key: 'can_send_reminders',     label: 'Automated Reminders',    desc: 'Trigger email/notification reminders' },
-    { key: 'can_download_reports',   label: 'Export Data',            desc: 'Download CSV/PDF versions of reports' },
-    { key: 'can_manage_settings',    label: 'System Settings',        desc: 'Modify global system configuration' },
-    { key: 'can_delete_data',        label: 'Delete Records',         desc: 'Permanently delete data entries' },
-    { key: 'can_delete_tasks',       label: 'Delete Tasks',           desc: 'Delete any task regardless of ownership' },
-    { key: 'can_connect_email',      label: 'Connect Email Accounts', desc: 'Link personal email via IMAP for event extraction' },
+    { key: 'can_assign_tasks',        label: 'Task Delegation',       desc: 'Assign tasks to other staff' },
+    { key: 'can_assign_clients',      label: 'Client Assignment',     desc: 'Assign and reassign staff to clients' },
+    { key: 'can_manage_users',        label: 'User Governance',       desc: 'Manage other team members and roles' },
+    { key: 'can_view_attendance',     label: 'Attendance Management', desc: 'Review punch timings and late reports' },
+    { key: 'can_view_staff_activity', label: 'Staff Monitoring',      desc: 'View app usage and screen activity' },
+    { key: 'can_send_reminders',      label: 'Automated Reminders',   desc: 'Trigger email/notification reminders' },
+    { key: 'can_download_reports',    label: 'Export Data',           desc: 'Download CSV/PDF versions of reports' },
+    { key: 'can_manage_settings',     label: 'System Settings',       desc: 'Modify global system configuration' },
+    { key: 'can_delete_data',         label: 'Delete Records',        desc: 'Permanently delete data entries' },
+    { key: 'can_delete_tasks',        label: 'Delete Tasks',          desc: 'Delete any task regardless of ownership' },
+    { key: 'can_connect_email',       label: 'Connect Email Accounts',desc: 'Link personal email via IMAP for event extraction' },
   ];
 
   const EDIT_PERMS = [
@@ -606,16 +612,17 @@ export default function Users() {
             )}
           </p>
         </div>
-
         {isAdmin && (
           <Button className="rounded-xl font-bold h-12 shadow-lg hover:scale-105 transition-all"
             style={{ background: COLORS.deepBlue }}
             onClick={() => {
               setSelectedUser(null); setRoleChanged(false);
-              setFormData({ full_name: '', email: '', password: '', role: 'staff',
+              setFormData({
+                full_name: '', email: '', password: '', role: 'staff',
                 departments: [], phone: '', birthday: '', profile_picture: '',
                 punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
-                telegram_id: '', is_active: true, status: 'active' });
+                telegram_id: '', is_active: true, status: 'active',
+              });
               setDialogOpen(true);
             }}>
             <Plus className="h-5 w-5 mr-2" />Create New Member
@@ -635,6 +642,7 @@ export default function Users() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
+            {/* Profile picture */}
             <div className="flex justify-center">
               <div className="relative">
                 <div className="w-28 h-28 rounded-3xl overflow-hidden bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center">
@@ -649,22 +657,28 @@ export default function Users() {
                 </label>
               </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Full Name *</Label>
-                <Input name="full_name" value={formData.full_name} onChange={handleInput} placeholder="e.g. Manthan Desai" className="rounded-xl" />
+                <Input name="full_name" value={formData.full_name} onChange={handleInput}
+                  placeholder="e.g. Manthan Desai" className="rounded-xl" />
               </div>
               <div className="space-y-2">
-                <Label className="font-semibold">Email {isAdmin ? '*' : <span className="text-slate-400 font-normal">(read only)</span>}</Label>
+                <Label className="font-semibold">
+                  Email {isAdmin ? '*' : <span className="text-slate-400 font-normal">(read only)</span>}
+                </Label>
                 <Input type="email" name="email" value={formData.email} onChange={handleInput}
                   placeholder="name@firm.com" className="rounded-xl"
                   disabled={!isAdmin || (selectedUser && selectedUser.id === user.id)} />
               </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Phone</Label>
-                <Input name="phone" value={formData.phone} onChange={handleInput} placeholder="+91 00000 00000" className="rounded-xl" />
+                <Input name="phone" value={formData.phone} onChange={handleInput}
+                  placeholder="+91 00000 00000" className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold flex items-center gap-2">
@@ -673,36 +687,44 @@ export default function Users() {
                   {selectedUser && <span className="text-slate-400 font-normal text-xs">(blank = keep current)</span>}
                 </Label>
                 <Input type="password" name="password" value={formData.password} onChange={handleInput}
-                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'} className="rounded-xl" />
+                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'}
+                  className="rounded-xl" />
               </div>
             </div>
+
+            {/* Shift schedule */}
             <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 space-y-4">
               <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center gap-2">
                 <Clock className="h-4 w-4" /> Shift Schedule
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { label: 'Punch-In Time', name: 'punch_in_time' },
-                  { label: 'Grace Period (HH:MM)', name: 'grace_time' },
-                  { label: 'Punch-Out Time', name: 'punch_out_time' },
+                  { label: 'Punch-In Time',      name: 'punch_in_time'  },
+                  { label: 'Grace Period (HH:MM)', name: 'grace_time'   },
+                  { label: 'Punch-Out Time',      name: 'punch_out_time' },
                 ].map(f => (
                   <div key={f.name} className="space-y-2">
                     <Label className="text-xs font-bold text-slate-600">{f.label}</Label>
-                    <Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput} className="rounded-lg bg-white" />
+                    <Input type="time" name={f.name} value={formData[f.name]}
+                      onChange={handleInput} className="rounded-lg bg-white" />
                   </div>
                 ))}
               </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Birthday</Label>
-                <Input type="date" name="birthday" value={formData.birthday} onChange={handleInput} className="rounded-xl" />
+                <Input type="date" name="birthday" value={formData.birthday}
+                  onChange={handleInput} className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Telegram ID</Label>
-                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="Numeric Telegram ID" className="rounded-xl" />
+                <Input type="number" name="telegram_id" value={formData.telegram_id}
+                  onChange={handleInput} placeholder="Numeric Telegram ID" className="rounded-xl" />
               </div>
             </div>
+
             {isAdmin && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
@@ -739,7 +761,8 @@ export default function Users() {
                 </div>
                 <div className="space-y-2">
                   <Label className="font-semibold">Account Status</Label>
-                  <Select value={formData.status} onValueChange={v => setFormData(p => ({ ...p, status: v, is_active: v === 'active' }))}>
+                  <Select value={formData.status}
+                    onValueChange={v => setFormData(p => ({ ...p, status: v, is_active: v === 'active' }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="active">Active</SelectItem>
@@ -751,6 +774,7 @@ export default function Users() {
                 </div>
               </div>
             )}
+
             {isAdmin && (
               <div className="space-y-3">
                 <Label className="font-semibold">Assigned Departments</Label>
@@ -770,6 +794,7 @@ export default function Users() {
               </div>
             )}
           </div>
+
           <DialogFooter className="gap-3 border-t pt-5">
             <Button variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl h-12">Discard</Button>
             <Button onClick={handleSubmit} disabled={loading} className="rounded-xl h-12 px-8 font-bold shadow-lg"
@@ -787,7 +812,9 @@ export default function Users() {
             className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl shadow-sm">
             <div className="p-2 bg-amber-100 rounded-xl"><Clock className="h-5 w-5 text-amber-600" /></div>
             <div className="flex-1">
-              <p className="text-sm font-bold text-amber-800">{pendingUsers.length} registration{pendingUsers.length > 1 ? 's' : ''} pending approval</p>
+              <p className="text-sm font-bold text-amber-800">
+                {pendingUsers.length} registration{pendingUsers.length > 1 ? 's' : ''} pending approval
+              </p>
               <p className="text-xs text-amber-600">These users cannot log in until approved.</p>
             </div>
             <Button size="sm" onClick={() => setActiveTab('pending')}
@@ -806,7 +833,8 @@ export default function Users() {
             value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
             className="pl-12 h-12 rounded-2xl border-slate-200 shadow-sm" />
         </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-white p-1 rounded-2xl border shadow-sm self-start">
+        <Tabs value={activeTab} onValueChange={setActiveTab}
+          className="bg-white p-1 rounded-2xl border shadow-sm self-start">
           <TabsList className="bg-transparent h-10 flex flex-wrap gap-0.5">
             {['all', 'admin', 'manager', 'staff'].map(t => (
               <TabsTrigger key={t} value={t} className="rounded-xl font-bold px-4 capitalize">
@@ -815,7 +843,8 @@ export default function Users() {
             ))}
             {isAdmin && (
               <TabsTrigger value="pending" className="rounded-xl font-bold px-3 relative">
-                <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Pending
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" />Pending
                   {pendingUsers.length > 0 && (
                     <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
                       {pendingUsers.length}
@@ -826,7 +855,9 @@ export default function Users() {
             )}
             {isAdmin && rejectedUsers.length > 0 && (
               <TabsTrigger value="rejected" className="rounded-xl font-bold px-3">
-                <span className="flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-red-400" />Rejected</span>
+                <span className="flex items-center gap-1.5">
+                  <XCircle className="h-3.5 w-3.5 text-red-400" />Rejected
+                </span>
               </TabsTrigger>
             )}
           </TabsList>
@@ -843,42 +874,45 @@ export default function Users() {
           : <motion.div variants={containerVariants} initial="hidden" animate="visible"
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredUsers.map(u => (
-                <PendingUserCard key={u.id} userData={u} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
+                <PendingUserCard key={u.id} userData={u}
+                  onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
               ))}
             </motion.div>
       )}
 
       {/* ── Main grid ── */}
       {activeTab !== 'pending' && (
-        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <motion.div variants={containerVariants}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredUsers.length === 0
             ? <div className="col-span-full py-24 text-center">
                 <UsersIcon className="h-16 w-16 text-slate-200 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-slate-400">No members found</h3>
               </div>
             : filteredUsers.map(u => (
-                <UserCard key={u.id} userData={u} onEdit={handleEdit} onDelete={handleDelete}
-                  onPermissions={openPermissionsDialog} onApprove={handleApprove} onReject={handleReject}
+                <UserCard key={u.id} userData={u}
+                  onEdit={handleEdit} onDelete={handleDelete}
+                  onPermissions={openPermissionsDialog}
+                  onApprove={handleApprove} onReject={handleReject}
                   currentUserId={user?.id} isAdmin={isAdmin}
-                  canEditUsers={canEditUsers} canManagePermissions={canManagePermissions} approving={approvingId} />
+                  canEditUsers={canEditUsers} canManagePermissions={canManagePermissions}
+                  approving={approvingId} />
               ))}
         </motion.div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          PERMISSIONS DIALOG
-          All Switch onCheckedChange handlers use the extracted PermToggleRow
-          component to guarantee the closure captures `permKey` as a string,
-          not as `p.key` (which would be undefined because `p` is the prev
-          state object in the setPermissions updater function).
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ── PERMISSIONS DIALOG ── */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-emerald-50 rounded-2xl"><Shield className="h-7 w-7 text-emerald-600" /></div>
+              <div className="p-3 bg-emerald-50 rounded-2xl">
+                <Shield className="h-7 w-7 text-emerald-600" />
+              </div>
               <div>
-                <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>Access Governance</DialogTitle>
+                <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
+                  Access Governance
+                </DialogTitle>
                 <DialogDescription>
                   Configuring <b>{selectedUserForPerms?.full_name}</b> ({selectedUserForPerms?.role})
                 </DialogDescription>
@@ -902,21 +936,17 @@ export default function Users() {
 
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
 
-              {/* ── Global Visibility ── */}
+              {/* ── Global Visibility (includes Quotations) ── */}
               <AccordionItem value="global" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3"><Eye className="h-5 w-5 text-blue-500" />Global Visibility</div>
+                  <div className="flex items-center gap-3">
+                    <Eye className="h-5 w-5 text-blue-500" />Global Visibility
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {GLOBAL_PERMS.map(p => (
-                    <PermToggleRow
-                      key={p.key}
-                      permKey={p.key}
-                      label={p.label}
-                      desc={p.desc}
-                      permissions={permissions}
-                      setPermissions={setPermissions}
-                    />
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc}
+                      permissions={permissions} setPermissions={setPermissions} />
                   ))}
                 </AccordionContent>
               </AccordionItem>
@@ -924,18 +954,14 @@ export default function Users() {
               {/* ── Operational Powers ── */}
               <AccordionItem value="ops" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3"><Settings className="h-5 w-5 text-purple-500" />Operational Powers</div>
+                  <div className="flex items-center gap-3">
+                    <Settings className="h-5 w-5 text-purple-500" />Operational Powers
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {OPS_PERMS.map(p => (
-                    <PermToggleRow
-                      key={p.key}
-                      permKey={p.key}
-                      label={p.label}
-                      desc={p.desc}
-                      permissions={permissions}
-                      setPermissions={setPermissions}
-                    />
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc}
+                      permissions={permissions} setPermissions={setPermissions} />
                   ))}
                 </AccordionContent>
               </AccordionItem>
@@ -943,18 +969,14 @@ export default function Users() {
               {/* ── Edit & Modification ── */}
               <AccordionItem value="edits" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3"><Edit className="h-5 w-5 text-orange-500" />Edit & Modification</div>
+                  <div className="flex items-center gap-3">
+                    <Edit className="h-5 w-5 text-orange-500" />Edit & Modification
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {EDIT_PERMS.map(p => (
-                    <PermToggleRow
-                      key={p.key}
-                      permKey={p.key}
-                      label={p.label}
-                      desc={p.desc}
-                      permissions={permissions}
-                      setPermissions={setPermissions}
-                    />
+                    <PermToggleRow key={p.key} permKey={p.key} label={p.label} desc={p.desc}
+                      permissions={permissions} setPermissions={setPermissions} />
                   ))}
                 </AccordionContent>
               </AccordionItem>
@@ -962,7 +984,9 @@ export default function Users() {
               {/* ── Cross-User Visibility ── */}
               <AccordionItem value="cross" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3"><UsersIcon className="h-5 w-5 text-emerald-500" />Cross-User Visibility</div>
+                  <div className="flex items-center gap-3">
+                    <UsersIcon className="h-5 w-5 text-emerald-500" />Cross-User Visibility
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-6">
                   {[
@@ -976,7 +1000,7 @@ export default function Users() {
                       <p className="text-sm font-bold text-slate-800 px-1">Allowed {section.label} Visibility</p>
                       <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-2xl min-h-[50px]">
                         {users.filter(u => u.id !== selectedUserForPerms?.id).map(u => {
-                          const sectionKey = section.key; // capture as string
+                          const sectionKey = section.key;
                           const sel = permissions[sectionKey]?.includes(u.id);
                           return (
                             <Badge key={u.id}
@@ -995,7 +1019,9 @@ export default function Users() {
                             </Badge>
                           );
                         })}
-                        {users.length <= 1 && <p className="text-xs text-slate-400 italic">No other users available</p>}
+                        {users.length <= 1 && (
+                          <p className="text-xs text-slate-400 italic">No other users available</p>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1005,7 +1031,9 @@ export default function Users() {
               {/* ── Assigned Portfolio ── */}
               <AccordionItem value="clients" className="border rounded-2xl px-4 shadow-sm">
                 <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3"><Briefcase className="h-5 w-5 text-cyan-500" />Assigned Portfolio</div>
+                  <div className="flex items-center gap-3">
+                    <Briefcase className="h-5 w-5 text-cyan-500" />Assigned Portfolio
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-4">
                   <div className="relative">
@@ -1017,7 +1045,7 @@ export default function Users() {
                     {clients
                       .filter(c => c.company_name.toLowerCase().includes(clientSearch.toLowerCase()))
                       .map(client => {
-                        const clientId = client.id; // capture as string
+                        const clientId = client.id;
                         const assigned = (permissions.assigned_clients || []).includes(clientId);
                         return (
                           <div key={clientId}
@@ -1028,8 +1056,11 @@ export default function Users() {
                                 : [...(prev.assigned_clients || []), clientId],
                             }))}
                             className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
-                              assigned ? 'bg-emerald-50 border-emerald-400' : 'bg-white border-slate-100 hover:border-slate-200'}`}>
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${assigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                              assigned
+                                ? 'bg-emerald-50 border-emerald-400'
+                                : 'bg-white border-slate-100 hover:border-slate-200'}`}>
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              assigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
                               {assigned ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                             </div>
                             <span className="text-xs font-bold text-slate-700 truncate">{client.company_name}</span>
@@ -1044,7 +1075,9 @@ export default function Users() {
           </div>
 
           <div className="sticky bottom-0 p-6 bg-slate-50 border-t flex justify-end gap-3">
-            <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermDialogOpen(false)}>Discard</Button>
+            <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermDialogOpen(false)}>
+              Discard
+            </Button>
             <Button onClick={handleSavePermissions} disabled={loading}
               className="rounded-xl h-12 px-10 font-bold shadow-xl"
               style={{ background: COLORS.emeraldGreen }}>
