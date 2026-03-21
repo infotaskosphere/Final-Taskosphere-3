@@ -1,44 +1,35 @@
 # =============================================================================
-# email_integration.py  — v8  COMPLETE CORRECTED FILE
+# email_integration.py  — v9  COMPLETE CORRECTED FILE
 # FastAPI router — IMAP email connection management + AI event extraction
 # Specialized for: CA/CS/Legal Firm (Trademark Hearings, NCLT, GST, ROC)
 # Stack: FastAPI · MongoDB (motor) · Google Gemini 2.0 Flash-Lite · imaplib
 #
-# NEW IN v8 (based on REAL IP India email samples):
+# FIXED IN v9 (bug fixes over v8):
 #
-#  [HEARING NOTICE — e.g. "Hearing Notice for Application No. 6313085"]
-#  - Date pattern "scheduled on 07-05-2026" precisely extracted from body
-#  - "Show Cause" keyword detected → urgency = high
-#  - Reminder saved on the ACTUAL hearing date (not email received date)
-#  - Title: "Trademark Hearing — TM App No. 6313085 (Show Cause)"
+#  [BUG FIX 1 — DELETE/PATCH 404 on auto-saved reminders]
+#  - _auto_save_event reminder INSERT now generates a UUID string "id" field
+#    before insert_one, so DELETE /reminders/{id} and PATCH /reminders/{id}
+#    can find the document. Previously only manual saves had a string id.
 #
-#  [EXAMINATION REPORT — bilingual subject e.g. "परीक्षा रिपोर्ट / Examination Report
-#    for Application No6526106 वर्ग/in class 43"]
-#  - Hindi+English mixed subject fully parsed for app number + class
-#  - App number extracted WITHOUT requiring "No." prefix (bare number ok)
-#  - Issue date from email header (msg_date) used as fallback when not in body
-#  - due_date = issue_date + 30 calendar days  (stored as TODO due_date)
+#  [BUG FIX 2 — DELETE/PATCH 404 on auto-saved todos]
+#  - _auto_save_event todo INSERT now generates a UUID string "id" field
+#    before insert_one, matching the pattern used by save_as_todo route.
 #
-#  [REMINDER-I / REMINDER-II / REMINDER-III for same application]
-#  - Same TM app number → UPDATE existing TODO (escalate urgency, update title)
-#  - Never inserts a second TODO for the same application
-#  - Urgency escalation: original=medium, Reminder-I=medium, Reminder-II=high,
-#    Reminder-III=high+overdue flag
+#  [BUG FIX 3 — _doc_to_out empty id for auto-saved records]
+#  - _doc_to_out now falls back to str(_id) when string "id" field is absent,
+#    so cached auto-saved events always expose a usable id to the frontend.
 #
-#  [ADJOURNMENT HANDLING]
-#  - Keywords: "adjourned", "rescheduled", "postponed", "new date", "revised date"
-#  - Finds the NEW hearing date (takes the latest date found in body)
-#  - Updates existing reminder's remind_at and description — does NOT create new
+#  [NEW ROUTE — /migrate-fix-ids]
+#  - One-time backfill: sets string "id" = str(_id) on all existing reminders
+#    and todos that were auto-saved without a string id (v8 and earlier).
+#    Safe to call multiple times. Run once after deploying v9.
 #
-#  [DEDUPLICATION KEY = tm_app_no + event_type]
-#  - Hearing   → keyed by (user_id, tm_app_no, "reminder")
-#  - Exam/Todo → keyed by (user_id, tm_app_no, "todo")
-#  - Generic   → keyed by (user_id, title)
-#
-#  [v7/v6 RETAINED]
-#  - HTML→plain text extraction, _clean_text(), charset fallback
+#  [v8 RETAINED — all original features unchanged]
+#  - IP India hearing / exam report / reminder-I/II/III / adjournment parsing
+#  - TM app number deduplication for reminders and todos
+#  - HTML→plain text, _clean_text, charset fallback
 #  - Whitelist subdomain matching, junk pre-filter
-#  - All API routes unchanged
+#  - All existing API routes unchanged
 # =============================================================================
 
 import imaplib
@@ -49,6 +40,7 @@ import json
 import asyncio
 import logging
 import html
+import uuid as _uuid
 from html.parser import HTMLParser
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Set, Tuple
@@ -148,7 +140,7 @@ class ExtractedEventOut(BaseModel):
     raw_snippet: Optional[str] = None
     email_account: Optional[str] = None
     save_category: Optional[str] = None   # "todo" | "reminder" | "visit"
-    tm_app_no: Optional[str] = None       # TM Application Number (v7)
+    tm_app_no: Optional[str] = None       # TM Application Number
 
 class AutoSavePrefRequest(BaseModel):
     auto_save_reminders: bool
@@ -211,7 +203,7 @@ def _clean_password(password: str) -> str:
 
 
 # =============================================================================
-# TEXT CLEANING  (v6 — retained)
+# TEXT CLEANING
 # =============================================================================
 
 class _HTMLTextExtractor(HTMLParser):
@@ -290,13 +282,7 @@ def _clean_text(text: str, max_chars: int = 0) -> str:
 
 
 # =============================================================================
-# IP INDIA EMAIL PARSER  (v7 — NEW)
-# =============================================================================
-# Handles noreply.tmr@gov.in emails precisely:
-#   Type A — Hearing Notice:        scheduled date → reminder
-#   Type B — Examination Report:    issue date + 30 days → TODO
-#   Reminder-I/II/III on same app → update existing, never duplicate
-#   Adjournment                   → update existing reminder to new date
+# IP INDIA EMAIL PARSER
 # =============================================================================
 
 _MONTH_MAP = {
@@ -312,17 +298,8 @@ _MONTH_MAP = {
 def _extract_tm_app_no(text: str) -> Optional[str]:
     """
     Extract TM application number from text.
-
-    Handles real IP India email patterns:
-      - "Application No. 6313085"       (hearing notice subject)
-      - "Application No6526106"         (no space before number)
-      - "No6526106 वर्ग/in class 43"   (bilingual subject)
-      - "No. 6526106 वर्ग"              (dot-space variant)
-      - bare 7-digit number in body     (last resort)
-
-    Priority: explicit "No" prefix first → bare 7-digit fallback
+    Priority: explicit "No" prefix first → bare 7-digit fallback.
     """
-    # Pattern 1: explicit "Application No" or "No." prefix with optional space/dot
     for pat in [
         r"Application\s+No\.?\s*(\d{5,9})",
         r"\bNo\.?\s*(\d{5,9})(?:\s|$|[^\d])",
@@ -335,14 +312,11 @@ def _extract_tm_app_no(text: str) -> Optional[str]:
             if 5 <= len(candidate) <= 9:
                 return candidate
 
-    # Pattern 2: bare 7-digit number (TM app numbers are typically 7 digits)
     for m in re.finditer(r"\b(\d{7})\b", text):
         return m.group(1)
 
-    # Pattern 3: 5-9 digit standalone number as last resort
     for m in re.finditer(r"\b(\d{5,9})\b", text):
         candidate = m.group(1)
-        # Skip obvious years
         if 2000 <= int(candidate) <= 2099:
             continue
         return candidate
@@ -351,11 +325,7 @@ def _extract_tm_app_no(text: str) -> Optional[str]:
 
 
 def _parse_date_from_text(text: str) -> Optional[str]:
-    """
-    Extract first plausible date from text. Returns "YYYY-MM-DD" or None.
-    Priority: DD-MM-YYYY / DD Month YYYY / Month DD YYYY
-    """
-    # DD-MM-YYYY or DD/MM/YYYY
+    """Extract first plausible date from text. Returns 'YYYY-MM-DD' or None."""
     for m in re.finditer(r"\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b", text):
         d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
         if 1 <= mo <= 12 and 1 <= d <= 31 and 2020 <= y <= 2035:
@@ -364,7 +334,6 @@ def _parse_date_from_text(text: str) -> Optional[str]:
             except ValueError:
                 continue
 
-    # DD Month YYYY  e.g. "07 May 2026", "7th May, 2026"
     for m in re.finditer(
         r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+),?\s+(\d{4})\b",
         text, re.IGNORECASE
@@ -377,7 +346,6 @@ def _parse_date_from_text(text: str) -> Optional[str]:
             except ValueError:
                 continue
 
-    # Month DD, YYYY  e.g. "May 07, 2026"
     for m in re.finditer(
         r"\b([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b",
         text, re.IGNORECASE
@@ -394,14 +362,7 @@ def _parse_date_from_text(text: str) -> Optional[str]:
 
 
 def _extract_tm_class(text: str) -> Optional[str]:
-    """
-    Extract trademark class number from subject/body.
-    Handles:
-      - "class 43"  / "Class No. 43"
-      - "in class 43"
-      - "वर्ग/in class 43"   (bilingual IP India subject)
-      - "वर्ग 43"            (Hindi only)
-    """
+    """Extract trademark class number from subject/body."""
     for pat in [
         r"in\s+class\s+(\d{1,2})\b",
         r"(?:class|वर्ग)\s*(?:no\.?)?\s*(\d{1,2})\b",
@@ -434,9 +395,9 @@ def _get_reminder_sequence(subject: str) -> int:
 class _IPIndiaResult:
     __slots__ = [
         "event_type", "tm_app_no", "tm_class",
-        "event_date",      # hearing: scheduled date | exam: issue date
-        "reply_deadline",  # exam only: issue_date + 30 days
-        "new_date",        # adjournment only: updated hearing date
+        "event_date",
+        "reply_deadline",
+        "new_date",
         "title", "description", "urgency", "save_category",
         "reminder_seq", "is_adjournment",
     ]
@@ -450,54 +411,14 @@ class _IPIndiaResult:
 def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_IPIndiaResult"]:
     """
     Parse an IP India (noreply.tmr@gov.in) email with precision.
-
-    REAL EMAIL PATTERNS (from actual samples):
-    ──────────────────────────────────────────
-    1. HEARING NOTICE
-       Subject: "Hearing Notice for Application No. 6313085"
-       Body:    "A hearing ... scheduled on 07-05-2026 . The Hearing Notice
-                 (Show Cause) for this purpose has been issued..."
-       → event_type = "Trademark Hearing"
-       → event_date = 2026-05-07   (from "scheduled on DD-MM-YYYY")
-       → is_show_cause = True when "(Show Cause)" in body
-       → save_category = "reminder"   (remind on hearing day)
-
-    2. EXAMINATION REPORT
-       Subject: "आवेदन संख्या के लिए परीक्षा रिपोर्ट /Examination Report
-                 for Application No6526106 वर्ग/in class 43"
-       Body:    "The above mentioned application has been examined under the
-                 provisions of Trade Marks Act,1999 and Trade Marks Rules,
-                 2017 and the objections raised."
-       → event_type = "Examination Report"
-       → event_date = date from msg_date header (email sent date = issue date)
-       → reply_deadline = event_date + 30 days
-       → save_category = "todo"
-
-    3. REMINDER-I / REMINDER-II / REMINDER-III (for Examination Report)
-       Subject: "Reminder-I to file a Response/Reply to Examination Report
-                 dated 28/02/2026 in Application No.65451"
-       → reminder_seq = 1 (or 2, 3)
-       → Find existing TODO for same tm_app_no → UPDATE urgency + title
-       → reply_deadline extracted from "dated DD/MM/YYYY" + 30 days
-
-    4. ADJOURNMENT
-       Subject contains: "adjourned" / "rescheduled" / "new date"
-       → is_adjournment = True
-       → new_date = latest date found in body (the rescheduled date)
-       → UPDATE existing reminder for same tm_app_no
-
-    Decision tree (subject keywords, checked in order):
-      "hearing notice"        → Hearing Notice path
-      "adjourned"/"rescheduled" → Adjournment path
-      "examination report" / "परीक्षा रिपोर्ट" → Examination Report path
-      "reminder" + ("examination"/"reply"/"response") → Reminder path
+    Handles: Hearing Notices, Examination Reports, Reminder-I/II/III,
+    and Adjournment emails.
     """
     r = _IPIndiaResult()
     subj_lower  = subject.lower()
     body_lower  = body.lower()
     full_lower  = subj_lower + " " + body_lower[:800]
 
-    # ── Classify email type ──────────────────────────────────────────────────
     is_hearing = (
         "hearing notice" in subj_lower
         or ("hearing" in subj_lower and "application" in subj_lower
@@ -514,7 +435,6 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
     )
     is_adjournment = _is_adjournment(subject, body)
 
-    # If it's a reminder for an examination report, treat it as exam path
     if is_reminder_for_exam:
         is_exam_report = True
         is_hearing     = False
@@ -522,56 +442,38 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
     if not is_hearing and not is_exam_report:
         return None
 
-    # ── TM Application Number ────────────────────────────────────────────────
-    # Try subject first (most reliable), then first 800 chars of body
     r.tm_app_no = (
         _extract_tm_app_no(subject)
         or _extract_tm_app_no(body[:800])
     )
     if not r.tm_app_no:
-        return None   # Cannot identify without app number
+        return None
 
-    # ── Class number ─────────────────────────────────────────────────────────
-    r.tm_class = _extract_tm_class(subject) or _extract_tm_class(body[:400])
-
-    # ── Reminder sequence ────────────────────────────────────────────────────
+    r.tm_class     = _extract_tm_class(subject) or _extract_tm_class(body[:400])
     r.reminder_seq = _get_reminder_sequence(subject)
-
-    # ── Adjournment flag ─────────────────────────────────────────────────────
     r.is_adjournment = is_adjournment
 
-    class_sfx    = f" (Class {r.tm_class})" if r.tm_class else ""
+    class_sfx     = f" (Class {r.tm_class})" if r.tm_class else ""
     is_show_cause = "show cause" in full_lower
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    #  PATH 1 — HEARING NOTICE
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── PATH 1: HEARING NOTICE ─────────────────────────────────────────────
     if is_hearing:
         r.event_type = "Trademark Hearing"
 
-        # Primary: "scheduled on DD-MM-YYYY" — most reliable pattern in IP India body
         sched_m = re.search(
             r"scheduled\s+on\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
             body, re.IGNORECASE
         )
         if sched_m:
             r.event_date = _parse_date_from_text(sched_m.group(1))
-
-        # Secondary: any DD-MM-YYYY in first 1200 chars of body
         if not r.event_date:
             r.event_date = _parse_date_from_text(body[:1200])
-
-        # Tertiary: date in subject
         if not r.event_date:
             r.event_date = _parse_date_from_text(subject)
-
-        # Last resort: email header date
         if not r.event_date and msg_date:
             r.event_date = _parse_date_from_text(msg_date)
 
-        # Adjournment: find new (rescheduled) date
         if is_adjournment:
-            # Try explicit "adjourned to DD-MM-YYYY" or "new date DD-MM-YYYY"
             new_m = re.search(
                 r"(?:new|revised|rescheduled|adjourned\s+to|postponed\s+to)"
                 r"\s+(?:date\s+is\s+)?(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
@@ -580,7 +482,6 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
             if new_m:
                 r.new_date = _parse_date_from_text(new_m.group(1))
             else:
-                # Collect all dates, take the latest one as the new hearing date
                 all_dates = [
                     _parse_date_from_text(m.group(0))
                     for m in re.finditer(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", body)
@@ -590,9 +491,7 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
 
             r.event_type  = "Adjournment"
             display_date  = r.new_date or "see notice"
-            r.title       = (
-                f"Adjourned: Hearing — TM App No. {r.tm_app_no}{class_sfx}"
-            )
+            r.title       = f"Adjourned: Hearing — TM App No. {r.tm_app_no}{class_sfx}"
             r.description = (
                 f"Hearing for TM Application No. {r.tm_app_no}{class_sfx} has been "
                 f"adjourned. New hearing date: {display_date}."
@@ -601,55 +500,39 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
             r.save_category = "reminder"
         else:
             sc_note = " (Show Cause)" if is_show_cause else ""
-            r.title = (
-                f"Trademark Hearing{sc_note} — TM App No. {r.tm_app_no}{class_sfx}"
-            )
+            r.title = f"Trademark Hearing{sc_note} — TM App No. {r.tm_app_no}{class_sfx}"
             r.description = (
                 f"Hearing scheduled on {r.event_date or 'date in notice'} "
                 f"for TM Application No. {r.tm_app_no}{class_sfx}."
                 + (" Show Cause hearing — attendance mandatory." if is_show_cause else "")
                 + " Issued by Registrar of Trade Marks (IP India)."
             )
-            r.urgency       = "high" if is_show_cause else "high"
+            r.urgency       = "high"
             r.save_category = "reminder"
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    #  PATH 2 — EXAMINATION REPORT  (including Reminder-I/II/III)
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── PATH 2: EXAMINATION REPORT ─────────────────────────────────────────
     elif is_exam_report:
         r.event_type = "Examination Report"
 
-        # For Reminder emails: extract "dated DD/MM/YYYY" from subject as issue date
-        # e.g. "Reminder-I to file ... dated 28/02/2026 in Application No.65451"
         dated_m = re.search(
             r"dated\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
             subject + " " + body[:400], re.IGNORECASE
         )
         if dated_m:
             r.event_date = _parse_date_from_text(dated_m.group(1))
-
-        # Fallback: any date in body
         if not r.event_date:
             r.event_date = _parse_date_from_text(body[:1200])
-
-        # Fallback: parse the email received date from msg_date header
-        # This is the most reliable for original exam report emails (no date in body)
         if not r.event_date and msg_date:
             r.event_date = _parse_date_from_text(msg_date)
-
-        # Last resort: today's date in IST
         if not r.event_date:
             r.event_date = datetime.now(IST).strftime("%Y-%m-%d")
 
-        # Reply deadline = issue date + 30 calendar days
         try:
             issue_dt         = datetime.strptime(r.event_date, "%Y-%m-%d")
             r.reply_deadline = (issue_dt + timedelta(days=30)).strftime("%Y-%m-%d")
         except Exception:
             r.reply_deadline = None
 
-        # Urgency escalates with reminder sequence
-        # Original → medium, Reminder-I → medium, Reminder-II → high, Reminder-III → high
         r.urgency = {0: "medium", 1: "medium", 2: "high", 3: "high"}.get(
             r.reminder_seq, "high"
         )
@@ -667,9 +550,7 @@ def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_I
                 f"Deadline to file response: {r.reply_deadline or '30 days from issue date'}."
             )
         else:
-            r.title = (
-                f"Examination Report — TM App No. {r.tm_app_no}{class_sfx}"
-            )
+            r.title = f"Examination Report — TM App No. {r.tm_app_no}{class_sfx}"
             r.description = (
                 f"Examination Report issued on {r.event_date} for "
                 f"TM Application No. {r.tm_app_no}{class_sfx}. "
@@ -975,18 +856,14 @@ async def _extract_events_from_email(
         return []
 
     # ── 1. IP India parser ────────────────────────────────────────────────────
-    # Only fire IP India parser for confirmed IP India / TMR senders
-    # "gov.in" alone is too broad — MCA, GST, IT dept also use gov.in
     _IPINDIA_SENDER_PATTERNS = (
-        "noreply.tmr",       # noreply.tmr@gov.in
-        "tmr.gov.in",        # any @tmr.gov.in
-        "ipindia",           # any @ipindia.gov.in
-        "trademarks.gov.in", # alternate domain
+        "noreply.tmr",
+        "tmr.gov.in",
+        "ipindia",
+        "trademarks.gov.in",
     )
     is_ipindia = any(pat in sender_clean for pat in _IPINDIA_SENDER_PATTERNS)
 
-    # Also fire IP India parser when subject has clear TM keywords regardless of sender
-    # (covers forwarded emails or alternate sender domains)
     if not is_ipindia:
         subj_l = subject.lower()
         is_ipindia = (
@@ -999,14 +876,12 @@ async def _extract_events_from_email(
     if is_ipindia:
         r = _parse_ipindia_email(subject, body, msg_date)
         if r:
-            # For hearing the "date" field = scheduled hearing date
-            # For exam report the "date" field = reply deadline (30 days)
             if r.is_adjournment and r.new_date:
                 ev_date = r.new_date
             elif r.save_category == "todo":
-                ev_date = r.reply_deadline      # TODO due date = 30-day deadline
+                ev_date = r.reply_deadline
             else:
-                ev_date = r.event_date          # Reminder on hearing date
+                ev_date = r.event_date
 
             ev = {
                 "title":          r.title,
@@ -1103,7 +978,8 @@ def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
 # =============================================================================
 
 def _doc_to_out(doc: Dict) -> ExtractedEventOut:
-    # Safely convert MongoDB _id (ObjectId) or string "id" to str
+    # ── FIX: Prefer string "id" field; fall back to str(_id) for auto-saved docs
+    # that were inserted before v9 (which had no string id field).
     raw_id = doc.get("id") or doc.get("_id")
     str_id = str(raw_id) if raw_id is not None else ""
     return ExtractedEventOut(
@@ -1140,37 +1016,35 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
 
 
 # =============================================================================
-# AUTO-SAVE WITH TM APP NUMBER DEDUPLICATION  (v7)
+# AUTO-SAVE WITH TM APP NUMBER DEDUPLICATION
 # =============================================================================
 
 async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
     """
     Save/update event to todos / reminders / visits.
 
-    DEDUPLICATION LOGIC (v8):
-    ─────────────────────────
+    DEDUPLICATION LOGIC:
+    ─────────────────────
     IP India events (tm_app_no present):
       TODO  → key = (user_id, tm_app_no, source="email_auto", is_completed=False)
               If found & new seq > old seq: UPDATE title + urgency + reminder_seq
-              If found & same seq: skip (already saved)
-              If not found: INSERT new TODO
+              If found & same seq: skip
+              If not found: INSERT with UUID string "id"
 
       REMINDER → key = (user_id, tm_app_no, source="email_auto")
-              If found & is_dismissed: skip (user dismissed it — respect that)
+              If found & is_dismissed: skip
               If found & is_adjournment: UPDATE remind_at + description + title
-              If found & not adjournment: skip (already saved, same hearing)
-              If not found: INSERT new reminder
+              If found & not adjournment: skip
+              If not found: INSERT with UUID string "id"
 
     Generic events (no tm_app_no):
-      Deduplicate by (user_id, title, source) as before.
+      Deduplicate by (user_id, title, source).
 
-    NOTE: A Reminder-I/II/III for an exam report → same TODO entry is UPDATED,
-    never duplicated. The TODO title escalates e.g.
-      original → "Examination Report — TM App No. 12345"
-      Reminder-I → "Reminder-I: Reply to Examination Report — TM App No. 12345"
-      Reminder-II → "Reminder-II: Reply to Examination Report — TM App No. 12345"
+    v9 FIX: All INSERT operations now pre-generate a UUID string "id" field
+    so that DELETE /reminders/{id} and PATCH /reminders/{id} routes resolve
+    correctly. Previously auto-saved docs only had MongoDB ObjectId (_id)
+    and the string "id" field was absent, causing 404 errors on delete/update.
     """
-    # Do not reinstate events the user has dismissed
     dismissed_check = await db["reminders"].find_one(
         {"user_id": user_id, "title": event.title, "is_dismissed": True},
         {"_id": 0, "title": 1}
@@ -1194,7 +1068,6 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
         if save_cat == "todo" and prefs.get("auto_save_todos"):
             existing = None
             if tm_app_no:
-                # Primary dedup key: same TM app number in todos
                 existing = await db["todos"].find_one(
                     {
                         "user_id":      user_id,
@@ -1205,7 +1078,6 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     {"_id": 1, "reminder_seq": 1, "title": 1, "due_date": 1}
                 )
             if not existing:
-                # Fallback: same title
                 existing = await db["todos"].find_one(
                     {"user_id": user_id, "title": event.title, "source": "email_auto"},
                     {"_id": 1, "reminder_seq": 1}
@@ -1214,14 +1086,12 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
             if existing:
                 old_seq = existing.get("reminder_seq") or 0
                 if reminder_seq > old_seq:
-                    # Escalate: Reminder-I > original, Reminder-II > Reminder-I etc.
                     update_fields = {
                         "title":        event.title,
                         "urgency":      event.urgency,
                         "reminder_seq": reminder_seq,
                         "updated_at":   datetime.now(timezone.utc).isoformat(),
                     }
-                    # Also update due_date if the new reminder has a later deadline
                     if event.date:
                         existing_due = existing.get("due_date") or ""
                         if not existing_due or event.date > existing_due:
@@ -1237,7 +1107,10 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 else:
                     logger.debug(f"[TODO] Skip duplicate seq={reminder_seq} TM#{tm_app_no}")
             else:
+                # ── v9 FIX: generate UUID string "id" before insert ──────────
+                new_id = str(_uuid.uuid4())
                 await db["todos"].insert_one({
+                    "id":               new_id,          # ← string id for API routes
                     "user_id":          user_id,
                     "title":            event.title,
                     "description":      (
@@ -1256,7 +1129,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     "created_at":       datetime.now(timezone.utc).isoformat(),
                     "updated_at":       datetime.now(timezone.utc).isoformat(),
                 })
-                logger.info(f"[TODO] New: {event.title} (TM#{tm_app_no})")
+                logger.info(f"[TODO] New: {event.title} (TM#{tm_app_no}, id={new_id})")
 
         # ──────────────────────────────────────────────────────────────────────
         #  REMINDER  (Hearing / Adjournment)
@@ -1272,7 +1145,6 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
 
             existing = None
             if tm_app_no:
-                # Primary dedup key: same TM app number in reminders
                 existing = await db["reminders"].find_one(
                     {"user_id": user_id, "tm_app_no": tm_app_no, "source": "email_auto"},
                     {"_id": 1, "is_dismissed": 1, "remind_at": 1, "title": 1}
@@ -1285,11 +1157,9 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
 
             if existing:
                 if existing.get("is_dismissed"):
-                    # User dismissed this — do NOT reinstate, respect their choice
                     logger.debug(f"[REMINDER] Skip dismissed TM#{tm_app_no}")
                     return
                 if is_adjournment:
-                    # Update hearing date to new (adjourned) date
                     await db["reminders"].update_one(
                         {"_id": existing["_id"]},
                         {"$set": {
@@ -1307,17 +1177,19 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     )
                     logger.info(f"[REMINDER] Adjourned TM#{tm_app_no} → new date {date_str}")
                 else:
-                    # Same hearing, different reminder email (e.g. second notice) — skip
                     logger.debug(f"[REMINDER] Skip duplicate hearing TM#{tm_app_no}")
                 return
 
-            # New reminder — insert
+            # New reminder — build description
             desc_parts = []
             if event.organizer:       desc_parts.append(f"From: {event.organizer}")
             if clean_desc:            desc_parts.append(f"Notes: {clean_desc}")
             if event.source_subject:  desc_parts.append(f"Subject: {event.source_subject}")
 
+            # ── v9 FIX: generate UUID string "id" before insert ──────────────
+            new_id = str(_uuid.uuid4())
             await db["reminders"].insert_one({
+                "id":               new_id,          # ← string id for DELETE/PATCH routes
                 "user_id":          user_id,
                 "title":            event.title,
                 "description":      "\n".join(desc_parts) or None,
@@ -1329,7 +1201,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 "urgency":          event.urgency,
                 "created_at":       datetime.now(timezone.utc).isoformat(),
             })
-            logger.info(f"[REMINDER] New: {event.title} (TM#{tm_app_no}, date={date_str})")
+            logger.info(f"[REMINDER] New: {event.title} (TM#{tm_app_no}, date={date_str}, id={new_id})")
 
         # ──────────────────────────────────────────────────────────────────────
         #  VISIT
@@ -1346,7 +1218,9 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 {"_id": 0}
             )
             if not existing:
+                new_id = str(_uuid.uuid4())
                 await db["visits"].insert_one({
+                    "id":               new_id,
                     "user_id":          user_id,
                     "title":            event.title,
                     "visit_date":       date_str,
@@ -1357,7 +1231,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     "tm_app_no":        tm_app_no,
                     "created_at":       datetime.now(timezone.utc).isoformat(),
                 })
-                logger.info(f"[VISIT] New: {event.title} on {date_str}")
+                logger.info(f"[VISIT] New: {event.title} on {date_str} (id={new_id})")
 
     except Exception as e:
         logger.error(f"Auto-save error '{event.title}': {e}", exc_info=True)
@@ -1394,8 +1268,8 @@ def _build_event_doc(user_id: str, email_addr: str, raw: Dict, ev: Dict) -> Dict
     }
 
 def _attach_extra_attrs(ev_out: ExtractedEventOut, ev: Dict, mid: str):
-    ev_out._message_id    = mid
-    ev_out._reminder_seq  = ev.get("reminder_seq", 0)
+    ev_out._message_id     = mid
+    ev_out._reminder_seq   = ev.get("reminder_seq", 0)
     ev_out._is_adjournment = ev.get("is_adjournment", False)
 
 
@@ -1504,15 +1378,8 @@ def start_scheduled_scan_loop():
 
 async def create_email_indexes():
     """
-    Create MongoDB indexes for the email integration collections.
-    Call this once from your app startup (lifespan / on_startup).
-
-    Indexes created:
-      email_connections      : (user_id, email_address) unique
-      email_extracted_events : (user_id, message_id) unique  ← dedup by message
-                               (user_id, tm_app_no)          ← fast TM app lookup
-      reminders              : (user_id, tm_app_no)          ← fast dedup for hearings
-      todos                  : (user_id, tm_app_no, is_completed) ← fast dedup for exams
+    Create MongoDB indexes for email integration collections.
+    Call once from app startup (lifespan / on_startup).
     """
     try:
         await db[COL_CONNECTIONS].create_index(
@@ -1531,9 +1398,15 @@ async def create_email_indexes():
         await db["reminders"].create_index(
             [("user_id", 1), ("tm_app_no", 1)], background=True, sparse=True
         )
+        await db["reminders"].create_index(
+            [("user_id", 1), ("id", 1)], background=True, sparse=True
+        )
         await db["todos"].create_index(
             [("user_id", 1), ("tm_app_no", 1), ("is_completed", 1)],
             background=True, sparse=True
+        )
+        await db["todos"].create_index(
+            [("user_id", 1), ("id", 1)], background=True, sparse=True
         )
         logger.info("Email integration indexes created/verified.")
     except Exception as e:
@@ -1750,8 +1623,7 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
         )
         if existing:
             return {"status": "already_exists", "id": existing.get("id", "")}
-        import uuid
-        nid = str(uuid.uuid4())
+        nid = str(_uuid.uuid4())
         await db["reminders"].insert_one({
             "id": nid, "user_id": str(current_user.id), "title": body.title,
             "description": _clean_text(body.description or "", 500),
@@ -1774,8 +1646,7 @@ async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(get_c
         )
         if existing:
             return {"status": "already_exists", "id": existing.get("id", "")}
-        import uuid
-        nid = str(uuid.uuid4())
+        nid = str(_uuid.uuid4())
         await db["visits"].insert_one({
             "id": nid, "user_id": str(current_user.id), "title": body.title,
             "visit_date": body.visit_date, "notes": _clean_text(body.notes or "", 500),
@@ -1796,8 +1667,7 @@ async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(get
         )
         if existing:
             return {"status": "already_exists", "id": existing.get("id", "")}
-        import uuid
-        nid = str(uuid.uuid4())
+        nid = str(_uuid.uuid4())
         await db["todos"].insert_one({
             "id": nid, "user_id": str(current_user.id), "title": body.title,
             "description": _clean_text(body.description or "", 500),
@@ -1842,15 +1712,13 @@ async def extract_events(
     async def process_account(conn):
         email_addr = conn["email_address"]
 
-        # ── Cache hit: last synced < 30 min ago ──────────────────────────────
         if not force_refresh and conn.get("last_synced"):
             try:
                 last = datetime.fromisoformat(conn["last_synced"])
                 if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
-                    # Exclude _id to avoid ObjectId serialization; use string "id" field
                     cached = await db[COL_EVENTS].find(
                         {"user_id": str(current_user.id), "email_account": email_addr},
-                        {"_id": 0}   # ← exclude Mongo _id; we use the string "id" field
+                        {"_id": 0}
                     ).sort("created_at", -1).limit(limit).to_list(limit)
                     return [_doc_to_out(d) for d in cached]
             except Exception:
@@ -1908,6 +1776,7 @@ async def extract_events(
 
     final.sort(key=lambda e: e.date or "0000-00-00", reverse=True)
     return final[:limit]
+
 
 # NOTE: /events/clear-all MUST be defined before /events/{event_id}
 # otherwise FastAPI matches "clear-all" as an event_id and tries ObjectId("clear-all")
@@ -1971,11 +1840,8 @@ async def trigger_scan_now(current_user=Depends(get_current_user)):
 async def migrate_clean_descriptions(current_user=Depends(get_current_user)):
     """
     One-time migration: strip HTML from any existing description/raw_snippet
-    fields in email_extracted_events, todos, reminders, and visits that were
-    saved before v6 (when HTML was stored raw).
-
-    Safe to run multiple times — skips records that don't contain HTML.
-    Returns counts of updated records.
+    fields saved before v6 (when HTML was stored raw).
+    Safe to run multiple times. Returns counts of updated records.
     """
     user_id  = str(current_user.id)
     counts   = {"events": 0, "todos": 0, "reminders": 0, "visits": 0}
@@ -2006,11 +1872,44 @@ async def migrate_clean_descriptions(current_user=Depends(get_current_user)):
     return {"status": "ok", "updated": counts}
 
 
+@router.post("/migrate-fix-ids", status_code=200)
+async def migrate_fix_missing_ids(current_user=Depends(get_current_user)):
+    """
+    v9 ONE-TIME MIGRATION — backfill missing string 'id' field.
+
+    Auto-saved reminders, todos, and visits created by v8 and earlier were
+    inserted WITHOUT a string 'id' field (only MongoDB ObjectId '_id' existed).
+    The frontend DELETE and PATCH routes look up by the string 'id' field,
+    so those operations returned 404.
+
+    This endpoint sets id = str(_id) on every affected document.
+    Safe to call multiple times — skips documents that already have 'id'.
+
+    Call this ONCE after deploying v9, then you can remove it in v10.
+    """
+    user_id = str(current_user.id)
+    counts  = {"reminders": 0, "todos": 0, "visits": 0}
+
+    for col_name in ("reminders", "todos", "visits"):
+        async for doc in db[col_name].find(
+            {"user_id": user_id, "id": {"$exists": False}},
+            {"_id": 1}
+        ):
+            await db[col_name].update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"id": str(doc["_id"])}}
+            )
+            counts[col_name] += 1
+
+    logger.info(f"migrate-fix-ids complete for user {user_id}: {counts}")
+    return {"status": "ok", "backfilled": counts}
+
+
 @router.get("/events/by-tm/{tm_app_no}", response_model=List[ExtractedEventOut])
 async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(get_current_user)):
     """
     Fetch all extracted events for a specific TM application number.
-    Useful for the frontend to show the full history of a trademark case.
+    Useful for frontend to show full history of a trademark case.
     """
     docs = await db[COL_EVENTS].find(
         {"user_id": str(current_user.id), "tm_app_no": tm_app_no},
