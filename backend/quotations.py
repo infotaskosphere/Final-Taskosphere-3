@@ -35,7 +35,7 @@ from backend.models import User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["Quotations"])
+router = APIRouter(tags=["Quotations"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
