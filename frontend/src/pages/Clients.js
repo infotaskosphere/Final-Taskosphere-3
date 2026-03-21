@@ -21,7 +21,6 @@ import {
   CheckCircle2, AlertCircle, Building2, ChevronDown, ChevronUp,
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
   Send, Copy, ExternalLink, CheckSquare, Square, MinusSquare,
-  Star, TrendingUp, Clock, Shield,
 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -54,18 +53,6 @@ const SERVICES = [
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
 ];
 
-// Department to service mapping for permission logic
-const DEPT_TO_SERVICES = {
-  GST: ['GST', 'Compliance'],
-  IT: ['Income Tax', 'Tax Planning'],
-  ACC: ['Accounting', 'Payroll', 'Audit'],
-  TDS: ['TDS'],
-  ROC: ['ROC', 'Company Registration', 'Compliance'],
-  TM: ['Trademark'],
-  MSME: ['MSME'],
-  FEMA: ['FEMA'],
-};
-
 const TYPE_CONFIG = {
   pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', accent: 'from-blue-600 to-blue-800',     strip: '#2563EB' },
   llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', accent: 'from-violet-600 to-violet-800',  strip: '#7C3AED' },
@@ -74,6 +61,16 @@ const TYPE_CONFIG = {
   trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', accent: 'from-rose-600 to-rose-800',      strip: '#E11D48' },
   proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', accent: 'from-slate-500 to-slate-700',    strip: '#64748B' },
   other:       { label: 'Other',       bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', accent: 'from-sky-600 to-sky-800',        strip: '#0284C7' },
+};
+
+const TYPE_BADGE = {
+  pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
+  llp:         'bg-violet-50 text-violet-700 border-violet-200',
+  partnership: 'bg-amber-50 text-amber-700 border-amber-200',
+  huf:         'bg-teal-50 text-teal-700 border-teal-200',
+  trust:       'bg-rose-50 text-rose-700 border-rose-200',
+  proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
+  other:       'bg-sky-50 text-sky-700 border-sky-200',
 };
 
 const AVATAR_GRADIENTS = [
@@ -394,6 +391,35 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                     </div>
                   </div>
 
+                  <div className="bg-white/70 rounded-xl p-4 border border-emerald-100">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 mb-2.5">
+                      How to use on WhatsApp Business App (Free)
+                    </p>
+                    <div className="space-y-2">
+                      {[
+                        { step: '1', text: 'Click "Export & Copy Numbers" below — CSV downloads, numbers go to clipboard' },
+                        { step: '2', text: 'Open WhatsApp Business app on your phone' },
+                        { step: '3', text: 'Tap ⋮ Menu → New Broadcast → Add recipients by pasting or searching saved contacts' },
+                        { step: '4', text: 'Type or paste your message and tap Send — each client gets it as a personal message' },
+                      ].map(({ step, text }) => (
+                        <div key={step} className="flex items-start gap-2.5">
+                          <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 mt-0.5"
+                            style={{ background: 'linear-gradient(135deg, #128C7E, #25D366)' }}>
+                            {step}
+                          </span>
+                          <p className="text-xs text-slate-600 leading-relaxed">{text}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                      <span className="text-amber-500 text-xs flex-shrink-0 mt-0.5">⚠</span>
+                      <p className="text-[10px] text-amber-700 leading-relaxed">
+                        Contacts must have <strong>your number saved</strong> in their phone to receive broadcast messages.
+                        Max <strong>256 per broadcast</strong> — create multiple lists if needed.
+                      </p>
+                    </div>
+                  </div>
+
                   <button
                     onClick={handleExportBroadcast}
                     disabled={selectedClients.filter(c => c.phone).length === 0}
@@ -435,6 +461,16 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                       </span>
                     )}
                   </div>
+                  {isWhatsApp && phoneCount < selectedClients.length && (
+                    <p className="text-[10px] mt-2" style={{ color: '#b45309' }}>
+                      ⚠ {selectedClients.length - phoneCount} client(s) have no phone and will be skipped
+                    </p>
+                  )}
+                  {!isWhatsApp && emailCount < selectedClients.length && (
+                    <p className="text-[10px] mt-2" style={{ color: '#b45309' }}>
+                      ⚠ {selectedClients.length - emailCount} client(s) have no email and will be skipped
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -486,248 +522,6 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
         </div>
       </DialogContent>
     </Dialog>
-  );
-};
-
-// ── MODERN CLIENT CARD ──────────────────────────────────────────────────────
-// Professional business card design with all info visible, classic alignment
-const ModernClientCard = ({ client, index, users, onEdit, onDelete, onWhatsApp, canDeleteData, setSelectedClient, setDetailDialogOpen }) => {
-  const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
-  const avatarGrad = getAvatarGradient(client.company_name);
-  const isArchived = client.status === 'inactive';
-  const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
-
-  // Build assignments display
-  const getClientAssignments = (c) => {
-    if (c?.assignments && c.assignments.length > 0) return c.assignments;
-    if (c?.assigned_to) return [{ user_id: c.assigned_to, services: [] }];
-    return [];
-  };
-  const clientAssignments = getClientAssignments(client);
-  const assignedUsers = clientAssignments
-    .map(a => users.find(u => u.id === a.user_id))
-    .filter(Boolean);
-
-  const today = new Date();
-  const expiringDSC = client.dsc_details?.find(d => {
-    if (!d.expiry_date) return false;
-    const exp = new Date(d.expiry_date);
-    const diff = (exp - today) / (1000 * 60 * 60 * 24);
-    return diff >= 0 && diff <= 60;
-  });
-
-  const serviceCount = client.services?.length || 0;
-  const locationStr = [client.city, client.state].filter(Boolean).join(', ');
-
-  return (
-    <div
-      className={`group relative bg-white rounded-2xl flex flex-col cursor-pointer select-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl ${isArchived ? 'opacity-70' : ''}`}
-      style={{
-        border: `1px solid ${cfg.border}`,
-        boxShadow: '0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
-        overflow: 'hidden',
-      }}
-      onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
-    >
-      {/* ── Top color accent bar ── */}
-      <div style={{ height: '3px', background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}90)`, flexShrink: 0 }} />
-
-      {/* ── HEADER SECTION ── */}
-      <div className="px-4 pt-3 pb-2 flex-shrink-0" style={{ borderBottom: `1px solid ${cfg.border}` }}>
-        <div className="flex items-start gap-3">
-          {/* Avatar */}
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-white text-base font-black flex-shrink-0 shadow"
-            style={{ background: avatarGrad, minWidth: '44px' }}
-          >
-            {client.company_name?.charAt(0).toUpperCase() || '?'}
-          </div>
-
-          {/* Name + Type */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-1 flex-wrap">
-              <h3
-                className="font-bold text-slate-900 leading-tight break-words flex-1"
-                style={{ fontSize: '12px', lineHeight: '1.35' }}
-                title={client.company_name}
-              >
-                {client.company_name}
-              </h3>
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              <TypePill type={client.client_type} customLabel={client.client_type_label} />
-              {isArchived && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">
-                  ARCHIVED
-                </span>
-              )}
-              {expiringDSC && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
-                  DSC ⚠
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── INFO ROWS ── */}
-      <div className="px-4 py-2 flex-1 flex flex-col gap-2">
-
-        {/* Director / Contact */}
-        <div className="flex items-start gap-2">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: `${cfg.strip}15` }}>
-            <User className="h-3 w-3" style={{ color: cfg.strip }} />
-          </div>
-          <div className="flex-1 min-w-0">
-            {primaryContact?.name ? (
-              <div>
-                <p className="text-[11px] font-semibold text-slate-800 leading-tight truncate" title={primaryContact.name}>
-                  {primaryContact.name}
-                </p>
-                {primaryContact.designation && (
-                  <p className="text-[9px] text-slate-400 leading-tight truncate">{primaryContact.designation}</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-[11px] text-slate-400 italic">No contact listed</p>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile */}
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${cfg.strip}15` }}>
-            <Phone className="h-3 w-3" style={{ color: cfg.strip }} />
-          </div>
-          <p className="text-[11px] font-medium text-slate-700 truncate flex-1">
-            {client.phone || <span className="text-slate-400 italic font-normal">Not provided</span>}
-          </p>
-        </div>
-
-        {/* Email */}
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${cfg.strip}15` }}>
-            <Mail className="h-3 w-3" style={{ color: cfg.strip }} />
-          </div>
-          <p className="text-[11px] text-slate-600 truncate flex-1" title={client.email || ''}>
-            {client.email || <span className="text-slate-400 italic font-normal">Not provided</span>}
-          </p>
-        </div>
-
-        {/* Assigned Staff */}
-        <div className="flex items-start gap-2">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: `${cfg.strip}15` }}>
-            <Briefcase className="h-3 w-3" style={{ color: cfg.strip }} />
-          </div>
-          <div className="flex-1 min-w-0">
-            {assignedUsers.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {assignedUsers.slice(0, 2).map((u, i) => (
-                  <span key={i} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border bg-slate-50 text-slate-600 border-slate-200 truncate max-w-[100px]" title={u.full_name}>
-                    {u.full_name}
-                  </span>
-                ))}
-                {assignedUsers.length > 2 && (
-                  <span className="text-[9px] font-bold text-slate-400">+{assignedUsers.length - 2}</span>
-                )}
-              </div>
-            ) : (
-              <p className="text-[11px] text-slate-400 italic">Unassigned</p>
-            )}
-          </div>
-        </div>
-
-        {/* Services */}
-        {serviceCount > 0 && (
-          <div className="flex items-start gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: `${cfg.strip}15` }}>
-              <BarChart3 className="h-3 w-3" style={{ color: cfg.strip }} />
-            </div>
-            <div className="flex flex-wrap gap-1 flex-1">
-              {client.services?.slice(0, 3).map((svc, i) => (
-                <span
-                  key={i}
-                  className="text-[9px] font-bold px-1.5 py-0.5 rounded-md border"
-                  style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-                >
-                  {svc.replace('Other: ', '')}
-                </span>
-              ))}
-              {serviceCount > 3 && (
-                <span className="text-[9px] font-bold text-slate-400 px-1">+{serviceCount - 3}</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Referred By */}
-        {client.referred_by && (
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${cfg.strip}15` }}>
-              <Share2 className="h-3 w-3" style={{ color: cfg.strip }} />
-            </div>
-            <p className="text-[11px] font-medium text-slate-700 truncate flex-1" title={client.referred_by}>
-              via {client.referred_by}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* ── ACTION FOOTER ── */}
-      <div
-        className="flex items-stretch flex-shrink-0 mt-auto"
-        style={{ borderTop: `1px solid ${cfg.border}` }}
-      >
-        <button
-          onClick={(e) => { e.stopPropagation(); onWhatsApp(client.phone, client.company_name); }}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
-          style={{ color: '#25D366' }}
-          onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          title="WhatsApp"
-        >
-          <MessageCircle className="h-3.5 w-3.5" />
-          <span className="text-[8px] font-bold">WhatsApp</span>
-        </button>
-
-        <div style={{ width: '1px', background: cfg.border }} />
-
-        <button
-          onClick={(e) => { e.stopPropagation(); onEdit(client); }}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
-          style={{ color: '#1F6FB2' }}
-          onMouseEnter={e => e.currentTarget.style.background = '#eff6ff'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          title="Edit"
-        >
-          <Edit className="h-3.5 w-3.5" />
-          <span className="text-[8px] font-bold">Edit</span>
-        </button>
-
-        {canDeleteData && (
-          <>
-            <div style={{ width: '1px', background: cfg.border }} />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm('Delete this client permanently?')) {
-                  onDelete(client.id);
-                }
-              }}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
-              style={{ color: '#ef4444' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              title="Delete"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="text-[8px] font-bold">Delete</span>
-            </button>
-          </>
-        )}
-      </div>
-    </div>
   );
 };
 
@@ -807,6 +601,10 @@ export default function Clients() {
   };
 
   // ── FETCH REFERRERS ─────────────────────────────────────────────────────
+  // FIX: The backend returns an array of objects ({ id, name, created_by, ... }).
+  // We extract only the `name` string so that savedReferrers is always string[],
+  // preventing React error #31 ("Objects are not valid as a React child") when
+  // the names are rendered inside <option> elements.
   const fetchReferrers = async () => {
     try {
       const response = await api.get('/referrers');
@@ -814,6 +612,7 @@ export default function Clients() {
       const names = raw.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
       setSavedReferrers(names);
     } catch {
+      // Fallback: load from localStorage if backend endpoint not yet available
       try {
         const stored = JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]');
         const names = stored.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
@@ -833,6 +632,7 @@ export default function Clients() {
     try {
       await api.post('/referrers', { name: trimmed });
     } catch {
+      // Fallback: persist in localStorage
       localStorage.setItem('taskosphere_referrers', JSON.stringify(updated));
     }
     return trimmed;
@@ -848,7 +648,7 @@ export default function Clients() {
     }
   }, [location]);
 
-  // Sync referrerSelectValue when formData.referred_by changes
+  // Sync referrerSelectValue when formData.referred_by changes (e.g. on edit)
   useEffect(() => {
     const val = formData.referred_by;
     if (!val || val === '') {
@@ -861,6 +661,7 @@ export default function Clients() {
       setReferrerSelectValue(val);
       setReferrerInput('');
     } else {
+      // It's a custom value not yet in the list — treat as "other"
       setReferrerSelectValue('__other__');
       setReferrerInput(val);
     }
@@ -888,16 +689,6 @@ export default function Clients() {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
-  };
-
-  const handleDeleteClient = async (clientId) => {
-    try {
-      await api.delete(`/clients/${clientId}`);
-      toast.success('Client deleted');
-      fetchClients();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to delete client');
-    }
   };
 
   const stats = useMemo(() => {
@@ -930,101 +721,31 @@ export default function Clients() {
     });
   }, [clients]);
 
-  // ── PERMISSION-AWARE FILTER ─────────────────────────────────────────────
-  // Staff users with department assignments should see clients that have any
-  // service mapping to their departments, OR are directly assigned to them.
-  const isClientVisibleToUser = (client) => {
-    if (!user) return false;
-    if (user.role === 'admin' || user.role === 'manager') return true;
-
-    // FIX: Guard assignments — DB can return null, a non-array, or objects missing user_id
-    const rawAssignments = client?.assignments;
-    const assignments = Array.isArray(rawAssignments) ? rawAssignments : [];
-    const legacyAssignedTo = client?.assigned_to;
-    const isDirectlyAssigned =
-      assignments.some(a => a && typeof a === 'object' && a.user_id === user.id) ||
-      legacyAssignedTo === user.id;
-    if (isDirectlyAssigned) return true;
-
-    // Check permission: can_view_all_clients
-    if (canViewAllClients) return true;
-
-    // FIX: Guard permAssignedClients — must be an array; client.id may be missing (_id fallback)
-    const permAssignedClients = Array.isArray(user?.permissions?.assigned_clients)
-      ? user.permissions.assigned_clients
-      : [];
-    const clientId = client?.id || client?._id;
-    if (clientId && permAssignedClients.includes(clientId)) return true;
-
-    // Department-based visibility:
-    // FIX: services from DB can be a string, null, or non-array — normalise defensively
-    const userDepts = Array.isArray(user?.departments) ? user.departments : [];
-    const rawServices = client?.services;
-    const clientServicesRaw = Array.isArray(rawServices)
-      ? rawServices
-      : typeof rawServices === 'string'
-        ? rawServices.split(',').map(s => s.trim()).filter(Boolean)
-        : [];
-
-    if (userDepts.length > 0 && clientServicesRaw.length > 0) {
-      const relevantServices = userDepts.flatMap(dept => DEPT_TO_SERVICES[dept] || []);
-      // FIX: guard each service element — it must be a string before calling .replace()
-      const clientServices = clientServicesRaw
-        .map(s => (typeof s === 'string' ? s.replace('Other: ', '').trim() : ''))
-        .filter(Boolean);
-      const hasMatchingService = clientServices.some(cs =>
-        relevantServices.some(rs =>
-          cs.toLowerCase().includes(rs.toLowerCase()) ||
-          rs.toLowerCase().includes(cs.toLowerCase())
-        )
-      );
-      if (hasMatchingService) return true;
-    }
-
-    return false;
-  };
-
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
-      // Apply permission-based visibility
-      if (!isClientVisibleToUser(c)) return false;
-
-      // FIX: phone from DB may be a number — coerce to string before .includes()
       const matchesSearch =
         (c?.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(c?.phone || '').includes(searchTerm);
-
-      // FIX: services may not be an array — normalise before calling .some()
-      const rawSvcs = c?.services;
-      const servicesArr = Array.isArray(rawSvcs)
-        ? rawSvcs
-        : typeof rawSvcs === 'string'
-          ? rawSvcs.split(',').map(s => s.trim())
-          : [];
+        (c?.phone || '').includes(searchTerm);
       const matchesService = serviceFilter === 'all' ||
-        servicesArr.some(s => (typeof s === 'string' ? s : '').toLowerCase().includes(serviceFilter.toLowerCase()));
-
+        (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
       const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
       const matchesClientType = clientTypeFilter === 'all' || (c?.client_type || 'proprietor') === clientTypeFilter;
 
       let matchesAssigned = true;
       if (assignedToFilter !== 'all') {
-        // FIX: guard assignments array same as above
-        const rawAsgn = c?.assignments;
-        const assignments = Array.isArray(rawAsgn) ? rawAsgn : [];
+        const assignments = c?.assignments || [];
         const legacyAssignedTo = c?.assigned_to;
         if (assignments.length > 0) {
-          matchesAssigned = assignments.some(a => a && typeof a === 'object' && a.user_id === assignedToFilter);
+          matchesAssigned = assignments.some(a => a.user_id === assignedToFilter);
         } else {
           matchesAssigned = legacyAssignedTo === assignedToFilter;
         }
       }
 
-
       return matchesSearch && matchesService && matchesStatus && matchesAssigned && matchesClientType;
     });
-  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, user, canViewAllClients]);
+  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
@@ -1069,6 +790,14 @@ export default function Clients() {
     });
     if (!hasValidContact) {
       errors.contacts = 'At least one contact person with a valid name is required';
+    }
+    const allEmails = new Set();
+    if (trimmedEmail) allEmails.add(trimmedEmail.toLowerCase());
+    formData.contact_persons.forEach(cp => {
+      if (cp.email?.trim()) allEmails.add(cp.email.trim().toLowerCase());
+    });
+    if (allEmails.size !== (trimmedEmail ? 1 : 0) + formData.contact_persons.filter(cp => cp.email?.trim()).length) {
+      errors.email = (errors.email || '') + ' (duplicate email detected)';
     }
     setFormErrors(errors);
     setContactErrors(cErrors);
@@ -1286,7 +1015,7 @@ export default function Clients() {
         .filter(a => a.user_id && a.user_id !== 'unassigned')
         .map(a => ({ user_id: a.user_id, services: a.services || [] }));
 
-      // FIX: Save referred_by to referrer list if it's a new "other" value
+      // If referred_by is a new "other" value, save it to the referrer list
       const finalReferredBy = formData.referred_by?.trim() || null;
       if (
         finalReferredBy &&
@@ -1296,18 +1025,11 @@ export default function Clients() {
         await saveReferrer(finalReferredBy);
       }
 
-      // FIX: Ensure client_type is always one of the valid enum values accepted by backend
-      // The backend pattern is: ^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$
-      // We always send lowercase versions to match the Pydantic validator
-      const validClientTypes = ['proprietor', 'pvt_ltd', 'llp', 'partnership', 'huf', 'trust', 'other'];
-      const safeClientType = validClientTypes.includes(formData.client_type) ? formData.client_type : 'other';
-
       const payload = {
         company_name: formData.company_name.trim(),
-        client_type: safeClientType,
-        client_type_label: safeClientType === 'other' ? (formData.client_type_other?.trim() || 'Other') : null,
-        email: formData.email?.trim() || null,
-        phone: cleanPhone || null,
+        client_type: formData.client_type,
+        client_type_label: formData.client_type === 'other' ? (formData.client_type_other?.trim() || 'Other') : null,
+        email: formData.email?.trim(), phone: cleanPhone,
         birthday: safeDate(formData.birthday),
         address: formData.address?.trim() || null,
         city: formData.city?.trim() || null,
@@ -1316,12 +1038,9 @@ export default function Clients() {
         notes: formData.notes?.trim() || null,
         assigned_to: cleanedAssignments[0]?.user_id || null,
         assignments: cleanedAssignments,
-        status: formData.status,
-        contact_persons: cleanedContacts,
-        dsc_details: cleanedDSC,
+        status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
         referred_by: finalReferredBy,
       };
-
       if (editingClient) {
         await api.put(`/clients/${editingClient.id}`, payload);
       } else {
@@ -1330,15 +1049,7 @@ export default function Clients() {
       setDialogOpen(false); resetForm(); fetchClients();
       toast.success("Saved successfully!");
     } catch (error) {
-      // FIX: Show detailed error from backend for debugging
-      const detail = error.response?.data?.detail;
-      const errorMsg = typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join('; ')
-          : "Error saving client";
-      toast.error(errorMsg);
-      console.error('Client save error:', error.response?.data);
+      toast.error(error.response?.data?.detail || "Error saving client");
     } finally {
       setLoading(false);
     }
@@ -1492,26 +1203,228 @@ export default function Clients() {
     toast.success(`"${saved}" saved to referrer list`);
   };
 
-  // ── VIRTUALIZED BOARD CELL RENDERER ────────────────────────────────────
-  const BoardCell = ({ columnIndex, rowIndex, style, columnCount }) => {
+  // ── REDESIGNED CLIENT CARD WITH ALL INFORMATION VISIBLE ──────────────────
+  // Shows all critical info: Name, Email, Mobile, Director, Assigned To, Services, Referred By
+  // No horizontal scrolling needed, all buttons fully visible
+  const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
     const index = rowIndex * columnCount + columnIndex;
-    if (index >= filteredClients.length) return null;
     const client = filteredClients[index];
-    if (!client) return null;
+    if (index >= filteredClients.length || !client) return null;
+
+    const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
+    const avatarGrad = getAvatarGradient(client.company_name);
+    const serviceCount = client.services?.length || 0;
+    const isArchived = client.status === 'inactive';
+    const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
+    const clientAssignments = getClientAssignments(client);
+    const locationStr = [client.city, client.state].filter(Boolean).join(', ');
+
+    // DSC expiry check: flag if any DSC expires within 60 days
+    const today = new Date();
+    const expiringDSC = client.dsc_details?.find(d => {
+      if (!d.expiry_date) return false;
+      const exp = new Date(d.expiry_date);
+      const diff = (exp - today) / (1000 * 60 * 60 * 24);
+      return diff >= 0 && diff <= 60;
+    });
 
     return (
-      <div style={{ ...style, padding: '8px', boxSizing: 'border-box' }}>
-        <ModernClientCard
-          client={client}
-          index={index}
-          users={users}
-          onEdit={handleEdit}
-          onDelete={handleDeleteClient}
-          onWhatsApp={openWhatsApp}
-          canDeleteData={canDeleteData}
-          setSelectedClient={setSelectedClient}
-          setDetailDialogOpen={setDetailDialogOpen}
-        />
+      <div style={style} className="p-2 box-border">
+        <div
+          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
+          style={{
+            border: `1.5px solid ${cfg.border}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          }}
+          onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
+        >
+          {/* ── TOP ACCENT STRIP ── */}
+          <div className="h-[4px] w-full flex-shrink-0" style={{ background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}aa)` }} />
+
+          {/* ── CARD HEADER: Avatar + Name + Type pill ── */}
+          <div className="px-3 pt-2.5 pb-1 flex-shrink-0">
+            <div className="flex items-start gap-2 mb-1">
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-base font-bold flex-shrink-0 shadow-sm"
+                style={{ background: avatarGrad }}
+              >
+                {client.company_name?.charAt(0).toUpperCase() || '?'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-xs leading-tight text-slate-900 break-words">
+                  {client.company_name}
+                </h3>
+                <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                  <span className="text-[8px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                  <TypePill type={client.client_type} customLabel={client.client_type_label} />
+                  {isArchived && (
+                    <Badge variant="outline" className="text-[7px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0">
+                      ARCHIVED
+                    </Badge>
+                  )}
+                  {expiringDSC && (
+                    <Badge variant="outline" className="text-[7px] bg-orange-50 text-orange-600 border-orange-200 px-1 py-0">
+                      DSC EXPIRING
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── DIVIDER ── */}
+          <div className="mx-3 h-px flex-shrink-0" style={{ backgroundColor: cfg.border }} />
+
+          {/* ── MAIN INFO SECTION - FULLY VISIBLE ── */}
+          <div className="px-3 py-1.5 space-y-0.5 flex-shrink-0 flex-1">
+            
+            {/* Contact Person / Director */}
+            <div className="flex items-start gap-1.5">
+              <User className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Director</p>
+                {primaryContact?.name ? (
+                  <p className="text-[10px] text-slate-700 font-semibold break-words leading-tight">
+                    {primaryContact.name}
+                    {primaryContact.designation && (
+                      <span className="text-slate-500 font-normal block text-[8px]">{primaryContact.designation}</span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 italic">Not specified</p>
+                )}
+              </div>
+            </div>
+
+            {/* Mobile Number */}
+            <div className="flex items-start gap-1.5">
+              <Phone className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Mobile</p>
+                {client.phone ? (
+                  <p className="text-[10px] text-slate-700 font-medium break-words leading-tight">{client.phone}</p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 italic">Not provided</p>
+                )}
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="flex items-start gap-1.5">
+              <Mail className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Email</p>
+                {client.email ? (
+                  <p className="text-[10px] text-slate-700 break-words leading-tight">{client.email}</p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 italic">Not provided</p>
+                )}
+              </div>
+            </div>
+
+            {/* Assigned To */}
+            <div className="flex items-start gap-1.5">
+              <Briefcase className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Assigned To</p>
+                {clientAssignments.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {clientAssignments.map((a, i) => {
+                      const u = users.find(x => x.id === a.user_id);
+                      return u ? (
+                        <p key={i} className="text-[9px] text-slate-700 font-medium break-words leading-tight">
+                          {u.full_name || u.name}
+                          {a.services?.length > 0 && (
+                            <span className="text-slate-500 text-[8px] block">{a.services.join(', ')}</span>
+                          )}
+                        </p>
+                      ) : null;
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-slate-400 italic">Unassigned</p>
+                )}
+              </div>
+            </div>
+
+            {/* Services Provided */}
+            {serviceCount > 0 && (
+              <div className="flex items-start gap-1.5">
+                <BarChart3 className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5 leading-tight">Services</p>
+                  <div className="flex flex-wrap gap-0.5">
+                    {client.services?.map((svc, i) => (
+                      <span
+                        key={i}
+                        className="text-[7px] font-bold px-1 py-0.5 rounded-full border whitespace-normal break-words"
+                        style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
+                      >
+                        {svc.replace('Other: ', '')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Referred By */}
+            {client.referred_by && (
+              <div className="flex items-start gap-1.5">
+                <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Referred By</p>
+                  <p className="text-[10px] text-slate-700 font-medium break-words leading-tight">{client.referred_by}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── ACTION BUTTONS FOOTER ── */}
+          <div
+            className="flex items-stretch mt-auto border-t flex-shrink-0 gap-0"
+            style={{ borderColor: cfg.border }}
+          >
+            {/* WhatsApp Button */}
+            <button
+              onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 text-emerald-600 hover:bg-emerald-50 transition-colors border-r"
+              style={{ borderColor: cfg.border }}
+              title="Send WhatsApp message"
+            >
+              <MessageCircle className="h-3 w-3" />
+              <span className="text-[7px] font-bold tracking-wide">WhatsApp</span>
+            </button>
+
+            {/* Edit Button */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+              style={canDeleteData ? { borderRight: `1px solid ${cfg.border}` } : {}}
+              title="Edit client details"
+            >
+              <Edit className="h-3 w-3" />
+              <span className="text-[7px] font-bold tracking-wide">Edit</span>
+            </button>
+
+            {/* Delete Button */}
+            {canDeleteData && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm("Delete this client permanently?")) {
+                    api.delete(`/clients/${client.id}`).then(() => fetchClients());
+                  }
+                }}
+                className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 text-red-500 hover:bg-red-50 transition-colors"
+                title="Delete client"
+              >
+                <Trash2 className="h-3 w-3" />
+                <span className="text-[7px] font-bold tracking-wide">Delete</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     );
   };
@@ -1582,7 +1495,7 @@ export default function Clients() {
               <button onClick={(e) => {
                 e.stopPropagation();
                 if (confirm("Delete this client permanently?")) {
-                  handleDeleteClient(client.id);
+                  api.delete(`/clients/${client.id}`).then(() => fetchClients());
                 }
               }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors" title="Delete">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1901,10 +1814,11 @@ export default function Clients() {
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
 
-                      {/* ── REFERRED BY ── */}
+                      {/* ── REFERRED BY — with saved referrers + "Other" + save ── */}
                       <div>
                         <label className={labelCls}>Referred By</label>
 
+                        {/* Dropdown */}
                         <div className="relative">
                           <Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
                           <select
@@ -1924,6 +1838,7 @@ export default function Clients() {
                           </select>
                         </div>
 
+                        {/* Free-text input shown only when "+ Other" is selected */}
                         {referrerSelectValue === '__other__' && (
                           <div className="flex gap-2 mt-2">
                             <Input
@@ -1947,9 +1862,10 @@ export default function Clients() {
                           </div>
                         )}
 
+                        {/* Helper text */}
                         {referrerSelectValue === '__other__' && (
                           <p className="text-[10px] text-slate-400 mt-1.5">
-                            Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save
+                            Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time
                           </p>
                         )}
                         {referrerSelectValue && referrerSelectValue !== '__other__' && referrerSelectValue !== '' && (
@@ -2175,7 +2091,34 @@ export default function Clients() {
                                         .filter((_, i) => i !== idx)
                                         .map(a => a.user_id)
                                         .filter(Boolean);
-                                      return !otherAssignedIds.includes(u.id);
+                                      if (otherAssignedIds.includes(u.id)) return false;
+
+                                      const SERVICE_TO_DEPT = {
+                                        GST: 'GST',
+                                        'Income Tax': 'IT',
+                                        Accounting: 'ACC',
+                                        TDS: 'TDS',
+                                        ROC: 'ROC',
+                                        Trademark: 'TM',
+                                        Audit: 'ACC',
+                                        Compliance: 'ROC',
+                                        'Company Registration': 'ROC',
+                                        'Tax Planning': 'IT',
+                                        Payroll: 'ACC',
+                                      };
+
+                                      const clientDepts = [
+                                        ...new Set(
+                                          (formData.services || [])
+                                            .map(s => SERVICE_TO_DEPT[s])
+                                            .filter(Boolean)
+                                        ),
+                                      ];
+
+                                      if (clientDepts.length === 0) return true;
+
+                                      const userDepts = u.departments || [];
+                                      return userDepts.some(d => clientDepts.includes(d));
                                     })
                                     .map(u => (
                                       <SelectItem key={u.id} value={u.id}>
@@ -2242,7 +2185,7 @@ export default function Clients() {
       </div>
 
       {/* ── Today's Celebrations ── */}
-      {todayReminders.length > 0 && (
+      {canViewAllClients && todayReminders.length > 0 && (
         <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
           <div className="w-11 h-11 bg-white rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0">
@@ -2262,7 +2205,7 @@ export default function Clients() {
       )}
 
       {/* ── Stats Cards ── */}
-      {(canViewAllClients || user?.role === 'admin') && (
+      {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Total Clients', value: stats.totalClients, icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66', bar: '#1F6FB2' },
@@ -2298,6 +2241,7 @@ export default function Clients() {
               <button
                 onClick={() => openBulkMsg('whatsapp')}
                 className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-emerald-700 hover:bg-emerald-50 transition-all text-xs font-semibold"
+                title={`Send WhatsApp to ${filteredClients.length} client${filteredClients.length !== 1 ? 's' : ''}`}
               >
                 <MessageCircle className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">WhatsApp</span>
@@ -2309,6 +2253,7 @@ export default function Clients() {
               <button
                 onClick={() => openBulkMsg('email')}
                 className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-blue-700 hover:bg-blue-50 transition-all text-xs font-semibold"
+                title={`Email ${filteredClients.length} client${filteredClients.length !== 1 ? 's' : ''}`}
               >
                 <Mail className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Email</span>
@@ -2341,7 +2286,7 @@ export default function Clients() {
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
-          {(canAssignClients || user?.role === 'admin' || user?.role === 'manager') && users.length > 0 && (
+          {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
               <SelectTrigger className="h-10 w-[160px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Staff" /></SelectTrigger>
               <SelectContent>
@@ -2367,7 +2312,7 @@ export default function Clients() {
       </div>
 
       {/* ── Client Grid / List ── */}
-      <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: '#F8FAFC' }}>
+      <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: 'white' }}>
         {filteredClients.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
             <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center mb-4">
@@ -2379,25 +2324,23 @@ export default function Clients() {
         ) : viewMode === 'board' ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 280;
+              const CARD_MIN = 310;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
-              // Dynamic row height based on content visibility
-              const rowHeight = 380;
               return (
                 <Grid
                   columnCount={columnCount}
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={rowHeight}
+                  rowHeight={420}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
                 >
                   {({ columnIndex, rowIndex, style }) => (
-                    <BoardCell columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
+                    <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
                   )}
                 </Grid>
               );
@@ -2405,7 +2348,7 @@ export default function Clients() {
           </AutoSizer>
         ) : (
           <div className="h-full flex flex-col">
-            <div className="flex items-center gap-4 px-5 py-3 bg-white border-b border-slate-100 flex-shrink-0">
+            <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
               <div className="w-1 flex-shrink-0" />
               <div className="w-8 flex-shrink-0" />
               <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
@@ -2485,15 +2428,14 @@ export default function Clients() {
                   let success = 0;
                   for (let row of previewData) {
                     const exists = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
-                    if (exists) { continue; }
+                    if (exists) { console.log("Skipping duplicate:", row.company_name); continue; }
                     try {
-                      const validClientTypes = ['proprietor', 'pvt_ltd', 'llp', 'partnership', 'huf', 'trust', 'other'];
                       await api.post('/clients', {
                         company_name: row.company_name?.trim(),
-                        client_type: validClientTypes.includes(row.client_type) ? row.client_type : 'proprietor',
+                        client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor',
                         client_type_label: row.client_type === 'other' ? (row.client_type_label?.trim() || null) : null,
-                        email: row.email?.trim() || null,
-                        phone: row.phone?.replace(/\D/g, "") || null,
+                        email: row.email?.trim(),
+                        phone: row.phone?.replace(/\D/g, ""),
                         birthday: row.birthday || null,
                         address: row.address?.trim() || null,
                         city: row.city?.trim() || null,
@@ -2559,6 +2501,7 @@ export default function Clients() {
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
               <p className="text-sm text-slate-500 font-medium">Parsing Excel sheets…</p>
+              <p className="text-xs text-slate-400">Reading company info, directors, and charges</p>
             </div>
           )}
 
@@ -2571,55 +2514,187 @@ export default function Clients() {
                     <Briefcase className="h-3.5 w-3.5" />
                   </div>
                   <h4 className="text-sm font-semibold text-slate-800">Company Details</h4>
+                  <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                    style={mdsForm.status === 'active'
+                      ? { background: '#f0fdf4', color: '#166534', borderColor: '#bbf7d0' }
+                      : { background: '#fffbeb', color: '#92400e', borderColor: '#fde68a' }}>
+                    {mdsForm.status === 'active' ? '● Active' : '● Archived'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">
                     <label className={labelCls}>Company Name</label>
-                    <input className={`${mdsFieldCls} border`} value={mdsForm.company_name}
+                    <input className={mdsFieldCls} value={mdsForm.company_name}
                       onChange={e => setMdsForm(f => ({ ...f, company_name: e.target.value }))} />
                   </div>
                   <div>
                     <label className={labelCls}>Client Type</label>
-                    <select className={`${mdsFieldCls} border appearance-none`} value={mdsForm.client_type}
+                    <select className={`${mdsFieldCls} appearance-none`} value={mdsForm.client_type}
                       onChange={e => setMdsForm(f => ({ ...f, client_type: e.target.value }))}>
                       {CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className={labelCls}>Incorporation Date</label>
-                    <input type="date" className={`${mdsFieldCls} border`} value={mdsForm.birthday}
+                    <input type="date" className={mdsFieldCls} value={mdsForm.birthday}
                       onChange={e => setMdsForm(f => ({ ...f, birthday: e.target.value }))} />
                   </div>
                   <div>
                     <label className={labelCls}>Email</label>
-                    <input type="email" className={`${mdsFieldCls} border`} value={mdsForm.email}
-                      onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))} />
+                    <input type="email" className={mdsFieldCls} value={mdsForm.email}
+                      onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))} placeholder="Enter email address" />
                   </div>
                   <div>
                     <label className={labelCls}>Phone</label>
-                    <input className={`${mdsFieldCls} border`} value={mdsForm.phone}
-                      onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))} />
+                    <input className={mdsFieldCls} value={mdsForm.phone}
+                      onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))} placeholder="10-digit phone number" />
                   </div>
                   <div className="md:col-span-2">
-                    <label className={labelCls}>Services</label>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {SERVICES.map(s => {
-                        const sel = mdsForm.services?.includes(s);
-                        return (
-                          <button key={s} type="button"
-                            onClick={() => setMdsForm(f => ({
-                              ...f, services: sel ? f.services.filter(x => x !== s) : [...(f.services || []), s]
-                            }))}
-                            className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200'}`}
-                            style={sel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
-                            {s}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <label className={labelCls}>Address</label>
+                    <input className={mdsFieldCls} value={mdsForm.address || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>City</label>
+                    <input className={mdsFieldCls} value={mdsForm.city || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>State</label>
+                    <input className={mdsFieldCls} value={mdsForm.state || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={labelCls}>Referred By</label>
+                    <input className={mdsFieldCls} value={mdsForm.referred_by || ''}
+                      onChange={e => setMdsForm(f => ({ ...f, referred_by: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <label className={labelCls}>Services</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {SERVICES.map(s => {
+                      const sel = mdsForm.services?.includes(s);
+                      return (
+                        <button key={s} type="button"
+                          onClick={() => setMdsForm(f => ({
+                            ...f, services: sel ? f.services.filter(x => x !== s) : [...(f.services || []), s]
+                          }))}
+                          className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                          style={sel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
+                          {s}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
+
+              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
+                      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                      <Users className="h-3.5 w-3.5" />
+                    </div>
+                    <h4 className="text-sm font-semibold text-slate-800">
+                      Directors / Contact Persons
+                      <span className="ml-2 text-[10px] font-normal text-slate-400">
+                        ({mdsForm.contact_persons.filter(c => c.name?.trim()).length} parsed)
+                      </span>
+                    </h4>
+                  </div>
+                  <button type="button"
+                    onClick={() => setMdsForm(f => ({
+                      ...f, contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }]
+                    }))}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors">
+                    <Plus className="h-3 w-3" /> Add
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {mdsForm.contact_persons.map((cp, idx) => (
+                    <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                          <span className="text-xs font-semibold text-slate-600">{cp.name || `Contact ${idx + 1}`}</span>
+                        </div>
+                        <button type="button"
+                          onClick={() => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.filter((_, i) => i !== idx) }))}
+                          className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                          <Trash className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className={labelCls}>Name</label>
+                          <input className={mdsFieldCls} value={cp.name}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, name: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Designation</label>
+                          <input className={mdsFieldCls} value={cp.designation}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, designation: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>DIN / PAN</label>
+                          <input className={mdsFieldCls} value={cp.din || ''}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, din: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Email</label>
+                          <input type="email" className={mdsFieldCls} value={cp.email || ''} placeholder="Optional"
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, email: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Phone</label>
+                          <input className={mdsFieldCls} value={cp.phone || ''} placeholder="Optional"
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, phone: e.target.value } : c) }))} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Birthday</label>
+                          <input type="date" className={mdsFieldCls} value={cp.birthday || ''}
+                            onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, birthday: e.target.value } : c) }))} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Notes</label>
+                <textarea
+                  className="w-full min-h-[90px] bg-white border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors"
+                  value={mdsForm.notes}
+                  onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))}
+                />
+              </div>
+
+              {mdsData?.raw_company_info && Object.keys(mdsData.raw_company_info).length > 0 && (
+                <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                  <button type="button" onClick={() => setMdsRawInfoOpen(o => !o)}
+                    className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-600">Raw Excel Data</span>
+                      <span className="text-[10px] text-slate-400">({Object.keys(mdsData.raw_company_info).length} fields extracted)</span>
+                    </div>
+                    {mdsRawInfoOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </button>
+                  {mdsRawInfoOpen && (
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto bg-white">
+                      {Object.entries(mdsData.raw_company_info).map(([key, val]) => (
+                        <div key={key} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg hover:bg-slate-50">
+                          <span className="text-slate-400 font-medium min-w-[120px] flex-shrink-0">{key}</span>
+                          <span className="text-slate-700 font-medium break-all">{String(val)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
                 <Button type="button" variant="ghost"
@@ -2627,7 +2702,7 @@ export default function Clients() {
                   className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" onClick={() => handleMdsConfirm(false)}
-                    className="h-10 px-5 text-sm rounded-xl border-slate-200 text-slate-700 font-semibold gap-2">
+                    className="h-10 px-5 text-sm rounded-xl border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 gap-2">
                     <Edit className="h-4 w-4" /> Open in Full Form
                   </Button>
                   <Button type="button" disabled={importLoading} onClick={() => handleMdsConfirm(true)}
