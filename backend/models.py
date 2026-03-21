@@ -52,6 +52,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_delete_tasks": True,
         "can_connect_email": True,
         "can_view_own_data": True,
+        "can_create_quotations": True,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -91,6 +92,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_delete_tasks": False,
         "can_connect_email": True,
         "can_view_own_data": True,
+        "can_create_quotations": False,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -130,6 +132,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_delete_tasks": False,
         "can_connect_email": True,
         "can_view_own_data": True,
+        "can_create_quotations": False,
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -174,6 +177,7 @@ class UserPermissions(BaseModel):
     can_delete_tasks: bool = False
     can_connect_email: bool = True
     can_view_own_data: bool = True
+    can_create_quotations: bool = False
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -522,8 +526,6 @@ class ContactPerson(BaseModel):
     birthday: Optional[Any] = None
     din: Optional[str] = None
 
-    # FIX: Convert empty strings to None so EmailStr / phone validators
-    # do not raise when the frontend sends "" instead of null.
     @model_validator(mode="before")
     @classmethod
     def clean_empty_contact_fields(cls, data: Any) -> Any:
@@ -561,14 +563,10 @@ class ClientBase(BaseModel):
         description="List of {user_id, services} assignments"
     )
 
-    # FIX: Convert empty strings to None for all optional / nullable fields
-    # BEFORE any field-level validators (e.g. EmailStr, phone pattern) run.
-    # This prevents 422/500 errors when the frontend sends "" instead of null.
     @model_validator(mode="before")
     @classmethod
     def clean_empty_optional_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            # These fields must be None (not empty string) when blank
             nullable_fields = [
                 "email", "phone", "referred_by", "notes", "assigned_to",
                 "birthday", "date_of_incorporation", "client_type_label",
@@ -762,15 +760,15 @@ class HolidayCreate(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
-    type: str = "manual"            # ✅ server.py accesses holiday.type
+    type: str = "manual"
 
 
 class HolidayResponse(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
-    status: str = "confirmed"       # ✅ server.py returns status in response
-    type: Optional[str] = "manual"  # ✅ consistent with HolidayCreate
+    status: str = "confirmed"
+    type: Optional[str] = "manual"
 
 
 # ======================
