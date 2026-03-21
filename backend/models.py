@@ -522,6 +522,18 @@ class ContactPerson(BaseModel):
     birthday: Optional[Any] = None
     din: Optional[str] = None
 
+    # FIX: Convert empty strings to None so EmailStr / phone validators
+    # do not raise when the frontend sends "" instead of null.
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_contact_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nullable = ["email", "phone", "designation", "birthday", "din"]
+            for field in nullable:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
+
 
 class ClientDSC(BaseModel):
     certificate_number: str
@@ -548,6 +560,24 @@ class ClientBase(BaseModel):
         default_factory=list,
         description="List of {user_id, services} assignments"
     )
+
+    # FIX: Convert empty strings to None for all optional / nullable fields
+    # BEFORE any field-level validators (e.g. EmailStr, phone pattern) run.
+    # This prevents 422/500 errors when the frontend sends "" instead of null.
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_optional_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # These fields must be None (not empty string) when blank
+            nullable_fields = [
+                "email", "phone", "referred_by", "notes", "assigned_to",
+                "birthday", "date_of_incorporation", "client_type_label",
+                "address", "city", "state",
+            ]
+            for field in nullable_fields:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
 
     @field_validator("phone", mode="before")
     @classmethod
@@ -726,21 +756,21 @@ class PerformanceMetric(BaseModel):
 
 
 # ======================
-# HOLIDAY MODELS  ← FIXED
+# HOLIDAY MODELS
 # ======================
 class HolidayCreate(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
-    type: str = "manual"            # ✅ ADDED — server.py accesses holiday.type
+    type: str = "manual"            # ✅ server.py accesses holiday.type
 
 
 class HolidayResponse(BaseModel):
     date: Any
     name: str
     description: Optional[str] = None
-    status: str = "confirmed"       # ✅ ADDED — server.py returns status in response
-    type: Optional[str] = "manual"  # ✅ ADDED — consistent with HolidayCreate
+    status: str = "confirmed"       # ✅ server.py returns status in response
+    type: Optional[str] = "manual"  # ✅ consistent with HolidayCreate
 
 
 # ======================
