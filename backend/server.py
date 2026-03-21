@@ -13,6 +13,7 @@ import requests
 import httpx
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from backend.quotations import router as quotation_router
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from io import StringIO, BytesIO
@@ -245,6 +246,11 @@ async def startup_event():
         await db.visits.create_index("status")
         await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
         await db.notifications.create_index("created_at")
+        await db.quotations.create_index([("created_by", 1), ("created_at", -1)])
+        await db.quotations.create_index("status")
+        await db.quotations.create_index("service")
+        await db.companies.create_index("created_by")
+        await db.companies.create_index("name")
 
     # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
         try:
@@ -4720,6 +4726,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(visits_router)
+api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
 api_router.include_router(notification_router)
