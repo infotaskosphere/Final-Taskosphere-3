@@ -1,0 +1,977 @@
+"""
+backend/quotations.py
+─────────────────────────────────────────────────────────────────────────────
+Quotation Module — FastAPI Router
+Endpoints:
+  POST   /api/companies            - Create a company profile
+  GET    /api/companies            - List all companies for the current user
+  PUT    /api/companies/{id}       - Update a company
+  DELETE /api/companies/{id}       - Delete a company
+
+  POST   /api/quotations           - Create a quotation
+  GET    /api/quotations           - List quotations (filtered by role/perm)
+  GET    /api/quotations/{id}      - Get single quotation
+  PUT    /api/quotations/{id}      - Update a quotation
+  DELETE /api/quotations/{id}      - Delete a quotation
+  GET    /api/quotations/{id}/pdf  - Export quotation as PDF (streaming)
+  GET    /api/quotations/{id}/checklist-pdf - Export document checklist as PDF
+  GET    /api/quotations/next-number - Get next auto quotation number
+"""
+
+import uuid
+import logging
+import re
+from datetime import datetime, timezone, date
+from io import BytesIO
+from typing import List, Optional, Any, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+# ── project-local imports (mirror pattern used in main.py) ───────────────────
+from backend.dependencies import db, get_current_user, require_admin
+from backend.models import User
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["Quotations"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCUMENT CHECKLISTS per service  (offline – no external call required)
+# ═══════════════════════════════════════════════════════════════════════════════
+SERVICE_CHECKLISTS: Dict[str, List[str]] = {
+    "GST Registration": [
+        "PAN Card of Applicant / Business",
+        "Aadhaar Card of Proprietor / Partners / Directors",
+        "Photograph (Passport Size)",
+        "Address Proof of Business Premises (Electricity Bill / Rent Agreement)",
+        "Bank Account Statement / Cancelled Cheque",
+        "Constitution Proof (Partnership Deed / MOA-AOA / Certificate of Incorporation)",
+        "Digital Signature Certificate (for Companies/LLP)",
+        "Letter of Authorization / Board Resolution",
+        "Mobile Number & Email ID",
+    ],
+    "GST Return Filing": [
+        "GSTIN",
+        "GST Username & Password",
+        "Sales Invoices / Register",
+        "Purchase Invoices / Register",
+        "Bank Statement",
+        "Credit / Debit Notes (if any)",
+        "Previous Return Copy (GSTR-3B / GSTR-1)",
+        "E-way Bill Records (if applicable)",
+    ],
+    "GST Annual Return (GSTR-9)": [
+        "GSTIN",
+        "GSTR-1 Filed Returns (All months)",
+        "GSTR-3B Filed Returns (All months)",
+        "Audited Financial Statements",
+        "Purchase & Sales Ledger",
+        "Input Tax Credit (ITC) Reconciliation",
+        "HSN/SAC Code Summary",
+    ],
+    "Income Tax Return (ITR) – Individual": [
+        "PAN Card",
+        "Aadhaar Card",
+        "Form 16 (from Employer)",
+        "Bank Statements (All accounts)",
+        "Interest Certificates (FD/Savings)",
+        "Investment Proofs (80C, 80D, etc.)",
+        "Rental Income Details (if any)",
+        "Capital Gains Statements",
+        "Previous Year ITR Copy",
+    ],
+    "Income Tax Return (ITR) – Business": [
+        "PAN Card of Business / Proprietor",
+        "Aadhaar Card",
+        "Audited Financial Statements (P&L, Balance Sheet)",
+        "Bank Statements (All accounts)",
+        "TDS Certificates / Form 26AS",
+        "GST Returns (if applicable)",
+        "Loan Statements",
+        "Investment / Asset Details",
+        "Previous Year ITR Copy",
+    ],
+    "TDS Return Filing": [
+        "TAN (Tax Deduction Account Number)",
+        "PAN of Deductee(s)",
+        "Challan Details (BSR Code, Date, Amount, Challan No.)",
+        "Nature of Payment & Rate of TDS",
+        "Previous Quarter TDS Return Copy",
+        "Form 16 / 16A Data",
+    ],
+    "Tax Audit (Form 3CA/3CB)": [
+        "PAN Card of Business",
+        "Audited Financial Statements",
+        "Books of Accounts (Ledger, Cash Book, Journal)",
+        "Bank Statements",
+        "GST Returns",
+        "ITR Filed Copies",
+        "Stock Valuation Report",
+        "Fixed Asset Register",
+        "Loan & Advance Details",
+    ],
+    "Company Registration (Pvt. Ltd.)": [
+        "PAN Card of all Proposed Directors",
+        "Aadhaar Card of all Proposed Directors",
+        "Passport Size Photographs of all Directors",
+        "Address Proof of Registered Office (Electricity Bill / NOC)",
+        "Rent Agreement (if rented premises)",
+        "Email IDs & Mobile Numbers of all Directors",
+        "Proposed Company Name(s) (2-3 Options)",
+        "Object Clause / Business Description",
+        "DSC (Digital Signature Certificate) – will be applied",
+        "DIN (Director Identification Number) – will be applied",
+    ],
+    "LLP Registration": [
+        "PAN Card of all Designated Partners",
+        "Aadhaar Card of all Designated Partners",
+        "Passport Size Photographs",
+        "Address Proof of Registered Office",
+        "Proposed LLP Name(s)",
+        "LLP Agreement Draft",
+        "DPIN / DIN of Partners",
+        "Email IDs & Mobile Numbers",
+    ],
+    "ROC Annual Compliance": [
+        "Certificate of Incorporation",
+        "MOA & AOA",
+        "Audited Financial Statements",
+        "Board Resolution",
+        "Minutes of AGM / Board Meeting",
+        "Shareholding Pattern",
+        "List of Directors",
+        "DIN of all Directors",
+        "DSC of Authorized Signatory",
+        "Previous Year Filed Forms",
+    ],
+    "Trademark Registration": [
+        "PAN Card of Applicant",
+        "Aadhaar Card",
+        "Trademark (Logo / Word / Device) in JPEG format",
+        "Business Proof (MSME / GST Certificate / MOA / Partnership Deed)",
+        "TM Class Description (Goods/Services)",
+        "Power of Attorney (TM-48)",
+        "Prior Use Evidence (if claiming use before date)",
+    ],
+    "MSME / Udyam Registration": [
+        "Aadhaar Card of Proprietor / Director / Partner",
+        "PAN Card",
+        "GSTIN (if applicable)",
+        "Bank Account Details",
+        "Business Address Proof",
+        "NIC Code (Business Activity)",
+    ],
+    "Accounting & Bookkeeping": [
+        "Bank Statements (All accounts)",
+        "Sales Invoices",
+        "Purchase Invoices",
+        "Expense Vouchers / Bills",
+        "Payroll Details (if employees)",
+        "Loan Statements",
+        "Credit Card Statements (if any)",
+        "Opening Balance Sheet / Previous Year Data",
+    ],
+    "Payroll Processing": [
+        "Employee Details (Name, PAN, Aadhaar, Bank Account)",
+        "Salary Structure / CTC Breakup",
+        "Attendance Records",
+        "Leave Records",
+        "ESI & PF Registration Numbers",
+        "Professional Tax Registration",
+        "Investment Declarations (Form 12BB)",
+    ],
+    "FEMA / RBI Compliance": [
+        "PAN Card",
+        "Certificate of Incorporation",
+        "MOA & AOA",
+        "Foreign Inward Remittance Certificate (FIRC)",
+        "Valuation Report",
+        "CS Certificate",
+        "Board Resolution for Foreign Investment",
+        "Form FC-GPR / FC-TRS (as applicable)",
+    ],
+    "DSC (Digital Signature Certificate)": [
+        "PAN Card",
+        "Aadhaar Card",
+        "Passport Size Photograph",
+        "Mobile Number (linked to Aadhaar)",
+        "Email ID",
+        "Organisation Certificate (for Class-3 Org DSC)",
+    ],
+    "Other / Custom Service": [
+        "PAN Card",
+        "Aadhaar Card",
+        "Address Proof",
+        "Bank Account Details",
+        "Photograph",
+        "Any specific document advised by our team",
+    ],
+}
+
+# All available services (mirrors backend COMPLIANCE_RULES + extras)
+ALL_SERVICES = list(SERVICE_CHECKLISTS.keys())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PYDANTIC MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CompanyProfile(BaseModel):
+    id: Optional[str] = None
+    name: str
+    address: str = ""
+    phone: str = ""
+    email: str = ""
+    website: str = ""
+    gstin: str = ""
+    pan: str = ""
+    bank_account_name: str = ""
+    bank_name: str = ""
+    bank_account_no: str = ""
+    bank_ifsc: str = ""
+    logo_base64: Optional[str] = None   # data:image/png;base64,....
+    signature_base64: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class QuotationItem(BaseModel):
+    description: str
+    amount: float = 0.0
+
+
+class QuotationCreate(BaseModel):
+    company_id: str
+    client_name: str
+    client_address: str = ""
+    client_email: str = ""
+    client_phone: str = ""
+    service: str                        # must be one of ALL_SERVICES
+    subject: str = ""
+    scope_of_work: List[str] = []
+    items: List[QuotationItem] = []
+    gst_rate: float = 18.0
+    payment_terms: str = ""
+    timeline: str = ""
+    validity_days: int = 30
+    advance_terms: str = ""
+    extra_terms: List[str] = []
+    notes: str = ""
+    # checklist overrides
+    extra_checklist_items: List[str] = []
+    # status
+    status: str = "draft"              # draft | sent | accepted | rejected
+
+
+class QuotationOut(QuotationCreate):
+    id: str
+    quotation_no: str
+    date: str
+    created_by: str
+    created_at: str
+    updated_at: str
+    subtotal: float
+    gst_amount: float
+    total: float
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _compute_totals(items: List[QuotationItem], gst_rate: float):
+    subtotal   = sum(i.amount for i in items)
+    gst_amount = round(subtotal * gst_rate / 100, 2)
+    total      = round(subtotal + gst_amount, 2)
+    return subtotal, gst_amount, total
+
+
+def _permission_ok(user: User) -> bool:
+    """Returns True if user can access quotation module."""
+    if user.role == "admin":
+        return True
+    perms = user.permissions if isinstance(user.permissions, dict) else (
+        user.permissions.model_dump() if user.permissions else {}
+    )
+    return bool(perms.get("can_create_quotations", False))
+
+
+async def _next_qtn_number() -> str:
+    """Auto-increment quotation number like QTN-001/2025."""
+    year = datetime.now().year
+    count = await db.quotations.count_documents(
+        {"quotation_no": {"$regex": f"/{year}$"}}
+    )
+    return f"QTN-{count + 1:03d}/{year}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPANY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/companies")
+async def create_company(data: dict, current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id":                  str(uuid.uuid4()),
+        "name":                data.get("name", "").strip(),
+        "address":             data.get("address", ""),
+        "phone":               data.get("phone", ""),
+        "email":               data.get("email", ""),
+        "website":             data.get("website", ""),
+        "gstin":               data.get("gstin", ""),
+        "pan":                 data.get("pan", ""),
+        "bank_account_name":   data.get("bank_account_name", ""),
+        "bank_name":           data.get("bank_name", ""),
+        "bank_account_no":     data.get("bank_account_no", ""),
+        "bank_ifsc":           data.get("bank_ifsc", ""),
+        "logo_base64":         data.get("logo_base64"),
+        "signature_base64":    data.get("signature_base64"),
+        "created_by":          current_user.id,
+        "created_at":          now,
+    }
+    if not doc["name"]:
+        raise HTTPException(400, "Company name is required")
+    await db.companies.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/companies")
+async def get_companies(current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    # Admin sees all; others see only their own
+    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
+    companies = await db.companies.find(query, {"_id": 0}).to_list(500)
+    return companies
+
+
+@router.put("/companies/{company_id}")
+async def update_company(
+    company_id: str, data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Company not found")
+    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+    allowed = [
+        "name", "address", "phone", "email", "website", "gstin", "pan",
+        "bank_account_name", "bank_name", "bank_account_no", "bank_ifsc",
+        "logo_base64", "signature_base64",
+    ]
+    update = {k: data[k] for k in allowed if k in data}
+    await db.companies.update_one({"id": company_id}, {"$set": update})
+    updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    return updated
+
+
+@router.delete("/companies/{company_id}")
+async def delete_company(company_id: str, current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Company not found")
+    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+    await db.companies.delete_one({"id": company_id})
+    return {"message": "Company deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUOTATION ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/quotations/next-number")
+async def get_next_quotation_number(current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    return {"number": await _next_qtn_number()}
+
+
+@router.get("/quotations/services")
+async def get_services(_: User = Depends(get_current_user)):
+    return {"services": ALL_SERVICES, "checklists": SERVICE_CHECKLISTS}
+
+
+@router.post("/quotations")
+async def create_quotation(
+    data: QuotationCreate,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+
+    subtotal, gst_amount, total = _compute_totals(data.items, data.gst_rate)
+    now = datetime.now(timezone.utc).isoformat()
+    qtn_no = await _next_qtn_number()
+
+    doc = {
+        "id":                   str(uuid.uuid4()),
+        "quotation_no":         qtn_no,
+        "date":                 date.today().isoformat(),
+        **data.model_dump(),
+        "items":                [i.model_dump() for i in data.items],
+        "subtotal":             subtotal,
+        "gst_amount":           gst_amount,
+        "total":                total,
+        "created_by":           current_user.id,
+        "created_at":           now,
+        "updated_at":           now,
+    }
+    await db.quotations.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/quotations")
+async def list_quotations(
+    status: Optional[str] = None,
+    service: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+
+    query: Dict[str, Any] = {}
+    if current_user.role != "admin":
+        query["created_by"] = current_user.id
+    if status:
+        query["status"] = status
+    if service:
+        query["service"] = service
+
+    quotations = await db.quotations.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return quotations
+
+
+@router.get("/quotations/{quotation_id}")
+async def get_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not q:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and q.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+    return q
+
+
+@router.put("/quotations/{quotation_id}")
+async def update_quotation(
+    quotation_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+
+    # Recompute totals if items/gst changed
+    items_raw = data.get("items", existing.get("items", []))
+    items = [QuotationItem(**i) if isinstance(i, dict) else i for i in items_raw]
+    gst_rate = float(data.get("gst_rate", existing.get("gst_rate", 18)))
+    subtotal, gst_amount, total = _compute_totals(items, gst_rate)
+
+    data["items"]      = [i.model_dump() if hasattr(i, "model_dump") else i for i in items]
+    data["subtotal"]   = subtotal
+    data["gst_amount"] = gst_amount
+    data["total"]      = total
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Remove protected fields
+    for f in ["id", "quotation_no", "created_by", "created_at"]:
+        data.pop(f, None)
+
+    await db.quotations.update_one({"id": quotation_id}, {"$set": data})
+    updated = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    return updated
+
+
+@router.delete("/quotations/{quotation_id}")
+async def delete_quotation(quotation_id: str, current_user: User = Depends(get_current_user)):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    existing = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+    await db.quotations.delete_one({"id": quotation_id})
+    return {"message": "Quotation deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF GENERATION  (uses reportlab – already available via fpdf in project)
+# We fall back to fpdf2 since that's what the existing codebase uses.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
+    """Build a professional quotation PDF using fpdf2."""
+    from fpdf import FPDF
+    import base64, tempfile, os
+
+    DEEP_BLUE  = (13, 59, 102)
+    MED_BLUE   = (31, 111, 178)
+    LIGHT_BLUE = (224, 242, 254)
+    EMERALD    = (31, 175, 90)
+    DARK_TEXT  = (30, 41, 59)
+    MUTED      = (100, 116, 139)
+
+    class PDF(FPDF):
+        def header(self): pass   # handled manually
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(*MUTED)
+            self.cell(0, 5, f"Quotation No: {q.get('quotation_no','')}  |  Page {self.page_no()}", align="C")
+
+    pdf = PDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    W = pdf.w - 28    # usable width (14mm margins each side)
+
+    # ── Logo + Company block ─────────────────────────────────────────────────
+    logo_b64 = company.get("logo_base64", "")
+    logo_printed = False
+    if logo_b64:
+        try:
+            # strip data-URI prefix
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+            img_bytes = base64.b64decode(raw)
+            suffix = ".png" if logo_b64.startswith("data:image/png") else ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=12, h=18)
+            logo_printed = True
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    pdf.set_xy(14, 32)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 6, company.get("name", ""), ln=True)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    if company.get("address"):
+        pdf.multi_cell(W // 2, 4, company.get("address", ""), ln=True)
+    contact_parts = []
+    if company.get("phone"):  contact_parts.append(f"Ph: {company['phone']}")
+    if company.get("email"):  contact_parts.append(f"E: {company['email']}")
+    if company.get("website"):contact_parts.append(company["website"])
+    if contact_parts:
+        pdf.cell(0, 4, "  |  ".join(contact_parts), ln=True)
+    if company.get("gstin"):
+        pdf.cell(0, 4, f"GSTIN: {company['gstin']}", ln=True)
+
+    # ── QUOTATION Title band ─────────────────────────────────────────────────
+    band_y = 62
+    pdf.set_fill_color(*DEEP_BLUE)
+    pdf.rect(14, band_y, W, 10, "F")
+    pdf.set_xy(14, band_y + 1.5)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(W, 7, "QUOTATION", align="C", ln=True)
+
+    # ── Meta row ─────────────────────────────────────────────────────────────
+    pdf.set_xy(14, band_y + 13)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}")
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", ln=True)
+
+    # ── Client block ─────────────────────────────────────────────────────────
+    cl_y = pdf.get_y() + 4
+    pdf.set_fill_color(*LIGHT_BLUE)
+    pdf.rect(14, cl_y, W, 22, "F")
+    pdf.set_xy(16, cl_y + 2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 5, "To:", ln=True)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, q.get("client_name", ""), ln=True)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    if q.get("client_address"):
+        pdf.cell(0, 4, q.get("client_address", ""), ln=True)
+    if q.get("client_email") or q.get("client_phone"):
+        pdf.set_x(16)
+        pdf.cell(0, 4, "  ".join(filter(None, [q.get("client_email",""), q.get("client_phone","")])), ln=True)
+
+    # ── Subject ──────────────────────────────────────────────────────────────
+    pdf.set_xy(14, cl_y + 26)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    subject = q.get("subject") or f"Quotation for {q.get('service','')}"
+    pdf.cell(0, 5, f"Subject: {subject}", ln=True)
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:", ln=True)
+
+    # ── Scope of Work ────────────────────────────────────────────────────────
+    scope = q.get("scope_of_work", [])
+    if scope:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*DEEP_BLUE)
+        pdf.cell(0, 6, "Scope of Work / Services", ln=True)
+        pdf.set_draw_color(*MED_BLUE)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*DARK_TEXT)
+        for item in scope:
+            pdf.cell(6, 5, chr(149))
+            pdf.cell(0, 5, str(item), ln=True)
+
+    # ── Items Table ──────────────────────────────────────────────────────────
+    items = q.get("items", [])
+    if items:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*DEEP_BLUE)
+        pdf.cell(0, 6, "Quotation Details", ln=True)
+        pdf.set_draw_color(*MED_BLUE)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+
+        # Table header
+        pdf.set_fill_color(*DEEP_BLUE)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 9)
+        col_w = [12, W - 60, 48]
+        pdf.cell(col_w[0], 7, "Sr.", align="C", fill=True)
+        pdf.cell(col_w[1], 7, "Description", fill=True)
+        pdf.cell(col_w[2], 7, "Amount (Rs.)", align="R", fill=True, ln=True)
+
+        # Table rows
+        for idx, item in enumerate(items, 1):
+            pdf.set_fill_color(245, 249, 255) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(*DARK_TEXT)
+            pdf.set_font("Helvetica", "", 9)
+            row_h = 7
+            pdf.cell(col_w[0], row_h, str(idx), align="C", fill=True)
+            pdf.cell(col_w[1], row_h, str(item.get("description", "")), fill=True)
+            amt = item.get("amount", 0)
+            pdf.cell(col_w[2], row_h, f"Rs. {amt:,.2f}", align="R", fill=True, ln=True)
+
+        # Subtotal
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(*LIGHT_BLUE)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.cell(col_w[0] + col_w[1], 7, "Sub Total", align="R", fill=True)
+        pdf.cell(col_w[2], 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, ln=True)
+
+        gst_rate = q.get("gst_rate", 18)
+        if gst_rate > 0:
+            pdf.cell(col_w[0] + col_w[1], 7, f"GST @ {gst_rate}%", align="R", fill=True)
+            pdf.cell(col_w[2], 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, ln=True)
+
+        pdf.set_fill_color(*DEEP_BLUE)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(col_w[0] + col_w[1], 8, "TOTAL PAYABLE", align="R", fill=True)
+        pdf.cell(col_w[2], 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, ln=True)
+
+    # ── Terms & Conditions ───────────────────────────────────────────────────
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 6, "Terms & Conditions", ln=True)
+    pdf.set_draw_color(*MED_BLUE)
+    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+    pdf.ln(1)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+
+    terms = []
+    if q.get("payment_terms"):
+        terms.append(f"1. Payment Terms: {q['payment_terms']}")
+    if q.get("timeline"):
+        terms.append(f"2. Timeline: {q['timeline']}")
+    terms.append(f"3. Validity of Quotation: {q.get('validity_days', 30)} days")
+    terms.append("4. Additional work will be charged separately.")
+    if q.get("advance_terms"):
+        terms.append(f"5. Advance: {q['advance_terms']}")
+    for i, t in enumerate(q.get("extra_terms", []), len(terms) + 1):
+        terms.append(f"{i}. {t}")
+
+    for term in terms:
+        pdf.multi_cell(W, 5, term, ln=True)
+
+    # ── Bank Details ─────────────────────────────────────────────────────────
+    if any([company.get("bank_account_no"), company.get("bank_name")]):
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*DEEP_BLUE)
+        pdf.cell(0, 6, "Bank Details", ln=True)
+        pdf.set_draw_color(*MED_BLUE)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*DARK_TEXT)
+        half = W / 2
+        rows = [
+            ("Account Name", company.get("bank_account_name", "")),
+            ("Bank Name",    company.get("bank_name", "")),
+            ("Account No",   company.get("bank_account_no", "")),
+            ("IFSC Code",    company.get("bank_ifsc", "")),
+        ]
+        for label, val in rows:
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(half * 0.45, 5, f"{label}:", ln=False)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(half * 0.55, 5, str(val), ln=True)
+
+    # ── Signature block ──────────────────────────────────────────────────────
+    pdf.ln(8)
+    sig_b64 = company.get("signature_base64", "")
+    if sig_b64:
+        try:
+            raw  = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
+            img_bytes = base64.b64decode(raw)
+            suffix = ".png"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=pdf.get_y(), h=14)
+            pdf.ln(16)
+            os.unlink(tmp.name)
+        except Exception:
+            pdf.ln(14)
+    else:
+        pdf.ln(14)
+
+    pdf.set_draw_color(*MED_BLUE)
+    pdf.line(14, pdf.get_y(), 80, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, f"For {company.get('name', 'Company')}", ln=True)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 4, "Authorized Signatory", ln=True)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 4, "We look forward to working with you.", ln=True)
+
+    if q.get("notes"):
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(*MUTED)
+        pdf.multi_cell(W, 4, f"Note: {q['notes']}", ln=True)
+
+    out = BytesIO()
+    out.write(pdf.output(dest="S").encode("latin1"))
+    out.seek(0)
+    return out
+
+
+def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
+    """Build a document checklist PDF."""
+    from fpdf import FPDF
+    import base64, tempfile, os
+
+    DEEP_BLUE  = (13, 59, 102)
+    MED_BLUE   = (31, 111, 178)
+    LIGHT_BLUE = (224, 242, 254)
+    EMERALD    = (31, 175, 90)
+    DARK_TEXT  = (30, 41, 59)
+    MUTED      = (100, 116, 139)
+
+    class PDF(FPDF):
+        def header(self): pass
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(*MUTED)
+            self.cell(0, 5, f"Document Checklist – {q.get('client_name', '')}  |  Page {self.page_no()}", align="C")
+
+    pdf = PDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    W = pdf.w - 28
+
+    # Logo
+    logo_b64 = company.get("logo_base64", "")
+    if logo_b64:
+        try:
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+            img_bytes = base64.b64decode(raw)
+            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=12, h=16)
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    pdf.set_xy(14, 30)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 6, company.get("name", ""), ln=True)
+
+    # Title band
+    band_y = 50
+    pdf.set_fill_color(*DEEP_BLUE)
+    pdf.rect(14, band_y, W, 10, "F")
+    pdf.set_xy(14, band_y + 1.5)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", ln=True)
+
+    # Client info
+    pdf.set_xy(14, band_y + 14)
+    pdf.set_fill_color(*LIGHT_BLUE)
+    pdf.rect(14, band_y + 14, W, 20, "F")
+    pdf.set_xy(16, band_y + 16)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(W / 2, 5, f"Client Name: {q.get('client_name', '')}", ln=False)
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", ln=True)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(W / 2, 5, f"Service: {q.get('service', '')}", ln=False)
+    pdf.cell(W / 2, 5, f"Ref: {q.get('quotation_no', '')}", align="R", ln=True)
+    pdf.set_x(16)
+    pdf.set_text_color(*MUTED)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", ln=True)
+
+    # Build checklist
+    service  = q.get("service", "Other / Custom Service")
+    base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
+    extras   = q.get("extra_checklist_items", [])
+    all_docs = base_docs + extras
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 6, "Required Documents", ln=True)
+    pdf.set_draw_color(*MED_BLUE)
+    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+    pdf.ln(2)
+
+    # Table header
+    col_sr   = 12
+    col_doc  = W - 62
+    col_recv = 22
+    col_rem  = W - col_sr - col_doc - col_recv
+
+    pdf.set_fill_color(*DEEP_BLUE)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(col_sr,   7, "Sr.", align="C", fill=True)
+    pdf.cell(col_doc,  7, "Document Name", fill=True)
+    pdf.cell(col_recv, 7, "Received", align="C", fill=True)
+    pdf.cell(col_rem,  7, "Remarks", fill=True, ln=True)
+
+    for idx, doc_name in enumerate(all_docs, 1):
+        fill_color = (245, 249, 255) if idx % 2 == 0 else (255, 255, 255)
+        pdf.set_fill_color(*fill_color)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.set_font("Helvetica", "", 8)
+        row_h = 8
+        pdf.cell(col_sr,   row_h, str(idx), align="C", fill=True)
+        pdf.cell(col_doc,  row_h, str(doc_name), fill=True)
+        pdf.cell(col_recv, row_h, "",  align="C", fill=True, border=1)
+        pdf.cell(col_rem,  row_h, "",  fill=True,  border=1, ln=True)
+
+    # Checked by
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    half = W / 2
+    pdf.cell(half, 5, "Checked By: _______________________", ln=False)
+    pdf.cell(half, 5, "Signature: _______________________", align="R", ln=True)
+
+    # Client confirmation
+    pdf.ln(10)
+    pdf.set_fill_color(*LIGHT_BLUE)
+    pdf.rect(14, pdf.get_y(), W, 22, "F")
+    pdf.set_xy(16, pdf.get_y() + 2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DEEP_BLUE)
+    pdf.cell(0, 5, "Client Confirmation", ln=True)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, "I confirm that the above documents have been submitted / will be submitted.", ln=True)
+    pdf.set_x(16)
+    pdf.cell(0, 5, "", ln=True)
+    pdf.set_x(16)
+    pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", ln=True)
+
+    out = BytesIO()
+    out.write(pdf.output(dest="S").encode("latin1"))
+    out.seek(0)
+    return out
+
+
+@router.get("/quotations/{quotation_id}/pdf")
+async def export_quotation_pdf(
+    quotation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not q:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and q.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+
+    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company profile not found")
+
+    pdf_buf = _build_quotation_pdf(q, company)
+    filename = f"quotation_{q.get('quotation_no','').replace('/', '-')}.pdf"
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/quotations/{quotation_id}/checklist-pdf")
+async def export_checklist_pdf(
+    quotation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    if not _permission_ok(current_user):
+        raise HTTPException(403, "Quotation module access denied")
+    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not q:
+        raise HTTPException(404, "Quotation not found")
+    if current_user.role != "admin" and q.get("created_by") != current_user.id:
+        raise HTTPException(403, "Not authorized")
+
+    company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company profile not found")
+
+    pdf_buf = _build_checklist_pdf(q, company)
+    filename = f"checklist_{q.get('quotation_no','').replace('/', '-')}.pdf"
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
