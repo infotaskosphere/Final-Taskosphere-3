@@ -3399,6 +3399,90 @@ async def create_client(payload: dict, current_user: User = Depends(get_current_
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+_DEPT_SERVICE_MAP: Dict[str, List[str]] = {
+    "GST":   ["GST", "Compliance"],
+    "IT":    ["Income Tax", "Tax Planning"],
+    "ACC":   ["Accounting", "Payroll", "Audit"],
+    "TDS":   ["TDS"],
+    "ROC":   ["ROC", "Company Registration", "Compliance"],
+    "TM":    ["Trademark"],
+    "MSME":  ["MSME"],
+    "FEMA":  ["FEMA"],
+    "DSC":   [],
+    "OTHER": [],
+}
+ 
+ 
+@api_router.get("/clients", response_model=List[Client])
+async def get_clients(current_user: User = Depends(get_current_user)):
+    query = {}
+ 
+    if current_user.role == "admin":
+        # Admin sees all clients — no filter
+        query = {}
+ 
+    elif current_user.role == "manager":
+        # Manager sees clients assigned to their team members
+        team_ids = await get_team_user_ids(current_user.id)
+        query = {"assigned_to": {"$in": team_ids + [current_user.id]}}
+ 
+    else:
+        # Staff: build visibility from multiple sources
+        permissions = get_user_permissions(current_user)
+ 
+        if permissions.get("can_view_all_clients", False):
+            # Explicit global permission
+            query = {}
+        else:
+            extra_clients = permissions.get("assigned_clients", [])
+ 
+            # Base OR conditions: direct assignment (legacy + new format)
+            or_conditions: list = [
+                {"assigned_to": current_user.id},
+                {"assignments": {"$elemMatch": {"user_id": current_user.id}}},
+            ]
+ 
+            # Explicitly assigned client IDs from permissions
+            if extra_clients:
+                or_conditions.append({"id": {"$in": extra_clients}})
+ 
+            # Department-based visibility:
+            # If the staff member belongs to departments, include clients
+            # whose services overlap with those departments' service groups.
+            user_depts: list = getattr(current_user, "departments", []) or []
+            if user_depts:
+                dept_services: list = []
+                for dept in user_depts:
+                    dept_services.extend(_DEPT_SERVICE_MAP.get(dept, []))
+ 
+                # Deduplicate and build per-service regex conditions
+                unique_services = list(dict.fromkeys(dept_services))  # preserve order, dedup
+                for svc in unique_services:
+                    # Case-insensitive substring match against the services array
+                    or_conditions.append(
+                        {"services": {"$regex": re.escape(svc), "$options": "i"}}
+                    )
+ 
+            query = {"$or": or_conditions}
+ 
+    clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
+ 
+    for client in clients:
+        if isinstance(client.get("created_at"), str):
+            try:
+                client["created_at"] = datetime.fromisoformat(client["created_at"])
+            except ValueError:
+                client["created_at"] = None
+ 
+        if client.get("birthday") and isinstance(client["birthday"], str):
+            try:
+                client["birthday"] = date.fromisoformat(client["birthday"])
+            except ValueError:
+                client["birthday"] = None
+ 
+    return clients
+
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(get_current_user)):
     query = {}
@@ -3453,154 +3537,109 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
     return Client(**client)
 
 @api_router.put("/clients/{client_id}", response_model=Client)
-async def update_client(client_id: str, client_data: ClientCreate, current_user: User = Depends(get_current_user)):
+async def update_client(
+    client_id: str,
+    client_data: dict,          # <-- Changed from ClientCreate to dict
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update an existing client record.
+ 
+    Accepts a raw dict instead of ClientCreate so that:
+      - Extra frontend-only fields (address, city, state, client_type_label)
+        are accepted without causing Pydantic validation failures.
+      - Empty strings sent by the frontend (email="", phone="") are
+        safely converted to None before any validation runs.
+      - The referred_by field can be any string without pattern checks.
+ 
+    Only fields in ALLOWED_FIELDS are written to the database.
+    """
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Client not found")
+ 
     perms = get_user_permissions(current_user)
-    if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
+    if (
+        current_user.role != "admin"
+        and existing.get("assigned_to") != current_user.id
+        and not perms.get("can_edit_clients", False)
+    ):
         raise HTTPException(status_code=403, detail="Not authorized to edit this client")
-    update_data = client_data.model_dump()
-    if update_data.get("birthday"):
-        update_data["birthday"] = update_data["birthday"].isoformat()
+ 
+    # ── Whitelist: only persist known fields ────────────────────────
+    ALLOWED_FIELDS = {
+        "company_name", "client_type", "client_type_label",
+        "email", "phone", "birthday", "date_of_incorporation",
+        "address", "city", "state",
+        "services", "notes", "assigned_to", "assignments",
+        "status", "contact_persons", "dsc_details", "referred_by",
+    }
+    update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
+ 
+    # ── Convert empty strings → None for nullable fields ────────────
+    NULLABLE_FIELDS = {
+        "email", "phone", "referred_by", "notes", "assigned_to",
+        "birthday", "date_of_incorporation", "address", "city",
+        "state", "client_type_label",
+    }
+    for field in NULLABLE_FIELDS:
+        if field in update_data and update_data[field] == "":
+            update_data[field] = None
+ 
+    # ── Validate and normalise client_type ──────────────────────────
+    VALID_CLIENT_TYPES = {
+        "proprietor", "pvt_ltd", "llp", "partnership",
+        "huf", "trust", "other",
+        # Accept legacy uppercase variants from old data
+        "LLP", "PVT_LTD",
+    }
+    if "client_type" in update_data:
+        ct = update_data["client_type"]
+        if ct not in VALID_CLIENT_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid client_type '{ct}'. Must be one of: proprietor, pvt_ltd, llp, partnership, huf, trust, other"
+            )
+        # Normalise to lowercase for consistent storage
+        lower_map = {"LLP": "llp", "PVT_LTD": "pvt_ltd"}
+        update_data["client_type"] = lower_map.get(ct, ct)
+ 
+    # ── Validate company_name length ────────────────────────────────
+    if "company_name" in update_data:
+        name = str(update_data["company_name"]).strip()
+        if len(name) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail="Company name must be at least 3 characters long"
+            )
+        update_data["company_name"] = name
+ 
+    # ── Validate phone if provided ──────────────────────────────────
+    if update_data.get("phone"):
+        cleaned_phone = re.sub(r"\s|-|\+", "", str(update_data["phone"]))
+        if not cleaned_phone.isdigit():
+            raise HTTPException(status_code=422, detail="Phone number must contain only digits")
+        if not (10 <= len(cleaned_phone) <= 15):
+            raise HTTPException(status_code=422, detail="Phone number must be 10–15 digits")
+ 
+    # ── Persist ─────────────────────────────────────────────────────
     await db.clients.update_one({"id": client_id}, {"$set": update_data})
-    await create_audit_log(current_user, action="UPDATE_CLIENT", module="client", record_id=client_id, old_data=existing, new_data=update_data)
+ 
+    await create_audit_log(
+        current_user,
+        action="UPDATE_CLIENT",
+        module="client",
+        record_id=client_id,
+        old_data=existing,
+        new_data=update_data,
+    )
+ 
     updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if isinstance(updated["created_at"], str):
+    if isinstance(updated.get("created_at"), str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
     if updated.get("birthday") and isinstance(updated["birthday"], str):
         updated["birthday"] = date.fromisoformat(updated["birthday"])
     return Client(**updated)
-
-@api_router.delete("/clients/{client_id}")
-async def delete_client(client_id: str, current_user: User = Depends(get_current_user)):
-    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Client not found")
-    perms = get_user_permissions(current_user)
-    if (current_user.role != "admin" and existing.get("assigned_to") != current_user.id and not perms.get("can_edit_clients", False)):
-        raise HTTPException(status_code=403, detail="Not authorized to delete this client")
-    await create_audit_log(current_user, action="DELETE_CLIENT", module="client", record_id=client_id, old_data=existing)
-    result = await db.clients.delete_one({"id": client_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return {"message": "Client deleted successfully"}
-
-@api_router.post("/clients/{client_id}/send-birthday-email")
-async def send_client_birthday_email(
-    client_id: str,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user)
-):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    background_tasks.add_task(send_birthday_email, client["email"], client["company_name"])
-    return {"message": "Birthday email queued for delivery"}
-
-@api_router.post("/clients/import")
-async def import_clients_from_file(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
-):
-    filename = file.filename.lower()
-    try:
-        if filename.endswith(".csv"):
-            content = await file.read()
-            df = pd.read_csv(BytesIO(content))
-        elif filename.endswith(".xlsx"):
-            content = await file.read()
-            df = pd.read_excel(BytesIO(content))
-        else:
-            raise HTTPException(status_code=400, detail="Only CSV or XLSX files are supported")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"File reading failed: {str(e)}")
-    df = df.dropna(how="all").reset_index(drop=True)
-    created_clients = 0
-    duplicate_clients = 0
-    added_contacts = 0
-    skipped_rows = 0
-    invalid_rows = 0
-    validation_errors = []
-    current_client_id = None
-    for idx, row in df.iterrows():
-        try:
-            row = {k: ("" if pd.isna(v) else str(v).strip()) for k, v in row.items()}
-            company_name = row.get("company_name", "").strip()
-            if company_name:
-                safe_company = re.escape(company_name)
-                user_id = current_user.id
-                existing = await db.clients.find_one({
-                    "created_by": user_id,
-                    "company_name": {"$regex": f"^{safe_company}$", "$options": "i"}
-                })
-                if existing:
-                    current_client_id = existing["id"]
-                    duplicate_clients += 1
-                    continue
-                birthday = None
-                if row.get("birthday"):
-                    try:
-                        birthday = parser.parse(row["birthday"]).date()
-                    except Exception:
-                        birthday = None
-                services = [s.strip() for s in row.get("services", "").split(",") if s.strip()]
-                contact_persons = []
-                if row.get("contact_name_1"):
-                    contact_persons.append({
-                        "name": row.get("contact_name_1"),
-                        "designation": row.get("contact_designation_1"),
-                        "email": row.get("contact_email_1") or None,
-                        "phone": row.get("contact_phone_1") or None,
-                    })
-                client_create = ClientCreate(
-                    company_name=company_name,
-                    client_type=row.get("client_type") or "other",
-                    email=row.get("email"),
-                    phone=row.get("phone"),
-                    birthday=birthday,
-                    services=services,
-                    contact_persons=contact_persons,
-                    notes=row.get("notes")
-                )
-                client_doc = client_create.model_dump()
-                client_doc["id"] = str(uuid.uuid4())
-                client_doc["created_by"] = user_id
-                client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
-                await db.clients.insert_one(client_doc)
-                current_client_id = client_doc["id"]
-                created_clients += 1
-            else:
-                if current_client_id and row.get("contact_name_1"):
-                    contact_data = {
-                        "name": row.get("contact_name_1"),
-                        "designation": row.get("contact_designation_1"),
-                        "email": row.get("contact_email_1") or None,
-                        "phone": row.get("contact_phone_1") or None,
-                    }
-                    await db.clients.update_one({"id": current_client_id}, {"$push": {"contact_persons": contact_data}})
-                    added_contacts += 1
-                else:
-                    skipped_rows += 1
-        except ValidationError as ve:
-            invalid_rows += 1
-            validation_errors.append(f"Row {idx+2}: {ve.errors()[0]['msg']}")
-            skipped_rows += 1
-            continue
-        except Exception:
-            invalid_rows += 1
-            skipped_rows += 1
-            continue
-    return {
-        "message": "Client import completed successfully",
-        "clients_created": created_clients,
-        "duplicate_clients_skipped": duplicate_clients,
-        "contacts_added": added_contacts,
-        "invalid_rows": invalid_rows,
-        "rows_skipped": skipped_rows,
-        "validation_errors": validation_errors[:20]
-    }
-
 #============================================
 # DASHBOARD ROUTES
 #============================================
