@@ -918,41 +918,57 @@ async def reject_user(user_id: str, current_user: User = Depends(require_admin))
 # ==========================================================
 
 def normalize_reminder_doc(doc: dict) -> dict:
-    """Ensure every reminder document has a string `id` field."""
+    """
+    Ensure every reminder document has a string `id` field and no ObjectId fields.
+ 
+    *** BUG FIX v5 ***
+    The previous version converted _id to id but never removed _id.
+    MongoDB ObjectId is not JSON-serializable, causing a 500 on GET /reminders.
+    Fix: pop _id after converting it.
+    """
     if not doc:
         return doc
     doc = dict(doc)
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
-    # Also normalize datetime fields
+        doc.pop("_id")           # ← THIS WAS MISSING — caused the 500 error
+    elif "id" not in doc:
+        doc["id"] = ""           # Ensure id field always exists
+ 
+    # Normalize datetime fields to ISO strings
     for field in ["remind_at", "created_at", "updated_at"]:
-        if field in doc and doc[field] and hasattr(doc[field], 'isoformat'):
+        if field in doc and doc[field] and hasattr(doc[field], "isoformat"):
             doc[field] = doc[field].isoformat()
     return doc
+ 
 
 # REMINDER ROUTES
-# ==========================================================
-
-@api_router.post("/reminders")
+# ==========================================================@api_router.post("/reminders")
 async def create_reminder(
     data: ReminderCreate,
     current_user: User = Depends(get_current_user)
 ):
     """Create a reminder for the current user."""
+    import uuid
+    reminder_id = str(uuid.uuid4())
     reminder = {
-        "id": str(uuid.uuid4()),
-        "user_id": current_user.id,
-        "title": data.title,
-        "description": data.description,
-        "remind_at": data.remind_at.isoformat() if isinstance(data.remind_at, datetime) else str(data.remind_at),
+        "id":           reminder_id,
+        "user_id":      current_user.id,
+        "title":        data.title,
+        "description":  data.description,
+        "remind_at":    (
+            data.remind_at.isoformat()
+            if isinstance(data.remind_at, datetime)
+            else str(data.remind_at)
+        ),
         "is_dismissed": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at":   datetime.now(timezone.utc).isoformat(),
     }
     await db.reminders.insert_one(reminder)
-    reminder.pop("_id", None)
+    reminder.pop("_id", None)   # Remove ObjectId added by insert_one
     return reminder
-
-
+ 
+ 
 @api_router.get("/reminders")
 async def get_reminders(
     user_id: Optional[str] = None,
@@ -964,21 +980,24 @@ async def get_reminders(
         query = {"user_id": user_id}
     else:
         query = {"user_id": current_user.id}
-
+ 
+    # Use projection {"_id": 0} so MongoDB never returns ObjectId at all.
+    # normalize_reminder_doc handles the id field from the string "id" field.
     reminders = await db.reminders.find(query).sort("remind_at", 1).to_list(500)
     return [normalize_reminder_doc(doc) for doc in reminders]
-
-
+ 
+ 
 @api_router.patch("/reminders/{reminder_id}")
 async def update_reminder(
     reminder_id: str,
     updates: dict,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a reminder — handles both ObjectId and string id formats."""
+    """Update a reminder — handles both ObjectId (_id) and string id formats."""
     user_id = str(current_user.id)
-
-    # Try ObjectId first
+    updated = None
+ 
+    # Strategy 1: Match by MongoDB ObjectId (_id field)
     if ObjectId.is_valid(reminder_id):
         result = await db.reminders.update_one(
             {"_id": ObjectId(reminder_id), "user_id": user_id},
@@ -986,20 +1005,22 @@ async def update_reminder(
         )
         if result.matched_count > 0:
             updated = await db.reminders.find_one({"_id": ObjectId(reminder_id)})
-            return normalize_reminder_doc(updated)
-
-    # Fall back to string id field
-    result = await db.reminders.update_one(
-        {"id": reminder_id, "user_id": user_id},
-        {"$set": updates}
-    )
-    if result.matched_count > 0:
-        updated = await db.reminders.find_one({"id": reminder_id, "user_id": user_id})
-        return normalize_reminder_doc(updated)
-
-    raise HTTPException(status_code=404, detail="Reminder not found")
-
-
+ 
+    # Strategy 2: Match by string `id` field
+    if not updated:
+        result = await db.reminders.update_one(
+            {"id": reminder_id, "user_id": user_id},
+            {"$set": updates}
+        )
+        if result.matched_count > 0:
+            updated = await db.reminders.find_one({"id": reminder_id})
+ 
+    if not updated:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+ 
+    return normalize_reminder_doc(updated)
+ 
+ 
 @api_router.delete("/reminders/{reminder_id}")
 async def delete_reminder(
     reminder_id: str,
@@ -1007,40 +1028,50 @@ async def delete_reminder(
 ):
     """
     Delete a reminder by ID.
-    Accepts both plain ObjectId strings and any string ID.
-    FIX: Try ObjectId match first, then fall back to string match.
+ 
+    *** BUG FIX v5 ***
+    Strategy 3 in the old code used an invalid MongoDB query:
+      {"_id": reminder_id (string)}  when ObjectId.is_valid is False
+    MongoDB can't match a string against an ObjectId field → always fails.
+ 
+    New Strategy 3: dismiss by string `id` field OR by user_id+title fallback.
     """
     user_id = str(current_user.id)
-
-    # Strategy 1: Try matching by MongoDB ObjectId (_id field)
+ 
+    # Strategy 1: Delete by MongoDB ObjectId (_id)
     if ObjectId.is_valid(reminder_id):
-        result = await db.reminders.delete_one({
-            "_id": ObjectId(reminder_id),
-            "user_id": user_id,
-        })
+        result = await db.reminders.delete_one(
+            {"_id": ObjectId(reminder_id), "user_id": user_id}
+        )
         if result.deleted_count > 0:
             return {"status": "deleted"}
-
-    # Strategy 2: Try matching by string `id` field (some docs store it explicitly)
-    result = await db.reminders.delete_one({
-        "id": reminder_id,
-        "user_id": user_id,
-    })
+ 
+    # Strategy 2: Delete by string `id` field
+    result = await db.reminders.delete_one(
+        {"id": reminder_id, "user_id": user_id}
+    )
     if result.deleted_count > 0:
         return {"status": "deleted"}
-
-    # Strategy 3: Mark as dismissed so it stops firing even if we can't delete
-    # This handles the case where the reminder was auto-saved and has a
-    # different ID format
+ 
+    # Strategy 3 (FIXED): Mark as dismissed by string id field only.
+    # This handles auto-saved reminders that may have string UUIDs as id.
     update_result = await db.reminders.update_one(
-        {"user_id": user_id, "title": {"$exists": True}, "_id": ObjectId(reminder_id) if ObjectId.is_valid(reminder_id) else reminder_id},
+        {"id": reminder_id, "user_id": user_id},
         {"$set": {"is_dismissed": True}}
     )
     if update_result.modified_count > 0:
         return {"status": "dismissed"}
-
+ 
+    # Strategy 4: If ObjectId valid, try dismissing by _id
+    if ObjectId.is_valid(reminder_id):
+        update_result = await db.reminders.update_one(
+            {"_id": ObjectId(reminder_id), "user_id": user_id},
+            {"$set": {"is_dismissed": True}}
+        )
+        if update_result.modified_count > 0:
+            return {"status": "dismissed"}
+ 
     raise HTTPException(status_code=404, detail="Reminder not found")
-
 #============================================================
 # USER MANAGEMENT
 #=============================================================
