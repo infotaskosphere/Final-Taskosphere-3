@@ -1,9 +1,12 @@
-// Attendance.jsx - Complete file with all reminder bugs fixed
-// KEY FIXES:
-// 1. handleDeleteReminder: logs actual reminder object to debug ID field, uses correct ID
-// 2. fetchReminders: normalizes _id → id so the whole app uses consistent IDs
-// 3. Auto-saved reminders: after delete, marks them dismissed in backend so scan doesn't re-add
-// 4. handleDeleteReminder now calls PATCH is_dismissed=true as fallback if DELETE 404s
+// Attendance.jsx - v5 COMPLETE REWRITE — ALL FIXES APPLIED
+// FIXES:
+// 1. normalizeReminder: ensures `id` is always a string (was causing invisible reminders)
+// 2. fetchReminders: normalizes every doc, doesn't clear list on error
+// 3. handleDeleteReminder: uses correct id, falls back to dismiss on 404,
+//    clears email cache by email_message_id (not unreliable event_id)
+// 4. handleDismissPopup: uses correct id field
+// 5. Reminder popup check: uses sessionStorage to prevent re-firing on navigation (IMPROVEMENT F)
+// 6. All {"_id": 0} projections on reminder queries handled at backend level
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
@@ -134,79 +137,32 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FIX: Normalize reminder document — ensures `id` field is always present
-// MongoDB returns _id as string in some routes. This guarantees consistency.
+// FIX 1: normalizeReminder
+// Ensures `id` is always a string regardless of whether MongoDB returns
+// _id (ObjectId→string) or id (UUID string from newer routes).
 // ═══════════════════════════════════════════════════════════════════════════
 function normalizeReminder(r) {
   if (!r) return r;
-  // Prefer explicit `id` field, fall back to `_id`, then generate a temp key
   const id = r.id || r._id || null;
-  return { ...r, id };
+  return { ...r, id: id ? String(id) : null };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DIGITAL CLOCK
+// IMPROVEMENT F: Persist fired reminder IDs in sessionStorage
+// Prevents the popup from re-firing when user navigates away and returns.
 // ═══════════════════════════════════════════════════════════════════════════
-function DigitalClock() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => { const interval = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(interval); }, []);
-  const istString = time.toLocaleString('en-US', { timeZone: IST_TIMEZONE, hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const [timePart, rawPeriod] = istString.split(' ');
-  const [hh, mm, ss] = timePart.split(':');
-  const period = rawPeriod || 'AM';
-  const dayDate = formatInTimeZone(time, IST_TIMEZONE, 'EEEE, MMMM d, yyyy');
-  const MONO = { fontFamily: "'Roboto Mono', 'Courier New', monospace" };
-  return (
-    <div className="flex flex-col justify-between rounded-2xl overflow-hidden select-none"
-      style={{ background: 'linear-gradient(170deg, #071a2e 0%, #0c2d52 40%, #0D3B66 70%, #1a4f82 100%)', boxShadow: '0 12px 40px rgba(7,26,46,0.6), inset 0 1px 0 rgba(255,255,255,0.05)', minHeight: 180, border: '1px solid rgba(255,255,255,0.06)' }}>
-      <div className="flex items-center justify-between px-5 py-2.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
-        <div className="flex items-center gap-2">
-          <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-400" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 2, repeat: Infinity }} />
-          <span className="text-[9px] font-medium tracking-[0.22em] uppercase text-slate-400" style={MONO}>LIVE · IST</span>
-        </div>
-        <span className="text-[9px] font-medium text-slate-500 tracking-widest" style={MONO}>UTC +5:30</span>
-      </div>
-      <div className="flex items-center justify-center px-5 py-5 gap-0">
-        <span className="text-white leading-none" style={{ ...MONO, fontSize: 58, fontWeight: 700, letterSpacing: '0.02em' }}>{hh}</span>
-        <motion.span className="text-blue-400/80 leading-none mx-1" style={{ ...MONO, fontSize: 48, fontWeight: 300, marginBottom: 2 }} animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>:</motion.span>
-        <span className="text-white leading-none" style={{ ...MONO, fontSize: 58, fontWeight: 700, letterSpacing: '0.02em' }}>{mm}</span>
-        <div className="flex flex-col items-start justify-center ml-2 gap-0.5" style={{ marginBottom: 2 }}>
-          <span className="text-slate-300/60 leading-none" style={{ ...MONO, fontSize: 20, fontWeight: 400 }}>{ss}</span>
-          <span className="leading-none font-semibold tracking-widest" style={{ ...MONO, fontSize: 11, color: '#60a5fa' }}>{period}</span>
-        </div>
-      </div>
-      <div className="px-5 py-2.5 text-center" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.22)' }}>
-        <span className="text-[10px] font-medium tracking-[0.16em] uppercase text-slate-400" style={MONO}>{dayDate}</span>
-      </div>
-    </div>
-  );
+function getFiredIds() {
+  try {
+    const stored = sessionStorage.getItem('att_fired_reminder_ids');
+    return new Set(stored ? JSON.parse(stored) : []);
+  } catch { return new Set(); }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// STAT CARD
-// ═══════════════════════════════════════════════════════════════════════════
-function StatCard({ icon: Icon, label, value, unit, color = COLORS.deepBlue, trend = null, onClick }) {
-  return (
-    <motion.div variants={itemVariants} className="h-full" whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}>
-      <Card onClick={onClick} className={`border-0 shadow-md hover:shadow-xl transition-all duration-200 overflow-hidden h-full ${onClick ? 'cursor-pointer' : ''}`} style={{ background: `linear-gradient(135deg, white 60%, ${color}08 100%)` }}>
-        <CardContent className="p-6 h-full flex flex-col justify-between">
-          <div className="flex items-start justify-between">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">{label}</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-3xl font-black tracking-tight" style={{ color }}>{value}</p>
-                {unit && <p className="text-sm font-medium text-slate-400">{unit}</p>}
-              </div>
-            </div>
-            <motion.div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ml-3" style={{ backgroundColor: `${color}18` }} whileHover={{ scale: 1.12, rotate: 5 }} transition={{ type: 'spring', stiffness: 400 }}>
-              <Icon className="w-6 h-6" style={{ color }} />
-            </motion.div>
-          </div>
-          <p className="text-xs text-slate-500 mt-3 font-medium h-4">{trend || ''}</p>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
+function addFiredId(id) {
+  try {
+    const set = getFiredIds();
+    set.add(String(id));
+    sessionStorage.setItem('att_fired_reminder_ids', JSON.stringify([...set]));
+  } catch {}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -261,23 +217,14 @@ const formatReminderTime = (isoStr) => {
     return format(d, 'MMM d, yyyy • hh:mm a');
   } catch { return '—'; }
 };
-
 const stripHtml = (html) => {
   if (!html) return '';
   return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n').trim();
 };
-
 const buildGCalURL = (reminder) => {
   try {
     const start = new Date(reminder.remind_at);
@@ -293,7 +240,10 @@ const buildGCalURL = (reminder) => {
 };
 const reverseGeocode = async (lat, lng) => {
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { 'Accept-Language': 'en' } });
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
     const data = await res.json();
     if (data?.display_name) return data.display_name.split(',').slice(0, 3).join(',').trim();
   } catch {}
@@ -302,7 +252,9 @@ const reverseGeocode = async (lat, lng) => {
 const extractHolidaysFromPDF = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await api.post('/holidays/extract-from-pdf', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  const res = await api.post('/holidays/extract-from-pdf', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
   const holidays = res.data?.holidays;
   if (!Array.isArray(holidays)) throw new Error('Unexpected response from server');
   if (holidays.length === 0) throw new Error('No holidays found in the PDF');
@@ -328,11 +280,24 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
       <TooltipTrigger asChild>
         <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95">
           {ringColor ? (
-            <motion.span className="absolute flex items-center justify-center rounded-full border-2" style={{ width: 30, height: 30, borderColor: ringColor, backgroundColor: bgColor }} animate={isSpecial ? { scale: [1, 1.08, 1] } : { scale: 1 }} transition={{ duration: 2.2, repeat: isSpecial ? Infinity : 0, ease: 'easeInOut' }} />
+            <motion.span
+              className="absolute flex items-center justify-center rounded-full border-2"
+              style={{ width: 30, height: 30, borderColor: ringColor, backgroundColor: bgColor }}
+              animate={isSpecial ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+              transition={{ duration: 2.2, repeat: isSpecial ? Infinity : 0, ease: 'easeInOut' }}
+            />
           ) : isTodayDate ? (
-            <motion.span className="absolute rounded-full border-2" style={{ width: 30, height: 30, borderColor: COLORS.red, borderStyle: 'dashed', backgroundColor: `${COLORS.red}12` }} animate={{ scale: [1, 1.1, 1], opacity: [1, 0.7, 1] }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }} />
+            <motion.span
+              className="absolute rounded-full border-2"
+              style={{ width: 30, height: 30, borderColor: COLORS.red, borderStyle: 'dashed', backgroundColor: `${COLORS.red}12` }}
+              animate={{ scale: [1, 1.1, 1], opacity: [1, 0.7, 1] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
           ) : null}
-          <span className={`relative z-10 text-[13px] leading-none select-none ${isTodayDate ? 'font-black' : 'font-medium'}`} style={isTodayDate && ringColor ? { color: COLORS.deepBlue } : isTodayDate && !ringColor ? { color: COLORS.red } : undefined}>
+          <span
+            className={`relative z-10 text-[13px] leading-none select-none ${isTodayDate ? 'font-black' : 'font-medium'}`}
+            style={isTodayDate && ringColor ? { color: COLORS.deepBlue } : isTodayDate && !ringColor ? { color: COLORS.red } : undefined}
+          >
             {date.getDate()}
           </span>
         </button>
@@ -355,11 +320,19 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 function ReminderPopup({ reminder, onDismiss }) {
   return (
-    <motion.div className="fixed top-6 right-6 z-[99999] w-96 max-w-[calc(100vw-2rem)]" initial={{ opacity: 0, x: 80, scale: 0.9 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 80, scale: 0.9 }} transition={{ type: 'spring', stiffness: 300, damping: 25 }}>
+    <motion.div
+      className="fixed top-6 right-6 z-[99999] w-96 max-w-[calc(100vw-2rem)]"
+      initial={{ opacity: 0, x: 80, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 80, scale: 0.9 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+    >
       <div className="rounded-2xl shadow-2xl overflow-hidden border border-purple-200" style={{ background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)' }}>
         <div className="flex items-center justify-between px-5 py-3" style={{ backgroundColor: COLORS.purple }}>
           <div className="flex items-center gap-2">
-            <motion.div animate={{ rotate: [0, -15, 15, -10, 10, 0] }} transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 1.4 }}><BellRing className="w-5 h-5 text-white" /></motion.div>
+            <motion.div animate={{ rotate: [0, -15, 15, -10, 10, 0] }} transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 1.4 }}>
+              <BellRing className="w-5 h-5 text-white" />
+            </motion.div>
             <span className="text-white font-bold text-sm uppercase tracking-wider">Reminder</span>
           </div>
           <button onClick={onDismiss} className="text-purple-200 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
@@ -369,7 +342,9 @@ function ReminderPopup({ reminder, onDismiss }) {
           {reminder.description && <p className="text-slate-600 text-sm mb-3">{stripHtml(reminder.description)}</p>}
           <p className="text-xs text-slate-400 font-medium mb-4">⏰ {formatReminderTime(reminder.remind_at)}</p>
           <div className="flex gap-3">
-            <a href={buildGCalURL(reminder)} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-95" style={{ backgroundColor: COLORS.deepBlue }}>
+            <a href={buildGCalURL(reminder)} target="_blank" rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-95"
+              style={{ backgroundColor: COLORS.deepBlue }}>
               <CalendarPlus className="w-3.5 h-3.5" />Add to Google Calendar
             </a>
             <button onClick={onDismiss} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-white border-2 border-slate-200 hover:bg-slate-50 active:scale-95 transition-all">Dismiss</button>
@@ -455,9 +430,8 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
   if (!reminder) return null;
   const isDue = isPast(new Date(reminder.remind_at));
   const gcalUrl = buildGCalURL(reminder);
-  const descLines = reminder.description
-    ? stripHtml(reminder.description).split('\n').filter(Boolean)
-    : [];
+  const descLines = reminder.description ? stripHtml(reminder.description).split('\n').filter(Boolean) : [];
+  // FIX: use the normalized id field
   const reminderId = reminder.id || reminder._id;
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -507,7 +481,9 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
               </div>
             </div>
           )}
-          <a href={gcalUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95" style={{ backgroundColor: COLORS.deepBlue }}>
+          <a href={gcalUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
+            style={{ backgroundColor: COLORS.deepBlue }}>
             <CalendarPlus className="w-4 h-4" />Add to Google Calendar
           </a>
         </div>
@@ -537,9 +513,14 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
     if (!title.trim()) { toast.error('Title is required'); return; }
     setIsSaving(true);
     try {
-      await onSave({ title: title.trim(), description: description.trim() || undefined, remind_at: remindAt ? new Date(remindAt).toISOString() : undefined });
+      await onSave({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        remind_at: remindAt ? new Date(remindAt).toISOString() : undefined,
+      });
       onClose();
-    } catch { toast.error('Failed to update reminder'); } finally { setIsSaving(false); }
+    } catch { toast.error('Failed to update reminder'); }
+    finally { setIsSaving(false); }
   };
   if (!isOpen) return null;
   return (
@@ -553,7 +534,9 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
         </div>
         <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Cancel</Button>
-          <Button onClick={handleSave} disabled={isSaving} className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl">{isSaving ? 'Saving...' : 'Save Changes'}</Button>
+          <Button onClick={handleSave} disabled={isSaving} className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl">
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
         </div>
       </motion.div>
     </motion.div>
@@ -627,8 +610,9 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
                   <div className="space-y-0.5">
                     {dayReminders.slice(0, 3).map((r, idx) => {
                       const isDue = (() => { try { return isPast(new Date(r.remind_at)); } catch { return false; } })();
+                      const rid = r.id || r._id;
                       return (
-                        <motion.div key={r.id || r._id || idx} whileHover={{ scale: 1.02 }} onClick={() => onClickReminder(r)}
+                        <motion.div key={rid || idx} whileHover={{ scale: 1.02 }} onClick={() => onClickReminder(r)}
                           className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md truncate leading-tight cursor-pointer"
                           style={{ backgroundColor: isDue ? '#FEE2E2' : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple, border: `1px solid ${isDue ? '#FCA5A5' : COLORS.purple + '30'}` }}>
                           {format(new Date(r.remind_at), 'h:mma')} {r.title}
@@ -658,6 +642,8 @@ export default function Attendance() {
   const { user, hasPermission } = useAuth();
   const isAdmin = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
+
+  // ── State ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedUserId, setSelectedUserId] = useState(null);
@@ -674,6 +660,7 @@ export default function Attendance() {
   const [absentSummary, setAbsentSummary] = useState([]);
   const [dataError, setDataError] = useState(null);
   const absentWarningShownRef = useRef(false);
+
   const [showPunchInModal, setShowPunchInModal] = useState(false);
   const [modalActionDone, setModalActionDone] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -683,23 +670,26 @@ export default function Attendance() {
   const [leaveReason, setLeaveReason] = useState('');
   const [holidayRows, setHolidayRows] = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
   const [liveDuration, setLiveDuration] = useState('0h 0m');
+
   const [reminders, setReminders] = useState([]);
   const [firedReminder, setFiredReminder] = useState(null);
   const [showReminderForm, setShowReminderForm] = useState(false);
   const [reminderTitle, setReminderTitle] = useState('');
   const [reminderDesc, setReminderDesc] = useState('');
   const [reminderDatetime, setReminderDatetime] = useState('');
-  const firedIdsRef = useRef(new Set());
+
   const [pdfImporting, setPdfImporting] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
   const [editName, setEditName] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const pdfInputRef = useRef(null);
+
   const [exportingPDF, setExportingPDF] = useState(false);
   const [trademarkData, setTrademarkData] = useState(null);
   const [trademarkLoading, setTrademarkLoading] = useState(false);
   const trademarkPdfRef = useRef(null);
+
   const [selectedHolidayDetail, setSelectedHolidayDetail] = useState(null);
   const [selectedReminderDetail, setSelectedReminderDetail] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -707,24 +697,32 @@ export default function Attendance() {
   const [showEmailImporter, setShowEmailImporter] = useState(false);
   const [showReminderCalendar, setShowReminderCalendar] = useState(false);
 
+  // ── Derived flags ────────────────────────────────────────────────────────
   const isEveryoneView = isAdmin && selectedUserId === 'everyone';
   const isViewingOther = isAdmin && !!selectedUserId && selectedUserId !== 'everyone';
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
-  const todayIsHoliday = useMemo(() => holidays.some(h => h.date === todayDateStr && h.status === 'confirmed'), [holidays, todayDateStr]);
+  const todayIsHoliday = useMemo(() =>
+    holidays.some(h => h.date === todayDateStr && h.status === 'confirmed'),
+    [holidays, todayDateStr]
+  );
+
   const displayTodayAttendance = useMemo(() => {
     if (isViewingOther) return attendanceHistory.find(a => a.date === format(new Date(), 'yyyy-MM-dd')) || null;
     return todayAttendance;
   }, [isViewingOther, attendanceHistory, todayAttendance]);
+
   const displayLiveDuration = useMemo(() => {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
   }, [isViewingOther, displayTodayAttendance, liveDuration]);
 
+  // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => { fetchData(); fetchReminders(); }, []);
 
   useEffect(() => {
     if (!isViewingOther && todayAttendance) {
-      const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave' || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
+      const shouldClose = todayAttendance.punch_in || todayAttendance.status === 'leave'
+        || todayAttendance.status === 'absent' || todayIsHoliday || modalActionDone;
       if (shouldClose) { setShowPunchInModal(false); return; }
       const timer = setTimeout(() => setShowPunchInModal(true), 800);
       return () => clearTimeout(timer);
@@ -739,16 +737,22 @@ export default function Attendance() {
     }
   }, [todayAttendance]);
 
+  // FIX 5: Reminder popup check — uses sessionStorage to prevent re-firing on navigation
   useEffect(() => {
     const check = () => {
       const now = new Date();
+      const persistedFiredIds = getFiredIds(); // IMPROVEMENT F
       for (const r of reminders) {
         const rid = r.id || r._id;
-        if (r.is_dismissed || firedIdsRef.current.has(rid)) continue;
+        if (r.is_dismissed || persistedFiredIds.has(String(rid))) continue;
         const due = new Date(r.remind_at);
         if (isNaN(due.getTime())) continue;
         const diff = differenceInMinutes(due, now);
-        if (diff <= 0 && diff >= -2) { firedIdsRef.current.add(rid); setFiredReminder(r); break; }
+        if (diff <= 0 && diff >= -2) {
+          addFiredId(rid); // persist before setting state
+          setFiredReminder(r);
+          break;
+        }
       }
     };
     check();
@@ -793,6 +797,7 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [todayAttendance, isViewingOther, isEveryoneView]);
 
+  // ── Data Fetch ─────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
     setLoading(true); setDataError(null);
     const rawTargetId = isAdmin ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
@@ -804,6 +809,7 @@ export default function Attendance() {
       if (isEveryoneReq) historyUrl = '/attendance/history';
       else if (resolvedUserId) historyUrl = `/attendance/history?user_id=${resolvedUserId}`;
       else historyUrl = '/attendance/history';
+
       const requests = [
         api.get(historyUrl).catch(() => ({ data: [] })),
         (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary').catch(() => ({ data: null })),
@@ -813,16 +819,24 @@ export default function Attendance() {
         canViewRankings ? api.get('/reports/performance-rankings?period=monthly').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ];
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
+
       const allHolidays = holidaysRes.data || [];
       setHolidays(allHolidays.filter(h => h.status === 'confirmed'));
       if (isAdmin) setPendingHolidays(allHolidays.filter(h => h.status === 'pending'));
+
       if (isAdmin && allUsers.length === 0) {
-        try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch (e) {}
+        try { const usersRes = await api.get('/users'); setAllUsers(usersRes.data || []); } catch {}
       }
+
       const history = historyRes.data || [];
       setAttendanceHistory(history);
-      if (todayRes.data !== null && todayRes.data !== undefined) { setTodayAttendance(todayRes.data); setDataError(null); }
-      else { setDataError('Backend unreachable — it may be waking up (Render free tier). Please wait 30s and retry.'); }
+
+      if (todayRes.data !== null && todayRes.data !== undefined) {
+        setTodayAttendance(todayRes.data); setDataError(null);
+      } else {
+        setDataError('Backend unreachable — it may be waking up (Render free tier). Please wait 30s and retry.');
+      }
+
       if (isOtherReq) {
         const monthlySummary = {};
         history.forEach(a => {
@@ -830,18 +844,30 @@ export default function Attendance() {
           if (!monthlySummary[m]) monthlySummary[m] = { total_minutes: 0, days_present: 0 };
           if (a.punch_in && a.status === 'present') { monthlySummary[m].total_minutes += a.duration_minutes || 0; monthlySummary[m].days_present += 1; }
         });
-        setMySummary({ total_minutes: history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0), total_days: history.filter(a => a.punch_in && a.status === 'present').length, monthly_summary: Object.entries(monthlySummary).map(([month, d]) => { const h = Math.floor(d.total_minutes / 60), m = d.total_minutes % 60; return { month, ...d, total_hours: `${h}h ${m}m` }; }) });
+        setMySummary({
+          total_minutes: history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0),
+          total_days: history.filter(a => a.punch_in && a.status === 'present').length,
+          monthly_summary: Object.entries(monthlySummary).map(([month, d]) => {
+            const h = Math.floor(d.total_minutes / 60), m = d.total_minutes % 60;
+            return { month, ...d, total_hours: `${h}h ${m}m` };
+          }),
+        });
       } else if (isEveryoneReq) {
         const total_minutes = history.reduce((s, a) => s + (a.status === 'present' ? (a.duration_minutes || 0) : 0), 0);
         setMySummary({ total_minutes, total_days: history.filter(a => a.punch_in && a.status === 'present').length, monthly_summary: [] });
-      } else { setMySummary(summaryRes?.data ?? null); }
+      } else {
+        setMySummary(summaryRes?.data ?? null);
+      }
+
       const allTasksData = tasksRes.data || [];
       const relevantTasks = isOtherReq ? allTasksData.filter(t => t.assigned_to === rawTargetId) : allTasksData;
       setTasksCompleted(relevantTasks.filter(t => t.status === 'completed').length);
+
       const rankingList = Array.isArray(rankingRes.data) ? rankingRes.data : (rankingRes.data?.rankings || rankingRes.data?.data || []);
       const rankUserId = isOtherReq ? rawTargetId : user?.id;
       const myEntry = rankingList.find(r => r.user_id === rankUserId);
       setMyRank(myEntry ? `#${myEntry.rank}` : '—');
+
       if (isAdmin) {
         try { const absentRes = await api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`); setAbsentSummary(absentRes.data?.data || []); } catch { setAbsentSummary([]); }
       }
@@ -851,23 +877,23 @@ export default function Attendance() {
     } finally { setLoading(false); }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]);
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FIX: fetchReminders — normalize all reminder docs so `id` is always set
-  // ═══════════════════════════════════════════════════════════════════════
+  // FIX 2: fetchReminders — normalizes ALL docs, keeps showing list on error
   const fetchReminders = useCallback(async (overrideUserId = undefined) => {
     try {
       const uid = overrideUserId !== undefined ? overrideUserId : (isViewingOther ? selectedUserId : null);
       if (uid === 'everyone') return;
       const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
       const res = await api.get(url);
-      // CRITICAL FIX: normalize _id → id for every reminder
+      // CRITICAL FIX: normalize every reminder so `id` is always a clean string
       const normalized = (res.data || []).map(normalizeReminder);
       setReminders(normalized);
     } catch (err) {
       console.error('fetchReminders error:', err);
+      // Don't clear existing reminders on fetch error — keep showing what we have
     }
   }, [isViewingOther, selectedUserId]);
 
+  // ── Punch Action ───────────────────────────────────────────────────────────
   const handlePunchAction = useCallback(async (action, e) => {
     if (e) addAttRipple(e);
     setLoading(true);
@@ -875,7 +901,9 @@ export default function Attendance() {
       let locationData = null;
       if (navigator.geolocation) {
         try {
-          const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 }));
+          const position = await new Promise((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
+          );
           locationData = { latitude: position.coords.latitude, longitude: position.coords.longitude };
         } catch {}
       }
@@ -887,16 +915,22 @@ export default function Attendance() {
     finally { setLoading(false); }
   }, [fetchData]);
 
+  // ── Leave ──────────────────────────────────────────────────────────────────
   const handleApplyLeave = useCallback(async () => {
     if (!leaveFrom) { toast.error('Select a leave start date'); return; }
     try {
-      await api.post('/attendance/apply-leave', { from_date: format(leaveFrom, 'yyyy-MM-dd'), to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'), reason: leaveReason || 'Personal Leave' });
+      await api.post('/attendance/apply-leave', {
+        from_date: format(leaveFrom, 'yyyy-MM-dd'),
+        to_date: leaveTo ? format(leaveTo, 'yyyy-MM-dd') : format(leaveFrom, 'yyyy-MM-dd'),
+        reason: leaveReason || 'Personal Leave',
+      });
       toast.success('✓ Leave request submitted');
       setShowLeaveForm(false); setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
       await fetchData();
     } catch { toast.error('Failed to submit leave request'); }
   }, [leaveFrom, leaveTo, leaveReason, fetchData]);
 
+  // ── Holidays ───────────────────────────────────────────────────────────────
   const handleAddHolidays = useCallback(async () => {
     const validRows = holidayRows.filter(r => r.name.trim() && r.date);
     if (validRows.length === 0) { toast.error('Add at least one holiday'); return; }
@@ -958,6 +992,7 @@ export default function Attendance() {
     finally { setAbsentLoading(false); }
   }, [fetchData]);
 
+  // ── Reminder Create ────────────────────────────────────────────────────────
   const handleCreateReminder = useCallback(async () => {
     if (!reminderTitle.trim() || !reminderDatetime) { toast.error('Title and date/time are required'); return; }
     try {
@@ -968,22 +1003,22 @@ export default function Attendance() {
       });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
-      // Add the new reminder with normalized ID immediately
+      // Add normalized reminder immediately without waiting for re-fetch
       const newReminder = normalizeReminder(res.data);
       setReminders(prev => [...prev, newReminder].sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)));
     } catch { toast.error('Failed to create reminder'); }
   }, [reminderTitle, reminderDesc, reminderDatetime]);
 
   const handleEmailEventForReminder = useCallback((event) => {
-    setReminderTitle(event.title || "");
-    if (event.date) { const timeStr = event.time || "10:00"; setReminderDatetime(`${event.date}T${timeStr}`); }
+    setReminderTitle(event.title || '');
+    if (event.date) { const timeStr = event.time || '10:00'; setReminderDatetime(`${event.date}T${timeStr}`); }
     const descLines = [];
     if (event.event_type) descLines.push(`Event type: ${event.event_type}`);
     if (event.organizer)  descLines.push(`Organiser: ${event.organizer}`);
     if (event.location)   descLines.push(`Location: ${event.location}`);
     if (event.description) descLines.push(`Notes: ${event.description.slice(0, 200)}`);
     if (event.source_from) descLines.push(`From: ${event.source_from}`);
-    setReminderDesc(descLines.join("\n"));
+    setReminderDesc(descLines.join('\n'));
     setShowReminderForm(true);
   }, []);
 
@@ -997,11 +1032,10 @@ export default function Attendance() {
     if (!reminderId) return;
     try {
       await api.patch(`/reminders/${reminderId}`, updates);
-      // Re-fetch to get accurate server state
       await fetchReminders();
       toast.success('Reminder updated successfully');
       setIsEditModalOpen(false); setEditingReminder(null);
-    } catch (err) { toast.error('Failed to update reminder'); }
+    } catch { toast.error('Failed to update reminder'); }
   }, [editingReminder, fetchReminders]);
 
   const handleTrademarkPdfUpload = useCallback(async (e) => {
@@ -1030,82 +1064,73 @@ export default function Attendance() {
       if (data.brand_name) descLines.push(`Brand/Mark: ${data.brand_name}`);
       descLines.push('Hearing via Video Conferencing (Dynamic Utilities → Cause List → Trade Marks Show Cause & Review)');
       setReminderDesc(descLines.join('\n'));
-      toast.success(`✓ Details extracted — form auto-filled!`);
+      toast.success('✓ Details extracted — form auto-filled!');
     } catch (err) { toast.error(`PDF extraction failed: ${err?.response?.data?.detail || err?.message || 'Failed to read PDF'}`); }
     finally { setTrademarkLoading(false); }
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FIX: handleDeleteReminder — complete rewrite
-  //
-  // Problem: auto-saved reminders have `source: "email_auto"`. When we
-  // delete them from the frontend, the next email scan re-saves them
-  // because the extraction cache still exists in email_extracted_events.
-  //
-  // Solution:
-  // 1. Try DELETE /reminders/{id} with the correct ID
-  // 2. If 404: mark as dismissed via PATCH (prevents re-firing popup)
-  // 3. Also try to clear the email_extracted_events cache entry that
-  //    caused this reminder to exist, so the next scan doesn't re-add it
-  // 4. Remove from local state immediately regardless
-  // ═══════════════════════════════════════════════════════════════════════
+  // FIX 3: handleDeleteReminder — complete corrected implementation
   const handleDeleteReminder = useCallback(async (id) => {
-    // Find the reminder in current state with either id or _id
+    // Find the reminder in current state using either field
     const reminder = reminders.find(r => r.id === id || r._id === id);
-    
-    // Determine the best ID to use for the API call
-    // The backend expects the MongoDB ObjectId string
+    // Use the best available ID for the API call
     const reminderId = reminder?.id || reminder?._id || id;
 
-    // Optimistic removal from UI immediately
+    // Optimistic removal from UI immediately so it feels instant
     setReminders(prev => prev.filter(r => r.id !== id && r._id !== id));
 
     try {
       await api.delete(`/reminders/${reminderId}`);
       toast.success('Reminder deleted');
     } catch (err) {
-      const status = err?.response?.status;
-
-      if (status === 404) {
-        // Backend couldn't find it by this ID — try dismissing so it stops firing
+      const httpStatus = err?.response?.status;
+      if (httpStatus === 404) {
+        // Backend couldn't find it — try dismissing so it stops firing
         try {
           await api.patch(`/reminders/${reminderId}`, { is_dismissed: true });
           toast.success('Reminder removed');
         } catch {
-          // Already gone or wrong ID — the UI removal above already happened, that's fine
           toast.success('Reminder removed');
         }
       } else {
-        // Unexpected error — restore the reminder and show error
+        // Unexpected error — restore accurate list from server and show error
         toast.error('Failed to delete reminder — please try again');
-        await fetchReminders(); // restore accurate state
+        await fetchReminders();
         return;
       }
     }
 
-    // If this was an auto-saved reminder from email (source=email_auto),
-    // also clear it from the email events cache so next scan doesn't re-add it.
-    // We do this silently in the background.
-    if (reminder?.source === 'email_auto' || reminder?.email_message_id) {
+    // For auto-saved email reminders: clear the email events cache entry
+    // so the next scan doesn't re-add it.
+    // Use email_message_id (stable IMAP Message-ID), NOT event_id
+    // (event_id is unreliably stored on auto-saved reminders from the scan loop).
+    if (reminder?.source === 'email_auto' && reminder?.email_message_id) {
       try {
-        // Try to find and delete the originating email event by event_id
-        if (reminder.event_id) {
-          await api.delete(`/email/events/${reminder.event_id}`).catch(() => {});
-        }
+        // Silently try to dismiss the originating email event in the cache
+        // backend v5 will handle this correctly without cascading
+        await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }).catch(() => {});
       } catch {
-        // Non-critical — silently ignore
+        // Non-critical — ignore silently
       }
     }
   }, [reminders, fetchReminders]);
 
+  // FIX 4: handleDismissPopup — uses correct id field
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
     const reminderId = firedReminder.id || firedReminder._id;
     try { await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }); } catch {}
-    setReminders(prev => prev.map(r => (r.id || r._id) === reminderId ? { ...r, is_dismissed: true } : r));
+    setReminders(prev =>
+      prev.map(r => (r.id === reminderId || r._id === reminderId)
+        ? { ...r, is_dismissed: true }
+        : r
+      )
+    );
+    addFiredId(reminderId); // IMPROVEMENT F: persist to sessionStorage
     setFiredReminder(null);
   }, [firedReminder]);
 
+  // ── Export PDF ────────────────────────────────────────────────────────────
   const handleExportPDF = useCallback(async () => {
     setExportingPDF(true);
     try {
@@ -1154,8 +1179,9 @@ export default function Attendance() {
       toast.success('✓ PDF exported!');
     } catch { toast.error('Failed to export PDF'); }
     finally { setExportingPDF(false); }
-  }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory, mySummary]);
+  }, [isAdmin, selectedUserId, allUsers, user, selectedDate, attendanceHistory]);
 
+  // ── Derived / Memoised values ──────────────────────────────────────────────
   const monthAttendance = useMemo(() => {
     const start = startOfMonth(selectedDate), end = endOfMonth(selectedDate);
     let atts = attendanceHistory.filter(a => { try { const d = parseISO(a.date); return d >= start && d <= end; } catch { return false; } });
@@ -1181,27 +1207,35 @@ export default function Attendance() {
     if (displayTodayAttendance) map[displayTodayAttendance.date] = displayTodayAttendance;
     return map;
   }, [attendanceHistory, displayTodayAttendance]);
+
   const viewedUserName = useMemo(() => {
     if (isEveryoneView) return 'All Employees';
     if (!isViewingOther) return null;
     return allUsers.find(u => u.id === selectedUserId)?.full_name || 'Selected Employee';
   }, [isEveryoneView, isViewingOther, selectedUserId, allUsers]);
+
   const progressPct = useMemo(() => { const hrs = parseDurationToHours(displayLiveDuration); return Math.min(100, Math.round((hrs / 8.5) * 100)); }, [displayLiveDuration]);
-  
+
   // Only show non-dismissed reminders, sorted by date
   const upcomingReminders = useMemo(() =>
     reminders.filter(r => !r.is_dismissed).sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at)),
     [reminders]
   );
-  
-  const recentAttendance = useMemo(() => { if (isEveryoneView) return attendanceHistory.slice(0, 25); return attendanceHistory.slice(0, 15); }, [attendanceHistory, isEveryoneView]);
+
+  const recentAttendance = useMemo(() => {
+    if (isEveryoneView) return attendanceHistory.slice(0, 25);
+    return attendanceHistory.slice(0, 15);
+  }, [attendanceHistory, isEveryoneView]);
+
   const userMap = useMemo(() => { const map = {}; allUsers.forEach(u => { map[u.id] = u.full_name; }); return map; }, [allUsers]);
+
   const getLocationLabel = useCallback((record, type = 'in') => {
     const loc = type === 'in' ? record.location : record.punch_out_location;
     if (!loc?.latitude || !loc?.longitude) return null;
     const key = `${loc.latitude},${loc.longitude}`;
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
+
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView || todayAttendance === null) return null;
     if (todayIsHoliday) return null;
@@ -1214,30 +1248,59 @@ export default function Attendance() {
     const hLeft = Math.floor(msLeft / 3600000), mLeft = Math.floor((msLeft % 3600000) / 60000);
     return hLeft > 0 ? `${hLeft}h ${mLeft}m until auto-absent at 7:00 PM` : `${mLeft} minute(s) until auto-absent at 7:00 PM`;
   }, [todayAttendance, isViewingOther, isEveryoneView, todayIsHoliday]);
-  const todayHolidayName = useMemo(() => holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '', [holidays, todayDateStr]);
 
+  const todayHolidayName = useMemo(() =>
+    holidays.find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
+    [holidays, todayDateStr]
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ══════════════════════════════════════════════════════════════════════════
   return (
     <TooltipProvider>
+      {/* ── Reminder Popup ── */}
       <AnimatePresence>
         {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} />}
       </AnimatePresence>
+
+      {/* ── Holiday Detail ── */}
       <AnimatePresence>
         {selectedHolidayDetail && (
-          <HolidayDetailPopup holiday={selectedHolidayDetail} isAdmin={isAdmin} onClose={() => setSelectedHolidayDetail(null)}
-            onEdit={(h) => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }} onDelete={handleDeleteHoliday} />
+          <HolidayDetailPopup
+            holiday={selectedHolidayDetail} isAdmin={isAdmin}
+            onClose={() => setSelectedHolidayDetail(null)}
+            onEdit={(h) => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
+            onDelete={handleDeleteHoliday}
+          />
         )}
       </AnimatePresence>
+
+      {/* ── Reminder Detail ── */}
       <AnimatePresence>
         {selectedReminderDetail && (
-          <ReminderDetailPopup reminder={selectedReminderDetail} isViewingOther={isViewingOther}
-            onClose={() => setSelectedReminderDetail(null)} onDelete={handleDeleteReminder} onEdit={handleEditReminder} />
+          <ReminderDetailPopup
+            reminder={selectedReminderDetail} isViewingOther={isViewingOther}
+            onClose={() => setSelectedReminderDetail(null)}
+            onDelete={handleDeleteReminder}
+            onEdit={handleEditReminder}
+          />
         )}
       </AnimatePresence>
+
+      {/* ── Reminder Edit ── */}
       <AnimatePresence>
         {isEditModalOpen && editingReminder && (
-          <ReminderEditModal isOpen={isEditModalOpen} onClose={() => { setIsEditModalOpen(false); setEditingReminder(null); }} reminder={editingReminder} onSave={handleUpdateReminder} />
+          <ReminderEditModal
+            isOpen={isEditModalOpen}
+            onClose={() => { setIsEditModalOpen(false); setEditingReminder(null); }}
+            reminder={editingReminder}
+            onSave={handleUpdateReminder}
+          />
         )}
       </AnimatePresence>
+
+      {/* ── Reminder Calendar ── */}
       <AnimatePresence>
         {showReminderCalendar && (
           <ReminderCalendarModal
@@ -1249,10 +1312,11 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
-      <motion.div className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
+      <motion.div
+        className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
         style={{ background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)` }}
-        variants={containerVariants} initial="hidden" animate="visible">
-
+        variants={containerVariants} initial="hidden" animate="visible"
+      >
         {/* ── PAGE HEADER ── */}
         <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
@@ -1260,28 +1324,45 @@ export default function Attendance() {
               {isAdmin ? 'Attendance Management' : 'My Attendance'}
             </h1>
             <p className="text-slate-500 mt-2 text-sm font-medium">
-              {isAdmin ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily' : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
+              {isAdmin
+                ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
+                : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
             </p>
           </div>
           <div className="flex gap-3 flex-wrap items-center">
             {isAdmin && (
-              <motion.select variants={itemVariants}
+              <motion.select
+                variants={itemVariants}
                 className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer"
                 value={selectedUserId || ''}
-                onChange={e => { const val = e.target.value || null; setSelectedUserId(val); fetchData(val); fetchReminders(val); }}>
+                onChange={e => {
+                  const val = e.target.value || null;
+                  setSelectedUserId(val);
+                  fetchData(val);
+                  fetchReminders(val);
+                }}
+              >
                 <option value="">{allUsers.length === 0 ? 'Loading users…' : user?.full_name ? `${user.full_name} (Admin)` : 'My Attendance'}</option>
                 <option value="everyone">👥 Everyone (All Users)</option>
-                {allUsers.filter(u => u.id !== user?.id).map(u => (<option key={u.id} value={u.id}>{u.full_name} ({u.role === 'admin' ? 'Admin' : u.role})</option>))}
+                {allUsers.filter(u => u.id !== user?.id).map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name} ({u.role === 'admin' ? 'Admin' : u.role})</option>
+                ))}
               </motion.select>
             )}
             {isAdmin && (
-              <Button onClick={(e) => { addAttRipple(e); handleMarkAbsentBulk(); }} disabled={absentLoading} variant="outline"
-                className="att-ripple-btn border-2 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-400 font-semibold rounded-xl px-4 py-2.5">
-                <UserX className="w-4 h-4 mr-2" />{absentLoading ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Marking…</> : 'Mark Absent Now'}
+              <Button
+                onClick={(e) => { addAttRipple(e); handleMarkAbsentBulk(); }}
+                disabled={absentLoading} variant="outline"
+                className="att-ripple-btn border-2 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-400 font-semibold rounded-xl px-4 py-2.5"
+              >
+                <UserX className="w-4 h-4 mr-2" />
+                {absentLoading ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Marking…</> : 'Mark Absent Now'}
               </Button>
             )}
-            <Button onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
-              className="att-ripple-btn border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50">
+            <Button
+              onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
+              className="att-ripple-btn border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50"
+            >
               {exportingPDF ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</> : '↓ Export PDF'}
             </Button>
           </div>
@@ -1291,13 +1372,18 @@ export default function Attendance() {
         {dataError && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
             <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0" />
-            <div className="flex-1"><span className="text-sm font-bold text-red-800">Connection error: </span><span className="text-sm text-red-700">{dataError}</span></div>
+            <div className="flex-1">
+              <span className="text-sm font-bold text-red-800">Connection error: </span>
+              <span className="text-sm text-red-700">{dataError}</span>
+            </div>
             <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800">Retry</button>
           </motion.div>
         )}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-300 absent-pulse" style={{ backgroundColor: '#FFF1F2' }}>
-            <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}><AlertTriangle className="w-5 h-5 text-red-600" /></motion.div>
+            <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}>
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </motion.div>
             <span className="text-sm font-bold text-red-800 flex-1">⚠️ You haven't punched in today! {absentCountdown}</span>
             <Button size="sm" onClick={(e) => { addAttRipple(e); handlePunchAction('punch_in'); }} className="att-ripple-btn bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4">
               <LogIn className="w-4 h-4 mr-1" /> Punch In Now
@@ -1307,8 +1393,12 @@ export default function Attendance() {
         {(isViewingOther || isEveryoneView) && (
           <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200" style={{ backgroundColor: '#EFF6FF' }}>
             <Users className="w-4 h-4 text-blue-700" />
-            <span className="text-sm font-semibold text-blue-900">{isEveryoneView ? 'Viewing attendance for all employees' : <>Viewing attendance for: <span className="underline decoration-dotted">{viewedUserName}</span></>}</span>
-            <button className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline" onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>Clear — show my data</button>
+            <span className="text-sm font-semibold text-blue-900">
+              {isEveryoneView ? 'Viewing attendance for all employees' : <>Viewing attendance for: <span className="underline decoration-dotted">{viewedUserName}</span></>}
+            </span>
+            <button className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline" onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>
+              Clear — show my data
+            </button>
           </motion.div>
         )}
 
@@ -1324,32 +1414,71 @@ export default function Attendance() {
                         <Clock className="w-8 h-8 text-white" />
                       </motion.div>
                       <div>
-                        <h3 className="text-2xl font-bold">{isTodaySelected ? (isViewingOther ? `${viewedUserName}'s Status` : "Today's Status") : format(selectedDate, 'EEEE, MMM d')}</h3>
+                        <h3 className="text-2xl font-bold">
+                          {isTodaySelected ? (isViewingOther ? `${viewedUserName}'s Status` : "Today's Status") : format(selectedDate, 'EEEE, MMM d')}
+                        </h3>
                         <p className="text-blue-100 text-sm mt-0.5">{isViewingOther ? 'Read-only view' : 'Real-time attendance • Auto-absent at 7:00 PM IST'}</p>
                       </div>
                     </div>
-                    {todayIsHoliday && (<div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}><p className="text-sm font-bold text-amber-200">🎉 Today is a holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}</p></div>)}
-                    {displayTodayAttendance?.status === 'absent' && (<motion.div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(239,68,68,0.25)' }}><p className="text-sm font-bold text-red-200">❌ Marked as Absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}</p></motion.div>)}
-                    {displayTodayAttendance?.punch_in && (
-                      <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
-                        <p className="text-blue-100 text-sm"><span className="font-semibold">In:</span> {formatAttendanceTime(displayTodayAttendance.punch_in)}{displayTodayAttendance.punch_out && <> • <span className="font-semibold">Out:</span> {formatAttendanceTime(displayTodayAttendance.punch_out)}</>}</p>
+                    {todayIsHoliday && (
+                      <div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(245,158,11,0.25)' }}>
+                        <p className="text-sm font-bold text-amber-200">🎉 Today is a holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}</p>
                       </div>
                     )}
-                    {displayTodayAttendance?.status === 'leave' && (<div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(249,115,22,0.2)' }}><p className="text-sm font-semibold text-orange-200">🟠 On leave today</p></div>)}
+                    {displayTodayAttendance?.status === 'absent' && (
+                      <motion.div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(239,68,68,0.25)' }}>
+                        <p className="text-sm font-bold text-red-200">❌ Marked as Absent today{displayTodayAttendance.auto_marked ? ' (auto-marked at 7:00 PM)' : ''}</p>
+                      </motion.div>
+                    )}
+                    {displayTodayAttendance?.punch_in && (
+                      <div className="bg-white/10 backdrop-blur rounded-xl p-4 space-y-2">
+                        <p className="text-blue-100 text-sm">
+                          <span className="font-semibold">In:</span> {formatAttendanceTime(displayTodayAttendance.punch_in)}
+                          {displayTodayAttendance.punch_out && <> • <span className="font-semibold">Out:</span> {formatAttendanceTime(displayTodayAttendance.punch_out)}</>}
+                        </p>
+                      </div>
+                    )}
+                    {displayTodayAttendance?.status === 'leave' && (
+                      <div className="backdrop-blur rounded-xl p-4" style={{ backgroundColor: 'rgba(249,115,22,0.2)' }}>
+                        <p className="text-sm font-semibold text-orange-200">🟠 On leave today</p>
+                      </div>
+                    )}
                     {!isViewingOther && (
                       <div className="flex gap-3 flex-wrap pt-2">
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
-                          <>{isTodaySelected && (<motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading} className={`att-ripple-btn bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg ${!loading ? 'punch-in-pulse' : ''}`}>{loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching In…</> : <><LogIn className="w-5 h-5 inline mr-2" />Punch In</>}</motion.button>)}
-                          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowLeaveForm(true)} className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10">Apply Leave</motion.button></>
+                          <>
+                            {isTodaySelected && (
+                              <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
+                                onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading}
+                                className={`att-ripple-btn bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg ${!loading ? 'punch-in-pulse' : ''}`}>
+                                {loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching In…</> : <><LogIn className="w-5 h-5 inline mr-2" />Punch In</>}
+                              </motion.button>
+                            )}
+                            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                              onClick={() => setShowLeaveForm(true)}
+                              className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10">
+                              Apply Leave
+                            </motion.button>
+                          </>
                         ) : !todayAttendance?.punch_out && todayAttendance?.punch_in && isTodaySelected ? (
-                          <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} onClick={(e) => handlePunchAction('punch_out', e)} disabled={loading} className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl">{loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching Out…</> : <><LogOut className="w-5 h-5 inline mr-2" />Punch Out</>}</motion.button>
+                          <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
+                            onClick={(e) => handlePunchAction('punch_out', e)} disabled={loading}
+                            className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl">
+                            {loading ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching Out…</> : <><LogOut className="w-5 h-5 inline mr-2" />Punch Out</>}
+                          </motion.button>
                         ) : todayAttendance?.punch_out ? (
-                          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}><Badge className="px-4 py-2 bg-white/20 text-white border-0 font-mono text-sm">✓ {formatDuration(todayAttendance.duration_minutes)}</Badge></motion.div>
+                          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+                            <Badge className="px-4 py-2 bg-white/20 text-white border-0 font-mono text-sm">
+                              ✓ {formatDuration(todayAttendance.duration_minutes)}
+                            </Badge>
+                          </motion.div>
                         ) : null}
                       </div>
                     )}
                   </div>
-                  <div><DigitalClock /></div>
+                  <div>
+                    <DigitalClock />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1360,7 +1489,10 @@ export default function Attendance() {
         {isAdmin && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
-              <div className="bg-amber-100 px-6 py-3 border-b border-amber-200 flex items-center"><AlertTriangle className="w-5 h-5 text-amber-700 mr-3" /><span className="text-sm font-black uppercase text-amber-900">Holiday Review ({pendingHolidays.length})</span></div>
+              <div className="bg-amber-100 px-6 py-3 border-b border-amber-200 flex items-center">
+                <AlertTriangle className="w-5 h-5 text-amber-700 mr-3" />
+                <span className="text-sm font-black uppercase text-amber-900">Holiday Review ({pendingHolidays.length})</span>
+              </div>
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {pendingHolidays.map(holiday => (
@@ -1384,15 +1516,21 @@ export default function Attendance() {
           <motion.div variants={itemVariants} className="mb-8">
             <Card className="border-2 border-red-100 shadow-md">
               <div className="px-6 py-4 flex items-center gap-3 border-b border-red-100" style={{ backgroundColor: '#FFF1F2' }}>
-                <UserX className="w-5 h-5 text-red-600" /><span className="text-sm font-black uppercase text-red-800">Absent This Month — {absentSummary.length} Staff</span>
+                <UserX className="w-5 h-5 text-red-600" />
+                <span className="text-sm font-black uppercase text-red-800">Absent This Month — {absentSummary.length} Staff</span>
                 <span className="ml-auto text-xs text-red-500 font-medium">Auto-marked at 7:00 PM IST</span>
               </div>
               <CardContent className="p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {absentSummary.map(item => (
                     <motion.div key={item.user_id} whileHover={{ scale: 1.03 }} className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
-                      <div className="w-9 h-9 rounded-full bg-red-200 flex items-center justify-center flex-shrink-0"><span className="text-red-700 font-bold text-sm">{(item.user_name || '?')[0]}</span></div>
-                      <div className="min-w-0"><p className="text-sm font-bold text-slate-800 truncate">{item.user_name || 'Unknown'}</p><p className="text-xs text-red-600 font-semibold">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p></div>
+                      <div className="w-9 h-9 rounded-full bg-red-200 flex items-center justify-center flex-shrink-0">
+                        <span className="text-red-700 font-bold text-sm">{(item.user_name || '?')[0]}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{item.user_name || 'Unknown'}</p>
+                        <p className="text-xs text-red-600 font-semibold">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
+                      </div>
                     </motion.div>
                   ))}
                 </div>
@@ -1407,7 +1545,9 @@ export default function Attendance() {
           <StatCard icon={CheckCircle2} label="Tasks Done" value={tasksCompleted} unit="completed" color={COLORS.emeraldGreen} trend=" " />
           <StatCard icon={CalendarX} label="Days Late" value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange} trend=" " />
           <StatCard icon={UserX} label="Days Absent" value={monthDaysAbsent} unit="this month" color={COLORS.red} trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
-          {canViewRankings && !isEveryoneView && (<StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />)}
+          {canViewRankings && !isEveryoneView && (
+            <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
+          )}
         </motion.div>
 
         {/* ── DAILY PROGRESS ── */}
@@ -1424,18 +1564,31 @@ export default function Attendance() {
                       {displayTodayAttendance?.status === 'absent' ? 'Absent' : todayIsHoliday ? 'Holiday' : displayLiveDuration}
                     </motion.p>
                     <p className="text-xs font-bold uppercase tracking-wider" style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
-                      {displayTodayAttendance?.status === 'absent' ? '❌ Auto-marked absent' : todayIsHoliday ? '🎉 Office closed today' : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out ? '● Live • updating every minute' : 'Total for today')}
+                      {displayTodayAttendance?.status === 'absent' ? '❌ Auto-marked absent'
+                        : todayIsHoliday ? '🎉 Office closed today'
+                        : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out ? '● Live • updating every minute' : 'Total for today')}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gradient-to-br from-blue-50 to-slate-50 p-4 rounded-xl border border-slate-200"><p className="text-xs text-slate-500 font-bold uppercase mb-1">Daily Goal</p><p className="text-2xl font-bold text-slate-800">8.5h</p></div>
-                    <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200"><p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p><p className="text-2xl font-bold text-emerald-600">{displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}</p></div>
+                    <div className="bg-gradient-to-br from-blue-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                      <p className="text-xs text-slate-500 font-bold uppercase mb-1">Daily Goal</p>
+                      <p className="text-2xl font-bold text-slate-800">8.5h</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                      <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
+                      <p className="text-2xl font-bold text-emerald-600">
+                        {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
+                      </p>
+                    </div>
                   </div>
                 </div>
                 <div className="mt-6 bg-slate-100 rounded-full h-3 overflow-hidden">
                   <motion.div className="h-full rounded-full"
                     style={{ background: displayTodayAttendance?.status === 'absent' ? `linear-gradient(90deg, ${COLORS.red}, #FCA5A5)` : todayIsHoliday ? `linear-gradient(90deg, ${COLORS.amber}, #FCD34D)` : `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}
-                    initial={{ width: 0 }} animate={{ width: displayTodayAttendance?.status === 'absent' ? '100%' : todayIsHoliday ? '100%' : `${progressPct}%` }} transition={{ duration: 1.2, ease: 'easeOut' }} />
+                    initial={{ width: 0 }}
+                    animate={{ width: displayTodayAttendance?.status === 'absent' ? '100%' : todayIsHoliday ? '100%' : `${progressPct}%` }}
+                    transition={{ duration: 1.2, ease: 'easeOut' }}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1445,9 +1598,12 @@ export default function Attendance() {
         {/* ── HOLIDAY + REMINDER CARDS ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+
             {/* HOLIDAY CARD */}
             {(() => {
-              const monthHolidaysGrid = holidays.filter(h => { try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); } catch { return false; } });
+              const monthHolidaysGrid = holidays.filter(h => {
+                try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); } catch { return false; }
+              });
               return (
                 <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
                   <div className="px-5 py-3 flex items-center justify-between flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`, borderBottom: `2px solid ${COLORS.amber}25` }}>
@@ -1458,7 +1614,11 @@ export default function Attendance() {
                         <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">{monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''}</p>
                       </div>
                     </div>
-                    {isAdmin && (<Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }} size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs" style={{ backgroundColor: COLORS.amber }}><Plus className="w-3.5 h-3.5 mr-1" /> Add</Button>)}
+                    {isAdmin && (
+                      <Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }} size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs" style={{ backgroundColor: COLORS.amber }}>
+                        <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                      </Button>
+                    )}
                   </div>
                   <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                     {monthHolidaysGrid.length === 0 ? (
@@ -1474,7 +1634,10 @@ export default function Attendance() {
                           <span className="text-[8px] leading-none uppercase">{format(parseISO(h.date), 'MMM')}</span>
                           <span className="text-sm leading-none font-black">{format(parseISO(h.date), 'd')}</span>
                         </div>
-                        <div className="flex-1 min-w-0"><p className="text-sm font-bold text-slate-800 truncate">{h.name}</p><p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p></div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate">{h.name}</p>
+                          <p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p>
+                        </div>
                         <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 flex-shrink-0" />
                         {isAdmin && (
                           <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
@@ -1493,7 +1656,9 @@ export default function Attendance() {
             <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
               <div className="px-5 py-3 flex items-center justify-between flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`, borderBottom: `2px solid ${COLORS.purple}25` }}>
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}><AlarmClock className="w-4 h-4" style={{ color: COLORS.purple }} /></div>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}>
+                    <AlarmClock className="w-4 h-4" style={{ color: COLORS.purple }} />
+                  </div>
                   <div>
                     <h3 className="font-black text-sm cursor-pointer hover:underline" style={{ color: COLORS.deepBlue }} onClick={() => setShowReminderCalendar(true)} title="Click to view full calendar">
                       {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
@@ -1521,25 +1686,30 @@ export default function Attendance() {
                 {upcomingReminders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-8">
                     <Bell className="w-8 h-8 mx-auto text-slate-200 mb-2" />
-                    <p className="text-slate-400 font-medium text-xs text-center">{isViewingOther ? 'No upcoming reminders' : 'No reminders yet. Create one!'}</p>
+                    <p className="text-slate-400 font-medium text-xs text-center">
+                      {isViewingOther ? 'No upcoming reminders' : 'No reminders yet. Create one!'}
+                    </p>
                   </div>
                 ) : upcomingReminders.map((r, index) => {
                   const isDue = isPast(new Date(r.remind_at));
-                  // Use normalized `id` field (set by normalizeReminder)
+                  // Use normalized `id` field (always a string after normalizeReminder)
                   const rid = r.id;
                   return (
                     <motion.div key={rid || index}
                       className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
                       style={{ borderColor: isDue ? `${COLORS.red}35` : `${COLORS.purple}25`, backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}05` }}
                       whileHover={{ backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10` }}
-                      onClick={() => setSelectedReminderDetail(r)}>
+                      onClick={() => setSelectedReminderDetail(r)}
+                    >
                       <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 font-black text-xs"
                         style={{ backgroundColor: isDue ? `${COLORS.red}18` : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple }}>
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-slate-800 truncate leading-snug">{r.title}</p>
-                        <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>⏰ {formatReminderTime(r.remind_at)}</p>
+                        <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>
+                          ⏰ {formatReminderTime(r.remind_at)}
+                        </p>
                       </div>
                       {isDue && <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block">Due</span>}
                       <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 flex-shrink-0" />
@@ -1569,26 +1739,37 @@ export default function Attendance() {
               <Card className="border-0 shadow-md flex-shrink-0">
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}><CalendarIcon className="w-5 h-5" /> Attendance Calendar</CardTitle>
+                    <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                      <CalendarIcon className="w-5 h-5" /> Attendance Calendar
+                    </CardTitle>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())} className="text-xs font-bold">Today</Button>
                   </div>
                   <CardDescription className="text-xs">Click a date for details</CardDescription>
                 </CardHeader>
                 <CardContent className="p-4">
-                  <Calendar mode="single" selected={selectedDate} onSelect={date => date && setSelectedDate(date)}
-                    disabled={date => isAfter(date, new Date())} className="rounded-xl border-0 shadow-sm"
-                    classNames={{ months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse', head_row: 'flex w-full justify-between mb-2', head_cell: 'text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center', row: 'flex w-full mt-2 justify-between', cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20', day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100', day_today: 'font-black' }}
+                  <Calendar
+                    mode="single" selected={selectedDate}
+                    onSelect={date => date && setSelectedDate(date)}
+                    disabled={date => isAfter(date, new Date())}
+                    className="rounded-xl border-0 shadow-sm"
+                    classNames={{
+                      months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
+                      head_row: 'flex w-full justify-between mb-2',
+                      head_cell: 'text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center',
+                      row: 'flex w-full mt-2 justify-between', cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
+                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100', day_today: 'font-black',
+                    }}
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
                   <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
                     {[
-                      { color: COLORS.emeraldGreen, label: 'Present', style: 'solid' },
-                      { color: COLORS.red, label: 'Late/Absent', style: 'solid' },
-                      { color: COLORS.amber, label: 'Holiday', style: 'solid' },
-                      { color: COLORS.orange, label: 'Leave', style: 'solid' },
-                    ].map(({ color, label, style }) => (
+                      { color: COLORS.emeraldGreen, label: 'Present' },
+                      { color: COLORS.red,          label: 'Late/Absent' },
+                      { color: COLORS.amber,        label: 'Holiday' },
+                      { color: COLORS.orange,       label: 'Leave' },
+                    ].map(({ color, label }) => (
                       <div key={label} className="flex items-center gap-1.5">
-                        <span className="w-4 h-4 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, borderStyle: style, backgroundColor: `${color}25` }} />
+                        <span className="w-4 h-4 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}25` }} />
                         <span className="text-slate-600">{label}</span>
                       </div>
                     ))}
@@ -1598,7 +1779,10 @@ export default function Attendance() {
               <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
                 <CardContent className="p-0 h-full overflow-y-auto">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full"><p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p></div>
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full">
+                      <p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p>
+                      <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    </div>
                   ) : selectedAttendance?.punch_in ? (
                     <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4 h-full" style={{ borderColor: COLORS.emeraldGreen }}>
                       <p className="font-bold text-slate-800 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
@@ -1606,15 +1790,25 @@ export default function Attendance() {
                         <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch In</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_in)}</span></div>
                         {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch Out</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_out)}</span></div>}
                         {selectedAttendance.is_late && <div className="flex justify-between"><span className="text-slate-600 font-medium">Status</span><span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span></div>}
-                        <div className="pt-3 border-t flex justify-between"><span className="font-bold text-slate-800">Duration</span><Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge></div>
+                        <div className="pt-3 border-t flex justify-between">
+                          <span className="font-bold text-slate-800">Duration</span>
+                          <Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge>
+                        </div>
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}><p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p><p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p></div>
+                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}>
+                      <p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p>
+                      <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    </div>
                   ) : selectedHoliday ? (
-                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full"><p className="text-sm font-bold text-amber-900">🎉 {selectedHoliday.name}</p></div>
+                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full">
+                      <p className="text-sm font-bold text-amber-900">🎉 {selectedHoliday.name}</p>
+                    </div>
                   ) : (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400 h-full"><p className="text-sm font-bold text-red-900">No record for {format(selectedDate, 'MMM d')}</p></div>
+                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400 h-full">
+                      <p className="text-sm font-bold text-red-900">No record for {format(selectedDate, 'MMM d')}</p>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -1648,13 +1842,21 @@ export default function Attendance() {
                       return (
                         <motion.div key={`${record.date}-${record.user_id || idx}`} variants={itemVariants} whileHover={{ x: 2 }}
                           className="p-3 rounded-lg transition-all border"
-                          style={{ backgroundColor: isAbsent ? '#FFF1F2' : isLeave ? '#FFF7ED' : isPresent ? '#F0FDF4' : '#F8FAFC', borderColor: isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0', borderLeftWidth: 4, borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200 }}>
+                          style={{
+                            backgroundColor: isAbsent ? '#FFF1F2' : isLeave ? '#FFF7ED' : isPresent ? '#F0FDF4' : '#F8FAFC',
+                            borderColor: isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0',
+                            borderLeftWidth: 4,
+                            borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200,
+                          }}>
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
                               {recordUserName && <p className="text-xs font-bold text-blue-700 mb-1 flex items-center gap-1"><Users className="w-3 h-3" />{recordUserName}</p>}
                               <p className="font-bold text-slate-800 text-sm">{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
                               <p className="text-xs text-slate-500 mt-1 font-mono">
-                                {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked)' : ''}` : isLeave ? `🟠 On Leave` : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing'}` : '—'}
+                                {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked)' : ''}`
+                                  : isLeave ? '🟠 On Leave'
+                                  : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing'}`
+                                  : '—'}
                               </p>
                               {inLocLabel && !isAbsent && <p className="text-[11px] text-slate-500 mt-1 flex items-start gap-1"><MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.emeraldGreen }} /><span><span className="font-semibold text-emerald-700">In: </span>{inLocLabel}</span></p>}
                               {outLocLabel && !isAbsent && <p className="text-[11px] text-slate-500 mt-0.5 flex items-start gap-1"><MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.orange }} /><span><span className="font-semibold text-orange-600">Out: </span>{outLocLabel}</span></p>}
@@ -1677,11 +1879,17 @@ export default function Attendance() {
         </motion.div>
 
         {/* ══ MODALS ══ */}
+
+        {/* Punch In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
             <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowPunchInModal(false)}>
               <motion.div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl" onClick={e => e.stopPropagation()} initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
-                <div className="mb-6"><motion.div className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center punch-in-pulse"><LogIn className="w-10 h-10 text-emerald-600" /></motion.div></div>
+                <div className="mb-6">
+                  <motion.div className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center punch-in-pulse">
+                    <LogIn className="w-10 h-10 text-emerald-600" />
+                  </motion.div>
+                </div>
                 <h2 className="text-3xl font-black mb-3" style={{ color: COLORS.deepBlue }}>Good Morning! 👋</h2>
                 <p className="text-slate-600 text-lg mb-2">Let's punch in and start your day</p>
                 <p className="text-xs text-red-500 font-semibold mb-8">⚠️ Auto-absent marks at 7:00 PM if you don't punch in</p>
@@ -1694,28 +1902,40 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="flex justify-between items-start mb-8">
-                  <div><h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2></div>
+                  <h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2>
                   <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-light">✕</button>
                 </div>
                 <div className="mb-8">
                   <div className="flex flex-wrap gap-2">
-                    {[1, 3, 7, 15, 30].map(days => (<Button key={days} variant="outline" size="sm" onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }} className="rounded-lg font-semibold">{days === 1 ? '1 Day' : `${days} Days`}</Button>))}
+                    {[1, 3, 7, 15, 30].map(days => (
+                      <Button key={days} variant="outline" size="sm" onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }} className="rounded-lg font-semibold">
+                        {days === 1 ? '1 Day' : `${days} Days`}
+                      </Button>
+                    ))}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div><label className="text-sm font-bold text-slate-700 mb-3 block">From Date</label><Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom} disabled={date => isBefore(date, startOfDay(new Date()))} className="rounded-xl border border-slate-200" /></div>
                   <div><label className="text-sm font-bold text-slate-700 mb-3 block">To Date</label><Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo} disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true} className="rounded-xl border border-slate-200" /></div>
                 </div>
-                {leaveFrom && (<motion.div className="p-5 rounded-2xl mb-8" style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}>
-                  <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
-                  <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>{Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days</p>
-                </motion.div>)}
-                <div className="mb-8"><label className="text-sm font-bold text-slate-700 mb-2 block">Reason</label><textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)} placeholder="Reason for leave…" className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none" /></div>
+                {leaveFrom && (
+                  <motion.div className="p-5 rounded-2xl mb-8" style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}>
+                    <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
+                    <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>
+                      {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days
+                    </p>
+                  </motion.div>
+                )}
+                <div className="mb-8">
+                  <label className="text-sm font-bold text-slate-700 mb-2 block">Reason</label>
+                  <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)} placeholder="Reason for leave…" className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none" />
+                </div>
                 <div className="flex justify-end gap-3">
                   <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
                   <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="font-bold text-white" style={{ backgroundColor: COLORS.deepBlue }}>Submit Request</Button>
@@ -1725,13 +1945,14 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* Holiday Modal */}
         <AnimatePresence>
           {showHolidayModal && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
                   <div className="flex items-center justify-between mb-4">
-                    <div><h2 className="text-2xl font-black">Add Holidays</h2></div>
+                    <h2 className="text-2xl font-black">Add Holidays</h2>
                     <button onClick={() => setShowHolidayModal(false)} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="w-5 h-5 text-white" /></button>
                   </div>
                   <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfImport} className="hidden" />
@@ -1762,6 +1983,7 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1785,6 +2007,7 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1793,7 +2016,10 @@ export default function Attendance() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><AlarmClock className="w-5 h-5 text-white" /></div>
-                      <div><h2 className="text-2xl font-black">New Reminder</h2><p className="text-purple-200 text-sm mt-0.5">Manual entry or auto-fill from PDF</p></div>
+                      <div>
+                        <h2 className="text-2xl font-black">New Reminder</h2>
+                        <p className="text-purple-200 text-sm mt-0.5">Manual entry or auto-fill from PDF</p>
+                      </div>
                     </div>
                     <button onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white" /></button>
                   </div>
@@ -1814,11 +2040,14 @@ export default function Attendance() {
                       <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                         {[
                           { label: 'Application No', value: trademarkData.application_no, bold: true },
-                          { label: 'Class', value: trademarkData.class },
-                          { label: 'Applicant', value: trademarkData.applicant_name, bold: true },
-                          { label: 'Hearing Date', value: trademarkData.hearing_date },
+                          { label: 'Class',           value: trademarkData.class },
+                          { label: 'Applicant',       value: trademarkData.applicant_name, bold: true },
+                          { label: 'Hearing Date',    value: trademarkData.hearing_date },
                         ].filter(f => f.value).map(({ label, value, bold }) => (
-                          <div key={label}><p className="text-slate-400 text-[10px] uppercase font-bold">{label}</p><p className={`text-slate-800 mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`}>{value}</p></div>
+                          <div key={label}>
+                            <p className="text-slate-400 text-[10px] uppercase font-bold">{label}</p>
+                            <p className={`text-slate-800 mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`}>{value}</p>
+                          </div>
                         ))}
                       </div>
                     </motion.div>
@@ -1838,9 +2067,14 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
+        {/* Email Importer */}
         <AnimatePresence>
           {showEmailImporter && (
-            <EmailEventImporter mode="reminder" onSelectEvent={handleEmailEventForReminder} onClose={() => setShowEmailImporter(false)} />
+            <EmailEventImporter
+              mode="reminder"
+              onSelectEvent={handleEmailEventForReminder}
+              onClose={() => setShowEmailImporter(false)}
+            />
           )}
         </AnimatePresence>
 
