@@ -23,13 +23,14 @@ import {
   Circle, X, ArrowRight, IndianRupee, FileText,
   UserCheck, Users, Tag, MessageSquare, Target,
   ChevronRight, Sparkles, ShieldCheck, Timer, Layers,
+  RefreshCw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-// ─── CSS for ripple + pulse animations (injected once) ───────────────────────
+// ─── CSS for ripple + pulse animations ───────────────────────────────────────
 const INTERACTION_STYLES = `
   @keyframes ripple {
     0%   { transform: scale(0); opacity: 0.6; }
@@ -50,30 +51,16 @@ const INTERACTION_STYLES = `
     60%       { transform: translateX(-2px); }
     80%       { transform: translateX(2px); }
   }
-  @keyframes progressFill {
-    from { width: 0%; }
-    to   { width: var(--target-width); }
-  }
-  .stage-btn-active {
-    animation: stageActivePulse 1.5s ease-in-out 1;
-  }
-  .ripple-container {
-    position: relative;
-    overflow: hidden;
-  }
+  .stage-btn-active { animation: stageActivePulse 1.5s ease-in-out 1; }
+  .ripple-container { position: relative; overflow: hidden; }
   .ripple-container .ripple-effect {
-    position: absolute;
-    border-radius: 50%;
-    transform: scale(0);
-    background: rgba(255,255,255,0.4);
-    animation: ripple 0.5s linear;
-    pointer-events: none;
+    position: absolute; border-radius: 50%; transform: scale(0);
+    background: rgba(255,255,255,0.4); animation: ripple 0.5s linear; pointer-events: none;
   }
-  .won-glow { animation: wonGlow 1s ease-out 1; }
+  .won-glow  { animation: wonGlow 1s ease-out 1; }
   .lost-shake { animation: lostShake 0.4s ease-out 1; }
 `;
 
-// Inject styles once
 if (typeof document !== 'undefined' && !document.getElementById('leads-interaction-styles')) {
   const style = document.createElement('style');
   style.id = 'leads-interaction-styles';
@@ -108,8 +95,8 @@ const PIPELINE_STAGES = [
   { id: 'lost',        label: 'Lost',        stripe: 'bg-red-500',     badge: 'bg-red-50 text-red-600 border-red-200',             activeBg: 'bg-red-500',     activeText: 'text-white', hoverBg: 'hover:bg-red-50 hover:border-red-400 hover:text-red-600'           },
 ];
 
-const ACTIVE_STAGES   = ['new','contacted','meeting','proposal','negotiation','on_hold'];
-const KANBAN_COLS     = ACTIVE_STAGES;
+const ACTIVE_STAGES = ['new','contacted','meeting','proposal','negotiation','on_hold'];
+const KANBAN_COLS   = ACTIVE_STAGES;
 
 const LEAD_SOURCES = [
   { label: 'Direct',       value: 'direct'       },
@@ -120,51 +107,59 @@ const LEAD_SOURCES = [
 ];
 
 const LEAD_SERVICES = [
-  { value: 'GST',          label: 'GST',          color: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500'    },
-  { value: 'Income Tax',   label: 'Income Tax',   color: 'bg-violet-50 text-violet-700 border-violet-200',    dot: 'bg-violet-500'  },
-  { value: 'Accounts',     label: 'Accounts',     color: 'bg-teal-50 text-teal-700 border-teal-200',          dot: 'bg-teal-500'    },
-  { value: 'TDS',          label: 'TDS',          color: 'bg-amber-50 text-amber-700 border-amber-200',       dot: 'bg-amber-500'   },
-  { value: 'ROC',          label: 'ROC',          color: 'bg-indigo-50 text-indigo-700 border-indigo-200',    dot: 'bg-indigo-500'  },
-  { value: 'Trademark',    label: 'Trademark',    color: 'bg-pink-50 text-pink-700 border-pink-200',          dot: 'bg-pink-500'    },
-  { value: 'MSME',         label: 'MSME',         color: 'bg-orange-50 text-orange-700 border-orange-200',    dot: 'bg-orange-500'  },
-  { value: 'FEMA',         label: 'FEMA',         color: 'bg-sky-50 text-sky-700 border-sky-200',             dot: 'bg-sky-500'     },
-  { value: 'DSC',          label: 'DSC',          color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
-  { value: 'Audit',        label: 'Audit',        color: 'bg-cyan-50 text-cyan-700 border-cyan-200',          dot: 'bg-cyan-500'    },
-  { value: 'Payroll',      label: 'Payroll',      color: 'bg-lime-50 text-lime-700 border-lime-200',          dot: 'bg-lime-500'    },
-  { value: 'PF/ESIC',      label: 'PF/ESIC',      color: 'bg-rose-50 text-rose-700 border-rose-200',          dot: 'bg-rose-500'    },
-  { value: 'Other',        label: 'Other',        color: 'bg-slate-50 text-slate-600 border-slate-200',       dot: 'bg-slate-400'   },
+  { value: 'GST',        label: 'GST',        color: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500'    },
+  { value: 'Income Tax', label: 'Income Tax', color: 'bg-violet-50 text-violet-700 border-violet-200',    dot: 'bg-violet-500'  },
+  { value: 'Accounts',   label: 'Accounts',   color: 'bg-teal-50 text-teal-700 border-teal-200',          dot: 'bg-teal-500'    },
+  { value: 'TDS',        label: 'TDS',        color: 'bg-amber-50 text-amber-700 border-amber-200',       dot: 'bg-amber-500'   },
+  { value: 'ROC',        label: 'ROC',        color: 'bg-indigo-50 text-indigo-700 border-indigo-200',    dot: 'bg-indigo-500'  },
+  { value: 'Trademark',  label: 'Trademark',  color: 'bg-pink-50 text-pink-700 border-pink-200',          dot: 'bg-pink-500'    },
+  { value: 'MSME',       label: 'MSME',       color: 'bg-orange-50 text-orange-700 border-orange-200',    dot: 'bg-orange-500'  },
+  { value: 'FEMA',       label: 'FEMA',       color: 'bg-sky-50 text-sky-700 border-sky-200',             dot: 'bg-sky-500'     },
+  { value: 'DSC',        label: 'DSC',        color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+  { value: 'Audit',      label: 'Audit',      color: 'bg-cyan-50 text-cyan-700 border-cyan-200',          dot: 'bg-cyan-500'    },
+  { value: 'Payroll',    label: 'Payroll',    color: 'bg-lime-50 text-lime-700 border-lime-200',          dot: 'bg-lime-500'    },
+  { value: 'PF/ESIC',    label: 'PF/ESIC',    color: 'bg-rose-50 text-rose-700 border-rose-200',          dot: 'bg-rose-500'    },
+  { value: 'Other',      label: 'Other',      color: 'bg-slate-50 text-slate-600 border-slate-200',       dot: 'bg-slate-400'   },
+];
+
+const TASK_CATEGORIES = [
+  { value: 'gst',          label: 'GST'        },
+  { value: 'income_tax',   label: 'Income Tax' },
+  { value: 'accounts',     label: 'Accounts'   },
+  { value: 'tds',          label: 'TDS'        },
+  { value: 'roc',          label: 'ROC'        },
+  { value: 'trademark',    label: 'Trademark'  },
+  { value: 'msme_smadhan', label: 'MSME'       },
+  { value: 'fema',         label: 'FEMA'       },
+  { value: 'dsc',          label: 'DSC'        },
+  { value: 'other',        label: 'Other'      },
 ];
 
 const serviceStyle = (val) =>
   LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length - 1];
-
-const TASK_CATEGORIES = [
-  { value: 'gst',          label: 'GST'          },
-  { value: 'income_tax',   label: 'Income Tax'   },
-  { value: 'accounts',     label: 'Accounts'     },
-  { value: 'tds',          label: 'TDS'          },
-  { value: 'roc',          label: 'ROC'          },
-  { value: 'trademark',    label: 'Trademark'    },
-  { value: 'msme_smadhan', label: 'MSME'         },
-  { value: 'fema',         label: 'FEMA'         },
-  { value: 'dsc',          label: 'DSC'          },
-  { value: 'other',        label: 'Other'        },
-];
-
-const CLIENT_TYPES = [
-  { value: 'proprietorship', label: 'Proprietorship'  },
-  { value: 'partnership',    label: 'Partnership'     },
-  { value: 'pvt_ltd',        label: 'Private Limited' },
-  { value: 'llp',            label: 'LLP'             },
-  { value: 'trust',          label: 'Trust'           },
-  { value: 'other',          label: 'Other'           },
-];
 
 const stageOf   = (id) => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
 const isOverdue = (lead) =>
   lead.next_follow_up &&
   new Date(lead.next_follow_up) < new Date() &&
   !['won','lost'].includes(lead.status);
+
+// ─── FIX 1: Timezone-safe datetime helpers ────────────────────────────────────
+// Converts a UTC ISO string → local datetime-local input value (no offset shift)
+const toLocalDatetimeInput = (isoStr) => {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  const offset = d.getTimezoneOffset(); // minutes behind UTC
+  return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 16);
+};
+
+// Converts datetime-local input value → UTC ISO string (respects local timezone)
+const fromLocalDatetimeInput = (localStr) => {
+  if (!localStr) return null;
+  // new Date() on a datetime-local string interprets it as LOCAL time → .toISOString() gives correct UTC
+  return new Date(localStr).toISOString();
+};
 
 // ─── Ripple helper ────────────────────────────────────────────────────────────
 function addRipple(e) {
@@ -185,7 +180,7 @@ function addRipple(e) {
   setTimeout(() => circle.remove(), 600);
 }
 
-// ─── Stage Quick-Button with full interaction feedback ────────────────────────
+// ─── Stage Quick-Button ───────────────────────────────────────────────────────
 const StageButton = ({ stageId, isActive, disabled, onClick, children }) => {
   const [clicked, setClicked] = useState(false);
   const stage = stageOf(stageId);
@@ -217,15 +212,14 @@ const StageButton = ({ stageId, isActive, disabled, onClick, children }) => {
   );
 };
 
-// ─── Progress Bar with animated fill ─────────────────────────────────────────
+// ─── Progress Bar ─────────────────────────────────────────────────────────────
 const StageProgressBar = ({ currentStatus, stages, canEdit, onStageClick }) => {
   const currentIdx = stages.indexOf(currentStatus);
-
   return (
     <div className="flex items-center gap-[3px]">
       {stages.map((sid, i) => {
         const s = stageOf(sid);
-        const filled = i <= currentIdx;
+        const filled   = i <= currentIdx;
         const isCurrent = i === currentIdx;
         return (
           <button
@@ -252,12 +246,12 @@ const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', 
   <div className={cn(
     'relative rounded-2xl border transition-all duration-300 ease-in-out overflow-hidden group',
     isCompleted
-      ? 'bg-slate-50 border-slate-200 opacity-75 scale-[0.985]'
+      ? 'bg-slate-50 border-slate-200 opacity-80'
       : 'bg-white/90 backdrop-blur-sm border-slate-200 hover:shadow-md hover:-translate-y-[1px]',
     className,
   )}>
     <div className={cn('absolute left-0 top-0 h-full w-[6px] rounded-l-2xl transition-all duration-200 group-hover:w-[8px]', stripeColor)} />
-    <div className={cn('pl-6 pr-6 transition-all duration-300', isCompleted ? 'py-2' : 'py-5')}>
+    <div className={cn('pl-6 pr-6 transition-all duration-300', isCompleted ? 'py-3' : 'py-5')}>
       {children}
     </div>
   </div>
@@ -280,7 +274,7 @@ const StatCard = ({ label, value, color, onClick, active }) => (
   </Card>
 );
 
-// ─── Service Badge ─────────────────────────────────────────────────────────────
+// ─── Service Badge ────────────────────────────────────────────────────────────
 const ServiceBadge = ({ value, size = 'sm' }) => {
   const s = serviceStyle(value);
   return (
@@ -343,6 +337,15 @@ const ServiceSelector = ({ selected = [], onChange, availableFromServer = [] }) 
   );
 };
 
+// ─── Section Label ────────────────────────────────────────────────────────────
+const SectionLabel = ({ icon: Icon, children }) => (
+  <div className="md:col-span-2 flex items-center gap-2 pt-2">
+    <Icon className="h-3.5 w-3.5 text-slate-400" />
+    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{children}</p>
+    <div className="flex-1 h-px bg-slate-100" />
+  </div>
+);
+
 // ─── Client Conversion Dialog ─────────────────────────────────────────────────
 function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLater, converting }) {
   const [hovered, setHovered] = useState(null);
@@ -398,7 +401,7 @@ function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLa
             </div>
           </button>
 
-          {/* Convert Later — FIXED: uses /convert endpoint via onConvertLater */}
+          {/* Convert Later — FIXED: only PATCH status=won, no client created */}
           <button
             onClick={onConvertLater}
             disabled={converting}
@@ -417,12 +420,14 @@ function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLa
                 'h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200',
                 hovered === 'later' ? 'bg-slate-300 scale-110' : 'bg-slate-100 group-hover:bg-slate-200',
               )}>
-                <Timer className="h-4 w-4 text-slate-500" />
+                {converting
+                  ? <Loader2 className="h-4 w-4 text-slate-500 animate-spin" />
+                  : <Timer className="h-4 w-4 text-slate-500" />}
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-700">Mark as Won — Convert Later</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  Marks the lead as Won and creates a client profile. You can manage it from the Clients page anytime.
+                  Marks the lead as Won only. You can convert to a client anytime from the closed leads section.
                 </p>
               </div>
               <ChevronRight className={cn(
@@ -471,7 +476,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
           `Services:   ${(lead.services||[]).join(', ') || '—'}`,
           `Value:      ₹${(Number(lead.quotation_amount)||0).toLocaleString()}`,
           `Source:     ${lead.source?.replace('_',' ') || '—'}`,
-          `Referred By:${lead.referred_by   || '—'}`,
           `Notes:      ${lead.notes         || '—'}`,
         ].join('\n'),
       }));
@@ -519,7 +523,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
               <p className="text-sm font-semibold text-slate-800 truncate">{lead?.company_name}</p>
               <p className="text-xs text-slate-500">
                 ₹{(Number(lead?.quotation_amount)||0).toLocaleString()} · {lead?.contact_name || 'No contact'}
-                {lead?.referred_by && <span className="text-emerald-600"> · Ref: {lead.referred_by}</span>}
               </p>
               {(lead?.services||[]).length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -534,7 +537,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
             <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
               <UserCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
               <p className="text-xs text-blue-700">
-                This lead is assigned to <strong>{assignedUser.full_name}</strong>
+                Assigned to <strong>{assignedUser.full_name}</strong>
                 {assignedUser.id === currentUser?.id && <span className="text-blue-500"> (you)</span>}
               </p>
             </div>
@@ -555,7 +558,7 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
                 <SelectItem value="unassigned">— Unassigned —</SelectItem>
                 {users.map(u => (
                   <SelectItem key={u.id} value={u.id}>
-                    <span className="flex items-center gap-2">{u.full_name}{u.id === currentUser?.id && <span className="text-[10px] text-slate-400">(you)</span>}</span>
+                    {u.full_name}{u.id === currentUser?.id && ' (you)'}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -603,15 +606,6 @@ function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
   );
 }
 
-// ─── Section Label ─────────────────────────────────────────────────────────────
-const SectionLabel = ({ icon: Icon, children }) => (
-  <div className="md:col-span-2 flex items-center gap-2 pt-2">
-    <Icon className="h-3.5 w-3.5 text-slate-400" />
-    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{children}</p>
-    <div className="flex-1 h-px bg-slate-100" />
-  </div>
-);
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -643,7 +637,6 @@ export default function LeadsPage() {
   const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
   const [activeFilters,     setActiveFilters]     = useState([]);
-  // Track which lead's stage was just changed for visual feedback
   const [recentlyChanged,   setRecentlyChanged]   = useState({});
 
   const emptyForm = {
@@ -654,12 +647,18 @@ export default function LeadsPage() {
   };
   const [formData, setFormData] = useState(emptyForm);
 
+  // ─── FIX 2: fetchLeads returns data so handleSubmit can use it ──────────────
   const fetchLeads = async () => {
     try {
       const res = await api.get('/leads/');
       setLeads(res.data);
-    } catch { toast.error('Failed to fetch leads'); }
-    finally { setLoading(false); }
+      return res.data;
+    } catch {
+      toast.error('Failed to fetch leads');
+      return [];
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -678,13 +677,14 @@ export default function LeadsPage() {
   }, [availableServices]);
 
   const stats = useMemo(() => ({
-    total:     leads.length,
-    active:    leads.filter(l => ACTIVE_STAGES.includes(l.status)).length,
-    won:       leads.filter(l => l.status === 'won').length,
-    lost:      leads.filter(l => l.status === 'lost').length,
-    overdue:   leads.filter(isOverdue).length,
-    wonValue:  leads.filter(l => l.status === 'won').reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
-    pipeValue: leads.filter(l => ACTIVE_STAGES.includes(l.status)).reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
+    total:        leads.length,
+    active:       leads.filter(l => ACTIVE_STAGES.includes(l.status)).length,
+    won:          leads.filter(l => l.status === 'won').length,
+    lost:         leads.filter(l => l.status === 'lost').length,
+    negotiation:  leads.filter(l => l.status === 'negotiation').length,
+    overdue:      leads.filter(isOverdue).length,
+    wonValue:     leads.filter(l => l.status === 'won').reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
+    pipeValue:    leads.filter(l => ACTIVE_STAGES.includes(l.status)).reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
   }), [leads]);
 
   const serviceTabCounts = useMemo(() => {
@@ -711,14 +711,19 @@ export default function LeadsPage() {
   const handleEdit = (lead) => {
     setEditingLead(lead);
     setFormData({
-      company_name: lead.company_name || '', contact_name: lead.contact_name || null,
-      email: lead.email || null, phone: lead.phone || null,
-      quotation_amount: lead.quotation_amount || null,
-      services: Array.isArray(lead.services) ? lead.services : [],
-      source: lead.source || 'direct', referred_by: lead.referred_by || null,
-      notes: lead.notes || null, assigned_to: lead.assigned_to || null,
-      status: lead.status || 'new', next_follow_up: lead.next_follow_up || null,
-      date_of_meeting: lead.date_of_meeting || null,
+      company_name:        lead.company_name    || '',
+      contact_name:        lead.contact_name    || null,
+      email:               lead.email           || null,
+      phone:               lead.phone           || null,
+      quotation_amount:    lead.quotation_amount || null,
+      services:            Array.isArray(lead.services) ? lead.services : [],
+      source:              lead.source           || 'direct',
+      referred_by:         lead.referred_by      || null,
+      notes:               lead.notes            || null,
+      assigned_to:         lead.assigned_to      || null,
+      status:              lead.status           || 'new',
+      next_follow_up:      lead.next_follow_up   || null,
+      date_of_meeting:     lead.date_of_meeting  || null,
       closure_probability: lead.closure_probability ?? null,
     });
     setDialogOpen(true);
@@ -726,41 +731,66 @@ export default function LeadsPage() {
 
   const closeDialog = () => { setDialogOpen(false); setEditingLead(null); resetForm(); };
 
+  // ─── FIX 2: Optimistic insert on create so lead appears immediately ──────────
   const handleSubmit = async () => {
     if (!formData.company_name?.trim()) { setErrors({ company_name: 'Company name is required' }); return; }
     setSubmitting(true);
     const payload = {
-      company_name: formData.company_name?.trim() || '',
-      contact_name: formData.contact_name || null, email: formData.email || null,
-      phone: formData.phone || null,
-      quotation_amount: formData.quotation_amount ? Number(formData.quotation_amount) : null,
-      services: Array.isArray(formData.services) ? formData.services : [],
-      source: formData.source || 'direct', referred_by: formData.referred_by || null,
-      notes: formData.notes || null,
-      assigned_to: formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
-      status: formData.status || 'new', next_follow_up: formData.next_follow_up || null,
-      date_of_meeting: formData.date_of_meeting || null,
+      company_name:        formData.company_name?.trim() || '',
+      contact_name:        formData.contact_name    || null,
+      email:               formData.email           || null,
+      phone:               formData.phone           || null,
+      quotation_amount:    formData.quotation_amount ? Number(formData.quotation_amount) : null,
+      services:            Array.isArray(formData.services) ? formData.services : [],
+      source:              formData.source          || 'direct',
+      referred_by:         formData.referred_by     || null,
+      notes:               formData.notes           || null,
+      assigned_to:         formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
+      status:              formData.status          || 'new',
+      next_follow_up:      formData.next_follow_up  || null,
+      date_of_meeting:     formData.date_of_meeting || null,
       closure_probability: formData.closure_probability != null ? Number(formData.closure_probability) : null,
     };
     try {
-      if (editingLead) { await api.patch(`/leads/${editingLead.id}`, payload); toast.success('Lead updated!'); }
-      else             { await api.post('/leads/', payload);                   toast.success('Lead created!'); }
-      closeDialog(); fetchLeads();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save lead'); }
-    finally { setSubmitting(false); }
+      if (editingLead) {
+        await api.patch(`/leads/${editingLead.id}`, payload);
+        toast.success('Lead updated!');
+        closeDialog();
+        fetchLeads();
+      } else {
+        // Optimistically prepend the new lead immediately so user sees it right away
+        const res = await api.post('/leads/', payload);
+        const newLead = res.data;
+        setLeads(prev => [newLead, ...prev]);
+        toast.success('Lead created!');
+        closeDialog();
+        // Background refresh to get server-accurate data (audit fields etc.)
+        fetchLeads();
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save lead');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDelete = async (lead) => {
     if (!window.confirm(`Delete "${lead.company_name}"? This cannot be undone.`)) return;
-    try { await api.delete(`/leads/${lead.id}`); toast.success('Lead deleted'); fetchLeads(); }
-    catch (err) { toast.error(err?.response?.data?.detail || 'Failed to delete'); }
+    try {
+      // Optimistic remove
+      setLeads(prev => prev.filter(l => l.id !== lead.id));
+      await api.delete(`/leads/${lead.id}`);
+      toast.success('Lead deleted');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete');
+      fetchLeads(); // revert
+    }
   };
 
   const handleQuickStage = async (lead, newStatus) => {
     if (newStatus === 'won') { setClientConvLead(lead); return; }
     if (newStatus === 'lost' && !window.confirm(`Mark "${lead.company_name}" as Lost?`)) return;
     try {
-      // Optimistic update for instant visual feedback
       setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus } : l));
       setRecentlyChanged(prev => ({ ...prev, [lead.id]: newStatus }));
       setTimeout(() => setRecentlyChanged(prev => { const n = {...prev}; delete n[lead.id]; return n; }), 1500);
@@ -768,35 +798,45 @@ export default function LeadsPage() {
       fetchLeads();
     } catch (err) {
       toast.error('Failed to update stage');
-      fetchLeads(); // revert on error
+      fetchLeads();
     }
   };
 
-  // ── FIX: Convert Later now calls /convert endpoint (backend blocks direct PATCH to won) ──
+  // ─── FIX: Convert Now — uses /convert endpoint (creates client) ───────────
   const handleClientConvertNow = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
     try {
       await api.post(`/leads/${clientConvLead.id}/convert`);
       toast.success(`"${clientConvLead.company_name}" converted to client!`);
-      setClientConvLead(null); fetchLeads();
+      setClientConvLead(null);
+      fetchLeads();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Conversion failed');
-    } finally { setClientConverting(false); }
+    } finally {
+      setClientConverting(false);
+    }
   };
 
-  // ── FIXED: was trying PATCH status=won which backend blocks ──────────────────
+  // ─── FIX: Convert Later — PATCH status=won with converted_client_id=null ──
+  // Backend guard: blocks PATCH to won ONLY when "converted_client_id" key is ABSENT.
+  // Passing it explicitly as null satisfies the guard without creating a client.
   const handleClientConvertLater = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
     try {
-      // Must use /convert — backend blocks PATCH to status=won without converted_client_id
-      await api.post(`/leads/${clientConvLead.id}/convert`);
-      toast.success(`"${clientConvLead.company_name}" marked as Won. Client profile created — manage from Clients page.`);
-      setClientConvLead(null); fetchLeads();
+      await api.patch(`/leads/${clientConvLead.id}`, {
+        status: 'won',
+        converted_client_id: null,
+      });
+      toast.success(`"${clientConvLead.company_name}" marked as Won. You can convert to a client anytime.`);
+      setClientConvLead(null);
+      fetchLeads();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to mark as won');
-    } finally { setClientConverting(false); }
+    } finally {
+      setClientConverting(false);
+    }
   };
 
   useEffect(() => {
@@ -818,9 +858,7 @@ export default function LeadsPage() {
     if (key === 'service') setServiceFilter('all');
   };
 
-  // Named alias kept for kanban + list usage (matches original API)
   const handleConvertButtonClick = (lead) => setConvertingLead(lead);
-
   const userNameById = (id) => { const u = allUsers.find(u => u.id === id); return u ? u.full_name : id || '—'; };
 
   if (loading) return (
@@ -868,13 +906,13 @@ export default function LeadsPage() {
         </Card>
       </motion.div>
 
-      {/* ── Stats ── */}
+      {/* ── Stats — FIX 3: 5th card is now Negotiation, not Overdue ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Total"   value={stats.total}   color="text-slate-800"   onClick={() => setStatusFilter('all')}    active={statusFilter === 'all'} />
-        <StatCard label="Active"  value={stats.active}  color="text-blue-600"    onClick={() => setStatusFilter('active')} active={statusFilter === 'active'} />
-        <StatCard label="Won"     value={stats.won}     color="text-emerald-600" onClick={() => setStatusFilter('won')}    active={statusFilter === 'won'} />
-        <StatCard label="Lost"    value={stats.lost}    color="text-red-600"     onClick={() => setStatusFilter('lost')}   active={statusFilter === 'lost'} />
-        <StatCard label="Overdue" value={stats.overdue} color="text-orange-600"  onClick={() => setStatusFilter('all')}    active={false} />
+        <StatCard label="Total"       value={stats.total}       color="text-slate-800"   onClick={() => setStatusFilter('all')}         active={statusFilter === 'all'} />
+        <StatCard label="Active"      value={stats.active}      color="text-blue-600"    onClick={() => setStatusFilter('active')}      active={statusFilter === 'active'} />
+        <StatCard label="Won"         value={stats.won}         color="text-emerald-600" onClick={() => setStatusFilter('won')}         active={statusFilter === 'won'} />
+        <StatCard label="Lost"        value={stats.lost}        color="text-red-600"     onClick={() => setStatusFilter('lost')}        active={statusFilter === 'lost'} />
+        <StatCard label="Negotiation" value={stats.negotiation} color="text-orange-600"  onClick={() => setStatusFilter('negotiation')} active={statusFilter === 'negotiation'} />
       </motion.div>
 
       {/* ── Revenue ── */}
@@ -987,6 +1025,7 @@ export default function LeadsPage() {
             </div>
           )}
 
+          {/* ── Active leads ── */}
           {filteredLeads.filter(l => !['won','lost'].includes(l.status)).map((lead) => {
             const stage   = stageOf(lead.status);
             const overdue = isOverdue(lead);
@@ -1005,7 +1044,6 @@ export default function LeadsPage() {
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
                         <span className="text-base font-semibold text-slate-900 leading-tight">{lead.company_name}</span>
 
-                        {/* Stage badge — animated on change */}
                         <motion.span
                           key={lead.status}
                           initial={{ scale: 0.8, opacity: 0 }}
@@ -1068,12 +1106,12 @@ export default function LeadsPage() {
                       {lead.next_follow_up && (
                         <span className={cn('flex items-center gap-1.5 font-medium', overdue ? 'text-red-500' : 'text-slate-500')}>
                           <Calendar className="h-3.5 w-3.5" />
-                          Follow-up: {format(new Date(lead.next_follow_up), 'dd MMM yyyy')}
+                          Follow-up: {format(new Date(lead.next_follow_up), 'dd MMM yyyy, hh:mm a')}
                           {overdue && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full text-[10px] font-bold">OVERDUE</span>}
                         </span>
                       )}
                       {lead.date_of_meeting && (
-                        <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Meeting: {format(new Date(lead.date_of_meeting), 'dd MMM yyyy')}</span>
+                        <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Meeting: {format(new Date(lead.date_of_meeting), 'dd MMM yyyy, hh:mm a')}</span>
                       )}
                       <span className="md:hidden flex items-center gap-1 font-bold text-slate-700">
                         <IndianRupee className="h-3.5 w-3.5" />{(Number(lead.quotation_amount)||0).toLocaleString()}
@@ -1090,7 +1128,6 @@ export default function LeadsPage() {
 
                     {/* Row 4: Stage bar + buttons */}
                     <div className="space-y-2 pt-1 border-t border-slate-100">
-                      {/* Enhanced progress bar */}
                       <StageProgressBar
                         currentStatus={lead.status}
                         stages={ACTIVE_STAGES}
@@ -1112,14 +1149,12 @@ export default function LeadsPage() {
                             </StageButton>
                           ))}
 
-                          {/* Won button — special green glow on click */}
                           <button
                             onClick={(e) => { addRipple(e); e.currentTarget.classList.add('won-glow'); handleQuickStage(lead, 'won'); }}
                             className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 hover:shadow-md active:scale-95 transition-all duration-200">
                             Won ✓
                           </button>
 
-                          {/* Lost button — red warning style */}
                           <button
                             onClick={(e) => { addRipple(e); e.currentTarget.classList.add('lost-shake'); handleQuickStage(lead, 'lost'); }}
                             className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-red-400 border-slate-200 hover:bg-red-500 hover:text-white hover:border-red-500 hover:shadow-md active:scale-95 transition-all duration-200">
@@ -1128,14 +1163,13 @@ export default function LeadsPage() {
                         </div>
                       )}
                     </div>
-
                   </div>
                 </DashboardStripCard>
               </motion.div>
             );
           })}
 
-          {/* Closed leads */}
+          {/* ── Closed leads (Won / Lost) ── */}
           {filteredLeads.some(l => ['won','lost'].includes(l.status)) && (
             <div className="space-y-2 pt-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Closed</p>
@@ -1144,39 +1178,69 @@ export default function LeadsPage() {
                 return (
                   <motion.div key={lead.id} variants={itemVariants}>
                     <DashboardStripCard stripeColor={stage.stripe} isCompleted>
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
-                          <span className="text-sm font-semibold text-slate-600">{lead.company_name}</span>
-                          <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border', stage.badge)}>{stage.label}</span>
-                          {lead.assigned_to && (
-                            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600">
-                              <UserCheck className="h-3 w-3" />{userNameById(lead.assigned_to)}
+                      <div className="flex flex-col gap-2">
+
+                        {/* Row 1: Name + status + amount + delete */}
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                            <span className="text-sm font-semibold text-slate-600">{lead.company_name}</span>
+                            <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border', stage.badge)}>{stage.label}</span>
+                            {lead.assigned_to && (
+                              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600">
+                                <UserCheck className="h-3 w-3" />{userNameById(lead.assigned_to)}
+                              </span>
+                            )}
+                            {lead.converted_client_id && (
+                              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
+                                <CheckCircle2 className="h-3 w-3" /> Client Created
+                              </span>
+                            )}
+                            {(lead.services||[]).slice(0,3).map(s => <ServiceBadge key={s} value={s} />)}
+                          </div>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <span className={cn('text-sm font-bold', lead.status === 'won' ? 'text-emerald-600' : 'text-slate-400')}>
+                              ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
                             </span>
-                          )}
-                          {lead.converted_client_id && (
-                            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
-                              <CheckCircle2 className="h-3 w-3" /> Client Created
-                            </span>
-                          )}
-                          {lead.status === 'won' && !lead.converted_client_id && canEditLead(lead) && (
-                            <button onClick={() => setClientConvLead(lead)}
-                              className="hidden sm:inline-flex items-center gap-1 text-[11px] text-amber-600 font-semibold border border-amber-200 px-2 py-0.5 rounded-lg hover:bg-amber-50 hover:border-amber-400 transition-all active:scale-95">
-                              <Building2 className="h-3 w-3" /> Convert to Client
-                            </button>
-                          )}
-                          {(lead.services||[]).slice(0,3).map(s => <ServiceBadge key={s} value={s} />)}
+                            {canDeleteLead && (
+                              <button onClick={() => handleDelete(lead)}
+                                className="p-1.5 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all active:scale-90">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
-                          <span className={cn('text-sm font-bold', lead.status === 'won' ? 'text-emerald-600' : 'text-slate-400')}>
-                            ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
-                          </span>
-                          {canDeleteLead && (
-                            <button onClick={() => handleDelete(lead)}
-                              className="p-1.5 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all active:scale-90">
-                              <Trash2 className="h-3.5 w-3.5" />
+
+                        {/* Row 2: Action buttons for closed leads — FIX: Edit + Reopen + Convert to Client */}
+                        {canEditLead(lead) && (
+                          <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
+                            {/* Edit lead */}
+                            <button
+                              onClick={() => handleEdit(lead)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-400 transition-all active:scale-95"
+                            >
+                              <Edit className="h-3 w-3" /> Edit Lead
                             </button>
-                          )}
-                        </div>
+
+                            {/* Reopen — move back to negotiation */}
+                            <button
+                              onClick={() => handleQuickStage(lead, 'negotiation')}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 transition-all active:scale-95"
+                            >
+                              <RefreshCw className="h-3 w-3" /> Reopen
+                            </button>
+
+                            {/* Convert to Client — only for won leads not yet converted */}
+                            {lead.status === 'won' && !lead.converted_client_id && (
+                              <button
+                                onClick={() => setClientConvLead(lead)}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-500 transition-all active:scale-95"
+                              >
+                                <Building2 className="h-3 w-3" /> Convert to Client
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                       </div>
                     </DashboardStripCard>
                   </motion.div>
@@ -1216,7 +1280,7 @@ export default function LeadsPage() {
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all hover:-translate-y-[1px]">
-                          <div className={cn('absolute left-0 top-0 h-full w-[5px] transition-all duration-200 group-hover:w-[7px]', stage.stripe)} />
+                          <div className={cn('absolute left-0 top-0 h-full w-[5px]', stage.stripe)} />
                           <div className="pl-4 pr-3 py-3 space-y-2">
                             <p className="text-xs font-semibold text-slate-900 leading-tight line-clamp-2 pr-1">{lead.company_name}</p>
                             {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3 flex-shrink-0" />{lead.contact_name}</p>}
@@ -1339,7 +1403,7 @@ export default function LeadsPage() {
                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
                   {allUsers.map(u => (
                     <SelectItem key={u.id} value={u.id}>
-                      <span className="flex items-center gap-2">{u.full_name}{u.id === user?.id && <span className="text-[10px] text-slate-400">(you)</span>}</span>
+                      {u.full_name}{u.id === user?.id && ' (you)'}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1357,14 +1421,35 @@ export default function LeadsPage() {
               </div>
             )}
 
+            {/* ── FIX 1: Timezone-safe datetime inputs ── */}
             <SectionLabel icon={Calendar}>Dates & Follow-up</SectionLabel>
             <div className="space-y-1.5">
               <Label>Next Follow-up</Label>
-              <Input type="datetime-local" value={formData.next_follow_up ? formData.next_follow_up.slice(0,16) : ''} onChange={e => handleChange('next_follow_up', e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-10 rounded-2xl text-sm" />
+              <Input
+                type="datetime-local"
+                value={toLocalDatetimeInput(formData.next_follow_up)}
+                onChange={e => handleChange('next_follow_up', fromLocalDatetimeInput(e.target.value))}
+                className="h-10 rounded-2xl text-sm"
+              />
+              {formData.next_follow_up && (
+                <p className="text-[10px] text-slate-400">
+                  {format(new Date(formData.next_follow_up), 'dd MMM yyyy, hh:mm a')}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Date of Meeting</Label>
-              <Input type="datetime-local" value={formData.date_of_meeting ? formData.date_of_meeting.slice(0,16) : ''} onChange={e => handleChange('date_of_meeting', e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-10 rounded-2xl text-sm" />
+              <Input
+                type="datetime-local"
+                value={toLocalDatetimeInput(formData.date_of_meeting)}
+                onChange={e => handleChange('date_of_meeting', fromLocalDatetimeInput(e.target.value))}
+                className="h-10 rounded-2xl text-sm"
+              />
+              {formData.date_of_meeting && (
+                <p className="text-[10px] text-slate-400">
+                  {format(new Date(formData.date_of_meeting), 'dd MMM yyyy, hh:mm a')}
+                </p>
+              )}
             </div>
 
             {editingLead && (
