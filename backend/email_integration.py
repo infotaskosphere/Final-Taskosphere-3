@@ -570,6 +570,15 @@ VISIT_EVENT_TYPES    = {"Visit", "Online Meeting", "Conference", "Interview", "M
 TODO_EVENT_TYPES     = {"Examination Report", "Notice"}
 
 async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
+    # Don't re-save if user has explicitly dismissed this event title before
+    existing_dismissed = await db["reminders"].find_one({
+        "user_id": user_id,
+        "title":   event.title,
+        "is_dismissed": True,
+    })
+    if existing_dismissed:
+        return  # User has dismissed this reminder — respect their choice
+
     """
     Save a qualified event to the appropriate collection based on smart categorization.
 
@@ -620,6 +629,9 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 "title":   event.title,
                 "source":  "email_auto",
             })
+            # Don\'t re-save if it was previously deleted/dismissed by user
+            if existing and existing.get("is_dismissed"):
+                return  # User dismissed/deleted this — don\'t re-add
             if not existing:
                 description_parts = []
                 if event.organizer:      description_parts.append(f"From: {event.organizer}")
