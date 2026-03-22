@@ -93,17 +93,17 @@ const safeDate = (dateStr) => {
 const trimmedEmail = (v) => { const t = v?.trim(); return t && t.length > 0 ? t : null; };
 
 // ─── useDebounce hook ─────────────────────────────────────────────────────────
-function useDebounce(value, delay) {
+const useDebounce = (value, delay) => {
   const [debouncedValue, setDebouncedValue] = useState(value);
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedValue(value), delay);
     return () => clearTimeout(handler);
   }, [value, delay]);
   return debouncedValue;
-}
+};
 
 // ─── useLocalStorage hook ─────────────────────────────────────────────────────
-function useLocalStorage(key, defaultValue) {
+const useLocalStorage = (key, defaultValue) => {
   const [value, setValue] = useState(() => {
     try {
       const stored = localStorage.getItem(key);
@@ -115,7 +115,7 @@ function useLocalStorage(key, defaultValue) {
     try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
   }, [key]);
   return [value, setStored];
-}
+};
 
 // ─── copyToClipboard helper ───────────────────────────────────────────────────
 const copyToClipboard = async (text, label = 'Copied') => {
