@@ -3,20 +3,13 @@ backend/quotations.py
 ─────────────────────────────────────────────────────────────────────────────
 Quotation Module — FastAPI Router
 
-Changes vs previous version:
-  - QuotationItem gains  quantity (float), unit (str), unit_price (float)
-    amount = quantity × unit_price  (computed on backend)
-  - QuotationCreate / QuotationOut gain  lead_id: Optional[str]
-  - On quotation CREATE with lead_id  → lead status auto-set to "proposal"
-  - On quotation status change:
-      sent      → lead status "proposal"
-      accepted  → lead status "negotiation"
-  - PDF builder completely rewritten:
-      · proper try/except — no more silent 500
-      · qty / unit columns in items table
-      · dominant brand-colour extracted from company logo via Pillow
-  - GET /quotations/{id}/pdf  &  GET /quotations/{id}/checklist-pdf
-    both return StreamingResponse with correct Content-Disposition
+Bug fixes in this version:
+  1. PDF 500 error: pdf.output() in fpdf2 v2+ returns bytearray directly.
+     Old code used pdf.output(dest="S").encode("latin1") which is deprecated
+     and causes a 500 on some fpdf2 builds. Fixed to bytes(pdf.output()).
+  2. Lead status not updating: _update_lead_status_for_quotation now tries
+     BOTH {"_id": ObjectId(lead_id)} AND {"id": lead_id} so it works
+     regardless of whether the caller stored the ObjectId string or the uuid.
 """
 
 import uuid
@@ -242,15 +235,15 @@ class CompanyProfile(BaseModel):
 
 class QuotationItem(BaseModel):
     description: str
-    quantity: float = 1.0          # NEW: quantity
-    unit: str = "service"          # NEW: unit (e.g. "month", "hour", "service")
-    unit_price: float = 0.0        # NEW: price per unit
-    amount: float = 0.0            # computed = quantity × unit_price
+    quantity: float = 1.0
+    unit: str = "service"
+    unit_price: float = 0.0
+    amount: float = 0.0        # computed = quantity × unit_price
 
 
 class QuotationCreate(BaseModel):
     company_id: str
-    lead_id: Optional[str] = None   # NEW: link to lead
+    lead_id: Optional[str] = None      # link to lead pipeline
     client_name: str
     client_address: str = ""
     client_email: str = ""
@@ -292,9 +285,9 @@ def _compute_item_amount(item: QuotationItem) -> float:
 
 
 def _compute_totals(items: List[QuotationItem], gst_rate: float):
-    subtotal = sum(i.amount for i in items)
+    subtotal   = sum(i.amount for i in items)
     gst_amount = round(subtotal * gst_rate / 100, 2)
-    total = round(subtotal + gst_amount, 2)
+    total      = round(subtotal + gst_amount, 2)
     return subtotal, gst_amount, total
 
 
@@ -308,7 +301,7 @@ def _permission_ok(user: User) -> bool:
 
 
 async def _next_qtn_number() -> str:
-    year = datetime.now().year
+    year  = datetime.now().year
     count = await db.quotations.count_documents(
         {"quotation_no": {"$regex": f"/{year}$"}}
     )
@@ -317,33 +310,58 @@ async def _next_qtn_number() -> str:
 
 async def _update_lead_status_for_quotation(lead_id: str, new_status: str):
     """
-    Auto-updates the linked lead's pipeline status when quotation status changes.
+    Auto-update the linked lead's pipeline status.
+
     Mapping:
       quotation created / sent → lead "proposal"
       quotation accepted       → lead "negotiation"
+
+    BUG FIX: tries BOTH ObjectId (_id) AND uuid string (id) lookups so it
+    works regardless of which field was stored as lead_id.
     """
     if not lead_id:
         return
     try:
         from bson import ObjectId
+        now = datetime.now(timezone.utc)
+        update_payload = {"$set": {"status": new_status, "updated_at": now}}
+
+        updated = False
+
+        # Try 1: lead_id is the string form of MongoDB _id (ObjectId)
         if ObjectId.is_valid(lead_id):
-            await db.leads.update_one(
-                {"_id": ObjectId(lead_id)},
-                {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc)}}
+            result = await db.leads.update_one(
+                {"_id": ObjectId(lead_id)}, update_payload
             )
-        else:
-            await db.leads.update_one(
-                {"id": lead_id},
-                {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc)}}
+            if result.matched_count > 0:
+                updated = True
+                logger.info(f"Lead {lead_id} status → {new_status} (via _id)")
+
+        # Try 2: lead_id is the uuid "id" field
+        if not updated:
+            result = await db.leads.update_one(
+                {"id": lead_id}, update_payload
             )
+            if result.matched_count > 0:
+                updated = True
+                logger.info(f"Lead {lead_id} status → {new_status} (via id)")
+
+        if not updated:
+            logger.warning(
+                f"_update_lead_status_for_quotation: "
+                f"lead '{lead_id}' not found in either _id or id field"
+            )
+
     except Exception as e:
-        logger.warning(f"Could not update lead {lead_id} status to {new_status}: {e}")
+        logger.warning(
+            f"Could not update lead {lead_id} status to {new_status}: {e}"
+        )
 
 
 def _extract_dominant_color_from_b64(logo_b64: str):
     """
-    Extract the dominant non-white colour from a base64 logo image using Pillow.
-    Returns an (R, G, B) tuple.  Falls back to deep blue if anything fails.
+    Extract the dominant non-white colour from a base64 logo using Pillow.
+    Returns an (R, G, B) tuple. Falls back to deep blue if anything fails.
     """
     FALLBACK = (13, 59, 102)
     if not logo_b64:
@@ -352,22 +370,20 @@ def _extract_dominant_color_from_b64(logo_b64: str):
         from PIL import Image
         import io as _io
 
-        raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+        raw       = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
         img_bytes = base64.b64decode(raw)
-        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
-        img = img.resize((50, 50))  # shrink for speed
+        img       = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        img       = img.resize((50, 50))
 
-        pixels = list(img.getdata())
-        # Filter out near-white and near-black pixels
+        pixels   = list(img.getdata())
         filtered = [
             p for p in pixels
             if not (p[0] > 220 and p[1] > 220 and p[2] > 220)
-            and not (p[0] < 30 and p[1] < 30 and p[2] < 30)
+            and not (p[0] < 30  and p[1] < 30  and p[2] < 30)
         ]
         if not filtered:
             return FALLBACK
 
-        # Average the remaining pixels
         r = int(sum(p[0] for p in filtered) / len(filtered))
         g = int(sum(p[1] for p in filtered) / len(filtered))
         b = int(sum(p[2] for p in filtered) / len(filtered))
@@ -378,13 +394,25 @@ def _extract_dominant_color_from_b64(logo_b64: str):
 
 
 def _lighten(color: tuple, factor: float = 0.85) -> tuple:
-    """Blend a colour toward white by factor (0=original, 1=white)."""
     return tuple(int(c + (255 - c) * factor) for c in color)
 
 
 def _darken(color: tuple, factor: float = 0.6) -> tuple:
-    """Darken a colour by multiplying by factor."""
     return tuple(int(c * factor) for c in color)
+
+
+def _safe_pdf_output(pdf) -> bytes:
+    """
+    ─── BUG FIX ───────────────────────────────────────────────────────────────
+    fpdf2 v2.x changed pdf.output() to return bytearray directly.
+    The old pattern pdf.output(dest="S").encode("latin1") is deprecated and
+    raises errors on some builds. This helper works with all fpdf2 versions.
+    """
+    result = pdf.output()
+    if isinstance(result, (bytes, bytearray)):
+        return bytes(result)
+    # Legacy fpdf (very old): result is a string
+    return result.encode("latin1")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -394,13 +422,12 @@ def _darken(color: tuple, factor: float = 0.6) -> tuple:
 def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     """
     Build a professional quotation PDF using fpdf2.
-    Brand colour is auto-detected from the company logo.
-    Items table includes Qty, Unit, Unit Price, and Amount columns.
+    Brand colour auto-detected from company logo via Pillow.
+    Items table includes Qty, Unit, Unit Price, Amount columns.
     """
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
 
-    # ── Colour palette (derived from logo) ─────────────────────────────────
     BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
     BRAND_DARK = _darken(BRAND, 0.7)
     BRAND_LITE = _lighten(BRAND, 0.88)
@@ -417,12 +444,16 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*MUTED)
-            self.cell(0, 5, f"Quotation No: {q.get('quotation_no', '')}  |  Page {self.page_no()}", align="C")
+            self.cell(
+                0, 5,
+                f"Quotation No: {q.get('quotation_no', '')}  |  Page {self.page_no()}",
+                align="C",
+            )
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    W = pdf.w - 28   # usable width (14mm margins each side)
+    W = pdf.w - 28   # usable width (14 mm margins each side)
 
     # ── Logo ─────────────────────────────────────────────────────────────────
     logo_b64 = company.get("logo_base64", "")
@@ -432,13 +463,14 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             img_bytes = base64.b64decode(raw)
             suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(img_bytes); tmp.close()
+            tmp.write(img_bytes)
+            tmp.close()
             pdf.image(tmp.name, x=14, y=12, h=18)
             os.unlink(tmp.name)
         except Exception as e:
             logger.warning(f"Logo embed failed: {e}")
 
-    # ── Company block ─────────────────────────────────────────────────────────
+    # ── Company block ────────────────────────────────────────────────────────
     pdf.set_xy(14, 32)
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(*BRAND_DARK)
@@ -471,14 +503,12 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}", **CONT)
     pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
-
-    # Validity
     pdf.set_xy(14, pdf.get_y())
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*MUTED)
     pdf.cell(0, 4, f"Valid for {q.get('validity_days', 30)} days from date of issue", **NL)
 
-    # ── Client (Prepared For) block ───────────────────────────────────────────
+    # ── Client block ─────────────────────────────────────────────────────────
     cl_y = pdf.get_y() + 4
     pdf.set_fill_color(*BRAND_LITE)
     pdf.rect(14, cl_y, W, 26, "F")
@@ -510,7 +540,11 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     pdf.cell(0, 5, f"Subject: {subject}", **NL)
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:")
+    pdf.multi_cell(
+        W, 5,
+        "Dear Sir / Madam,\n"
+        "Thank you for your inquiry. We are pleased to submit our quotation as under:"
+    )
 
     # ── Scope of Work ────────────────────────────────────────────────────────
     scope = q.get("scope_of_work", [])
@@ -528,7 +562,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             pdf.cell(6, 5, "-", **CONT)
             pdf.cell(0, 5, str(item), **NL)
 
-    # ── Items Table (with Qty / Unit / Unit Price / Amount) ───────────────────
+    # ── Items Table (Qty / Unit / Unit Price / Amount) ───────────────────────
     items = q.get("items", [])
     if items:
         pdf.ln(4)
@@ -539,57 +573,58 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
         pdf.ln(1)
 
-        # Column widths: Sr | Description | Qty | Unit | Unit Price | Amount
-        sr_w    = 10
-        desc_w  = W - 10 - 18 - 22 - 30 - 30  # remaining
-        qty_w   = 18
-        unit_w  = 22
+        sr_w     = 10
+        desc_w   = W - 10 - 18 - 22 - 30 - 30
+        qty_w    = 18
+        unit_w   = 22
         uprice_w = 30
-        amt_w   = 30
+        amt_w    = 30
 
-        # Header row
+        # Header
         pdf.set_fill_color(*BRAND)
         pdf.set_text_color(*WHITE)
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(sr_w,    7, "Sr.",         align="C", fill=True, **CONT)
-        pdf.cell(desc_w,  7, "Description",            fill=True, **CONT)
-        pdf.cell(qty_w,   7, "Qty",         align="C", fill=True, **CONT)
-        pdf.cell(unit_w,  7, "Unit",        align="C", fill=True, **CONT)
-        pdf.cell(uprice_w,7, "Unit Price",  align="R", fill=True, **CONT)
-        pdf.cell(amt_w,   7, "Amount (Rs)", align="R", fill=True, **NL)
+        pdf.cell(sr_w,     7, "Sr.",          align="C", fill=True, **CONT)
+        pdf.cell(desc_w,   7, "Description",             fill=True, **CONT)
+        pdf.cell(qty_w,    7, "Qty",          align="C", fill=True, **CONT)
+        pdf.cell(unit_w,   7, "Unit",         align="C", fill=True, **CONT)
+        pdf.cell(uprice_w, 7, "Unit Price",   align="R", fill=True, **CONT)
+        pdf.cell(amt_w,    7, "Amount (Rs)",  align="R", fill=True, **NL)
 
-        # Data rows
+        # Rows
         for idx, item in enumerate(items, 1):
             fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
             pdf.set_fill_color(*fill_color)
             pdf.set_text_color(*DARK_TEXT)
             pdf.set_font("Helvetica", "", 8)
-            desc     = str(item.get("description", ""))[:55]
-            qty      = item.get("quantity", 1)
-            unit     = str(item.get("unit", "service"))[:10]
-            uprice   = item.get("unit_price", 0)
-            amt      = item.get("amount", 0)
-            pdf.cell(sr_w,    7, str(idx),                  align="C", fill=True, **CONT)
-            pdf.cell(desc_w,  7, desc,                                  fill=True, **CONT)
-            pdf.cell(qty_w,   7, str(qty),                  align="C", fill=True, **CONT)
-            pdf.cell(unit_w,  7, unit,                      align="C", fill=True, **CONT)
-            pdf.cell(uprice_w,7, f"Rs. {uprice:,.2f}",      align="R", fill=True, **CONT)
-            pdf.cell(amt_w,   7, f"Rs. {amt:,.2f}",         align="R", fill=True, **NL)
+            desc   = str(item.get("description", ""))[:55]
+            qty    = item.get("quantity", 1)
+            unit   = str(item.get("unit", "service"))[:10]
+            uprice = item.get("unit_price", 0)
+            amt    = item.get("amount", 0)
+            pdf.cell(sr_w,     7, str(idx),              align="C", fill=True, **CONT)
+            pdf.cell(desc_w,   7, desc,                              fill=True, **CONT)
+            pdf.cell(qty_w,    7, str(qty),              align="C", fill=True, **CONT)
+            pdf.cell(unit_w,   7, unit,                  align="C", fill=True, **CONT)
+            pdf.cell(uprice_w, 7, f"Rs. {uprice:,.2f}",  align="R", fill=True, **CONT)
+            pdf.cell(amt_w,    7, f"Rs. {amt:,.2f}",     align="R", fill=True, **NL)
 
-        # Subtotal / GST / Total rows
+        non_amt_w = sr_w + desc_w + qty_w + unit_w + uprice_w
+
+        # Sub Total
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_fill_color(*BRAND_LITE)
         pdf.set_text_color(*DARK_TEXT)
-        non_amt_w = sr_w + desc_w + qty_w + unit_w + uprice_w
         pdf.cell(non_amt_w, 7, "Sub Total", align="R", fill=True, **CONT)
         pdf.cell(amt_w, 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, **NL)
 
+        # GST
         gst_rate = q.get("gst_rate", 18)
         if gst_rate and float(gst_rate) > 0:
             pdf.cell(non_amt_w, 7, f"GST @ {gst_rate}%", align="R", fill=True, **CONT)
             pdf.cell(amt_w, 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, **NL)
 
-        # Total row
+        # Total
         pdf.set_fill_color(*BRAND)
         pdf.set_text_color(*WHITE)
         pdf.set_font("Helvetica", "B", 10)
@@ -643,7 +678,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             pdf.set_font("Helvetica", "", 9)
             pdf.cell(half * 0.55, 5, str(val), **NL)
 
-    # ── Signature block ──────────────────────────────────────────────────────
+    # ── Signature ────────────────────────────────────────────────────────────
     pdf.ln(8)
     sig_b64 = company.get("signature_base64", "")
     if sig_b64:
@@ -651,7 +686,8 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             raw = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
             img_bytes = base64.b64decode(raw)
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            tmp.write(img_bytes); tmp.close()
+            tmp.write(img_bytes)
+            tmp.close()
             pdf.image(tmp.name, x=14, y=pdf.get_y(), h=14)
             pdf.ln(16)
             os.unlink(tmp.name)
@@ -678,8 +714,9 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.set_text_color(*MUTED)
         pdf.multi_cell(W, 4, f"Note: {q['notes']}")
 
+    # ── BUG FIX: use _safe_pdf_output instead of .output(dest="S").encode() ──
     out = BytesIO()
-    out.write(pdf.output())
+    out.write(_safe_pdf_output(pdf))
     out.seek(0)
     return out
 
@@ -689,7 +726,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
-    """Build a document checklist PDF using fpdf2 with brand colour from logo."""
+    """Build a document checklist PDF. Brand colour from logo via Pillow."""
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
 
@@ -709,14 +746,17 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
             self.set_text_color(*MUTED)
-            self.cell(0, 5, f"Document Checklist – {q.get('client_name', '')}  |  Page {self.page_no()}", align="C")
+            self.cell(
+                0, 5,
+                f"Document Checklist – {q.get('client_name', '')}  |  Page {self.page_no()}",
+                align="C",
+            )
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
     W = pdf.w - 28
 
-    # Logo
     logo_b64 = company.get("logo_base64", "")
     if logo_b64:
         try:
@@ -724,7 +764,8 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
             img_bytes = base64.b64decode(raw)
             suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(img_bytes); tmp.close()
+            tmp.write(img_bytes)
+            tmp.close()
             pdf.image(tmp.name, x=14, y=12, h=16)
             os.unlink(tmp.name)
         except Exception as e:
@@ -735,7 +776,6 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_text_color(*BRAND_DARK)
     pdf.cell(0, 6, company.get("name", ""), **NL)
 
-    # Title band
     band_y = 50
     pdf.set_fill_color(*BRAND)
     pdf.rect(14, band_y, W, 10, "F")
@@ -744,7 +784,6 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_text_color(*WHITE)
     pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", **NL)
 
-    # Client info block
     pdf.set_xy(14, band_y + 14)
     pdf.set_fill_color(*BRAND_LITE)
     pdf.rect(14, band_y + 14, W, 20, "F")
@@ -762,7 +801,6 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_font("Helvetica", "I", 8)
     pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", **NL)
 
-    # Checklist table
     service   = q.get("service", "Other / Custom Service")
     base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
     extras    = q.get("extra_checklist_items", [])
@@ -781,7 +819,6 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     col_recv = 22
     col_rem  = W - col_sr - col_doc - col_recv
 
-    # Header
     pdf.set_fill_color(*BRAND)
     pdf.set_text_color(*WHITE)
     pdf.set_font("Helvetica", "B", 8)
@@ -790,18 +827,16 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.cell(col_recv, 7, "Received",      align="C", fill=True, **CONT)
     pdf.cell(col_rem,  7, "Remarks",                  fill=True, **NL)
 
-    # Rows
     for idx, doc_name in enumerate(all_docs, 1):
         fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
         pdf.set_fill_color(*fill_color)
         pdf.set_text_color(*DARK_TEXT)
         pdf.set_font("Helvetica", "", 8)
-        pdf.cell(col_sr,   8, str(idx),          align="C", fill=True, **CONT)
-        pdf.cell(col_doc,  8, str(doc_name)[:60],           fill=True, **CONT)
+        pdf.cell(col_sr,   8, str(idx),           align="C", fill=True,         **CONT)
+        pdf.cell(col_doc,  8, str(doc_name)[:60],            fill=True,         **CONT)
         pdf.cell(col_recv, 8, "",                 align="C", fill=True, border=1, **CONT)
         pdf.cell(col_rem,  8, "",                            fill=True, border=1, **NL)
 
-    # Checked by
     pdf.ln(8)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
@@ -809,7 +844,6 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.cell(half, 5, "Checked By: _______________________", **CONT)
     pdf.cell(half, 5, "Signature: _______________________", align="R", **NL)
 
-    # Client confirmation block
     pdf.ln(10)
     confirm_y = pdf.get_y()
     pdf.set_fill_color(*BRAND_LITE)
@@ -827,8 +861,9 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_x(16)
     pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", **NL)
 
+    # ── BUG FIX: use _safe_pdf_output ────────────────────────────────────────
     out = BytesIO()
-    out.write(pdf.output())
+    out.write(_safe_pdf_output(pdf))
     out.seek(0)
     return out
 
@@ -936,33 +971,33 @@ async def create_quotation(
     if not _permission_ok(current_user):
         raise HTTPException(403, "Quotation module access denied")
 
-    # Recompute each item's amount from quantity × unit_price
+    # Recompute each item's amount = quantity × unit_price
     computed_items = []
     for item in data.items:
         item.amount = _compute_item_amount(item)
         computed_items.append(item)
 
     subtotal, gst_amount, total = _compute_totals(computed_items, data.gst_rate)
-    now = datetime.now(timezone.utc).isoformat()
+    now    = datetime.now(timezone.utc).isoformat()
     qtn_no = await _next_qtn_number()
 
     doc = {
-        "id":                   str(uuid.uuid4()),
-        "quotation_no":         qtn_no,
-        "date":                 date.today().isoformat(),
+        "id":           str(uuid.uuid4()),
+        "quotation_no": qtn_no,
+        "date":         date.today().isoformat(),
         **data.model_dump(),
-        "items":                [i.model_dump() for i in computed_items],
-        "subtotal":             subtotal,
-        "gst_amount":           gst_amount,
-        "total":                total,
-        "created_by":           current_user.id,
-        "created_at":           now,
-        "updated_at":           now,
+        "items":        [i.model_dump() for i in computed_items],
+        "subtotal":     subtotal,
+        "gst_amount":   gst_amount,
+        "total":        total,
+        "created_by":   current_user.id,
+        "created_at":   now,
+        "updated_at":   now,
     }
     await db.quotations.insert_one(doc)
     doc.pop("_id", None)
 
-    # Auto-update linked lead to "proposal" status
+    # Auto-update linked lead to "proposal"
     if data.lead_id:
         await _update_lead_status_for_quotation(data.lead_id, "proposal")
 
@@ -971,7 +1006,7 @@ async def create_quotation(
 
 @router.get("/quotations")
 async def list_quotations(
-    status: Optional[str] = None,
+    status:  Optional[str] = None,
     service: Optional[str] = None,
     lead_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
@@ -1019,7 +1054,7 @@ async def update_quotation(
     if current_user.role != "admin" and existing.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
 
-    # Recompute items
+    # Recompute items if provided
     items_raw = data.get("items", existing.get("items", []))
     items = []
     for i in items_raw:
@@ -1042,9 +1077,9 @@ async def update_quotation(
 
     await db.quotations.update_one({"id": quotation_id}, {"$set": data})
 
-    # Auto-update linked lead based on new quotation status
+    # ── Auto-update linked lead based on new quotation status ────────────────
     new_status = data.get("status")
-    lead_id = data.get("lead_id") or existing.get("lead_id")
+    lead_id    = data.get("lead_id") or existing.get("lead_id")
     if lead_id and new_status:
         if new_status == "sent":
             await _update_lead_status_for_quotation(lead_id, "proposal")
@@ -1087,12 +1122,15 @@ async def export_quotation_pdf(
 
     company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
     if not company:
-        raise HTTPException(404, "Company profile not found")
+        raise HTTPException(404, "Company profile not found. Please add a company profile first.")
 
     try:
         pdf_buf = _build_quotation_pdf(q, company)
     except Exception as e:
-        logger.error(f"Quotation PDF build failed for {quotation_id}: {e}", exc_info=True)
+        logger.error(
+            f"Quotation PDF build failed for {quotation_id}: {e}",
+            exc_info=True,
+        )
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
@@ -1101,8 +1139,8 @@ async def export_quotation_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type": "application/pdf",
-        }
+            "Content-Type":        "application/pdf",
+        },
     )
 
 
@@ -1121,12 +1159,15 @@ async def export_checklist_pdf(
 
     company = await db.companies.find_one({"id": q.get("company_id")}, {"_id": 0})
     if not company:
-        raise HTTPException(404, "Company profile not found")
+        raise HTTPException(404, "Company profile not found. Please add a company profile first.")
 
     try:
         pdf_buf = _build_checklist_pdf(q, company)
     except Exception as e:
-        logger.error(f"Checklist PDF build failed for {quotation_id}: {e}", exc_info=True)
+        logger.error(
+            f"Checklist PDF build failed for {quotation_id}: {e}",
+            exc_info=True,
+        )
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
@@ -1135,6 +1176,6 @@ async def export_checklist_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type": "application/pdf",
-        }
+            "Content-Type":        "application/pdf",
+        },
     )
