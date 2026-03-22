@@ -832,31 +832,6 @@ export default function Clients() {
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
 
-  const stats = useMemo(() => {
-    const totalClients = clients.length;
-    const activeClients = clients.filter(c => (c?.status || 'active') === 'active').length;
-    const serviceCounts = {};
-    clients.forEach(c => {
-      if ((c?.status || 'active') === 'active' && c?.services) {
-        c.services.forEach(s => { const name = s?.startsWith('Other:') ? 'Other' : s; serviceCounts[name] = (serviceCounts[name] || 0) + 1; });
-      }
-    });
-    return { totalClients, activeClients, serviceCounts };
-  }, [clients]);
-
-  // ── FIX: Birthday reminders ONLY for contact persons, NOT company incorporation date ──
-  const todayReminders = useMemo(() => {
-    const today = startOfDay(new Date());
-    return clients.filter(c => {
-      // Only check contact_persons birthdays — NOT company birthday (that's incorporation date)
-      return c?.contact_persons?.some(cp => {
-        if (!cp?.birthday) return false;
-        const bday = new Date(cp.birthday);
-        return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
-      }) ?? false;
-    });
-  }, [clients]);
-
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -879,6 +854,32 @@ export default function Clients() {
 
   // Reset to page 1 whenever filters change
   useEffect(() => { setBoardPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, clients]);
+
+  // Stats reflect the current filter — filtered counts, not global totals
+  const stats = useMemo(() => {
+    const totalClients = filteredClients.length;
+    const activeClients = filteredClients.filter(c => (c?.status || 'active') === 'active').length;
+    const serviceCounts = {};
+    filteredClients.forEach(c => {
+      if (c?.services) {
+        c.services.forEach(s => { const name = s?.startsWith('Other:') ? 'Other' : s; serviceCounts[name] = (serviceCounts[name] || 0) + 1; });
+      }
+    });
+    return { totalClients, activeClients, serviceCounts };
+  }, [filteredClients]);
+
+  // ── FIX: Birthday reminders ONLY for contact persons, NOT company incorporation date ──
+  const todayReminders = useMemo(() => {
+    const today = startOfDay(new Date());
+    return clients.filter(c => {
+      // Only check contact_persons birthdays — NOT company birthday (that's incorporation date)
+      return c?.contact_persons?.some(cp => {
+        if (!cp?.birthday) return false;
+        const bday = new Date(cp.birthday);
+        return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
+      }) ?? false;
+    });
+  }, [clients]);
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
@@ -1953,10 +1954,21 @@ export default function Clients() {
 
         if (viewMode === 'board') return (
           <div
-            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
-            style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}
+            className="rounded-2xl border shadow-sm flex flex-col"
+            style={{
+              background: isDark ? '#1e293b' : '#F8FAFC',
+              borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+              overflow: 'hidden',
+            }}
           >
-            {/* Card grid — CSS grid, no virtualisation, no scroll */}
+            {/* Card grid — CSS grid, no virtualisation, vertical scroll only inside this div */}
+            <div
+              style={{
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                flex: 1,
+              }}
+            >
             <div
               style={{
                 display: 'grid',
@@ -1985,6 +1997,7 @@ export default function Clients() {
                   />
                 );
               })}
+            </div>
             </div>
             <PaginationBar />
           </div>
