@@ -92,30 +92,7 @@ const safeDate = (dateStr) => {
 
 const trimmedEmail = (v) => { const t = v?.trim(); return t && t.length > 0 ? t : null; };
 
-// ─── useDebounce hook ─────────────────────────────────────────────────────────
-const useDebounce = (value, delay) => {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-  return debouncedValue;
-};
 
-// ─── useLocalStorage hook ─────────────────────────────────────────────────────
-const useLocalStorage = (key, defaultValue) => {
-  const [value, setValue] = useState(() => {
-    try {
-      const stored = localStorage.getItem(key);
-      return stored !== null ? JSON.parse(stored) : defaultValue;
-    } catch { return defaultValue; }
-  });
-  const setStored = useCallback((v) => {
-    setValue(v);
-    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
-  }, [key]);
-  return [value, setStored];
-};
 
 // ─── copyToClipboard helper ───────────────────────────────────────────────────
 const copyToClipboard = async (text, label = 'Copied') => {
@@ -824,9 +801,22 @@ export default function Clients() {
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen]     = useState(false);
 
-  // ── Persisted preferences ──────────────────────────────────────────────
-  const [viewMode, setViewMode] = useLocalStorage('clients_viewMode', 'board');
-  const [sortOrder, setSortOrder] = useLocalStorage('clients_sortOrder', 'lifo');
+  // ── Persisted preferences (inlined localStorage — avoids custom hook bundler issues) ──
+  const [viewMode, setViewModeRaw] = useState(() => {
+    try { return localStorage.getItem('clients_viewMode') || 'board'; } catch { return 'board'; }
+  });
+  const setViewMode = useCallback((v) => {
+    setViewModeRaw(v);
+    try { localStorage.setItem('clients_viewMode', v); } catch {}
+  }, []);
+
+  const [sortOrder, setSortOrderRaw] = useState(() => {
+    try { return localStorage.getItem('clients_sortOrder') || 'lifo'; } catch { return 'lifo'; }
+  });
+  const setSortOrder = useCallback((v) => {
+    setSortOrderRaw(v);
+    try { localStorage.setItem('clients_sortOrder', v); } catch {}
+  }, []);
 
   // ── Filter state ────────────────────────────────────────────────────────
   const [searchInput, setSearchInput]         = useState('');
@@ -835,8 +825,12 @@ export default function Clients() {
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
 
-  // Debounced search — avoids re-filtering on every keystroke
-  const searchTerm = useDebounce(searchInput, SEARCH_DEBOUNCE_MS);
+  // Debounced search — inlined to avoid custom hook bundler issues
+  const [searchTerm, setSearchTerm] = useState('');
+  useEffect(() => {
+    const handler = setTimeout(() => setSearchTerm(searchInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handler);
+  }, [searchInput]);
 
   // ── Pagination ──────────────────────────────────────────────────────────
   const [boardPage, setBoardPage] = useState(1);
