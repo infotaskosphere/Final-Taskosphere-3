@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, Histor
 import { format } from 'date-fns';
 
 export default function DocumentRegister() {
+  const isDark = useDark();
   const [documentList, setDocumentList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -259,11 +261,11 @@ export default function DocumentRegister() {
   };
 
   return (
-    <div className="space-y-6" data-testid="document-page">
+    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark?"bg-[#0f172a]":""}`} data-testid="document-page">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-900">Document Register</h1>
-          <p className="text-slate-600 mt-1">Manage documents with IN/OUT tracking</p>
+          <h1 className={`text-3xl font-bold font-outfit ${isDark?"text-slate-100":"text-slate-900"}`}>Document Register</h1>
+          <p className={`mt-1 ${isDark?"text-slate-400":"text-slate-600"}`}>Manage documents with IN/OUT tracking</p>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={(open) => {
@@ -429,7 +431,7 @@ export default function DocumentRegister() {
           placeholder="Search by holder name, type, company, notes..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
+          className={`pl-10 focus:border-indigo-500 ${isDark?"bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500":"bg-white border-slate-200"}`}
           data-testid="document-search-input"
         />
       </div>
@@ -456,7 +458,7 @@ export default function DocumentRegister() {
             </CardHeader>
             <CardContent className="p-0">
               {inDocuments.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
+                <div className={`text-center py-12 ${isDark?"text-slate-500":"text-slate-500"}`}>
                   <p>No documents currently IN</p>
                 </div>
               ) : (
@@ -484,7 +486,7 @@ export default function DocumentRegister() {
             </CardHeader>
             <CardContent className="p-0">
               {outDocuments.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
+                <div className={`text-center py-12 ${isDark?"text-slate-500":"text-slate-500"}`}>
                   <p>No documents currently OUT</p>
                 </div>
               ) : (
@@ -582,10 +584,10 @@ export default function DocumentRegister() {
                         )}
                         <span className="text-sm font-medium">{movement.person_name}</span>
                       </div>
-                      <p className="text-sm text-slate-600">
+                      <p className={`text-sm ${isDark?"text-slate-300":"text-slate-600"}`}>
                         {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         Recorded by: {movement.recorded_by || '—'}
                       </p>
                       {movement.notes && (
@@ -593,10 +595,10 @@ export default function DocumentRegister() {
                       )}
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'hh:mm a')}
                       </p>
                     </div>
@@ -619,9 +621,9 @@ export default function DocumentRegister() {
           <DialogHeader>
             <DialogTitle>Notes — {selectedFullNotes.holder_name}</DialogTitle>
           </DialogHeader>
-          <div className="mt-4 p-5 bg-slate-50 rounded-lg border max-h-[65vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+          <div className={`mt-4 p-5 rounded-lg border max-h-[65vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${isDark?"bg-slate-700 border-slate-600 text-slate-200":"bg-slate-50"}`}>
             {selectedFullNotes.notes || (
-              <p className="text-slate-400 italic text-center py-10">No notes available</p>
+              <p className={`italic text-center py-10 ${isDark?"text-slate-600":"text-slate-400"}`}>No notes available</p>
             )}
           </div>
           <DialogFooter>
@@ -639,37 +641,37 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
   return (
     <div className="w-full overflow-hidden">
       <table className="w-full table-auto border-collapse">
-        <thead className="bg-slate-50 border-b border-slate-200">
+        <thead className={`border-b ${isDark?"bg-slate-800 border-slate-700":"bg-slate-50 border-slate-200"}`}>
           <tr>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-12 ${isDark?"text-slate-400":"text-slate-500"}`}>
               S.No
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[150px] ${isDark?"text-slate-400":"text-slate-500"}`}>
               Holder Name
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider w-28 ${isDark?"text-slate-400":"text-slate-500"}`}>
               Type
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[150px] ${isDark?"text-slate-400":"text-slate-500"}`}>
               Associated With
             </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[260px]">
+            <th className={`px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider min-w-[260px] ${isDark?"text-slate-400":"text-slate-500"}`}>
               Notes
             </th>
-            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-44">
+            <th className={`px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider w-44 ${isDark?"text-slate-400":"text-slate-500"}`}>
               Actions
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 bg-white">
+        <tbody className={`divide-y ${isDark?"divide-slate-700 bg-slate-800":"divide-slate-100 bg-white"}`}>
           {documentList.map((doc, index) => (
             <tr
               key={doc.id}
-              className="hover:bg-slate-50 transition-colors"
+              className={`transition-colors ${isDark?"hover:bg-slate-700/30":"hover:bg-slate-50"}`}
               data-testid={`document-row-${doc.id}`}
             >
-              <td className="px-4 py-3 text-sm text-slate-500">{index + 1}</td>
-              <td className="px-4 py-3 text-sm font-medium text-slate-900 break-words leading-tight">
+              <td className={`px-4 py-3 text-sm ${isDark?"text-slate-400":"text-slate-500"}`}>{index + 1}</td>
+              <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark?"text-slate-100":"text-slate-900"}`}>
                 {doc.holder_name}
               </td>
               <td className="px-4 py-3 text-sm text-slate-600 truncate">
@@ -680,7 +682,7 @@ function DocumentTable({ documentList, onEdit, onDelete, onMovement, onViewLog, 
               </td>
 
               <td
-                className={`px-4 py-3 text-sm text-slate-600 break-words leading-tight cursor-pointer hover:bg-slate-50/80 transition-colors group relative ${doc.notes ? '' : 'cursor-default'}`}
+                className={`px-4 py-3 text-sm break-words leading-tight cursor-pointer ${isDark?"text-slate-300":"text-slate-600"} hover:bg-slate-50/80 transition-colors group relative ${doc.notes ? '' : 'cursor-default'}`}
                 onClick={() => doc.notes && onShowFullNotes(doc)}
               >
                 {doc.notes ? (
