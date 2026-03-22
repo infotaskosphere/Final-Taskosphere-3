@@ -1,3 +1,4 @@
+import { useDark } from '@/hooks/useDark';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from 'sonner';
@@ -541,17 +542,8 @@ export default function TodoDashboard() {
   const isAdmin     = user?.role === 'admin';
   const isManager   = user?.role === 'manager';
 
-  // ── Dark mode observer (matching Dashboard.jsx) ───────────────────────────
-  const [isDark, setIsDark] = useState(() =>
-    typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.classList.contains('dark'));
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
+  // ── Dark mode observer ──────────────────────────────────────────────────
+  const isDark = useDark();
 
   // ── Form state ───────────────────────────────────────────────────────────
   const [title,       setTitle]       = useState('');
