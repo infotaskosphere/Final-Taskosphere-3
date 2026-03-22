@@ -1,3 +1,4 @@
+import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -778,15 +779,8 @@ export default function Dashboard() {
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null); // { member, index }
 
-  // Dark mode observer
-  const [isDark, setIsDark] = useState(() =>
-    typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    const observer = new MutationObserver(() => setIsDark(document.documentElement.classList.contains('dark')));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
+  // Dark mode via shared hook
+  const isDark = useDark();
 
   // ── Data queries ─────────────────────────────────────────────────────────────
   const { data: tasks = [] }            = useTasks();
