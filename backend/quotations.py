@@ -2,25 +2,29 @@
 backend/quotations.py
 ─────────────────────────────────────────────────────────────────────────────
 Quotation Module — FastAPI Router
-Endpoints:
-  POST   /api/companies            - Create a company profile
-  GET    /api/companies            - List all companies for the current user
-  PUT    /api/companies/{id}       - Update a company
-  DELETE /api/companies/{id}       - Delete a company
 
-  POST   /api/quotations           - Create a quotation
-  GET    /api/quotations           - List quotations (filtered by role/perm)
-  GET    /api/quotations/{id}      - Get single quotation
-  PUT    /api/quotations/{id}      - Update a quotation
-  DELETE /api/quotations/{id}      - Delete a quotation
-  GET    /api/quotations/{id}/pdf  - Export quotation as PDF (streaming)
-  GET    /api/quotations/{id}/checklist-pdf - Export document checklist as PDF
-  GET    /api/quotations/next-number - Get next auto quotation number
+Changes vs previous version:
+  - QuotationItem gains  quantity (float), unit (str), unit_price (float)
+    amount = quantity × unit_price  (computed on backend)
+  - QuotationCreate / QuotationOut gain  lead_id: Optional[str]
+  - On quotation CREATE with lead_id  → lead status auto-set to "proposal"
+  - On quotation status change:
+      sent      → lead status "proposal"
+      accepted  → lead status "negotiation"
+  - PDF builder completely rewritten:
+      · proper try/except — no more silent 500
+      · qty / unit columns in items table
+      · dominant brand-colour extracted from company logo via Pillow
+  - GET /quotations/{id}/pdf  &  GET /quotations/{id}/checklist-pdf
+    both return StreamingResponse with correct Content-Disposition
 """
 
 import uuid
 import logging
 import re
+import base64
+import tempfile
+import os
 from datetime import datetime, timezone, date
 from io import BytesIO
 from typing import List, Optional, Any, Dict
@@ -29,7 +33,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-# ── project-local imports (mirror pattern used in main.py) ───────────────────
 from backend.dependencies import db, get_current_user, require_admin
 from backend.models import User
 
@@ -39,7 +42,7 @@ router = APIRouter(tags=["Quotations"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DOCUMENT CHECKLISTS per service  (offline – no external call required)
+# DOCUMENT CHECKLISTS per service
 # ═══════════════════════════════════════════════════════════════════════════════
 SERVICE_CHECKLISTS: Dict[str, List[str]] = {
     "GST Registration": [
@@ -211,7 +214,6 @@ SERVICE_CHECKLISTS: Dict[str, List[str]] = {
     ],
 }
 
-# All available services (mirrors backend COMPLIANCE_RULES + extras)
 ALL_SERVICES = list(SERVICE_CHECKLISTS.keys())
 
 
@@ -232,7 +234,7 @@ class CompanyProfile(BaseModel):
     bank_name: str = ""
     bank_account_no: str = ""
     bank_ifsc: str = ""
-    logo_base64: Optional[str] = None   # data:image/png;base64,....
+    logo_base64: Optional[str] = None
     signature_base64: Optional[str] = None
     created_by: Optional[str] = None
     created_at: Optional[str] = None
@@ -240,16 +242,20 @@ class CompanyProfile(BaseModel):
 
 class QuotationItem(BaseModel):
     description: str
-    amount: float = 0.0
+    quantity: float = 1.0          # NEW: quantity
+    unit: str = "service"          # NEW: unit (e.g. "month", "hour", "service")
+    unit_price: float = 0.0        # NEW: price per unit
+    amount: float = 0.0            # computed = quantity × unit_price
 
 
 class QuotationCreate(BaseModel):
     company_id: str
+    lead_id: Optional[str] = None   # NEW: link to lead
     client_name: str
     client_address: str = ""
     client_email: str = ""
     client_phone: str = ""
-    service: str                        # must be one of ALL_SERVICES
+    service: str
     subject: str = ""
     scope_of_work: List[str] = []
     items: List[QuotationItem] = []
@@ -260,10 +266,8 @@ class QuotationCreate(BaseModel):
     advance_terms: str = ""
     extra_terms: List[str] = []
     notes: str = ""
-    # checklist overrides
     extra_checklist_items: List[str] = []
-    # status
-    status: str = "draft"              # draft | sent | accepted | rejected
+    status: str = "draft"
 
 
 class QuotationOut(QuotationCreate):
@@ -282,15 +286,19 @@ class QuotationOut(QuotationCreate):
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _compute_item_amount(item: QuotationItem) -> float:
+    """Compute amount = quantity × unit_price."""
+    return round(item.quantity * item.unit_price, 2)
+
+
 def _compute_totals(items: List[QuotationItem], gst_rate: float):
-    subtotal   = sum(i.amount for i in items)
+    subtotal = sum(i.amount for i in items)
     gst_amount = round(subtotal * gst_rate / 100, 2)
-    total      = round(subtotal + gst_amount, 2)
+    total = round(subtotal + gst_amount, 2)
     return subtotal, gst_amount, total
 
 
 def _permission_ok(user: User) -> bool:
-    """Returns True if user can access quotation module."""
     if user.role == "admin":
         return True
     perms = user.permissions if isinstance(user.permissions, dict) else (
@@ -300,12 +308,529 @@ def _permission_ok(user: User) -> bool:
 
 
 async def _next_qtn_number() -> str:
-    """Auto-increment quotation number like QTN-001/2025."""
     year = datetime.now().year
     count = await db.quotations.count_documents(
         {"quotation_no": {"$regex": f"/{year}$"}}
     )
     return f"QTN-{count + 1:03d}/{year}"
+
+
+async def _update_lead_status_for_quotation(lead_id: str, new_status: str):
+    """
+    Auto-updates the linked lead's pipeline status when quotation status changes.
+    Mapping:
+      quotation created / sent → lead "proposal"
+      quotation accepted       → lead "negotiation"
+    """
+    if not lead_id:
+        return
+    try:
+        from bson import ObjectId
+        if ObjectId.is_valid(lead_id):
+            await db.leads.update_one(
+                {"_id": ObjectId(lead_id)},
+                {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc)}}
+            )
+        else:
+            await db.leads.update_one(
+                {"id": lead_id},
+                {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc)}}
+            )
+    except Exception as e:
+        logger.warning(f"Could not update lead {lead_id} status to {new_status}: {e}")
+
+
+def _extract_dominant_color_from_b64(logo_b64: str):
+    """
+    Extract the dominant non-white colour from a base64 logo image using Pillow.
+    Returns an (R, G, B) tuple.  Falls back to deep blue if anything fails.
+    """
+    FALLBACK = (13, 59, 102)
+    if not logo_b64:
+        return FALLBACK
+    try:
+        from PIL import Image
+        import io as _io
+
+        raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+        img_bytes = base64.b64decode(raw)
+        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        img = img.resize((50, 50))  # shrink for speed
+
+        pixels = list(img.getdata())
+        # Filter out near-white and near-black pixels
+        filtered = [
+            p for p in pixels
+            if not (p[0] > 220 and p[1] > 220 and p[2] > 220)
+            and not (p[0] < 30 and p[1] < 30 and p[2] < 30)
+        ]
+        if not filtered:
+            return FALLBACK
+
+        # Average the remaining pixels
+        r = int(sum(p[0] for p in filtered) / len(filtered))
+        g = int(sum(p[1] for p in filtered) / len(filtered))
+        b = int(sum(p[2] for p in filtered) / len(filtered))
+        return (r, g, b)
+    except Exception as e:
+        logger.warning(f"Dominant colour extraction failed: {e}")
+        return FALLBACK
+
+
+def _lighten(color: tuple, factor: float = 0.85) -> tuple:
+    """Blend a colour toward white by factor (0=original, 1=white)."""
+    return tuple(int(c + (255 - c) * factor) for c in color)
+
+
+def _darken(color: tuple, factor: float = 0.6) -> tuple:
+    """Darken a colour by multiplying by factor."""
+    return tuple(int(c * factor) for c in color)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF BUILDER – QUOTATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
+    """
+    Build a professional quotation PDF using fpdf2.
+    Brand colour is auto-detected from the company logo.
+    Items table includes Qty, Unit, Unit Price, and Amount columns.
+    """
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    # ── Colour palette (derived from logo) ─────────────────────────────────
+    BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
+    BRAND_DARK = _darken(BRAND, 0.7)
+    BRAND_LITE = _lighten(BRAND, 0.88)
+    DARK_TEXT  = (30, 41, 59)
+    MUTED      = (100, 116, 139)
+    WHITE      = (255, 255, 255)
+
+    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
+    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}
+
+    class PDF(FPDF):
+        def header(self): pass
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(*MUTED)
+            self.cell(0, 5, f"Quotation No: {q.get('quotation_no', '')}  |  Page {self.page_no()}", align="C")
+
+    pdf = PDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    W = pdf.w - 28   # usable width (14mm margins each side)
+
+    # ── Logo ─────────────────────────────────────────────────────────────────
+    logo_b64 = company.get("logo_base64", "")
+    if logo_b64:
+        try:
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+            img_bytes = base64.b64decode(raw)
+            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=12, h=18)
+            os.unlink(tmp.name)
+        except Exception as e:
+            logger.warning(f"Logo embed failed: {e}")
+
+    # ── Company block ─────────────────────────────────────────────────────────
+    pdf.set_xy(14, 32)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*BRAND_DARK)
+    pdf.cell(0, 6, company.get("name", ""), **NL)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    if company.get("address"):
+        pdf.multi_cell(W // 2, 4, company.get("address", ""))
+    contact_parts = []
+    if company.get("phone"):   contact_parts.append(f"Ph: {company['phone']}")
+    if company.get("email"):   contact_parts.append(f"E: {company['email']}")
+    if company.get("website"): contact_parts.append(company["website"])
+    if contact_parts:
+        pdf.cell(0, 4, "  |  ".join(contact_parts), **NL)
+    if company.get("gstin"):
+        pdf.cell(0, 4, f"GSTIN: {company['gstin']}", **NL)
+
+    # ── QUOTATION Title band ─────────────────────────────────────────────────
+    band_y = 62
+    pdf.set_fill_color(*BRAND)
+    pdf.rect(14, band_y, W, 10, "F")
+    pdf.set_xy(14, band_y + 1.5)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*WHITE)
+    pdf.cell(W, 7, "QUOTATION", align="C", **NL)
+
+    # ── Meta row ─────────────────────────────────────────────────────────────
+    pdf.set_xy(14, band_y + 13)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
+
+    # Validity
+    pdf.set_xy(14, pdf.get_y())
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 4, f"Valid for {q.get('validity_days', 30)} days from date of issue", **NL)
+
+    # ── Client (Prepared For) block ───────────────────────────────────────────
+    cl_y = pdf.get_y() + 4
+    pdf.set_fill_color(*BRAND_LITE)
+    pdf.rect(14, cl_y, W, 26, "F")
+    pdf.set_xy(16, cl_y + 2)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*BRAND)
+    pdf.cell(0, 5, "Prepared For:", **NL)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, q.get("client_name", ""), **NL)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    if q.get("client_address"):
+        pdf.cell(0, 4, str(q.get("client_address", ""))[:80], **NL)
+    if q.get("client_email") or q.get("client_phone"):
+        pdf.set_x(16)
+        parts = []
+        if q.get("client_phone"): parts.append(q["client_phone"])
+        if q.get("client_email"): parts.append(q["client_email"])
+        pdf.cell(0, 4, "  |  ".join(parts), **NL)
+
+    # ── Subject ──────────────────────────────────────────────────────────────
+    pdf.set_xy(14, cl_y + 30)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    subject = q.get("subject") or f"Quotation for {q.get('service', '')}"
+    pdf.cell(0, 5, f"Subject: {subject}", **NL)
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:")
+
+    # ── Scope of Work ────────────────────────────────────────────────────────
+    scope = q.get("scope_of_work", [])
+    if scope:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*BRAND)
+        pdf.cell(0, 6, "Scope of Work / Services", **NL)
+        pdf.set_draw_color(*BRAND)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*DARK_TEXT)
+        for item in scope:
+            pdf.cell(6, 5, "-", **CONT)
+            pdf.cell(0, 5, str(item), **NL)
+
+    # ── Items Table (with Qty / Unit / Unit Price / Amount) ───────────────────
+    items = q.get("items", [])
+    if items:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*BRAND)
+        pdf.cell(0, 6, "Quotation Details", **NL)
+        pdf.set_draw_color(*BRAND)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+
+        # Column widths: Sr | Description | Qty | Unit | Unit Price | Amount
+        sr_w    = 10
+        desc_w  = W - 10 - 18 - 22 - 30 - 30  # remaining
+        qty_w   = 18
+        unit_w  = 22
+        uprice_w = 30
+        amt_w   = 30
+
+        # Header row
+        pdf.set_fill_color(*BRAND)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(sr_w,    7, "Sr.",         align="C", fill=True, **CONT)
+        pdf.cell(desc_w,  7, "Description",            fill=True, **CONT)
+        pdf.cell(qty_w,   7, "Qty",         align="C", fill=True, **CONT)
+        pdf.cell(unit_w,  7, "Unit",        align="C", fill=True, **CONT)
+        pdf.cell(uprice_w,7, "Unit Price",  align="R", fill=True, **CONT)
+        pdf.cell(amt_w,   7, "Amount (Rs)", align="R", fill=True, **NL)
+
+        # Data rows
+        for idx, item in enumerate(items, 1):
+            fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
+            pdf.set_fill_color(*fill_color)
+            pdf.set_text_color(*DARK_TEXT)
+            pdf.set_font("Helvetica", "", 8)
+            desc     = str(item.get("description", ""))[:55]
+            qty      = item.get("quantity", 1)
+            unit     = str(item.get("unit", "service"))[:10]
+            uprice   = item.get("unit_price", 0)
+            amt      = item.get("amount", 0)
+            pdf.cell(sr_w,    7, str(idx),                  align="C", fill=True, **CONT)
+            pdf.cell(desc_w,  7, desc,                                  fill=True, **CONT)
+            pdf.cell(qty_w,   7, str(qty),                  align="C", fill=True, **CONT)
+            pdf.cell(unit_w,  7, unit,                      align="C", fill=True, **CONT)
+            pdf.cell(uprice_w,7, f"Rs. {uprice:,.2f}",      align="R", fill=True, **CONT)
+            pdf.cell(amt_w,   7, f"Rs. {amt:,.2f}",         align="R", fill=True, **NL)
+
+        # Subtotal / GST / Total rows
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(*BRAND_LITE)
+        pdf.set_text_color(*DARK_TEXT)
+        non_amt_w = sr_w + desc_w + qty_w + unit_w + uprice_w
+        pdf.cell(non_amt_w, 7, "Sub Total", align="R", fill=True, **CONT)
+        pdf.cell(amt_w, 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, **NL)
+
+        gst_rate = q.get("gst_rate", 18)
+        if gst_rate and float(gst_rate) > 0:
+            pdf.cell(non_amt_w, 7, f"GST @ {gst_rate}%", align="R", fill=True, **CONT)
+            pdf.cell(amt_w, 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, **NL)
+
+        # Total row
+        pdf.set_fill_color(*BRAND)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(non_amt_w, 8, "TOTAL PAYABLE", align="R", fill=True, **CONT)
+        pdf.cell(amt_w, 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, **NL)
+
+    # ── Terms & Conditions ───────────────────────────────────────────────────
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*BRAND)
+    pdf.cell(0, 6, "Terms & Conditions", **NL)
+    pdf.set_draw_color(*BRAND)
+    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+    pdf.ln(1)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+
+    terms = []
+    if q.get("payment_terms"):
+        terms.append(f"1. Payment Terms: {q['payment_terms']}")
+    if q.get("timeline"):
+        terms.append(f"2. Timeline: {q['timeline']}")
+    terms.append(f"3. Validity of Quotation: {q.get('validity_days', 30)} days")
+    terms.append("4. Additional work will be charged separately.")
+    if q.get("advance_terms"):
+        terms.append(f"5. Advance: {q['advance_terms']}")
+    for i, t in enumerate(q.get("extra_terms", []), len(terms) + 1):
+        terms.append(f"{i}. {t}")
+    for term in terms:
+        pdf.multi_cell(W, 5, str(term))
+
+    # ── Bank Details ─────────────────────────────────────────────────────────
+    if company.get("bank_account_no") or company.get("bank_name"):
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*BRAND)
+        pdf.cell(0, 6, "Bank Details", **NL)
+        pdf.set_draw_color(*BRAND)
+        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+        pdf.ln(1)
+        pdf.set_text_color(*DARK_TEXT)
+        half = W / 2
+        for label, val in [
+            ("Account Name", company.get("bank_account_name", "")),
+            ("Bank Name",    company.get("bank_name", "")),
+            ("Account No",   company.get("bank_account_no", "")),
+            ("IFSC Code",    company.get("bank_ifsc", "")),
+        ]:
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(half * 0.45, 5, f"{label}:", **CONT)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(half * 0.55, 5, str(val), **NL)
+
+    # ── Signature block ──────────────────────────────────────────────────────
+    pdf.ln(8)
+    sig_b64 = company.get("signature_base64", "")
+    if sig_b64:
+        try:
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
+            img_bytes = base64.b64decode(raw)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=pdf.get_y(), h=14)
+            pdf.ln(16)
+            os.unlink(tmp.name)
+        except Exception:
+            pdf.ln(14)
+    else:
+        pdf.ln(14)
+
+    pdf.set_draw_color(*BRAND)
+    pdf.line(14, pdf.get_y(), 80, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, f"For {company.get('name', 'Company')}", **NL)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 4, "Authorized Signatory", **NL)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 4, "We look forward to working with you.", **NL)
+
+    if q.get("notes"):
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(*MUTED)
+        pdf.multi_cell(W, 4, f"Note: {q['notes']}")
+
+    out = BytesIO()
+    out.write(pdf.output())
+    out.seek(0)
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF BUILDER – CHECKLIST
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
+    """Build a document checklist PDF using fpdf2 with brand colour from logo."""
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    BRAND      = _extract_dominant_color_from_b64(company.get("logo_base64", ""))
+    BRAND_DARK = _darken(BRAND, 0.7)
+    BRAND_LITE = _lighten(BRAND, 0.88)
+    DARK_TEXT  = (30, 41, 59)
+    MUTED      = (100, 116, 139)
+    WHITE      = (255, 255, 255)
+
+    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
+    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}
+
+    class PDF(FPDF):
+        def header(self): pass
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(*MUTED)
+            self.cell(0, 5, f"Document Checklist – {q.get('client_name', '')}  |  Page {self.page_no()}", align="C")
+
+    pdf = PDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    W = pdf.w - 28
+
+    # Logo
+    logo_b64 = company.get("logo_base64", "")
+    if logo_b64:
+        try:
+            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
+            img_bytes = base64.b64decode(raw)
+            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(img_bytes); tmp.close()
+            pdf.image(tmp.name, x=14, y=12, h=16)
+            os.unlink(tmp.name)
+        except Exception as e:
+            logger.warning(f"Checklist logo embed failed: {e}")
+
+    pdf.set_xy(14, 30)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*BRAND_DARK)
+    pdf.cell(0, 6, company.get("name", ""), **NL)
+
+    # Title band
+    band_y = 50
+    pdf.set_fill_color(*BRAND)
+    pdf.rect(14, band_y, W, 10, "F")
+    pdf.set_xy(14, band_y + 1.5)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*WHITE)
+    pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", **NL)
+
+    # Client info block
+    pdf.set_xy(14, band_y + 14)
+    pdf.set_fill_color(*BRAND_LITE)
+    pdf.rect(14, band_y + 14, W, 20, "F")
+    pdf.set_xy(16, band_y + 16)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(W / 2, 5, f"Client Name: {q.get('client_name', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(W / 2, 5, f"Service: {q.get('service', '')}", **CONT)
+    pdf.cell(W / 2, 5, f"Ref: {q.get('quotation_no', '')}", align="R", **NL)
+    pdf.set_x(16)
+    pdf.set_text_color(*MUTED)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", **NL)
+
+    # Checklist table
+    service   = q.get("service", "Other / Custom Service")
+    base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
+    extras    = q.get("extra_checklist_items", [])
+    all_docs  = base_docs + extras
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*BRAND)
+    pdf.cell(0, 6, "Required Documents", **NL)
+    pdf.set_draw_color(*BRAND)
+    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
+    pdf.ln(2)
+
+    col_sr   = 12
+    col_doc  = W - 62
+    col_recv = 22
+    col_rem  = W - col_sr - col_doc - col_recv
+
+    # Header
+    pdf.set_fill_color(*BRAND)
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(col_sr,   7, "Sr.",           align="C", fill=True, **CONT)
+    pdf.cell(col_doc,  7, "Document Name",            fill=True, **CONT)
+    pdf.cell(col_recv, 7, "Received",      align="C", fill=True, **CONT)
+    pdf.cell(col_rem,  7, "Remarks",                  fill=True, **NL)
+
+    # Rows
+    for idx, doc_name in enumerate(all_docs, 1):
+        fill_color = BRAND_LITE if idx % 2 == 0 else WHITE
+        pdf.set_fill_color(*fill_color)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.cell(col_sr,   8, str(idx),          align="C", fill=True, **CONT)
+        pdf.cell(col_doc,  8, str(doc_name)[:60],           fill=True, **CONT)
+        pdf.cell(col_recv, 8, "",                 align="C", fill=True, border=1, **CONT)
+        pdf.cell(col_rem,  8, "",                            fill=True, border=1, **NL)
+
+    # Checked by
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    half = W / 2
+    pdf.cell(half, 5, "Checked By: _______________________", **CONT)
+    pdf.cell(half, 5, "Signature: _______________________", align="R", **NL)
+
+    # Client confirmation block
+    pdf.ln(10)
+    confirm_y = pdf.get_y()
+    pdf.set_fill_color(*BRAND_LITE)
+    pdf.rect(14, confirm_y, W, 22, "F")
+    pdf.set_xy(16, confirm_y + 2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*BRAND)
+    pdf.cell(0, 5, "Client Confirmation", **NL)
+    pdf.set_x(16)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, "I confirm that the above documents have been submitted / will be submitted.", **NL)
+    pdf.set_x(16)
+    pdf.cell(0, 5, "", **NL)
+    pdf.set_x(16)
+    pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", **NL)
+
+    out = BytesIO()
+    out.write(pdf.output())
+    out.seek(0)
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -346,7 +871,6 @@ async def create_company(data: dict, current_user: User = Depends(get_current_us
 async def get_companies(current_user: User = Depends(get_current_user)):
     if not _permission_ok(current_user):
         raise HTTPException(403, "Quotation module access denied")
-    # Admin sees all; others see only their own
     query = {} if current_user.role == "admin" else {"created_by": current_user.id}
     companies = await db.companies.find(query, {"_id": 0}).to_list(500)
     return companies
@@ -412,7 +936,13 @@ async def create_quotation(
     if not _permission_ok(current_user):
         raise HTTPException(403, "Quotation module access denied")
 
-    subtotal, gst_amount, total = _compute_totals(data.items, data.gst_rate)
+    # Recompute each item's amount from quantity × unit_price
+    computed_items = []
+    for item in data.items:
+        item.amount = _compute_item_amount(item)
+        computed_items.append(item)
+
+    subtotal, gst_amount, total = _compute_totals(computed_items, data.gst_rate)
     now = datetime.now(timezone.utc).isoformat()
     qtn_no = await _next_qtn_number()
 
@@ -421,7 +951,7 @@ async def create_quotation(
         "quotation_no":         qtn_no,
         "date":                 date.today().isoformat(),
         **data.model_dump(),
-        "items":                [i.model_dump() for i in data.items],
+        "items":                [i.model_dump() for i in computed_items],
         "subtotal":             subtotal,
         "gst_amount":           gst_amount,
         "total":                total,
@@ -431,6 +961,11 @@ async def create_quotation(
     }
     await db.quotations.insert_one(doc)
     doc.pop("_id", None)
+
+    # Auto-update linked lead to "proposal" status
+    if data.lead_id:
+        await _update_lead_status_for_quotation(data.lead_id, "proposal")
+
     return doc
 
 
@@ -438,6 +973,7 @@ async def create_quotation(
 async def list_quotations(
     status: Optional[str] = None,
     service: Optional[str] = None,
+    lead_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     if not _permission_ok(current_user):
@@ -450,6 +986,8 @@ async def list_quotations(
         query["status"] = status
     if service:
         query["service"] = service
+    if lead_id:
+        query["lead_id"] = lead_id
 
     quotations = await db.quotations.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return quotations
@@ -481,23 +1019,38 @@ async def update_quotation(
     if current_user.role != "admin" and existing.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
 
-    # Recompute totals if items/gst changed
+    # Recompute items
     items_raw = data.get("items", existing.get("items", []))
-    items = [QuotationItem(**i) if isinstance(i, dict) else i for i in items_raw]
+    items = []
+    for i in items_raw:
+        if isinstance(i, dict):
+            item = QuotationItem(**i)
+            item.amount = _compute_item_amount(item)
+            items.append(item)
+
     gst_rate = float(data.get("gst_rate", existing.get("gst_rate", 18)))
     subtotal, gst_amount, total = _compute_totals(items, gst_rate)
 
-    data["items"]      = [i.model_dump() if hasattr(i, "model_dump") else i for i in items]
+    data["items"]      = [i.model_dump() for i in items]
     data["subtotal"]   = subtotal
     data["gst_amount"] = gst_amount
     data["total"]      = total
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Remove protected fields
     for f in ["id", "quotation_no", "created_by", "created_at"]:
         data.pop(f, None)
 
     await db.quotations.update_one({"id": quotation_id}, {"$set": data})
+
+    # Auto-update linked lead based on new quotation status
+    new_status = data.get("status")
+    lead_id = data.get("lead_id") or existing.get("lead_id")
+    if lead_id and new_status:
+        if new_status == "sent":
+            await _update_lead_status_for_quotation(lead_id, "proposal")
+        elif new_status == "accepted":
+            await _update_lead_status_for_quotation(lead_id, "negotiation")
+
     updated = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
     return updated
 
@@ -516,429 +1069,8 @@ async def delete_quotation(quotation_id: str, current_user: User = Depends(get_c
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PDF GENERATION  (uses reportlab – already available via fpdf in project)
-# We fall back to fpdf2 since that's what the existing codebase uses.
+# PDF EXPORT ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
-    """
-    Build a professional quotation PDF using fpdf2.
-    Compatible with fpdf2 >= 2.7 — uses new_x/new_y instead of deprecated ln=True/False.
-    """
-    from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
-    import base64, tempfile, os
-
-    DEEP_BLUE  = (13, 59, 102)
-    MED_BLUE   = (31, 111, 178)
-    LIGHT_BLUE = (224, 242, 254)
-    DARK_TEXT  = (30, 41, 59)
-    MUTED      = (100, 116, 139)
-
-    # ── Helper aliases for readability ──────────────────────────────────────
-    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}   # move to next line
-    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}     # stay on same line
-
-    class PDF(FPDF):
-        def header(self): pass
-        def footer(self):
-            self.set_y(-12)
-            self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*MUTED)
-            self.cell(0, 5, f"Quotation No: {q.get('quotation_no','')}  |  Page {self.page_no()}", align="C")
-
-    pdf = PDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.add_page()
-    W = pdf.w - 28    # usable width (14mm margins each side)
-
-    # ── Logo ─────────────────────────────────────────────────────────────────
-    logo_b64 = company.get("logo_base64", "")
-    if logo_b64:
-        try:
-            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
-            img_bytes = base64.b64decode(raw)
-            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(img_bytes); tmp.close()
-            pdf.image(tmp.name, x=14, y=12, h=18)
-            os.unlink(tmp.name)
-        except Exception:
-            pass
-
-    # ── Company block ─────────────────────────────────────────────────────────
-    pdf.set_xy(14, 32)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, company.get("name", ""), **NL)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    if company.get("address"):
-        pdf.multi_cell(W // 2, 4, company.get("address", ""))
-    contact_parts = []
-    if company.get("phone"):   contact_parts.append(f"Ph: {company['phone']}")
-    if company.get("email"):   contact_parts.append(f"E: {company['email']}")
-    if company.get("website"): contact_parts.append(company["website"])
-    if contact_parts:
-        pdf.cell(0, 4, "  |  ".join(contact_parts), **NL)
-    if company.get("gstin"):
-        pdf.cell(0, 4, f"GSTIN: {company['gstin']}", **NL)
-
-    # ── QUOTATION Title band ─────────────────────────────────────────────────
-    band_y = 62
-    pdf.set_fill_color(*DEEP_BLUE)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(W, 7, "QUOTATION", align="C", **NL)
-
-    # ── Meta row ─────────────────────────────────────────────────────────────
-    pdf.set_xy(14, band_y + 13)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(W / 2, 5, f"Quotation No: {q.get('quotation_no', '')}", **CONT)
-    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
-
-    # ── Client block ─────────────────────────────────────────────────────────
-    cl_y = pdf.get_y() + 4
-    pdf.set_fill_color(*LIGHT_BLUE)
-    pdf.rect(14, cl_y, W, 22, "F")
-    pdf.set_xy(16, cl_y + 2)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 5, "To:", **NL)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, q.get("client_name", ""), **NL)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    if q.get("client_address"):
-        pdf.cell(0, 4, str(q.get("client_address", ""))[:80], **NL)
-    if q.get("client_email") or q.get("client_phone"):
-        pdf.set_x(16)
-        pdf.cell(0, 4, "  ".join(filter(None, [q.get("client_email",""), q.get("client_phone","")])), **NL)
-
-    # ── Subject ──────────────────────────────────────────────────────────────
-    pdf.set_xy(14, cl_y + 26)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    subject = q.get("subject") or f"Quotation for {q.get('service','')}"
-    pdf.cell(0, 5, f"Subject: {subject}", **NL)
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(W, 5, "Dear Sir / Madam,\nThank you for your inquiry. We are pleased to submit our quotation as under:")
-
-    # ── Scope of Work ────────────────────────────────────────────────────────
-    scope = q.get("scope_of_work", [])
-    if scope:
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Scope of Work / Services", **NL)
-        pdf.set_draw_color(*MED_BLUE)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*DARK_TEXT)
-        for item in scope:
-            pdf.cell(6, 5, "-", **CONT)
-            pdf.cell(0, 5, str(item), **NL)
-
-    # ── Items Table ──────────────────────────────────────────────────────────
-    items = q.get("items", [])
-    if items:
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Quotation Details", **NL)
-        pdf.set_draw_color(*MED_BLUE)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-
-        col_w = [12, W - 60, 48]
-
-        # Header row
-        pdf.set_fill_color(*DEEP_BLUE)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(col_w[0], 7, "Sr.",          align="C", fill=True, **CONT)
-        pdf.cell(col_w[1], 7, "Description",               fill=True, **CONT)
-        pdf.cell(col_w[2], 7, "Amount (Rs.)", align="R", fill=True, **NL)
-
-        # Data rows
-        for idx, item in enumerate(items, 1):
-            if idx % 2 == 0:
-                pdf.set_fill_color(245, 249, 255)
-            else:
-                pdf.set_fill_color(255, 255, 255)
-            pdf.set_text_color(*DARK_TEXT)
-            pdf.set_font("Helvetica", "", 9)
-            amt = item.get("amount", 0)
-            desc = str(item.get("description", ""))[:60]
-            pdf.cell(col_w[0], 7, str(idx),               align="C", fill=True, **CONT)
-            pdf.cell(col_w[1], 7, desc,                               fill=True, **CONT)
-            pdf.cell(col_w[2], 7, f"Rs. {amt:,.2f}",      align="R", fill=True, **NL)
-
-        # Subtotal row
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_fill_color(*LIGHT_BLUE)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.cell(col_w[0] + col_w[1], 7, "Sub Total", align="R", fill=True, **CONT)
-        pdf.cell(col_w[2], 7, f"Rs. {q.get('subtotal', 0):,.2f}", align="R", fill=True, **NL)
-
-        gst_rate = q.get("gst_rate", 18)
-        if gst_rate and float(gst_rate) > 0:
-            pdf.cell(col_w[0] + col_w[1], 7, f"GST @ {gst_rate}%", align="R", fill=True, **CONT)
-            pdf.cell(col_w[2], 7, f"Rs. {q.get('gst_amount', 0):,.2f}", align="R", fill=True, **NL)
-
-        # Total row
-        pdf.set_fill_color(*DEEP_BLUE)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(col_w[0] + col_w[1], 8, "TOTAL PAYABLE", align="R", fill=True, **CONT)
-        pdf.cell(col_w[2], 8, f"Rs. {q.get('total', 0):,.2f}", align="R", fill=True, **NL)
-
-    # ── Terms & Conditions ───────────────────────────────────────────────────
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, "Terms & Conditions", **NL)
-    pdf.set_draw_color(*MED_BLUE)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*DARK_TEXT)
-
-    terms = []
-    if q.get("payment_terms"):
-        terms.append(f"1. Payment Terms: {q['payment_terms']}")
-    if q.get("timeline"):
-        terms.append(f"2. Timeline: {q['timeline']}")
-    terms.append(f"3. Validity of Quotation: {q.get('validity_days', 30)} days")
-    terms.append("4. Additional work will be charged separately.")
-    if q.get("advance_terms"):
-        terms.append(f"5. Advance: {q['advance_terms']}")
-    for i, t in enumerate(q.get("extra_terms", []), len(terms) + 1):
-        terms.append(f"{i}. {t}")
-
-    for term in terms:
-        pdf.multi_cell(W, 5, str(term))
-
-    # ── Bank Details ─────────────────────────────────────────────────────────
-    if company.get("bank_account_no") or company.get("bank_name"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*DEEP_BLUE)
-        pdf.cell(0, 6, "Bank Details", **NL)
-        pdf.set_draw_color(*MED_BLUE)
-        pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-        pdf.ln(1)
-        pdf.set_text_color(*DARK_TEXT)
-        half = W / 2
-        for label, val in [
-            ("Account Name", company.get("bank_account_name", "")),
-            ("Bank Name",    company.get("bank_name", "")),
-            ("Account No",   company.get("bank_account_no", "")),
-            ("IFSC Code",    company.get("bank_ifsc", "")),
-        ]:
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(half * 0.45, 5, f"{label}:", **CONT)
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(half * 0.55, 5, str(val), **NL)
-
-    # ── Signature block ──────────────────────────────────────────────────────
-    pdf.ln(8)
-    sig_b64 = company.get("signature_base64", "")
-    if sig_b64:
-        try:
-            raw = re.sub(r"^data:image/[^;]+;base64,", "", sig_b64)
-            img_bytes = base64.b64decode(raw)
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            tmp.write(img_bytes); tmp.close()
-            pdf.image(tmp.name, x=14, y=pdf.get_y(), h=14)
-            pdf.ln(16)
-            os.unlink(tmp.name)
-        except Exception:
-            pdf.ln(14)
-    else:
-        pdf.ln(14)
-
-    pdf.set_draw_color(*MED_BLUE)
-    pdf.line(14, pdf.get_y(), 80, pdf.get_y())
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, f"For {company.get('name', 'Company')}", **NL)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*MUTED)
-    pdf.cell(0, 4, "Authorized Signatory", **NL)
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 4, "We look forward to working with you.", **NL)
-
-    if q.get("notes"):
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(*MUTED)
-        pdf.multi_cell(W, 4, f"Note: {q['notes']}")
-
-    out = BytesIO()
-    out.write(pdf.output())
-    out.seek(0)
-    return out
-
-
-def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
-    """
-    Build a document checklist PDF using fpdf2.
-    Compatible with fpdf2 >= 2.7 — uses new_x/new_y instead of deprecated ln=True/False.
-    """
-    from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
-    import base64, tempfile, os
-
-    DEEP_BLUE  = (13, 59, 102)
-    MED_BLUE   = (31, 111, 178)
-    LIGHT_BLUE = (224, 242, 254)
-    DARK_TEXT  = (30, 41, 59)
-    MUTED      = (100, 116, 139)
-
-    NL   = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
-    CONT = {"new_x": XPos.RIGHT,   "new_y": YPos.TOP}
-
-    class PDF(FPDF):
-        def header(self): pass
-        def footer(self):
-            self.set_y(-12)
-            self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*MUTED)
-            self.cell(0, 5, f"Document Checklist – {q.get('client_name', '')}  |  Page {self.page_no()}", align="C")
-
-    pdf = PDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.add_page()
-    W = pdf.w - 28
-
-    # ── Logo ─────────────────────────────────────────────────────────────────
-    logo_b64 = company.get("logo_base64", "")
-    if logo_b64:
-        try:
-            raw = re.sub(r"^data:image/[^;]+;base64,", "", logo_b64)
-            img_bytes = base64.b64decode(raw)
-            suffix = ".png" if "png" in logo_b64[:30] else ".jpg"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(img_bytes); tmp.close()
-            pdf.image(tmp.name, x=14, y=12, h=16)
-            os.unlink(tmp.name)
-        except Exception:
-            pass
-
-    pdf.set_xy(14, 30)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, company.get("name", ""), **NL)
-
-    # ── Title band ────────────────────────────────────────────────────────────
-    band_y = 50
-    pdf.set_fill_color(*DEEP_BLUE)
-    pdf.rect(14, band_y, W, 10, "F")
-    pdf.set_xy(14, band_y + 1.5)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(W, 7, "DOCUMENT CHECKLIST", align="C", **NL)
-
-    # ── Client info block ─────────────────────────────────────────────────────
-    pdf.set_xy(14, band_y + 14)
-    pdf.set_fill_color(*LIGHT_BLUE)
-    pdf.rect(14, band_y + 14, W, 20, "F")
-    pdf.set_xy(16, band_y + 16)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(W / 2, 5, f"Client Name: {q.get('client_name', '')}", **CONT)
-    pdf.cell(W / 2, 5, f"Date: {q.get('date', '')}", align="R", **NL)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(W / 2, 5, f"Service: {q.get('service', '')}", **CONT)
-    pdf.cell(W / 2, 5, f"Ref: {q.get('quotation_no', '')}", align="R", **NL)
-    pdf.set_x(16)
-    pdf.set_text_color(*MUTED)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 4, "All documents must be self-attested. Originals may be required for verification.", **NL)
-
-    # ── Checklist table ───────────────────────────────────────────────────────
-    service   = q.get("service", "Other / Custom Service")
-    base_docs = SERVICE_CHECKLISTS.get(service, SERVICE_CHECKLISTS["Other / Custom Service"])
-    extras    = q.get("extra_checklist_items", [])
-    all_docs  = base_docs + extras
-
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 6, "Required Documents", **NL)
-    pdf.set_draw_color(*MED_BLUE)
-    pdf.line(14, pdf.get_y(), 14 + W, pdf.get_y())
-    pdf.ln(2)
-
-    col_sr   = 12
-    col_doc  = W - 62
-    col_recv = 22
-    col_rem  = W - col_sr - col_doc - col_recv
-
-    # Header
-    pdf.set_fill_color(*DEEP_BLUE)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.cell(col_sr,   7, "Sr.",           align="C", fill=True, **CONT)
-    pdf.cell(col_doc,  7, "Document Name",             fill=True, **CONT)
-    pdf.cell(col_recv, 7, "Received",      align="C", fill=True, **CONT)
-    pdf.cell(col_rem,  7, "Remarks",                   fill=True, **NL)
-
-    # Rows
-    for idx, doc_name in enumerate(all_docs, 1):
-        if idx % 2 == 0:
-            pdf.set_fill_color(245, 249, 255)
-        else:
-            pdf.set_fill_color(255, 255, 255)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(col_sr,   8, str(idx),          align="C", fill=True, **CONT)
-        pdf.cell(col_doc,  8, str(doc_name)[:60],           fill=True, **CONT)
-        pdf.cell(col_recv, 8, "",                 align="C", fill=True, border=1, **CONT)
-        pdf.cell(col_rem,  8, "",                            fill=True, border=1, **NL)
-
-    # ── Checked by ────────────────────────────────────────────────────────────
-    pdf.ln(8)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DARK_TEXT)
-    half = W / 2
-    pdf.cell(half, 5, "Checked By: _______________________", **CONT)
-    pdf.cell(half, 5, "Signature: _______________________", align="R", **NL)
-
-    # ── Client confirmation block ─────────────────────────────────────────────
-    pdf.ln(10)
-    confirm_y = pdf.get_y()
-    pdf.set_fill_color(*LIGHT_BLUE)
-    pdf.rect(14, confirm_y, W, 22, "F")
-    pdf.set_xy(16, confirm_y + 2)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*DEEP_BLUE)
-    pdf.cell(0, 5, "Client Confirmation", **NL)
-    pdf.set_x(16)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "I confirm that the above documents have been submitted / will be submitted.", **NL)
-    pdf.set_x(16)
-    pdf.cell(0, 5, "", **NL)
-    pdf.set_x(16)
-    pdf.cell(0, 5, "Client Signature: _________________________       Date: ______________", **NL)
-
-    out = BytesIO()
-    out.write(pdf.output())
-    out.seek(0)
-    return out
-
 
 @router.get("/quotations/{quotation_id}/pdf")
 async def export_quotation_pdf(
@@ -957,12 +1089,20 @@ async def export_quotation_pdf(
     if not company:
         raise HTTPException(404, "Company profile not found")
 
-    pdf_buf = _build_quotation_pdf(q, company)
-    filename = f"quotation_{q.get('quotation_no','').replace('/', '-')}.pdf"
+    try:
+        pdf_buf = _build_quotation_pdf(q, company)
+    except Exception as e:
+        logger.error(f"Quotation PDF build failed for {quotation_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+
+    filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
         pdf_buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "application/pdf",
+        }
     )
 
 
@@ -983,10 +1123,18 @@ async def export_checklist_pdf(
     if not company:
         raise HTTPException(404, "Company profile not found")
 
-    pdf_buf = _build_checklist_pdf(q, company)
-    filename = f"checklist_{q.get('quotation_no','').replace('/', '-')}.pdf"
+    try:
+        pdf_buf = _build_checklist_pdf(q, company)
+    except Exception as e:
+        logger.error(f"Checklist PDF build failed for {quotation_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+
+    filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
         pdf_buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "application/pdf",
+        }
     )
