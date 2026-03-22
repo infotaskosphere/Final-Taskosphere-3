@@ -638,21 +638,24 @@ export default function DocumentRegister() {
         </div>
       </div>
 
-      {/* ── Stats Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* ── Stats Cards — compliance-calendar style ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total IN',       value: statsIn,      icon: <ArrowDownCircle className="h-5 w-5" />, bg: 'bg-emerald-500', light: 'bg-emerald-50 border-emerald-200 text-emerald-700',  dark: 'bg-emerald-900/30 border-emerald-700 text-emerald-300' },
-          { label: 'Total OUT',      value: statsOut,     icon: <ArrowUpCircle className="h-5 w-5" />,   bg: 'bg-red-500',     light: 'bg-red-50 border-red-200 text-red-700',              dark: 'bg-red-900/30 border-red-700 text-red-300' },
-          { label: 'Total Records',  value: statsTotal,   icon: <LayoutList className="h-5 w-5" />,      bg: 'bg-indigo-500',  light: 'bg-indigo-50 border-indigo-200 text-indigo-700',     dark: 'bg-indigo-900/30 border-indigo-700 text-indigo-300' },
-          { label: 'Out > 30 days',  value: statsLongOut, icon: <FileText className="h-5 w-5" />,        bg: 'bg-orange-500',  light: 'bg-orange-50 border-orange-200 text-orange-700',     dark: 'bg-orange-900/30 border-orange-700 text-orange-300' },
+          { label: 'Total IN',      value: statsIn,      color: 'text-emerald-500' },
+          { label: 'Total OUT',     value: statsOut,     color: 'text-red-500'     },
+          { label: 'Total Records', value: statsTotal,   color: 'text-slate-700'   },
+          { label: 'Out > 30 days', value: statsLongOut, color: 'text-orange-500'  },
         ].map(stat => (
-          <div key={stat.label} className={`rounded-2xl border p-4 flex items-center gap-3 shadow-sm ${isDark ? stat.dark : stat.light}`}>
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0 ${stat.bg}`}>{stat.icon}</div>
-            <div>
-              <p className="text-2xl font-bold leading-none">{stat.value}</p>
-              <p className="text-[11px] font-medium mt-0.5 opacity-75">{stat.label}</p>
-            </div>
-          </div>
+          <Card
+            key={stat.label}
+            className={`border transition-all hover:shadow-lg hover:-translate-y-0.5 ${isDark ? 'bg-slate-800 border-slate-700' : 'border-slate-200'}`}
+            style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+          >
+            <CardContent className="p-5">
+              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{stat.label}</p>
+              <p className={`text-4xl font-bold tabular-nums ${isDark && stat.color === 'text-slate-700' ? 'text-slate-200' : stat.color}`}>{stat.value}</p>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
