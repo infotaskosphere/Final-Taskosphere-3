@@ -286,7 +286,7 @@ const ServiceSelector = ({ selected=[], onChange, extra=[] }) => {
           return (
             <button key={svc.value} type="button" onClick={()=>toggle(svc.value)}
               className={cn('inline-flex items-center gap-1.5 h-8 px-3 rounded-2xl text-xs font-semibold border transition-all active:scale-95',
-                isSel?cn(svc.color,'shadow-sm ring-1 ring-offset-1'):(isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500 hover:text-slate-700 hover:bg-slate-50')}>
+                isSel?cn(svc.color,'shadow-sm ring-1 ring-offset-1'):(isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500':'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50')}>
               {isSel&&<Check className="h-3 w-3 flex-shrink-0" />}{svc.value}
             </button>
           );
