@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, Histor
 import { format } from 'date-fns';
 
 export default function DSCRegister() {
+  const isDark = useDark();
   const [dscList, setDscList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -301,11 +303,11 @@ export default function DSCRegister() {
   const totalPagesExpired = Math.ceil(expiredDSC.length / rowsPerPage);
 
   return (
-    <div className="space-y-6" data-testid="dsc-page">
+    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark?"bg-[#0f172a]":""}`} data-testid="dsc-page">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-900">DSC Register</h1>
-          <p className="text-slate-600 mt-1">Manage digital signature certificates with IN/OUT tracking</p>
+          <h1 className={`text-3xl font-bold font-outfit ${isDark?"text-slate-100":"text-slate-900"}`}>DSC Register</h1>
+          <p className={`mt-1 ${isDark?"text-slate-400":"text-slate-600"}`}>Manage digital signature certificates with IN/OUT tracking</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
@@ -486,7 +488,7 @@ export default function DSCRegister() {
                   </Card>
 
                   <Card className="p-4">
-                    <h4 className="font-medium text-slate-900 mb-3">
+                    <h4 className={`font-medium mb-3 ${isDark?"text-slate-100":"text-slate-900"}`}>
                       {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     </h4>
                     <form onSubmit={(e) => {
@@ -630,7 +632,7 @@ export default function DSCRegister() {
                                   )}
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
-                                  <div className="text-xs text-slate-500">
+                                  <div className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                                     {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
                                   </div>
                                   {movement.id && (
@@ -789,7 +791,7 @@ export default function DSCRegister() {
       </div>
       <div className="flex flex-col sm:flex-row gap-4 max-w-xl">
         <Select value={rowsPerPage.toString()} onValueChange={(value) => setRowsPerPage(Number(value))}>
-          <SelectTrigger className="w-[180px] bg-white border-slate-200 focus:border-indigo-500">
+          <SelectTrigger className={`w-[180px] focus:border-indigo-500 ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}>
             <SelectValue placeholder="Rows per page" />
           </SelectTrigger>
           <SelectContent>
@@ -806,7 +808,7 @@ export default function DSCRegister() {
             placeholder="Search by holder name, certificate number, or company..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-white border-slate-200 focus:border-indigo-500"
+            className={`pl-10 focus:border-indigo-500 ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
             data-testid="dsc-search-input"
           />
         </div>
@@ -1017,7 +1019,7 @@ export default function DSCRegister() {
                       <p className="text-sm text-slate-600">
                         {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         Recorded by: {movement.recorded_by}
                       </p>
                       {movement.notes && (
@@ -1025,10 +1027,10 @@ export default function DSCRegister() {
                       )}
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'hh:mm a')}
                       </p>
                     </div>
@@ -1100,7 +1102,7 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
   return (
     <div className="w-full overflow-hidden">
       <table className="w-full table-auto border-collapse">
-        <thead className="bg-slate-50 border-b border-slate-200">
+        <thead className={`border-b ${isDark?"bg-slate-800 border-slate-700":"bg-slate-50 border-slate-200"}`}>
           <tr>
             <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
               S.No
@@ -1125,19 +1127,19 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 bg-white">
+        <tbody className={`divide-y ${isDark?"divide-slate-700 bg-slate-800":"divide-slate-100 bg-white"}`}>
           {dscList.map((dsc, index) => {
             const status = getDSCStatus(dsc.expiry_date);
             return (
               <tr
                 key={dsc.id}
-                className="hover:bg-slate-50 transition-colors"
+                className={`transition-colors ${isDark?"hover:bg-slate-700/30":"hover:bg-slate-50"}`}
                 data-testid={`dsc-row-${dsc.id}`}
               >
                 <td className="px-4 py-3 text-sm text-slate-500">
                   {globalIndexStart + index + 1}
                 </td>
-                <td className="px-4 py-3 text-sm font-medium text-slate-900 break-words leading-tight">
+                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark?"text-slate-100":"text-slate-900"}`}>
                   {dsc.holder_name}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600 truncate">
