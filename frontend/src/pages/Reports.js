@@ -31,20 +31,7 @@ const PALETTE = ['#0D3B66','#1F6FB2','#1FAF5A','#5CCB5F','#F59E0B','#EF4444'];
 const cV = { hidden:{opacity:0}, visible:{opacity:1,transition:{staggerChildren:0.06}} };
 const iV = { hidden:{opacity:0,y:16}, visible:{opacity:1,y:0,transition:{duration:0.35,ease:[0.23,1,0.32,1]}} };
 
-// ─── Dark-mode observer ───────────────────────────────────────────────────────
-function useDark() {
-  const [dark, setDark] = useState(
-    () => typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    const o = new MutationObserver(() =>
-      setDark(document.documentElement.classList.contains('dark'))
-    );
-    o.observe(document.documentElement, { attributes:true, attributeFilter:['class'] });
-    return () => o.disconnect();
-  }, []);
-  return dark;
-}
+// Dark mode via shared hook (imported above)
 
 // ─── Theme tokens (light / dark) ─────────────────────────────────────────────
 const tok = (dark) => ({
