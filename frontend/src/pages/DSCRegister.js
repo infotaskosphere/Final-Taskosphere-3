@@ -11,9 +11,170 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, History, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Edit, Trash2, AlertCircle, ArrowDownCircle, ArrowUpCircle, History, Search, ArrowUpDown } from 'lucide-react';
 import { format } from 'date-fns';
 
+// ─── Pagination (client-page style) ───────────────────────────────────────────
+function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageChange, isDark }) {
+  if (totalPages <= 1) return null;
+
+  const pageStart = (currentPage - 1) * pageSize;
+
+  const pageWindow = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (currentPage <= 4) return [1, 2, 3, 4, 5, '…', totalPages];
+    if (currentPage >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    return [1, '…', currentPage - 1, currentPage, currentPage + 1, '…', totalPages];
+  })();
+
+  return (
+    <div
+      className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+      style={{
+        borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+        background: isDark ? '#1e293b' : '#F8FAFC',
+      }}
+    >
+      <p style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', margin: 0 }}>
+        <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>
+          {pageStart + 1}–{Math.min(pageStart + pageSize, totalItems)}
+        </span>
+        {' '}of{' '}
+        <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>
+          {totalItems}
+        </span>
+        {' '}records
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          style={{
+            width: 30, height: 30, borderRadius: 8, border: 'none',
+            cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+            background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
+            color: currentPage === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'),
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 14, fontWeight: 700, transition: 'background 0.12s',
+            opacity: currentPage === 1 ? 0.4 : 1,
+          }}
+          onMouseEnter={e => { if (currentPage !== 1) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+        >‹</button>
+
+        {pageWindow.map((p, i) => p === '…' ? (
+          <span key={`ellipsis-${i}`} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: isDark ? '#475569' : '#94a3b8' }}>…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            style={{
+              width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: p === currentPage
+                ? 'linear-gradient(135deg, #4f46e5, #6366f1)'
+                : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'),
+              color: p === currentPage ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+              fontSize: 11, fontWeight: p === currentPage ? 700 : 500,
+              transition: 'background 0.12s',
+              boxShadow: p === currentPage ? '0 2px 8px rgba(79,70,229,0.35)' : 'none',
+            }}
+            onMouseEnter={e => { if (p !== currentPage) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+            onMouseLeave={e => { if (p !== currentPage) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+          >{p}</button>
+        ))}
+
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage === totalPages}
+          style={{
+            width: 30, height: 30, borderRadius: 8, border: 'none',
+            cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+            background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
+            color: currentPage === totalPages ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'),
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 14, fontWeight: 700, transition: 'background 0.12s',
+            opacity: currentPage === totalPages ? 0.4 : 1,
+          }}
+          onMouseEnter={e => { if (currentPage !== totalPages) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+        >›</button>
+      </div>
+
+      <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>
+        Page {currentPage} / {totalPages}
+      </p>
+    </div>
+  );
+}
+
+// ─── DSC Table ────────────────────────────────────────────────────────────────
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark }) {
+  return (
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-auto border-collapse">
+        <thead className={`border-b ${isDark ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
+          <tr>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">S.No</th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">Holder Name</th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">Type</th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">Associated With</th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">Expiry Date</th>
+            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-32">Status</th>
+            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">Actions</th>
+          </tr>
+        </thead>
+        <tbody className={`divide-y ${isDark ? "divide-slate-700 bg-slate-800" : "divide-slate-100 bg-white"}`}>
+          {dscList.map((dsc, index) => {
+            const status = getDSCStatus(dsc.expiry_date);
+            return (
+              <tr
+                key={dsc.id}
+                className={`transition-colors ${isDark ? "hover:bg-slate-700/30" : "hover:bg-slate-50"}`}
+                data-testid={`dsc-row-${dsc.id}`}
+              >
+                <td className="px-4 py-3 text-sm text-slate-500">{globalIndexStart + index + 1}</td>
+                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark ? "text-slate-100" : "text-slate-900"}`}>{dsc.holder_name}</td>
+                <td className="px-4 py-3 text-sm text-slate-600 truncate">{dsc.dsc_type || '-'}</td>
+                <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">{dsc.associated_with || '-'}</td>
+                <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-1.5 h-1.5 rounded-full ${status.color}`}></div>
+                    <span className={`text-[12px] font-medium leading-none ${status.textColor}`}>{status.text}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className="h-8 w-8 p-0 hover:bg-slate-100" title="View Log">
+                      <History className="h-4 w-4 text-slate-500" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
+                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
+                      title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
+                    >
+                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(dsc)} className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600">
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(dsc.id)} className="h-8 w-8 p-0 hover:bg-red-50 text-red-600">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 export default function DSCRegister() {
   const isDark = useDark();
   const [dscList, setDscList] = useState([]);
@@ -29,6 +190,11 @@ export default function DSCRegister() {
   const [currentPageIn, setCurrentPageIn] = useState(1);
   const [currentPageOut, setCurrentPageOut] = useState(1);
   const [currentPageExpired, setCurrentPageExpired] = useState(1);
+
+  // Sorting: 'az' | 'za' | 'fifo' | 'lifo'
+  // FIFO = oldest expiry first, LIFO = latest expiry first (for DSC, expiry-based)
+  const [sortOrder, setSortOrder] = useState('az');
+
   const [formData, setFormData] = useState({
     holder_name: '',
     dsc_type: '',
@@ -50,21 +216,20 @@ export default function DSCRegister() {
     notes: '',
   });
 
-  useEffect(() => {
-    fetchDSC();
-  }, []);
+  useEffect(() => { fetchDSC(); }, []);
+
+  // Reset pages when sort/search changes
+  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
 
   const fetchDSC = async () => {
     setLoading(true);
     try {
       const response = await api.get('/dsc');
-      console.log("API Response:", response.data);
       const actualData = Array.isArray(response.data)
         ? response.data
         : (response.data.data || response.data.dscs || []);
       setDscList(actualData);
     } catch (error) {
-      console.error('Fetch error:', error);
       toast.error('Failed to fetch DSC');
       setDscList([]);
     } finally {
@@ -137,25 +302,15 @@ export default function DSCRegister() {
     try {
       const currentStatus = getDSCInOutStatus(editingDSC);
       const newType = currentStatus === 'IN' ? 'OUT' : 'IN';
-      await api.post(`/dsc/${editingDSC.id}/movement`, {
-        ...movementData,
-        movement_type: newType,
-      });
+      await api.post(`/dsc/${editingDSC.id}/movement`, { ...movementData, movement_type: newType });
       toast.success(`DSC marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
-
       const response = await api.get('/dsc');
-      const actualData = Array.isArray(response.data)
-        ? response.data
-        : (response.data.data || response.data.dscs || []);
+      const actualData = Array.isArray(response.data) ? response.data : (response.data.data || response.data.dscs || []);
       setDscList(actualData);
-
       const updatedDSC = actualData.find(d => d.id === editingDSC.id);
-      if (updatedDSC) {
-        setEditingDSC(updatedDSC);
-      }
+      if (updatedDSC) setEditingDSC(updatedDSC);
     } catch (error) {
-      console.error('Movement error:', error);
       toast.error('Failed to record movement');
     } finally {
       setLoading(false);
@@ -174,16 +329,11 @@ export default function DSCRegister() {
       });
       toast.success('Movement log updated successfully!');
       setEditingMovement(null);
-
       const response = await api.get('/dsc');
-      const actualData = Array.isArray(response.data)
-        ? response.data
-        : (response.data.data || response.data.dscs || []);
+      const actualData = Array.isArray(response.data) ? response.data : (response.data.data || response.data.dscs || []);
       setDscList(actualData);
       const updatedDSC = actualData.find(d => d.id === editingDSC.id);
-      if (updatedDSC) {
-        setEditingDSC(updatedDSC);
-      }
+      if (updatedDSC) setEditingDSC(updatedDSC);
     } catch (error) {
       toast.error('Failed to update movement');
     } finally {
@@ -246,13 +396,9 @@ export default function DSCRegister() {
     const now = new Date();
     const expiry = new Date(expiryDate);
     const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0) {
-      return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
-    } else if (daysLeft <= 7) {
-      return { color: 'bg-red-500', text: `${daysLeft} Days left`, textColor: 'text-red-700' };
-    } else if (daysLeft <= 30) {
-      return { color: 'bg-yellow-500', text: `${daysLeft} Days left`, textColor: 'text-yellow-700' };
-    }
+    if (daysLeft < 0) return { color: 'bg-red-500', text: 'Expired', textColor: 'text-red-700' };
+    if (daysLeft <= 7) return { color: 'bg-red-500', text: `${daysLeft} Days left`, textColor: 'text-red-700' };
+    if (daysLeft <= 30) return { color: 'bg-yellow-500', text: `${daysLeft} Days left`, textColor: 'text-yellow-700' };
     return { color: 'bg-emerald-500', text: `${daysLeft} Days left`, textColor: 'text-emerald-700' };
   };
 
@@ -267,41 +413,62 @@ export default function DSCRegister() {
     );
   };
 
-  const inDSC = dscList.filter(dsc => {
+  // Sorting function — FIFO/LIFO based on expiry_date for DSC
+  const applySortOrder = (list) => {
+    const arr = [...list];
+    switch (sortOrder) {
+      case 'az':   return arr.sort((a, b) => (a.holder_name || '').localeCompare(b.holder_name || ''));
+      case 'za':   return arr.sort((a, b) => (b.holder_name || '').localeCompare(a.holder_name || ''));
+      case 'fifo': return arr.sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date)); // oldest expiry first
+      case 'lifo': return arr.sort((a, b) => new Date(b.expiry_date) - new Date(a.expiry_date)); // latest expiry first
+      default:     return arr;
+    }
+  };
+
+  const inDSC = applySortOrder(dscList.filter(dsc => {
     const notExpired = new Date(dsc.expiry_date) >= new Date();
     return notExpired && getDSCInOutStatus(dsc) === 'IN' && filterBySearch(dsc);
-  }).sort((a, b) => a.holder_name.localeCompare(b.holder_name));
+  }));
 
-  const outDSC = dscList.filter(dsc => {
+  const outDSC = applySortOrder(dscList.filter(dsc => {
     const notExpired = new Date(dsc.expiry_date) >= new Date();
     return notExpired && getDSCInOutStatus(dsc) === 'OUT' && filterBySearch(dsc);
-  }).sort((a, b) => a.holder_name.localeCompare(b.holder_name));
+  }));
 
-  const expiredDSC = dscList.filter(dsc => {
+  const expiredDSC = applySortOrder(dscList.filter(dsc => {
     const now = new Date();
     const expiry = new Date(dsc.expiry_date);
     return expiry < now && filterBySearch(dsc);
-  }).sort((a, b) => a.holder_name.localeCompare(b.holder_name));
-
-  const paginatedInDSC = inDSC.slice((currentPageIn - 1) * rowsPerPage, currentPageIn * rowsPerPage);
-  const paginatedOutDSC = outDSC.slice((currentPageOut - 1) * rowsPerPage, currentPageOut * rowsPerPage);
-  const paginatedExpiredDSC = expiredDSC.slice((currentPageExpired - 1) * rowsPerPage, currentPageExpired * rowsPerPage);
+  }));
 
   const totalPagesIn = Math.ceil(inDSC.length / rowsPerPage);
   const totalPagesOut = Math.ceil(outDSC.length / rowsPerPage);
   const totalPagesExpired = Math.ceil(expiredDSC.length / rowsPerPage);
 
+  const safePageIn = Math.min(currentPageIn, Math.max(1, totalPagesIn));
+  const safePageOut = Math.min(currentPageOut, Math.max(1, totalPagesOut));
+  const safePageExpired = Math.min(currentPageExpired, Math.max(1, totalPagesExpired));
+
+  const paginatedInDSC = inDSC.slice((safePageIn - 1) * rowsPerPage, safePageIn * rowsPerPage);
+  const paginatedOutDSC = outDSC.slice((safePageOut - 1) * rowsPerPage, safePageOut * rowsPerPage);
+  const paginatedExpiredDSC = expiredDSC.slice((safePageExpired - 1) * rowsPerPage, safePageExpired * rowsPerPage);
+
+  const SORT_OPTIONS = [
+    { value: 'az',   label: 'A → Z' },
+    { value: 'za',   label: 'Z → A' },
+    { value: 'fifo', label: 'FIFO (Expiry ↑)' },
+    { value: 'lifo', label: 'LIFO (Expiry ↓)' },
+  ];
+
   return (
     <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark ? "bg-[#0f172a]" : ""}`} data-testid="dsc-page">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className={`text-3xl font-bold font-outfit ${isDark ? "text-slate-100" : "text-slate-900"}`}>DSC Register</h1>
           <p className={`mt-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>Manage digital signature certificates with IN/OUT tracking</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
             <Button
               className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95"
@@ -334,59 +501,32 @@ export default function DSCRegister() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="holder_name"
-                          placeholder="Name of certificate holder"
-                          value={formData.holder_name}
-                          onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })}
-                          required
-                          data-testid="dsc-holder-name-input"
-                        />
+                        <Input id="holder_name" placeholder="Name of certificate holder" value={formData.holder_name}
+                          onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })} required data-testid="dsc-holder-name-input" />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="dsc_type">Type</Label>
-                        <Input
-                          id="dsc_type"
-                          placeholder="e.g. Class 3, Signature, Encryption"
-                          value={formData.dsc_type}
-                          onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })}
-                          data-testid="dsc-type-input"
-                        />
+                        <Input id="dsc_type" placeholder="e.g. Class 3, Signature, Encryption" value={formData.dsc_type}
+                          onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })} data-testid="dsc-type-input" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="dsc_password">Password</Label>
-                        <Input
-                          id="dsc_password"
-                          type="text"
-                          placeholder="DSC Password"
-                          value={formData.dsc_password}
-                          onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })}
-                          data-testid="dsc-password-input"
-                        />
+                        <Input id="dsc_password" type="text" placeholder="DSC Password" value={formData.dsc_password}
+                          onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })} data-testid="dsc-password-input" />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                        <Input
-                          id="associated_with"
-                          placeholder="Firm or client name"
-                          value={formData.associated_with}
-                          onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                          data-testid="dsc-associated-input"
-                        />
+                        <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
+                          onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })} data-testid="dsc-associated-input" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="entity_type">Entity Type</Label>
-                        <Select
-                          value={formData.entity_type}
-                          onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                        >
-                          <SelectTrigger data-testid="dsc-entity-type-select">
-                            <SelectValue />
-                          </SelectTrigger>
+                        <Select value={formData.entity_type} onValueChange={(value) => setFormData({ ...formData, entity_type: value })}>
+                          <SelectTrigger data-testid="dsc-entity-type-select"><SelectValue /></SelectTrigger>
                           <SelectContent className="max-h-60 overflow-y-auto">
                             <SelectItem value="firm">Firm</SelectItem>
                             <SelectItem value="client">Client</SelectItem>
@@ -395,59 +535,26 @@ export default function DSCRegister() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="issue_date"
-                          type="date"
-                          value={formData.issue_date}
-                          onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                          required
-                          data-testid="dsc-issue-date-input"
-                        />
+                        <Input id="issue_date" type="date" value={formData.issue_date}
+                          onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="dsc-issue-date-input" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="expiry_date"
-                          type="date"
-                          value={formData.expiry_date}
-                          onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                          required
-                          data-testid="dsc-expiry-date-input"
-                        />
+                        <Input id="expiry_date" type="date" value={formData.expiry_date}
+                          onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })} required data-testid="dsc-expiry-date-input" />
                       </div>
                       <div></div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="notes">Notes</Label>
-                      <Textarea
-                        id="notes"
-                        placeholder="Additional notes"
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        rows={2}
-                        data-testid="dsc-notes-input"
-                      />
+                      <Textarea id="notes" placeholder="Additional notes" value={formData.notes}
+                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} data-testid="dsc-notes-input" />
                     </div>
                     <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setDialogOpen(false);
-                          resetForm();
-                        }}
-                        data-testid="dsc-cancel-btn"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700"
-                        data-testid="dsc-submit-btn"
-                      >
+                      <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="dsc-cancel-btn">Cancel</Button>
+                      <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700" data-testid="dsc-submit-btn">
                         {loading ? 'Saving...' : 'Update DSC'}
                       </Button>
                     </DialogFooter>
@@ -461,65 +568,37 @@ export default function DSCRegister() {
                         <p className="text-sm text-slate-600">Current Status</p>
                         <div className="flex items-center gap-2 mt-1">
                           {getDSCInOutStatus(editingDSC) === 'IN' ? (
-                            <>
-                              <ArrowDownCircle className="h-5 w-5 text-emerald-600" />
-                              <Badge className="bg-emerald-600 text-white">IN - Available</Badge>
-                            </>
+                            <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /><Badge className="bg-emerald-600 text-white">IN - Available</Badge></>
                           ) : (
-                            <>
-                              <ArrowUpCircle className="h-5 w-5 text-red-600" />
-                              <Badge className="bg-red-600 text-white">OUT - Taken</Badge>
-                            </>
+                            <><ArrowUpCircle className="h-5 w-5 text-red-600" /><Badge className="bg-red-600 text-white">OUT - Taken</Badge></>
                           )}
                         </div>
                       </div>
                     </div>
                   </Card>
-
                   <Card className="p-4">
                     <h4 className={`font-medium mb-3 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
                       {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     </h4>
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      handleMovementInModal();
-                    }} className="space-y-3">
+                    <form onSubmit={(e) => { e.preventDefault(); handleMovementInModal(); }} className="space-y-3">
                       <div className="space-y-2">
                         <Label htmlFor="inline_person">
                           {getDSCInOutStatus(editingDSC) === 'IN' ? 'Taken By *' : 'Delivered By *'}
                         </Label>
-                        <Input
-                          id="inline_person"
-                          placeholder="Enter person name"
-                          value={movementData.person_name}
-                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                          required
-                        />
+                        <Input id="inline_person" placeholder="Enter person name" value={movementData.person_name}
+                          onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })} required />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="inline_notes">Notes</Label>
-                        <Input
-                          id="inline_notes"
-                          placeholder="Optional notes"
-                          value={movementData.notes}
-                          onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                        />
+                        <Input id="inline_notes" placeholder="Optional notes" value={movementData.notes}
+                          onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })} />
                       </div>
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}
-                      >
+                      <Button type="submit" disabled={loading}
+                        className={getDSCInOutStatus(editingDSC) === 'IN' ? 'bg-red-600 hover:bg-red-700 w-full' : 'bg-emerald-600 hover:bg-emerald-700 w-full'}>
                         {getDSCInOutStatus(editingDSC) === 'IN' ? (
-                          <>
-                            <ArrowUpCircle className="h-4 w-4 mr-2" />
-                            Mark as OUT
-                          </>
+                          <><ArrowUpCircle className="h-4 w-4 mr-2" />Mark as OUT</>
                         ) : (
-                          <>
-                            <ArrowDownCircle className="h-4 w-4 mr-2" />
-                            Mark as IN
-                          </>
+                          <><ArrowDownCircle className="h-4 w-4 mr-2" />Mark as IN</>
                         )}
                       </Button>
                     </form>
@@ -532,7 +611,6 @@ export default function DSCRegister() {
                       editingDSC.movement_log.slice().reverse().map((movement, index) => {
                         const movementKey = movement.id || movement.timestamp;
                         const isEditing = editingMovement === movementKey;
-
                         return (
                           <Card key={index} className={`p-3 ${movement.movement_type === 'IN' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
                             {isEditing ? (
@@ -540,62 +618,35 @@ export default function DSCRegister() {
                                 <div className="flex items-center gap-3">
                                   <Label className="text-sm font-medium">Status:</Label>
                                   <div className="flex gap-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
+                                    <Button type="button" size="sm"
                                       variant={editMovementData.movement_type === 'IN' ? 'default' : 'outline'}
                                       className={editMovementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}
-                                    >
-                                      <ArrowDownCircle className="h-4 w-4 mr-1" />
-                                      IN
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'IN' })}>
+                                      <ArrowDownCircle className="h-4 w-4 mr-1" />IN
                                     </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
+                                    <Button type="button" size="sm"
                                       variant={editMovementData.movement_type === 'OUT' ? 'default' : 'outline'}
                                       className={editMovementData.movement_type === 'OUT' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}
-                                    >
-                                      <ArrowUpCircle className="h-4 w-4 mr-1" />
-                                      OUT
+                                      onClick={() => setEditMovementData({ ...editMovementData, movement_type: 'OUT' })}>
+                                      <ArrowUpCircle className="h-4 w-4 mr-1" />OUT
                                     </Button>
                                   </div>
                                 </div>
                                 <div className="space-y-2">
                                   <Label className="text-xs">Person Name</Label>
-                                  <Input
-                                    size="sm"
-                                    value={editMovementData.person_name}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })}
-                                    placeholder="Person name"
-                                  />
+                                  <Input size="sm" value={editMovementData.person_name}
+                                    onChange={(e) => setEditMovementData({ ...editMovementData, person_name: e.target.value })} placeholder="Person name" />
                                 </div>
                                 <div className="space-y-2">
                                   <Label className="text-xs">Notes</Label>
-                                  <Input
-                                    size="sm"
-                                    value={editMovementData.notes}
-                                    onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })}
-                                    placeholder="Notes (optional)"
-                                  />
+                                  <Input size="sm" value={editMovementData.notes}
+                                    onChange={(e) => setEditMovementData({ ...editMovementData, notes: e.target.value })} placeholder="Notes (optional)" />
                                 </div>
                                 <div className="flex gap-2 justify-end">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setEditingMovement(null)}
-                                  >
-                                    Cancel
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-indigo-600 hover:bg-indigo-700"
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setEditingMovement(null)}>Cancel</Button>
+                                  <Button type="button" size="sm" className="bg-indigo-600 hover:bg-indigo-700"
                                     onClick={() => handleUpdateMovement(movement.id)}
-                                    disabled={loading || !editMovementData.person_name}
-                                  >
+                                    disabled={loading || !editMovementData.person_name}>
                                     {loading ? 'Saving...' : 'Save'}
                                   </Button>
                                 </div>
@@ -611,9 +662,7 @@ export default function DSCRegister() {
                                     )}
                                     <span className="text-sm font-medium">{movement.person_name}</span>
                                   </div>
-                                  {movement.notes && (
-                                    <p className="text-xs text-slate-600">{movement.notes}</p>
-                                  )}
+                                  {movement.notes && <p className="text-xs text-slate-600">{movement.notes}</p>}
                                   {movement.edited_at && (
                                     <p className="text-xs text-slate-400 mt-1">
                                       Edited by {movement.edited_by} on {format(new Date(movement.edited_at), 'MMM dd, yyyy')}
@@ -625,15 +674,10 @@ export default function DSCRegister() {
                                     {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
                                   </div>
                                   {movement.id && (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="ghost"
+                                    <Button type="button" size="sm" variant="ghost"
                                       className="h-7 px-2 text-xs text-slate-500 hover:text-indigo-600"
-                                      onClick={() => startEditingMovement(movement)}
-                                    >
-                                      <Edit className="h-3 w-3 mr-1" />
-                                      Edit
+                                      onClick={() => startEditingMovement(movement)}>
+                                      <Edit className="h-3 w-3 mr-1" />Edit
                                     </Button>
                                   )}
                                 </div>
@@ -656,59 +700,32 @@ export default function DSCRegister() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="holder_name">Holder Name <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="holder_name"
-                      placeholder="Name of certificate holder"
-                      value={formData.holder_name}
-                      onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })}
-                      required
-                      data-testid="dsc-holder-name-input"
-                    />
+                    <Input id="holder_name" placeholder="Name of certificate holder" value={formData.holder_name}
+                      onChange={(e) => setFormData({ ...formData, holder_name: e.target.value })} required data-testid="dsc-holder-name-input" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="dsc_type">Type</Label>
-                    <Input
-                      id="dsc_type"
-                      placeholder="e.g. Class 3, Signature, Encryption"
-                      value={formData.dsc_type}
-                      onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })}
-                      data-testid="dsc-type-input"
-                    />
+                    <Input id="dsc_type" placeholder="e.g. Class 3, Signature, Encryption" value={formData.dsc_type}
+                      onChange={(e) => setFormData({ ...formData, dsc_type: e.target.value })} data-testid="dsc-type-input" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="dsc_password">Password</Label>
-                    <Input
-                      id="dsc_password"
-                      type="text"
-                      placeholder="DSC Password"
-                      value={formData.dsc_password}
-                      onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })}
-                      data-testid="dsc-password-input"
-                    />
+                    <Input id="dsc_password" type="text" placeholder="DSC Password" value={formData.dsc_password}
+                      onChange={(e) => setFormData({ ...formData, dsc_password: e.target.value })} data-testid="dsc-password-input" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="associated_with">Associated With (Firm/Client)</Label>
-                    <Input
-                      id="associated_with"
-                      placeholder="Firm or client name"
-                      value={formData.associated_with}
-                      onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })}
-                      data-testid="dsc-associated-input"
-                    />
+                    <Input id="associated_with" placeholder="Firm or client name" value={formData.associated_with}
+                      onChange={(e) => setFormData({ ...formData, associated_with: e.target.value })} data-testid="dsc-associated-input" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="entity_type">Entity Type</Label>
-                    <Select
-                      value={formData.entity_type}
-                      onValueChange={(value) => setFormData({ ...formData, entity_type: value })}
-                    >
-                      <SelectTrigger data-testid="dsc-entity-type-select">
-                        <SelectValue />
-                      </SelectTrigger>
+                    <Select value={formData.entity_type} onValueChange={(value) => setFormData({ ...formData, entity_type: value })}>
+                      <SelectTrigger data-testid="dsc-entity-type-select"><SelectValue /></SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
                         <SelectItem value="firm">Firm</SelectItem>
                         <SelectItem value="client">Client</SelectItem>
@@ -717,59 +734,26 @@ export default function DSCRegister() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="issue_date">Issue Date <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="issue_date"
-                      type="date"
-                      value={formData.issue_date}
-                      onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                      required
-                      data-testid="dsc-issue-date-input"
-                    />
+                    <Input id="issue_date" type="date" value={formData.issue_date}
+                      onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })} required data-testid="dsc-issue-date-input" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="expiry_date"
-                      type="date"
-                      value={formData.expiry_date}
-                      onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                      required
-                      data-testid="dsc-expiry-date-input"
-                    />
+                    <Input id="expiry_date" type="date" value={formData.expiry_date}
+                      onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })} required data-testid="dsc-expiry-date-input" />
                   </div>
                   <div></div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    placeholder="Additional notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    rows={2}
-                    data-testid="dsc-notes-input"
-                  />
+                  <Textarea id="notes" placeholder="Additional notes" value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} data-testid="dsc-notes-input" />
                 </div>
                 <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setDialogOpen(false);
-                      resetForm();
-                    }}
-                    data-testid="dsc-cancel-btn"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-700"
-                    data-testid="dsc-submit-btn"
-                  >
+                  <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="dsc-cancel-btn">Cancel</Button>
+                  <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700" data-testid="dsc-submit-btn">
                     {loading ? 'Saving...' : 'Add DSC'}
                   </Button>
                 </DialogFooter>
@@ -779,23 +763,45 @@ export default function DSCRegister() {
         </Dialog>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4 max-w-xl">
-        <Select value={rowsPerPage.toString()} onValueChange={(value) => setRowsPerPage(Number(value))}>
-          <SelectTrigger className={`w-[180px] focus:border-indigo-500 ${isDark ? "bg-slate-800 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}>
+      {/* Controls: rows per page + sort + search */}
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+        <Select value={rowsPerPage.toString()} onValueChange={(value) => { setRowsPerPage(Number(value)); setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }}>
+          <SelectTrigger className={`w-[140px] focus:border-indigo-500 ${isDark ? "bg-slate-800 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}>
             <SelectValue placeholder="Rows per page" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="15">15</SelectItem>
-            <SelectItem value="30">30</SelectItem>
-            <SelectItem value="50">50</SelectItem>
-            <SelectItem value="100">100</SelectItem>
+            <SelectItem value="15">15 / page</SelectItem>
+            <SelectItem value="30">30 / page</SelectItem>
+            <SelectItem value="50">50 / page</SelectItem>
+            <SelectItem value="100">100 / page</SelectItem>
           </SelectContent>
         </Select>
-        <div className="relative flex-1">
+
+        {/* Sort control */}
+        <div className={`flex items-center gap-2 border rounded-xl px-3 h-10 ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-slate-200"}`}>
+          <ArrowUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
+          <div className="flex items-center gap-1">
+            {SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSortOrder(opt.value)}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: sortOrder === opt.value ? 'linear-gradient(135deg, #4f46e5, #6366f1)' : 'transparent',
+                  color: sortOrder === opt.value ? '#fff' : (isDark ? '#94a3b8' : '#64748b'),
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
             type="text"
-            placeholder="Search by holder name, certificate number, or company..."
+            placeholder="Search by holder name, type, or company..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className={`pl-10 focus:border-indigo-500 ${isDark ? "bg-slate-800 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}
@@ -804,134 +810,144 @@ export default function DSCRegister() {
         </div>
       </div>
 
+      {/* Tabs */}
       <Tabs defaultValue="in" className="w-full">
         <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="in" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-            <ArrowDownCircle className="h-4 w-4 mr-2" />
-            IN ({inDSC.length})
+            <ArrowDownCircle className="h-4 w-4 mr-2" />IN ({inDSC.length})
           </TabsTrigger>
           <TabsTrigger value="out" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
-            <ArrowUpCircle className="h-4 w-4 mr-2" />
-            OUT ({outDSC.length})
+            <ArrowUpCircle className="h-4 w-4 mr-2" />OUT ({outDSC.length})
           </TabsTrigger>
-          <TabsTrigger
-            value="expired"
-            className="data-[state=active]:bg-amber-700 data-[state=active]:text-white"
-          >
-            <AlertCircle className="h-4 w-4 mr-2" />
-            EXPIRED ({expiredDSC.length})
+          <TabsTrigger value="expired" className="data-[state=active]:bg-amber-700 data-[state=active]:text-white">
+            <AlertCircle className="h-4 w-4 mr-2" />EXPIRED ({expiredDSC.length})
           </TabsTrigger>
         </TabsList>
 
+        {/* IN Tab */}
         <TabsContent value="in" className="mt-6">
-          <Card className="border border-emerald-200 bg-emerald-50/30">
-            <CardHeader className="bg-emerald-50 border-b border-emerald-200">
-              <CardTitle className="text-sm font-medium text-emerald-700 uppercase tracking-wider flex items-center gap-2">
-                <ArrowDownCircle className="h-4 w-4" />
-                DSC IN - Available ({inDSC.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
+          <div
+            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+            style={{
+              background: isDark ? '#1e293b' : '#ffffff',
+              borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#d1fae5',
+            }}
+          >
+            <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3">
+              <p className="text-sm font-medium text-emerald-700 uppercase tracking-wider flex items-center gap-2">
+                <ArrowDownCircle className="h-4 w-4" />DSC IN - Available ({inDSC.length})
+              </p>
+            </div>
+            <div className="flex-1">
               {inDSC.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <p>No DSC certificates currently IN</p>
-                </div>
+                <div className="text-center py-12 text-slate-500"><p>No DSC certificates currently IN</p></div>
               ) : (
-                <>
-                  <DSCTable
-                    dscList={paginatedInDSC}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onMovement={openMovementDialog}
-                    onViewLog={openLogDialog}
-                    getDSCStatus={getDSCStatus}
-                    type="IN"
-                    globalIndexStart={(currentPageIn - 1) * rowsPerPage}
-                    isDark={isDark}
-                  />
-                  <Pagination
-                    currentPage={currentPageIn}
-                    totalPages={totalPagesIn}
-                    onPageChange={setCurrentPageIn}
-                  />
-                </>
+                <DSCTable
+                  dscList={paginatedInDSC}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onMovement={openMovementDialog}
+                  onViewLog={openLogDialog}
+                  getDSCStatus={getDSCStatus}
+                  type="IN"
+                  globalIndexStart={(safePageIn - 1) * rowsPerPage}
+                  isDark={isDark}
+                />
               )}
-            </CardContent>
-          </Card>
+            </div>
+            <PaginationBar
+              currentPage={safePageIn}
+              totalPages={totalPagesIn}
+              totalItems={inDSC.length}
+              pageSize={rowsPerPage}
+              onPageChange={setCurrentPageIn}
+              isDark={isDark}
+            />
+          </div>
         </TabsContent>
 
+        {/* OUT Tab */}
         <TabsContent value="out" className="mt-6">
-          <Card className="border border-red-200 bg-red-50/30">
-            <CardHeader className="bg-red-50 border-b border-red-200">
-              <CardTitle className="text-sm font-medium text-red-700 uppercase tracking-wider flex items-center gap-2">
-                <ArrowUpCircle className="h-4 w-4" />
-                DSC OUT - Taken ({outDSC.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
+          <div
+            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+            style={{
+              background: isDark ? '#1e293b' : '#ffffff',
+              borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#fecaca',
+            }}
+          >
+            <div className="bg-red-50 border-b border-red-200 px-4 py-3">
+              <p className="text-sm font-medium text-red-700 uppercase tracking-wider flex items-center gap-2">
+                <ArrowUpCircle className="h-4 w-4" />DSC OUT - Taken ({outDSC.length})
+              </p>
+            </div>
+            <div className="flex-1">
               {outDSC.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <p>No DSC certificates currently OUT</p>
-                </div>
+                <div className="text-center py-12 text-slate-500"><p>No DSC certificates currently OUT</p></div>
               ) : (
-                <>
-                  <DSCTable
-                    dscList={paginatedOutDSC}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onMovement={openMovementDialog}
-                    onViewLog={openLogDialog}
-                    getDSCStatus={getDSCStatus}
-                    type="OUT"
-                    globalIndexStart={(currentPageOut - 1) * rowsPerPage}
-                    isDark={isDark}
-                  />
-                  <Pagination
-                    currentPage={currentPageOut}
-                    totalPages={totalPagesOut}
-                    onPageChange={setCurrentPageOut}
-                  />
-                </>
+                <DSCTable
+                  dscList={paginatedOutDSC}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onMovement={openMovementDialog}
+                  onViewLog={openLogDialog}
+                  getDSCStatus={getDSCStatus}
+                  type="OUT"
+                  globalIndexStart={(safePageOut - 1) * rowsPerPage}
+                  isDark={isDark}
+                />
               )}
-            </CardContent>
-          </Card>
+            </div>
+            <PaginationBar
+              currentPage={safePageOut}
+              totalPages={totalPagesOut}
+              totalItems={outDSC.length}
+              pageSize={rowsPerPage}
+              onPageChange={setCurrentPageOut}
+              isDark={isDark}
+            />
+          </div>
         </TabsContent>
 
+        {/* EXPIRED Tab */}
         <TabsContent value="expired" className="mt-6">
-          <Card className="border border-amber-300 bg-amber-50/40">
-            <CardHeader className="bg-amber-100 border-b border-amber-300">
-              <CardTitle className="text-sm font-medium text-amber-800 uppercase tracking-wider flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                DSC EXPIRED ({expiredDSC.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
+          <div
+            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+            style={{
+              background: isDark ? '#1e293b' : '#ffffff',
+              borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#fde68a',
+            }}
+          >
+            <div className="bg-amber-100 border-b border-amber-300 px-4 py-3">
+              <p className="text-sm font-medium text-amber-800 uppercase tracking-wider flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" />DSC EXPIRED ({expiredDSC.length})
+              </p>
+            </div>
+            <div className="flex-1">
               {expiredDSC.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <p>No expired DSC certificates</p>
-                </div>
+                <div className="text-center py-12 text-slate-500"><p>No expired DSC certificates</p></div>
               ) : (
-                <>
-                  <DSCTable
-                    dscList={paginatedExpiredDSC}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onMovement={openMovementDialog}
-                    onViewLog={openLogDialog}
-                    getDSCStatus={getDSCStatus}
-                    type="EXPIRED"
-                    globalIndexStart={(currentPageExpired - 1) * rowsPerPage}
-                    isDark={isDark}
-                  />
-                  <Pagination
-                    currentPage={currentPageExpired}
-                    totalPages={totalPagesExpired}
-                    onPageChange={setCurrentPageExpired}
-                  />
-                </>
+                <DSCTable
+                  dscList={paginatedExpiredDSC}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onMovement={openMovementDialog}
+                  onViewLog={openLogDialog}
+                  getDSCStatus={getDSCStatus}
+                  type="EXPIRED"
+                  globalIndexStart={(safePageExpired - 1) * rowsPerPage}
+                  isDark={isDark}
+                />
               )}
-            </CardContent>
-          </Card>
+            </div>
+            <PaginationBar
+              currentPage={safePageExpired}
+              totalPages={totalPagesExpired}
+              totalItems={expiredDSC.length}
+              pageSize={rowsPerPage}
+              onPageChange={setCurrentPageExpired}
+              isDark={isDark}
+            />
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -939,13 +955,9 @@ export default function DSCRegister() {
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-outfit text-2xl">
-              Mark DSC as {movementData.movement_type}
-            </DialogTitle>
+            <DialogTitle className="font-outfit text-2xl">Mark DSC as {movementData.movement_type}</DialogTitle>
             <DialogDescription>
-              {movementData.movement_type === 'IN'
-                ? 'Record when DSC is delivered/returned'
-                : 'Record when DSC is taken out'}
+              {movementData.movement_type === 'IN' ? 'Record when DSC is delivered/returned' : 'Record when DSC is taken out'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleMovement} className="space-y-4">
@@ -957,33 +969,18 @@ export default function DSCRegister() {
               <Label htmlFor="person_name">
                 {movementData.movement_type === 'IN' ? 'Delivered By *' : 'Taken By *'}
               </Label>
-              <Input
-                id="person_name"
-                placeholder="Enter person name"
-                value={movementData.person_name}
-                onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })}
-                required
-              />
+              <Input id="person_name" placeholder="Enter person name" value={movementData.person_name}
+                onChange={(e) => setMovementData({ ...movementData, person_name: e.target.value })} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="movement_notes">Notes</Label>
-              <Textarea
-                id="movement_notes"
-                placeholder="Additional notes"
-                value={movementData.notes}
-                onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })}
-                rows={2}
-              />
+              <Textarea id="movement_notes" placeholder="Additional notes" value={movementData.notes}
+                onChange={(e) => setMovementData({ ...movementData, notes: e.target.value })} rows={2} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading}
-                className={movementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
-              >
+              <Button type="button" variant="outline" onClick={() => setMovementDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={loading}
+                className={movementData.movement_type === 'IN' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}>
                 {loading ? 'Recording...' : `Mark as ${movementData.movement_type}`}
               </Button>
             </DialogFooter>
@@ -996,12 +993,9 @@ export default function DSCRegister() {
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
-              <History className="h-6 w-6" />
-              Movement Log
+              <History className="h-6 w-6" />Movement Log
             </DialogTitle>
-            <DialogDescription>
-              {selectedDSC?.certificate_number} - {selectedDSC?.holder_name}
-            </DialogDescription>
+            <DialogDescription>{selectedDSC?.certificate_number} - {selectedDSC?.holder_name}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {selectedDSC?.movement_log && selectedDSC.movement_log.length > 0 ? (
@@ -1017,23 +1011,13 @@ export default function DSCRegister() {
                         )}
                         <span className="text-sm font-medium">{movement.person_name}</span>
                       </div>
-                      <p className="text-sm text-slate-600">
-                        {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
-                      </p>
-                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        Recorded by: {movement.recorded_by}
-                      </p>
-                      {movement.notes && (
-                        <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>
-                      )}
+                      <p className="text-sm text-slate-600">{movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}</p>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Recorded by: {movement.recorded_by}</p>
+                      {movement.notes && <p className="text-sm text-slate-600 mt-2">{movement.notes}</p>}
                     </div>
                     <div className="text-right">
-                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
-                      </p>
-                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {format(new Date(movement.timestamp), 'hh:mm a')}
-                      </p>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{format(new Date(movement.timestamp), 'MMM dd, yyyy')}</p>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{format(new Date(movement.timestamp), 'hh:mm a')}</p>
                     </div>
                   </div>
                 </Card>
@@ -1048,6 +1032,7 @@ export default function DSCRegister() {
         </DialogContent>
       </Dialog>
 
+      {/* Alert banner */}
       {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color !== 'bg-emerald-500').length > 0 && (
         <Card className="border-2 border-orange-200 bg-orange-50">
           <CardContent className="p-4">
@@ -1064,146 +1049,6 @@ export default function DSCRegister() {
           </CardContent>
         </Card>
       )}
-    </div>
-  );
-}
-
-// Pagination Component
-function Pagination({ currentPage, totalPages, onPageChange }) {
-  if (totalPages <= 1) return null;
-
-  return (
-    <div className="flex items-center justify-center py-4 border-t border-slate-200">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-        disabled={currentPage === 1}
-        className="h-8 w-8 p-0"
-      >
-        <ChevronLeft className="h-4 w-4" />
-      </Button>
-      <div className="mx-2 text-sm text-slate-600">
-        Page {currentPage} of {totalPages}
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-        disabled={currentPage === totalPages}
-        className="h-8 w-8 p-0"
-      >
-        <ChevronRight className="h-4 w-4" />
-      </Button>
-    </div>
-  );
-}
-
-// DSC Table Component — receives isDark as a prop (fixes "isDark is not defined" error)
-function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark }) {
-  return (
-    <div className="w-full overflow-hidden">
-      <table className="w-full table-auto border-collapse">
-        <thead className={`border-b ${isDark ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
-          <tr>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
-              S.No
-            </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
-              Holder Name
-            </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
-              Type
-            </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider min-w-[150px]">
-              Associated With
-            </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-28">
-              Expiry Date
-            </th>
-            <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-32">
-              Status
-            </th>
-            <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-36">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody className={`divide-y ${isDark ? "divide-slate-700 bg-slate-800" : "divide-slate-100 bg-white"}`}>
-          {dscList.map((dsc, index) => {
-            const status = getDSCStatus(dsc.expiry_date);
-            return (
-              <tr
-                key={dsc.id}
-                className={`transition-colors ${isDark ? "hover:bg-slate-700/30" : "hover:bg-slate-50"}`}
-                data-testid={`dsc-row-${dsc.id}`}
-              >
-                <td className="px-4 py-3 text-sm text-slate-500">
-                  {globalIndexStart + index + 1}
-                </td>
-                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                  {dsc.holder_name}
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 truncate">
-                  {dsc.dsc_type || '-'}
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 break-words leading-tight">
-                  {dsc.associated_with || '-'}
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
-                  {format(new Date(dsc.expiry_date), 'MMM dd, yyyy')}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${status.color}`}></div>
-                    <span className={`text-[12px] font-medium leading-none ${status.textColor}`}>
-                      {status.text}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onViewLog(dsc)}
-                      className="h-8 w-8 p-0 hover:bg-slate-100"
-                      title="View Log"
-                    >
-                      <History className="h-4 w-4 text-slate-500" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
-                      className={`h-8 w-8 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
-                      title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
-                    >
-                      {type === 'IN' ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onEdit(dsc)}
-                      className="h-8 w-8 p-0 hover:bg-indigo-50 text-indigo-600"
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onDelete(dsc.id)}
-                      className="h-8 w-8 p-0 hover:bg-red-50 text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
