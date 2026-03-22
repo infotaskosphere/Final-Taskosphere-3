@@ -29,7 +29,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// ─── Brand Colors (unchanged) ───────────────────────────────────────────────
+// ─── Brand Colors ────────────────────────────────────────────────────────────
 const COLORS = {
   deepBlue: '#0D3B66',
   mediumBlue: '#1F6FB2',
@@ -39,25 +39,25 @@ const COLORS = {
 
 // ─── Department categories ───────────────────────────────────────────────────
 const DEPARTMENTS = [
-  { value: 'gst', label: 'GST' },
-  { value: 'income_tax', label: 'INCOME TAX' },
-  { value: 'accounts', label: 'ACCOUNTS' },
-  { value: 'tds', label: 'TDS' },
-  { value: 'roc', label: 'ROC' },
-  { value: 'trademark', label: 'TRADEMARK' },
+  { value: 'gst',          label: 'GST' },
+  { value: 'income_tax',   label: 'INCOME TAX' },
+  { value: 'accounts',     label: 'ACCOUNTS' },
+  { value: 'tds',          label: 'TDS' },
+  { value: 'roc',          label: 'ROC' },
+  { value: 'trademark',    label: 'TRADEMARK' },
   { value: 'msme_smadhan', label: 'MSME SMADHAN' },
-  { value: 'fema', label: 'FEMA' },
-  { value: 'dsc', label: 'DSC' },
-  { value: 'other', label: 'OTHER' },
+  { value: 'fema',         label: 'FEMA' },
+  { value: 'dsc',          label: 'DSC' },
+  { value: 'other',        label: 'OTHER' },
 ];
 
 const TASK_CATEGORIES = DEPARTMENTS;
 
 const RECURRENCE_PATTERNS = [
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
+  { value: 'daily',   label: 'Daily' },
+  { value: 'weekly',  label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
-  { value: 'yearly', label: 'Yearly' },
+  { value: 'yearly',  label: 'Yearly' },
 ];
 
 // ─── CA/CS Compliance Workflow Templates ────────────────────────────────────
@@ -148,7 +148,7 @@ const COMPLIANCE_WORKFLOWS = [
   },
 ];
 
-// ─── Status & Priority Styles (unchanged) ───────────────────────────────────
+// ─── Status & Priority Styles ────────────────────────────────────────────────
 const STATUS_STYLES = {
   pending:     { bg: 'bg-red-50',    text: 'text-red-700',    border: 'border-red-200',    dot: 'bg-red-500',    label: 'To Do' },
   in_progress: { bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200',  dot: 'bg-amber-500',  label: 'In Progress' },
@@ -165,22 +165,28 @@ const PRIORITY_STYLES = {
 
 // ─── Stripe color for left accent bar ───────────────────────────────────────
 const getStripeColor = (task, overdue) => {
-  if (overdue)                          return 'bg-red-700';
+  if (overdue) return 'bg-red-700';
   const s = (task.status || '').toLowerCase();
-  if (s === 'completed')                return 'bg-blue-600';
-  if (s === 'in_progress')              return 'bg-amber-500';
+  if (s === 'completed')   return 'bg-blue-600';
+  if (s === 'in_progress') return 'bg-amber-500';
   if (s === 'pending') {
     const p = (task.priority || '').toLowerCase();
-    if (p === 'critical')               return 'bg-red-600';
-    if (p === 'high')                   return 'bg-orange-500';
+    if (p === 'critical') return 'bg-red-600';
+    if (p === 'high')     return 'bg-orange-500';
     return 'bg-red-400';
   }
   return 'bg-slate-300';
 };
 
 // ─── Animation variants ──────────────────────────────────────────────────────
-const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.04 } } };
-const itemVariants = { hidden: { opacity: 0, y: 18, scale: 0.98 }, visible: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } } };
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.04 } },
+};
+const itemVariants = {
+  hidden: { opacity: 0, y: 18, scale: 0.98 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } },
+};
 
 // ─── Empty form state ────────────────────────────────────────────────────────
 const EMPTY_FORM = {
@@ -190,7 +196,7 @@ const EMPTY_FORM = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TaskRow — compact, information-dense list row
+// TaskRow — compact list row
 // ═══════════════════════════════════════════════════════════════════════════════
 const TaskRow = ({
   task, index, isOverdue, statusStyle, priorityStyle, stripeColor,
@@ -203,6 +209,8 @@ const TaskRow = ({
   selectedTask, setSelectedTask, handleAddComment,
   user,
 }) => {
+  // FIX: each sub-component must call useDark() itself
+  const isDark = useDark();
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
@@ -212,16 +220,19 @@ const TaskRow = ({
   return (
     <motion.div variants={itemVariants} layout>
       <div className={`relative rounded-xl border transition-all duration-200 overflow-hidden group
-        ${isCompleted ? (isDark?'bg-slate-800/60 border-slate-700 opacity-70':'bg-slate-50 border-slate-200 opacity-70') : (isDark?'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm':'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
+        ${isCompleted
+          ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-70' : 'bg-slate-50 border-slate-200 opacity-70')
+          : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
+
         {/* Left accent stripe */}
         <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
 
-        {/* ── Main row — CSS grid, columns cannot overlap ── */}
+        {/* Main row */}
         <div
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
           style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
         >
-          {/* 1 · stripe placeholder (the stripe is absolute) */}
+          {/* 1 · index */}
           <span className="text-[11px] font-medium text-slate-400 select-none">
             {String(index + 1).padStart(2, '0')}
           </span>
@@ -237,28 +248,30 @@ const TaskRow = ({
             title="Cycle status"
           >
             <span className="w-4 h-4 rounded-full border-2 border-slate-300 flex items-center justify-center hover:border-blue-400 transition-colors">
-              {task.status === 'completed' && <Check className="h-2.5 w-2.5 text-blue-600" />}
+              {task.status === 'completed'   && <Check className="h-2.5 w-2.5 text-blue-600" />}
               {task.status === 'in_progress' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
             </span>
           </button>
 
           {/* 3 · Title */}
           <button
-            className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2
-              ${isCompleted ? 'text-slate-400 line-through text-sm' : (isDark?'text-slate-100 hover:text-blue-400 text-sm':'text-slate-800 hover:text-blue-700 text-sm')}`}
+            className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2 text-sm
+              ${isCompleted
+                ? 'text-slate-400 line-through'
+                : (isDark ? 'text-slate-100 hover:text-blue-400' : 'text-slate-800 hover:text-blue-700')}`}
             onClick={() => openTaskDetail(task)}
           >
             {task.title}
           </button>
 
-          {/* 4 · STATUS PILLS — 160px */}
+          {/* 4 · STATUS PILLS */}
           <div className="flex items-center justify-center gap-1 overflow-hidden">
             {canModifyTask(task) ? (
               <>
                 {[
-                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-red-400 hover:text-red-400':'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
-                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-amber-400 hover:text-amber-400':'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
-                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-blue-400 hover:text-blue-400':'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
+                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-red-400 hover:text-red-400'    : 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
+                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-amber-400 hover:text-amber-400' : 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-blue-400 hover:text-blue-400'   : 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
                 ].map(({ s, label, active, idle }) => (
                   <button key={s} onClick={() => handleQuickStatusChange(task, s)}
                     className={`h-[20px] px-2 text-[9px] font-semibold tracking-wide rounded border transition-all whitespace-nowrap
@@ -274,38 +287,36 @@ const TaskRow = ({
             )}
           </div>
 
-          {/* 5 · DEPT — 88px */}
+          {/* 5 · DEPT */}
           <div className="flex items-center justify-center overflow-hidden">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-full">
               {task.category?.toUpperCase() || 'OTHER'}
             </span>
           </div>
 
-          {/* 6 · PRIORITY — 64px */}
+          {/* 6 · PRIORITY */}
           <div className="flex items-center justify-center overflow-hidden">
             <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
           </div>
 
-          {/* 7 · OVERDUE — 72px */}
+          {/* 7 · OVERDUE */}
           <div className="flex items-center justify-center overflow-hidden">
             {isOverdue ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">
-                OVERDUE
-              </span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">OVERDUE</span>
             ) : (
               <span className="text-slate-200 text-[10px]">—</span>
             )}
           </div>
 
-          {/* 8 · ASSIGNEE — 110px */}
+          {/* 8 · ASSIGNEE */}
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-400" />
             <span className="text-[10px] text-slate-600 truncate">{getUserName(task.assigned_to)}</span>
           </div>
 
-          {/* 9 · ASSIGNOR — 110px */}
+          {/* 9 · ASSIGNOR */}
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-300" />
             <span className="text-[10px] text-slate-400 truncate">
@@ -313,9 +324,8 @@ const TaskRow = ({
             </span>
           </div>
 
-          {/* 10 · DUE — 88px */}
-          <div className={`flex items-center justify-center gap-1 overflow-hidden px-1
-            ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+          {/* 10 · DUE */}
+          <div className={`flex items-center justify-center gap-1 overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
             {task.due_date ? (
               <>
                 <Clock className="h-3 w-3 flex-shrink-0" />
@@ -324,47 +334,42 @@ const TaskRow = ({
             ) : <span className="text-slate-300 text-[10px]">—</span>}
           </div>
 
-          {/* 11 · ACTIONS — 100px: icons, reveal on hover */}
+          {/* 11 · ACTIONS */}
           <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity overflow-hidden">
             {canModifyTask(task) && (
               <button onClick={() => setExpanded(v => !v)}
-                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                title="Expand">
+                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Expand">
                 <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => handleEdit(task)}
-                className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
-                title="Edit">
+                className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors" title="Edit">
                 <Edit className="h-3.5 w-3.5" />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => handleDuplicateTask(task)}
-                className="p-1 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
-                title="Duplicate">
+                className="p-1 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors" title="Duplicate">
                 <Copy className="h-3.5 w-3.5" />
               </button>
             )}
             {canModifyTask(task) && (
               <button onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
-                className="p-1 rounded hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
-                title="Comments">
+                className="p-1 rounded hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors" title="Comments">
                 <MessageSquare className="h-3.5 w-3.5" />
               </button>
             )}
             {canDeleteTasks && (
               <button onClick={() => handleDelete(task.id)}
-                className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                title="Delete">
+                className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
         </div>
 
-        {/* Expanded panel — checklist + status switcher + comments */}
+        {/* Expanded panel */}
         <AnimatePresence>
           {(expanded || openCommentTaskId === task.id) && (
             <motion.div
@@ -374,7 +379,7 @@ const TaskRow = ({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className={`mx-5 mb-4 space-y-3 border-t pt-3 ${isDark?"border-slate-700":"border-slate-100"}`}>
+              <div className={`mx-5 mb-4 space-y-3 border-t pt-3 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                 {/* Checklist */}
                 {checklistItems.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
@@ -386,19 +391,14 @@ const TaskRow = ({
                         {checkedItems.length}/{checklistItems.length}
                       </span>
                     </div>
-                    {/* Progress bar */}
                     <div className="h-1 bg-emerald-200 rounded-full mb-3 overflow-hidden">
                       <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
                     </div>
                     <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                       {checklistItems.map((item, idx) => (
                         <label key={idx} className="flex items-start gap-2 cursor-pointer group/check">
-                          <Checkbox
-                            checked={checkedItems.includes(idx)}
-                            onCheckedChange={() => toggleChecklistItem(task.id, idx)}
-                            className="mt-0.5 flex-shrink-0"
-                          />
-                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : (isDark?'text-slate-300 group-hover/check:text-slate-100':'text-slate-700 group-hover/check:text-slate-900')}`}>
+                          <Checkbox checked={checkedItems.includes(idx)} onCheckedChange={() => toggleChecklistItem(task.id, idx)} className="mt-0.5 flex-shrink-0" />
+                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : (isDark ? 'text-slate-300 group-hover/check:text-slate-100' : 'text-slate-700 group-hover/check:text-slate-900')}`}>
                             {item}
                           </span>
                         </label>
@@ -412,22 +412,16 @@ const TaskRow = ({
                   <div className="space-y-2">
                     <div className="max-h-28 overflow-y-auto space-y-1">
                       {(comments[task.id] || []).map((comment, i) => (
-                        <div key={i} className={`text-xs rounded-lg px-3 py-2 border ${isDark?"bg-slate-700 text-slate-300 border-slate-600":"bg-slate-50 text-slate-600 border-slate-100"}`}>
+                        <div key={i} className={`text-xs rounded-lg px-3 py-2 border ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-100'}`}>
                           {comment.text}
                         </div>
                       ))}
                     </div>
                     <div className="flex gap-2">
-                      <Input
-                        value={newComment}
-                        onChange={(e) => setNewComment(e.target.value)}
-                        placeholder="Add a comment…"
-                        className="h-8 text-xs"
-                        onKeyDown={(e) => { if (e.key === 'Enter') { setSelectedTask(task); handleAddComment(); } }}
-                      />
-                      <Button size="sm" className="h-8 px-3 text-xs" onClick={() => { setSelectedTask(task); handleAddComment(); }}>
-                        Post
-                      </Button>
+                      <Input value={newComment} onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="Add a comment…" className="h-8 text-xs"
+                        onKeyDown={(e) => { if (e.key === 'Enter') { setSelectedTask(task); handleAddComment(); } }} />
+                      <Button size="sm" className="h-8 px-3 text-xs" onClick={() => { setSelectedTask(task); handleAddComment(); }}>Post</Button>
                     </div>
                   </div>
                 )}
@@ -453,6 +447,8 @@ const BoardCard = ({
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
 }) => {
+  // FIX: each sub-component must call useDark() itself
+  const isDark = useDark();
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
   const progress       = getChecklistProgress(task);
@@ -461,33 +457,32 @@ const BoardCard = ({
   return (
     <motion.div variants={itemVariants} layout>
       <div className={`relative rounded-xl border overflow-hidden transition-all duration-200 group
-        ${isCompleted ? (isDark?'bg-slate-800/60 border-slate-700 opacity-75':'bg-slate-50 border-slate-200 opacity-75') : (isDark?'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md':'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
+        ${isCompleted
+          ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-75' : 'bg-slate-50 border-slate-200 opacity-75')
+          : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
+
         {/* Top accent stripe */}
         <div className={`h-1 w-full ${stripeColor}`} />
 
         <div className="p-4 space-y-3">
-          {/* Header row */}
+          {/* Header */}
           <div className="flex items-start justify-between gap-2">
             <button
               onClick={() => openTaskDetail(task)}
               className={`font-semibold text-sm leading-snug text-left flex-1 transition-colors
-                ${isCompleted ? 'text-slate-400 line-through' : (isDark?'text-slate-100 hover:text-blue-400':'text-slate-800 hover:text-blue-700')}`}>
+                ${isCompleted ? 'text-slate-400 line-through' : (isDark ? 'text-slate-100 hover:text-blue-400' : 'text-slate-800 hover:text-blue-700')}`}>
               {task.title}
             </button>
-            {/* Dot menu */}
             {canModifyTask(task) && (
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                <button onClick={() => handleEdit(task)}
-                  className="p-1 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors">
+                <button onClick={() => handleEdit(task)} className="p-1 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors">
                   <Edit className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={() => handleDuplicateTask(task)}
-                  className="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors">
+                <button onClick={() => handleDuplicateTask(task)} className="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors">
                   <Copy className="h-3.5 w-3.5" />
                 </button>
                 {canDeleteTasks && (
-                  <button onClick={() => handleDelete(task.id)}
-                    className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors">
+                  <button onClick={() => handleDelete(task.id)} className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
@@ -500,17 +495,9 @@ const BoardCard = ({
             <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
-            {isOverdue && (
-              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-red-100 text-red-700">Overdue</span>
-            )}
-            {task.is_recurring && (
-              <span className="text-[10px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">↺ Recurring</span>
-            )}
-            {task.category && (
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                {task.category}
-              </span>
-            )}
+            {isOverdue && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-red-100 text-red-700">Overdue</span>}
+            {task.is_recurring && <span className="text-[10px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">↺ Recurring</span>}
+            {task.category && <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{task.category}</span>}
           </div>
 
           {/* Checklist mini preview */}
@@ -526,30 +513,26 @@ const BoardCard = ({
               <div className="space-y-0.5 max-h-20 overflow-hidden">
                 {checklistItems.slice(0, 3).map((item, idx) => (
                   <div key={idx} className="flex items-center gap-1.5 text-[10px] text-slate-500 truncate">
-                    <div className={`w-2.5 h-2.5 rounded-sm border flex-shrink-0 flex items-center justify-center
-                      ${checkedItems.includes(idx) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
+                    <div className={`w-2.5 h-2.5 rounded-sm border flex-shrink-0 flex items-center justify-center ${checkedItems.includes(idx) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                       {checkedItems.includes(idx) && <Check className="h-1.5 w-1.5 text-white" />}
                     </div>
                     <span className={checkedItems.includes(idx) ? 'line-through text-slate-400' : ''}>{item}</span>
                   </div>
                 ))}
-                {checklistItems.length > 3 && (
-                  <div className="text-[10px] text-slate-400 pl-4">+{checklistItems.length - 3} more</div>
-                )}
+                {checklistItems.length > 3 && <div className="text-[10px] text-slate-400 pl-4">+{checklistItems.length - 3} more</div>}
               </div>
             </div>
           )}
 
-          {/* Meta info */}
-          <div className={`pt-2 border-t space-y-1.5 ${isDark?"border-slate-700":"border-slate-100"}`}>
+          {/* Meta */}
+          <div className={`pt-2 border-t space-y-1.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
                 <User className="h-3.5 w-3.5 flex-shrink-0" />
                 <span className="truncate max-w-[120px]">{getUserName(task.assigned_to)}</span>
               </div>
               {task.due_date && (
-                <span className={`text-xs font-medium flex items-center gap-1
-                  ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+                <span className={`text-xs font-medium flex items-center gap-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
                   <Clock className="h-3.5 w-3.5" />
                   {getRelativeDueDate(task.due_date)}
                 </span>
@@ -567,24 +550,25 @@ const BoardCard = ({
           {canModifyTask(task) && (
             <div className="grid grid-cols-3 gap-1 pt-1">
               {[
-                { s: 'pending',     label: 'To Do',  active: 'bg-red-500 text-white border-red-500' },
-                { s: 'in_progress', label: 'WIP',    active: 'bg-amber-500 text-white border-amber-500' },
-                { s: 'completed',   label: 'Done',   active: 'bg-blue-600 text-white border-blue-600' },
+                { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500' },
+                { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500' },
+                { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600' },
               ].map(({ s, label, active }) => (
                 <button key={s} onClick={() => handleQuickStatusChange(task, s)}
                   className={`h-6 text-[10px] font-semibold rounded-lg border transition-all
-                    ${task.status === s ? active : (isDark?'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500':'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
+                    ${task.status === s ? active : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
                   {label}
                 </button>
               ))}
             </div>
           )}
 
-          {/* Comment inline */}
+          {/* Comment toggle */}
           {canModifyTask(task) && (
             <button
               onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
-              className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-indigo-600 py-1 rounded-lg transition-colors border border-dashed ${isDark?"border-slate-600 hover:bg-indigo-900/30 hover:border-indigo-700":"border-slate-200 hover:bg-indigo-50 hover:border-indigo-200"}`}>
+              className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-indigo-600 py-1 rounded-lg transition-colors border border-dashed
+                ${isDark ? 'border-slate-600 hover:bg-indigo-900/30 hover:border-indigo-700' : 'border-slate-200 hover:bg-indigo-50 hover:border-indigo-200'}`}>
               <MessageSquare className="h-3 w-3" />
               {openCommentTaskId === task.id ? 'Close Comments' : 'Add Comment'}
             </button>
@@ -594,7 +578,7 @@ const BoardCard = ({
             <div className="space-y-2">
               <div className="max-h-24 overflow-y-auto space-y-1">
                 {(comments[task.id] || []).map((c, i) => (
-                  <div key={i} className={`text-[10px] rounded-lg px-2 py-1.5 border ${isDark?"bg-slate-700 text-slate-300 border-slate-600":"bg-slate-50 text-slate-600 border-slate-100"}`}>
+                  <div key={i} className={`text-[10px] rounded-lg px-2 py-1.5 border ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-100'}`}>
                     {c.text}
                   </div>
                 ))}
@@ -614,9 +598,12 @@ const BoardCard = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Stat Card — no bottom line, per-stat active color, smooth spring animations
+// StatCard
 // ═══════════════════════════════════════════════════════════════════════════════
 const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClasses }) => {
+  // FIX: each sub-component must call useDark() itself
+  const isDark = useDark();
+
   const activeBg     = activeClasses?.bg     || 'bg-blue-50';
   const activeBorder = activeClasses?.border || 'border-blue-300';
   const activeRing   = activeClasses?.ring   || 'ring-blue-200';
@@ -633,16 +620,14 @@ const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClas
       className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
         ${active
           ? `${activeBg} ${activeBorder} ring-1 ${activeRing} shadow-sm`
-          : isDark?'border-slate-700 bg-slate-800':'border-slate-200 bg-white'}`}
+          : isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}
     >
-      {/* Top accent bar — slides in when active, no bottom line */}
       <motion.div
         initial={false}
         animate={{ scaleX: active ? 1 : 0, opacity: active ? 1 : 0 }}
         transition={{ duration: 0.22, ease: 'easeOut' }}
         className={`absolute top-0 left-0 right-0 h-[3px] origin-left rounded-t-xl ${activeBar}`}
       />
-
       <div className="flex items-start justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{label}</p>
@@ -671,8 +656,9 @@ export default function Tasks() {
   const { user, hasPermission } = useAuth();
   const isAdmin = user?.role === 'admin';
   const navigate = useNavigate();
+  const isDark = useDark();
 
-  // ── Permissions ─────────────────────────────────────────────────────────────
+  // ── Permissions ──────────────────────────────────────────────────────────────
   const canModifyTask = (task) => {
     if (isAdmin) return true;
     return task.assigned_to === user?.id ||
@@ -684,47 +670,45 @@ export default function Tasks() {
   const canDeleteTasks = isAdmin || hasPermission('can_edit_tasks');
 
   // ── State ────────────────────────────────────────────────────────────────────
-  const [tasks,    setTasks]    = useState([]);
-  const [users,    setUsers]    = useState([]);
-  const [clients,  setClients]  = useState([]);
-  const [loading,  setLoading]  = useState(false);
+  const [tasks,   setTasks]   = useState([]);
+  const [users,   setUsers]   = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const [dialogOpen,    setDialogOpen]    = useState(false);
-  const [editingTask,   setEditingTask]   = useState(null);
-  const [formData,      setFormData]      = useState({ ...EMPTY_FORM });
+  const [dialogOpen,   setDialogOpen]   = useState(false);
+  const [editingTask,  setEditingTask]  = useState(null);
+  const [formData,     setFormData]     = useState({ ...EMPTY_FORM });
+  const [viewMode,     setViewMode]     = useState('list');
 
-  const [viewMode,      setViewMode]      = useState('list');
+  const [taskDetailOpen,     setTaskDetailOpen]     = useState(false);
+  const [selectedDetailTask, setSelectedDetailTask] = useState(null);
 
-  const [taskDetailOpen,      setTaskDetailOpen]      = useState(false);
-  const [selectedDetailTask,  setSelectedDetailTask]  = useState(null);
+  const [comments,           setComments]           = useState({});
+  const [showCommentsDialog, setShowCommentsDialog] = useState(false);
+  const [selectedTask,       setSelectedTask]       = useState(null);
+  const [newComment,         setNewComment]         = useState('');
+  const [openCommentTaskId,  setOpenCommentTaskId]  = useState(null);
 
-  const [comments,            setComments]            = useState({});
-  const [showCommentsDialog,  setShowCommentsDialog]  = useState(false);
-  const [selectedTask,        setSelectedTask]        = useState(null);
-  const [newComment,          setNewComment]          = useState('');
-  const [openCommentTaskId,   setOpenCommentTaskId]   = useState(null);
-
-  const [notifications,       setNotifications]       = useState([]);
-  const [showNotifications,   setShowNotifications]   = useState(false);
+  const [notifications,     setNotifications]     = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const location = useLocation();
-  const isDark = useDark();
 
-  // ── Filters & sorting ───────────────────────────────────────────────────────
-  const [searchQuery,      setSearchQuery]      = useState('');
-  const [filterStatus,     setFilterStatus]     = useState('all');
-  const [filterPriority,   setFilterPriority]   = useState('all');
-  const [filterCategory,   setFilterCategory]   = useState('all');
-  const [filterAssignee,   setFilterAssignee]   = useState('all');
-  const [sortBy,           setSortBy]           = useState('due_date');
-  const [sortDirection,    setSortDirection]    = useState('asc');
-  const [showMyTasksOnly,  setShowMyTasksOnly]  = useState(false);
-  const [activeFilters,    setActiveFilters]    = useState([]);
+  // ── Filters & sorting ────────────────────────────────────────────────────────
+  const [searchQuery,     setSearchQuery]     = useState('');
+  const [filterStatus,    setFilterStatus]    = useState('all');
+  const [filterPriority,  setFilterPriority]  = useState('all');
+  const [filterCategory,  setFilterCategory]  = useState('all');
+  const [filterAssignee,  setFilterAssignee]  = useState('all');
+  const [sortBy,          setSortBy]          = useState('due_date');
+  const [sortDirection,   setSortDirection]   = useState('asc');
+  const [showMyTasksOnly, setShowMyTasksOnly] = useState(false);
+  const [activeFilters,   setActiveFilters]   = useState([]);
 
-  // ── Checklist state ─────────────────────────────────────────────────────────
+  // ── Checklist state ──────────────────────────────────────────────────────────
   const [taskChecklists, setTaskChecklists] = useState({});
 
-  // ── Workflow library ────────────────────────────────────────────────────────
+  // ── Workflow library ─────────────────────────────────────────────────────────
   const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
   const [workflowSearch,          setWorkflowSearch]          = useState('');
   const [workflowDeptFilter,      setWorkflowDeptFilter]      = useState('all');
@@ -732,7 +716,7 @@ export default function Tasks() {
 
   const fileInputRef = useRef(null);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────────
   const parseChecklist = (description) => {
     if (!description) return [];
     return description.split('\n')
@@ -756,9 +740,9 @@ export default function Tasks() {
     return Math.round((checked.length / items.length) * 100);
   };
 
-  const getUserName    = (id) => users.find(u => u.id === id)?.full_name || 'Unassigned';
-  const getClientName  = (id) => clients.find(c => c.id === id)?.company_name || 'No Client';
-  const getCategoryLabel = (v) => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other';
+  const getUserName      = (id) => users.find(u => u.id === id)?.full_name || 'Unassigned';
+  const getClientName    = (id) => clients.find(c => c.id === id)?.company_name || 'No Client';
+  const getCategoryLabel = (v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other';
 
   const isOverdue = (task) => {
     if (task.status === 'completed') return false;
@@ -766,10 +750,6 @@ export default function Tasks() {
     return new Date(task.due_date) < new Date();
   };
 
-  // ── BUG FIX: getDisplayStatus respects actual status; overdue is an overlay ─
-  // The original bug: getDisplayStatus returned 'overdue' which broke stat-card
-  // click filtering for 'in_progress' tasks that were also overdue.
-  // Fix: keep status as-is, use isOverdue only for visual decoration.
   const getDisplayStatus = (task) => {
     if (isOverdue(task)) return 'overdue';
     return task.status || 'pending';
@@ -780,22 +760,20 @@ export default function Tasks() {
     const due = new Date(dueDate);
     const now = new Date();
     const diffDays = Math.ceil((due - now) / 86400000);
-    if (diffDays < 0)  return `${Math.abs(diffDays)}d overdue`;
+    if (diffDays < 0)   return `${Math.abs(diffDays)}d overdue`;
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays <= 7)  return `In ${diffDays}d`;
     return format(due, 'MMM dd');
   };
 
-  // ── Data fetching ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetchTasks(); fetchClients(); fetchUsers(); fetchNotifications();
-  }, [user]);
+  // ── Data fetching ─────────────────────────────────────────────────────────────
+  useEffect(() => { fetchTasks(); fetchClients(); fetchUsers(); fetchNotifications(); }, [user]);
 
-  const fetchTasks         = async () => { try { const r = await api.get('/tasks');         setTasks(r.data);         } catch { toast.error('Failed to fetch tasks'); } };
-  const fetchUsers         = async () => { try { const r = await api.get('/users');         setUsers(r.data);         } catch { console.error('Failed to fetch users'); } };
-  const fetchClients       = async () => { try { const r = await api.get('/clients');       setClients(r.data);       } catch { console.error('Failed to fetch clients'); } };
-  const fetchNotifications = async () => { try { const r = await api.get('/notifications'); setNotifications(r.data || []); } catch {} };
+  const fetchTasks         = async () => { try { const r = await api.get('/tasks');         setTasks(r.data);                 } catch { toast.error('Failed to fetch tasks'); } };
+  const fetchUsers         = async () => { try { const r = await api.get('/users');         setUsers(r.data);                 } catch { console.error('Failed to fetch users'); } };
+  const fetchClients       = async () => { try { const r = await api.get('/clients');       setClients(r.data);               } catch { console.error('Failed to fetch clients'); } };
+  const fetchNotifications = async () => { try { const r = await api.get('/notifications'); setNotifications(r.data || []);   } catch {} };
 
   const fetchComments = async (taskId) => {
     try { const r = await api.get(`/tasks/${taskId}/comments`); setComments(prev => ({ ...prev, [taskId]: r.data })); }
@@ -808,17 +786,17 @@ export default function Tasks() {
     api.put('/notifications/read-all').catch(() => {});
   };
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
+  // ── CRUD ──────────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       const taskData = {
         ...formData,
-        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
+        assigned_to:   formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
         sub_assignees: formData.sub_assignees || [],
-        client_id: formData.client_id || null,
-        due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
+        client_id:     formData.client_id || null,
+        due_date:      formData.due_date ? new Date(formData.due_date).toISOString() : null,
       };
       if (editingTask) {
         await api.patch(`/tasks/${editingTask.id}`, taskData);
@@ -842,7 +820,7 @@ export default function Tasks() {
     finally { setLoading(false); }
   };
 
-  const handleEdit  = (task) => {
+  const handleEdit = (task) => {
     setEditingTask(task);
     setFormData({
       title: task.title, description: task.description || '',
@@ -867,7 +845,7 @@ export default function Tasks() {
       await api.patch(`/tasks/${task.id}`, { status: newStatus });
       toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
       api.post('/notifications/send', {
-        title: newStatus === 'completed' ? '✅ Task Completed' : '🔄 Status Updated',
+        title:   newStatus === 'completed' ? '✅ Task Completed' : '🔄 Status Updated',
         message: `"${task.title}" → ${STATUS_STYLES[newStatus]?.label || newStatus}`,
         type: 'task',
       }).catch(() => {});
@@ -888,10 +866,8 @@ export default function Tasks() {
   };
 
   const handleDuplicateTask = async (task) => {
-    try {
-      await api.post('/tasks', { ...task, title: `${task.title} (Copy)`, status: 'pending' });
-      toast.success('Task duplicated!'); fetchTasks();
-    } catch { toast.error('Failed to duplicate'); }
+    try { await api.post('/tasks', { ...task, title: `${task.title} (Copy)`, status: 'pending' }); toast.success('Task duplicated!'); fetchTasks(); }
+    catch { toast.error('Failed to duplicate'); }
   };
 
   const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
@@ -908,28 +884,21 @@ export default function Tasks() {
   const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
 
   // ── Filtering & sorting ──────────────────────────────────────────────────────
-  // ── BUG FIX: filterStatus for 'in_progress' now correctly matches tasks ──────
-  // Previously, overdue in_progress tasks were excluded because getDisplayStatus
-  // returned 'overdue'. Now we filter on actual task.status, and only use the
-  // 'overdue' filterStatus as an additional isOverdue() check.
   const filteredTasks = tasks.filter(task => {
-    const matchesSearch    = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                             task.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPriority  = filterPriority === 'all'  || task.priority  === filterPriority;
-    const matchesCategory  = filterCategory === 'all'  || task.category  === filterCategory;
-    const matchesAssignee  = filterAssignee === 'all'  || task.assigned_to === filterAssignee;
+    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            task.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPriority = filterPriority === 'all' || task.priority  === filterPriority;
+    const matchesCategory = filterCategory === 'all' || task.category  === filterCategory;
+    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
 
-    // ── KEY FIX: filter on actual status, not getDisplayStatus ──────────────
     let matchesStatus = true;
     if (filterStatus !== 'all') {
       if (filterStatus === 'overdue') {
         matchesStatus = isOverdue(task);
       } else {
-        // Match actual status, regardless of overdue state
         matchesStatus = task.status === filterStatus;
       }
     }
-
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee;
   });
 
@@ -961,10 +930,7 @@ export default function Tasks() {
     return result;
   }, [filteredTasks, showMyTasksOnly, sortBy, sortDirection, user]);
 
-  // ── Stats — BUG FIX: count actual status, not getDisplayStatus ──────────────
-  // Stats always use the raw full tasks list — never the filtered displayTasks.
-  // This ensures card counts (Total 17, To Do 3, etc.) stay constant even
-  // when the user clicks a filter card or applies search/status filters.
+  // ── Stats ─────────────────────────────────────────────────────────────────────
   const stats = {
     total:      tasks.length,
     todo:       tasks.filter(t => t.status === 'pending').length,
@@ -973,25 +939,25 @@ export default function Tasks() {
     overdue:    tasks.filter(t => isOverdue(t)).length,
   };
 
-  // ── Active filter pills ──────────────────────────────────────────────────────
+  // ── Active filter pills ───────────────────────────────────────────────────────
   useEffect(() => {
     const pills = [];
-    if (searchQuery)          pills.push({ key: 'search',    label: `"${searchQuery}"` });
-    if (filterStatus !== 'all')   pills.push({ key: 'status',    label: STATUS_STYLES[filterStatus]?.label || filterStatus });
-    if (filterPriority !== 'all') pills.push({ key: 'priority',  label: filterPriority.toUpperCase() });
-    if (filterCategory !== 'all') pills.push({ key: 'category',  label: getCategoryLabel(filterCategory) });
-    if (filterAssignee !== 'all') pills.push({ key: 'assignee',  label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
-    if (showMyTasksOnly)          pills.push({ key: 'mytasks',   label: 'My Tasks' });
+    if (searchQuery)              pills.push({ key: 'search',   label: `"${searchQuery}"` });
+    if (filterStatus !== 'all')   pills.push({ key: 'status',   label: STATUS_STYLES[filterStatus]?.label || filterStatus });
+    if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
+    if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
+    if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
+    if (showMyTasksOnly)          pills.push({ key: 'mytasks',  label: 'My Tasks' });
     setActiveFilters(pills);
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, users]);
 
   const removeFilter = (key) => {
-    if (key === 'search')    setSearchQuery('');
-    if (key === 'status')    setFilterStatus('all');
-    if (key === 'priority')  setFilterPriority('all');
-    if (key === 'category')  setFilterCategory('all');
-    if (key === 'assignee')  setFilterAssignee('all');
-    if (key === 'mytasks')   setShowMyTasksOnly(false);
+    if (key === 'search')   setSearchQuery('');
+    if (key === 'status')   setFilterStatus('all');
+    if (key === 'priority') setFilterPriority('all');
+    if (key === 'category') setFilterCategory('all');
+    if (key === 'assignee') setFilterAssignee('all');
+    if (key === 'mytasks')  setShowMyTasksOnly(false);
   };
 
   const clearAllFilters = () => {
@@ -1001,7 +967,7 @@ export default function Tasks() {
     toast.success('Filters cleared');
   };
 
-  // ── Workflow library ─────────────────────────────────────────────────────────
+  // ── Workflow library ──────────────────────────────────────────────────────────
   const filteredWorkflows = COMPLIANCE_WORKFLOWS.filter(wf => {
     const matchSearch = wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) ||
                         wf.title.toLowerCase().includes(workflowSearch.toLowerCase());
@@ -1025,19 +991,22 @@ export default function Tasks() {
     toast.success(`Template loaded: ${wf.name}`);
   };
 
-  // ── Export ───────────────────────────────────────────────────────────────────
+  // ── Export ────────────────────────────────────────────────────────────────────
   const handleCsvUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    Papa.parse(file, { header: true, complete: async (res) => {
-      try { await api.post('/tasks/bulk', { tasks: res.data }); toast.success('Tasks uploaded!'); fetchTasks(); }
-      catch { toast.error('Upload failed'); }
-    }});
+    Papa.parse(file, {
+      header: true, complete: async (res) => {
+        try { await api.post('/tasks/bulk', { tasks: res.data }); toast.success('Tasks uploaded!'); fetchTasks(); }
+        catch { toast.error('Upload failed'); }
+      }
+    });
   };
 
   const handleExportCsv = () => {
     const csv = Papa.unparse(tasks.map(t => ({
       title: t.title, description: t.description,
-      assigned_to: getUserName(t.assigned_to), due_date: t.due_date ? format(new Date(t.due_date), 'yyyy-MM-dd') : '',
+      assigned_to: getUserName(t.assigned_to),
+      due_date: t.due_date ? format(new Date(t.due_date), 'yyyy-MM-dd') : '',
       priority: t.priority, status: t.status, category: t.category, client: getClientName(t.client_id),
     })));
     const a = document.createElement('a');
@@ -1057,11 +1026,7 @@ export default function Tasks() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // ── Board column filter — BUG FIX ────────────────────────────────────────────
-  // Overdue tasks of any status go to correct column based on their actual status.
-  // Previously, overdue tasks always landed in "To Do" even if in_progress.
-  const getBoardColumnTasks = (colStatus) =>
-    displayTasks.filter(t => t.status === colStatus);
+  const getBoardColumnTasks = (colStatus) => displayTasks.filter(t => t.status === colStatus);
 
   // ════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -1070,13 +1035,13 @@ export default function Tasks() {
     <motion.div className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
       variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Page Header ─────────────────────────────────────────────────────── */}
+      {/* ── Page Header ──────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
         <Card className={`border shadow-sm rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
           <div className="h-1 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-500" />
           <CardContent className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className={`text-xl font-bold tracking-tight`} style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
+              <h1 className="text-xl font-bold tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
                 Task Management
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -1084,15 +1049,10 @@ export default function Tasks() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {/* Export / Import */}
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current.click()}
-                className="h-8 text-xs rounded-lg">Upload CSV</Button>
-              <Button variant="outline" size="sm" onClick={handleExportCsv}
-                className="h-8 text-xs rounded-lg">Export CSV</Button>
-              <Button variant="outline" size="sm" onClick={handleExportPdf}
-                className="h-8 text-xs rounded-lg">Export PDF</Button>
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current.click()} className="h-8 text-xs rounded-lg">Upload CSV</Button>
+              <Button variant="outline" size="sm" onClick={handleExportCsv} className="h-8 text-xs rounded-lg">Export CSV</Button>
+              <Button variant="outline" size="sm" onClick={handleExportPdf} className="h-8 text-xs rounded-lg">Export PDF</Button>
 
-              {/* Templates */}
               {canEditTasks && (
                 <Button variant="outline" size="sm" onClick={() => setShowWorkflowLibrary(true)}
                   className="h-8 text-xs rounded-lg gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
@@ -1112,20 +1072,15 @@ export default function Tasks() {
                     )}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className={`w-80 p-0 rounded-2xl shadow-xl border overflow-hidden ${isDark?"border-slate-700 bg-slate-800":"border-slate-200"}`} align="end">
-                  <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isDark?"border-slate-700 bg-slate-700/60":"border-slate-100 bg-slate-50"}`}>
+                <PopoverContent className={`w-80 p-0 rounded-2xl shadow-xl border overflow-hidden ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200'}`} align="end">
+                  <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isDark ? 'border-slate-700 bg-slate-700/60' : 'border-slate-100 bg-slate-50'}`}>
                     <div className="flex items-center gap-2">
                       <Bell className="h-4 w-4 text-slate-600" />
-                      <h3 className={`font-semibold text-sm ${isDark?"text-slate-100":"text-slate-800"}`}>Notifications</h3>
-                      {unreadCount > 0 && (
-                        <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{unreadCount} new</span>
-                      )}
+                      <h3 className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Notifications</h3>
+                      {unreadCount > 0 && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{unreadCount} new</span>}
                     </div>
                     {unreadCount > 0 && (
-                      <button onClick={markAllAsRead}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
-                        Mark all read
-                      </button>
+                      <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">Mark all read</button>
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
@@ -1135,16 +1090,14 @@ export default function Tasks() {
                         <p className="text-sm text-slate-400">No notifications</p>
                       </div>
                     ) : notifications.map((n) => (
-                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.read ? (isDark?'bg-blue-900/20':'bg-blue-50/40') : ''} ${isDark?'hover:bg-slate-700/50':'hover:bg-slate-50'}`}>
+                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.read ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50/40') : ''} ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'}`}>
                         <div className="flex gap-3">
                           {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
                           <div className={`flex-1 ${n.read ? 'pl-4' : ''}`}>
-                            <p className={`text-xs leading-relaxed ${!n.read ? (isDark?'font-semibold text-slate-100':'font-semibold text-slate-800') : (isDark?'text-slate-400':'text-slate-600')}`}>
+                            <p className={`text-xs leading-relaxed ${!n.read ? (isDark ? 'font-semibold text-slate-100' : 'font-semibold text-slate-800') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
                               {n.message}
                             </p>
-                            <p className="text-[10px] text-slate-400 mt-1">
-                              {format(new Date(n.created_at), 'MMM dd, hh:mm a')}
-                            </p>
+                            <p className="text-[10px] text-slate-400 mt-1">{format(new Date(n.created_at), 'MMM dd, hh:mm a')}</p>
                           </div>
                         </div>
                       </div>
@@ -1163,7 +1116,6 @@ export default function Tasks() {
                     </Button>
                   </DialogTrigger>
 
-                  {/* ── Task Form Dialog ─────────────────────────────────── */}
                   <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
@@ -1175,17 +1127,13 @@ export default function Tasks() {
                     </DialogHeader>
 
                     <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-                      {/* Title */}
                       <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Task Title <span className="text-red-500">*</span>
-                        </Label>
+                        <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Task Title <span className="text-red-500">*</span></Label>
                         <Input placeholder="Enter task title" value={formData.title}
                           onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))}
                           required className="h-9 text-sm border-slate-300" />
                       </div>
 
-                      {/* Description */}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Description</Label>
                         <Textarea placeholder="Describe the task (use - for checklist items)…" value={formData.description}
@@ -1193,7 +1141,6 @@ export default function Tasks() {
                           rows={3} className="text-sm border-slate-300 resize-none" />
                       </div>
 
-                      {/* Client + Due Date */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</Label>
@@ -1218,13 +1165,11 @@ export default function Tasks() {
                         </div>
                       </div>
 
-                      {/* Assignees */}
                       {canAssignTasks && (
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
                             <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assignee</Label>
-                            <Select value={formData.assigned_to}
-                              onValueChange={(v) => setFormData(p => ({ ...p, assigned_to: v }))}>
+                            <Select value={formData.assigned_to} onValueChange={(v) => setFormData(p => ({ ...p, assigned_to: v }))}>
                               <SelectTrigger className="h-9 text-sm border-slate-300"><SelectValue /></SelectTrigger>
                               <SelectContent className="max-h-52 overflow-y-auto">
                                 <SelectItem value="unassigned">Unassigned</SelectItem>
@@ -1244,8 +1189,7 @@ export default function Tasks() {
                                 <div className="space-y-2">
                                   {users.filter(u => u.id !== formData.assigned_to).map(u => (
                                     <label key={u.id} className="flex items-center gap-2 cursor-pointer">
-                                      <Checkbox checked={formData.sub_assignees.includes(u.id)}
-                                        onCheckedChange={() => toggleSubAssignee(u.id)} />
+                                      <Checkbox checked={formData.sub_assignees.includes(u.id)} onCheckedChange={() => toggleSubAssignee(u.id)} />
                                       <span className="text-sm text-slate-700">{u.full_name}</span>
                                     </label>
                                   ))}
@@ -1256,7 +1200,6 @@ export default function Tasks() {
                         </div>
                       )}
 
-                      {/* Department */}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Department</Label>
                         <div className="flex flex-wrap gap-1.5">
@@ -1264,16 +1207,13 @@ export default function Tasks() {
                             <button key={dept.value} type="button"
                               onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
                               className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all
-                                ${formData.category === dept.value
-                                  ? 'bg-blue-700 text-white shadow-sm'
-                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                                ${formData.category === dept.value ? 'bg-blue-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                               {dept.label}
                             </button>
                           ))}
                         </div>
                       </div>
 
-                      {/* Priority + Status */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</Label>
@@ -1300,22 +1240,19 @@ export default function Tasks() {
                         </div>
                       </div>
 
-                      {/* Recurring */}
-                      <div className={`border rounded-xl p-4 space-y-3 ${isDark?"border-slate-600 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
+                      <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Repeat className="h-4 w-4 text-slate-500" />
                             <Label className="font-semibold text-sm">Recurring Task</Label>
                           </div>
-                          <Switch checked={formData.is_recurring}
-                            onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
+                          <Switch checked={formData.is_recurring} onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
                         </div>
                         {formData.is_recurring && (
-                          <div className={`grid grid-cols-2 gap-3 pt-3 border-t ${isDark?"border-slate-600":"border-slate-200"}`}>
+                          <div className={`grid grid-cols-2 gap-3 pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                             <div className="space-y-1.5">
                               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Repeat</Label>
-                              <Select value={formData.recurrence_pattern}
-                                onValueChange={(v) => setFormData(p => ({ ...p, recurrence_pattern: v }))}>
+                              <Select value={formData.recurrence_pattern} onValueChange={(v) => setFormData(p => ({ ...p, recurrence_pattern: v }))}>
                                 <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   {RECURRENCE_PATTERNS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
@@ -1323,9 +1260,7 @@ export default function Tasks() {
                               </Select>
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Every (interval)
-                              </Label>
+                              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Every (interval)</Label>
                               <div className="flex items-center gap-2">
                                 <Input type="number" min="1" max="365" value={formData.recurrence_interval}
                                   onChange={(e) => setFormData(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))}
@@ -1342,9 +1277,8 @@ export default function Tasks() {
                         )}
                       </div>
 
-                      <DialogFooter className={`pt-3 border-t ${isDark?"border-slate-600":"border-slate-200"}`}>
-                        <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}
-                          className="h-9 text-sm rounded-lg">Cancel</Button>
+                      <DialogFooter className={`pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                        <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} className="h-9 text-sm rounded-lg">Cancel</Button>
                         <Button type="submit" disabled={loading} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800">
                           {loading ? 'Saving…' : editingTask ? 'Update Task' : 'Create Task'}
                         </Button>
@@ -1360,42 +1294,40 @@ export default function Tasks() {
 
       {/* ── Stat Cards ───────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard label="Total"       value={stats.total}      color={isDark?'text-slate-300':'text-slate-800'}  icon={SlidersHorizontal}
+        <StatCard label="Total"       value={stats.total}      color={isDark ? 'text-slate-300' : 'text-slate-800'} icon={SlidersHorizontal}
           active={filterStatus === 'all'}
-          activeClasses={{ bg: isDark?'bg-slate-700':'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
+          activeClasses={{ bg: isDark ? 'bg-slate-700' : 'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
           onClick={() => setFilterStatus('all')} />
-        <StatCard label="To Do"       value={stats.todo}       color="text-red-600"    icon={Circle}
+        <StatCard label="To Do"       value={stats.todo}       color="text-red-600"   icon={Circle}
           active={filterStatus === 'pending'}
           activeClasses={{ bg: 'bg-red-50', border: 'border-red-300', ring: 'ring-red-100', icon: 'bg-red-100', iconFg: 'text-red-600', bar: 'bg-red-500' }}
-          onClick={() => setFilterStatus(filterStatus === 'pending'     ? 'all' : 'pending')} />
-        <StatCard label="In Progress" value={stats.inProgress} color="text-amber-600"  icon={TrendingUp}
+          onClick={() => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending')} />
+        <StatCard label="In Progress" value={stats.inProgress} color="text-amber-600" icon={TrendingUp}
           active={filterStatus === 'in_progress'}
           activeClasses={{ bg: 'bg-amber-50', border: 'border-amber-300', ring: 'ring-amber-100', icon: 'bg-amber-100', iconFg: 'text-amber-600', bar: 'bg-amber-500' }}
           onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} />
-        <StatCard label="Completed"   value={stats.completed}  color="text-blue-600"   icon={CheckCircle2}
+        <StatCard label="Completed"   value={stats.completed}  color="text-blue-600"  icon={CheckCircle2}
           active={filterStatus === 'completed'}
           activeClasses={{ bg: 'bg-blue-50', border: 'border-blue-300', ring: 'ring-blue-100', icon: 'bg-blue-100', iconFg: 'text-blue-600', bar: 'bg-blue-600' }}
-          onClick={() => setFilterStatus(filterStatus === 'completed'   ? 'all' : 'completed')} />
-        <StatCard label="Overdue"     value={stats.overdue}    color="text-red-700"    icon={AlertCircle}
+          onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')} />
+        <StatCard label="Overdue"     value={stats.overdue}    color="text-red-700"   icon={AlertCircle}
           active={filterStatus === 'overdue'}
           activeClasses={{ bg: 'bg-red-50', border: 'border-red-400', ring: 'ring-red-200', icon: 'bg-red-100', iconFg: 'text-red-700', bar: 'bg-red-700' }}
-          onClick={() => setFilterStatus(filterStatus === 'overdue'     ? 'all' : 'overdue')} />
+          onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')} />
       </motion.div>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}
-        className={`flex flex-wrap items-center gap-2 border rounded-xl px-4 py-3 ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`}>
-        {/* Search */}
+        className={`flex flex-wrap items-center gap-2 border rounded-xl px-4 py-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="relative flex-1 min-w-40">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <Input placeholder="Search tasks…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className={`pl-9 h-8 text-sm rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400":"bg-slate-50 border-slate-200"}`} />
+            className={`pl-9 h-8 text-sm rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`} />
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Status */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="pending">To Do</SelectItem>
@@ -1405,9 +1337,8 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          {/* Priority */}
           <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Priority" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Priority" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Priorities</SelectItem>
               <SelectItem value="low">Low</SelectItem>
@@ -1417,28 +1348,25 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          {/* Category */}
           <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Department" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Department" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Depts</SelectItem>
               {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
             </SelectContent>
           </Select>
 
-          {/* Assignee */}
           <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Assignees</SelectItem>
               {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
             </SelectContent>
           </Select>
 
-          {/* Sort */}
           <Select value={`${sortBy}-${sortDirection}`}
             onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
-            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Sort" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
               <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
@@ -1447,22 +1375,20 @@ export default function Tasks() {
             </SelectContent>
           </Select>
 
-          {/* My Tasks toggle */}
           <label className="flex items-center gap-1.5 cursor-pointer">
             <Switch checked={showMyTasksOnly} onCheckedChange={setShowMyTasksOnly} className="scale-75" />
             <span className="text-xs text-slate-500 whitespace-nowrap">My Tasks</span>
           </label>
 
-          {/* View toggle */}
           <div className="flex bg-slate-100 p-0.5 rounded-lg">
             <button onClick={() => setViewMode('list')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'list' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+                ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <List className="h-3.5 w-3.5" />
             </button>
             <button onClick={() => setViewMode('board')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'board' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+                ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -1480,8 +1406,7 @@ export default function Tasks() {
                 {pill.label} <X className="h-3 w-3 ml-0.5" />
               </button>
             ))}
-            <button onClick={clearAllFilters}
-              className="text-[11px] font-medium text-slate-400 hover:text-slate-600 px-2 py-1 transition-colors">
+            <button onClick={clearAllFilters} className="text-[11px] font-medium text-slate-400 hover:text-slate-600 px-2 py-1 transition-colors">
               Clear all
             </button>
           </motion.div>
@@ -1492,13 +1417,13 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
           <motion.div className="space-y-1.5" variants={containerVariants}>
-            {/* ── Column headers — CSS grid, exact mirror of TaskRow grid ── */}
+            {/* Column headers */}
             <div
-              className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5 ${isDark?"text-slate-500 border-slate-700":"text-slate-400 border-slate-100"}`}
+              className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
+                ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
               style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
             >
-              <span />{/* stripe */}
-              <span />{/* dot */}
+              <span /><span />
               <span className="pl-1">Task</span>
               <span className="text-center">Status</span>
               <span className="text-center">Dept</span>
@@ -1563,16 +1488,11 @@ export default function Tasks() {
               const colTasks = getBoardColumnTasks(col.status);
               return (
                 <motion.div key={col.status} variants={itemVariants} className="space-y-3">
-                  {/* Column header */}
                   <div className="flex items-center gap-2 px-1">
                     <div className={`w-2.5 h-2.5 rounded-full ${col.bg}`} />
                     <h2 className={`text-sm font-bold ${col.color}`}>{col.title}</h2>
-                    <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-auto">
-                      {colTasks.length}
-                    </span>
+                    <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-auto">{colTasks.length}</span>
                   </div>
-
-                  {/* Cards */}
                   <div className="space-y-3 min-h-[200px]">
                     {colTasks.map((task, index) => {
                       const taskIsOverdue = isOverdue(task);
@@ -1606,7 +1526,7 @@ export default function Tasks() {
                       );
                     })}
                     {colTasks.length === 0 && (
-                      <div className={`flex items-center justify-center h-24 rounded-xl border-2 border-dashed ${isDark?"border-slate-700":"border-slate-200"}`}>
+                      <div className={`flex items-center justify-center h-24 rounded-xl border-2 border-dashed ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                         <p className="text-xs text-slate-400">No tasks</p>
                       </div>
                     )}
@@ -1637,9 +1557,8 @@ export default function Tasks() {
 
             return (
               <div className="space-y-5 mt-2">
-                {/* Title + badges */}
                 <div>
-                  <h2 className={`text-xl font-bold mb-2 leading-snug ${isDark?"text-slate-100":"text-slate-900"}`}>{selectedDetailTask.title}</h2>
+                  <h2 className={`text-xl font-bold mb-2 leading-snug ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedDetailTask.title}</h2>
                   <div className="flex flex-wrap gap-1.5">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>
                       {taskIsOverdue ? 'Overdue' : statusStyle.label}
@@ -1658,52 +1577,44 @@ export default function Tasks() {
                   </div>
                 </div>
 
-                {/* Description */}
                 {selectedDetailTask.description && (
-                  <div className={`border rounded-xl p-4 ${isDark?"border-slate-600 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
+                  <div className={`border rounded-xl p-4 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}>
                     <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Notes</p>
-                    <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                      {selectedDetailTask.description}
-                    </div>
+                    <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedDetailTask.description}</div>
                   </div>
                 )}
 
-                {/* Meta grid */}
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Assigned To',  value: getUserName(selectedDetailTask.assigned_to) },
-                    { label: 'Created By',   value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by) : '—' },
-                    { label: 'Department',   value: getCategoryLabel(selectedDetailTask.category) },
-                    { label: 'Client',       value: selectedDetailTask.client_id ? getClientName(selectedDetailTask.client_id) : '—' },
-                    { label: 'Due Date',     value: selectedDetailTask.due_date
+                    { label: 'Assigned To', value: getUserName(selectedDetailTask.assigned_to) },
+                    { label: 'Created By',  value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by) : '—' },
+                    { label: 'Department',  value: getCategoryLabel(selectedDetailTask.category) },
+                    { label: 'Client',      value: selectedDetailTask.client_id ? getClientName(selectedDetailTask.client_id) : '—' },
+                    { label: 'Due Date',    value: selectedDetailTask.due_date
                         ? `${format(new Date(selectedDetailTask.due_date), 'MMM dd, yyyy')} · ${getRelativeDueDate(selectedDetailTask.due_date)}`
                         : 'No due date' },
-                    { label: 'Recurrence',   value: selectedDetailTask.is_recurring
+                    { label: 'Recurrence', value: selectedDetailTask.is_recurring
                         ? `Every ${selectedDetailTask.recurrence_interval} ${selectedDetailTask.recurrence_pattern}(s)`
                         : 'One-time' },
                   ].map(({ label, value }) => (
-                    <div key={label} className={`border rounded-xl p-3.5 ${isDark?"border-slate-600 bg-slate-700":"border-slate-200 bg-white"}`}>
+                    <div key={label} className={`border rounded-xl p-3.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-white'}`}>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{label}</p>
-                      <p className={`text-sm font-semibold ${isDark?"text-slate-100":"text-slate-800"}`}>{value}</p>
+                      <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{value}</p>
                     </div>
                   ))}
                 </div>
 
-                {/* Co-assignees */}
                 {selectedDetailTask.sub_assignees?.length > 0 && (
-                  <div className={`border rounded-xl p-3.5 ${isDark?"border-slate-600":"border-slate-200"}`}>
+                  <div className={`border rounded-xl p-3.5 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Co-assignees</p>
                     <div className="flex flex-wrap gap-1.5">
                       {selectedDetailTask.sub_assignees.map(uid => (
-                        <span key={uid} className="text-xs font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg">
-                          {getUserName(uid)}
-                        </span>
+                        <span key={uid} className="text-xs font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg">{getUserName(uid)}</span>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Checklist */}
                 {checklistItems.length > 0 && (
                   <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50">
                     <div className="flex items-center justify-between mb-3">
@@ -1718,20 +1629,15 @@ export default function Tasks() {
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                       {checklistItems.map((item, idx) => (
                         <label key={idx} className="flex items-start gap-2.5 cursor-pointer group">
-                          <Checkbox checked={checkedItems.includes(idx)}
-                            onCheckedChange={() => toggleChecklistItem(selectedDetailTask.id, idx)}
-                            className="mt-0.5 flex-shrink-0" />
-                          <span className={`text-sm leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                            {item}
-                          </span>
+                          <Checkbox checked={checkedItems.includes(idx)} onCheckedChange={() => toggleChecklistItem(selectedDetailTask.id, idx)} className="mt-0.5 flex-shrink-0" />
+                          <span className={`text-sm leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : 'text-slate-700'}`}>{item}</span>
                         </label>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className={`flex gap-2 border-t pt-4 ${isDark?"border-slate-700":"border-slate-100"}`}>
+                <div className={`flex gap-2 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   {canModifyTask(selectedDetailTask) && (
                     <Button onClick={() => { handleEdit(selectedDetailTask); setTaskDetailOpen(false); }}
                       className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5">
@@ -1761,16 +1667,13 @@ export default function Tasks() {
       <Dialog open={showWorkflowLibrary} onOpenChange={setShowWorkflowLibrary}>
         <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>
-              CA/CS Compliance Workflow Library
-            </DialogTitle>
+            <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>CA/CS Compliance Workflow Library</DialogTitle>
             <DialogDescription className="text-sm text-slate-500">
               14 professionally curated compliance workflows. Click any template to pre-fill a task.
             </DialogDescription>
           </DialogHeader>
 
-          {/* Workflow filters */}
-          <div className={`flex gap-3 sticky top-0 z-10 py-3 border-b ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
+          <div className={`flex gap-3 sticky top-0 z-10 py-3 border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input placeholder="Search templates…" value={workflowSearch}
@@ -1801,7 +1704,7 @@ export default function Tasks() {
               const priorityStyle = PRIORITY_STYLES[wf.priority] || PRIORITY_STYLES.medium;
               return (
                 <button key={wf.id} onClick={() => applyComplianceWorkflow(wf)}
-                  className={`text-left border rounded-xl p-5 hover:border-emerald-400 hover:shadow-md transition-all group ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`}>
+                  className={`text-left border rounded-xl p-5 hover:border-emerald-400 hover:shadow-md transition-all group ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
@@ -1812,7 +1715,7 @@ export default function Tasks() {
                           {priorityStyle.label}
                         </span>
                       </div>
-                      <h3 className={`font-bold group-hover:text-emerald-600 transition-colors leading-snug ${isDark?"text-slate-100":"text-slate-800"}`}>{wf.name}</h3>
+                      <h3 className={`font-bold group-hover:text-emerald-600 transition-colors leading-snug ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{wf.name}</h3>
                     </div>
                     <div className="text-right flex-shrink-0 ml-3">
                       <div className="text-lg font-bold text-emerald-600">{wf.estimatedHours}h</div>
@@ -1820,7 +1723,7 @@ export default function Tasks() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mb-3 line-clamp-1">{wf.title}</p>
-                  <div className={`rounded-lg p-3 border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
+                  <div className={`rounded-lg p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Key Steps</p>
                     <div className="space-y-1">
                       {steps.slice(0, 4).map((s, i) => (
@@ -1856,7 +1759,7 @@ export default function Tasks() {
           <div className="space-y-3 mt-2">
             <div className="max-h-60 overflow-y-auto space-y-2">
               {(comments[selectedTask?.id] || []).map((c, i) => (
-                <div key={i} className={`rounded-lg px-3 py-2.5 border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
+                <div key={i} className={`rounded-lg px-3 py-2.5 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                   <p className="text-sm text-slate-700">{c.text}</p>
                   <p className="text-[10px] text-slate-400 mt-1">
                     {getUserName(c.user_id)} · {format(new Date(c.created_at), 'MMM dd, hh:mm a')}
@@ -1865,8 +1768,7 @@ export default function Tasks() {
               ))}
             </div>
             <div className="flex gap-2">
-              <Input value={newComment} onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Add a comment…" className="h-9 text-sm" />
+              <Input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Add a comment…" className="h-9 text-sm" />
               <Button className="h-9 text-sm" onClick={handleAddComment}>Post</Button>
             </div>
           </div>
