@@ -248,9 +248,14 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                     const isSel = selected[item._id];
                     return (
                       <motion.div
-                        key={item._id} layout
-                        onClick={()=>toggle(item._id)}
-                        className={`rounded-xl border-2 p-4 cursor-pointer transition-all duration-200 ${isSel?(isDark?'border-blue-300 bg-blue-50':'border-slate-200 bg-white opacity-60'}`}
+                        key={item._id}
+                        layout
+                        onClick={() => toggle(item._id)}
+                        className={`rounded-xl border-2 p-4 cursor-pointer transition-all duration-200 ${
+                          isSel
+                            ? (isDark ? 'border-blue-400 bg-blue-900/20' : 'border-blue-400 bg-blue-50')
+                            : (isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white opacity-60')
+                        }`}
                       >
                         <div className="flex items-start gap-3">
                           <div className={`flex-shrink-0 w-5 h-5 rounded-md mt-0.5 flex items-center justify-center border-2 transition-all ${isSel?'bg-blue-500 border-blue-500':'border-slate-300 bg-white'}`}>
