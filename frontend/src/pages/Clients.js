@@ -583,10 +583,18 @@ export default function Clients() {
   const [contactErrors, setContactErrors] = useState([]);
 
   const safeDate = (dateStr) => {
-    if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return null;
-    const date = new Date(dateStr.trim());
+    if (!dateStr) return null;
+    if (typeof dateStr !== 'string') return null;
+    const trimmed = dateStr.trim();
+    if (!trimmed || trimmed === 'None' || trimmed === 'null' || trimmed === 'undefined') return null;
+    // Must match YYYY-MM-DD format — backend expects this exact format
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    const date = new Date(trimmed);
     if (isNaN(date.getTime())) return null;
-    return date.toISOString().split('T')[0];
+    // Extra guard: year must be reasonable
+    if (date.getFullYear() < 1900 || date.getFullYear() > 2100) return null;
+    return `${match[1]}-${match[2]}-${match[3]}`;
   };
 
   const fetchReferrers = async () => {
@@ -606,7 +614,10 @@ export default function Clients() {
 
   const saveReferrer = async (name) => {
     const trimmed = name?.trim();
-    if (!trimmed || savedReferrers.includes(trimmed)) return trimmed;
+    if (!trimmed) return trimmed;
+    // Case-insensitive duplicate check
+    const existing = savedReferrers.find(r => r.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing;
     const updated = [...savedReferrers, trimmed];
     setSavedReferrers(updated);
     try { await api.post('/referrers', { name: trimmed }); }
@@ -808,8 +819,8 @@ export default function Clients() {
     if (saveDirectly) {
       setImportLoading(true);
       try {
-        const contacts = mdsForm.contact_persons.filter(cp => cp.name?.trim()).map(cp => ({ name: cp.name.trim(), designation: cp.designation?.trim() || null, email: cp.email?.trim() || null, phone: cp.phone?.replace(/\D/g, '') || null, birthday: cp.birthday ? cp.birthday : null, din: cp.din?.trim() || null }));
-        const payload = { company_name: mdsForm.company_name?.trim() || '', client_type: mdsForm.client_type || 'proprietor', email: mdsForm.email?.trim() || '', phone: mdsForm.phone?.replace(/\D/g, '') || '', birthday: mdsForm.birthday || null, address: mdsForm.address?.trim() || null, city: mdsForm.city?.trim() || null, state: mdsForm.state?.trim() || null, services: mdsForm.services || [], notes: mdsForm.notes?.trim() || null, status: mdsForm.status || 'active', contact_persons: contacts, dsc_details: [], assignments: [], assigned_to: null, referred_by: mdsForm.referred_by?.trim() || null };
+        const contacts = mdsForm.contact_persons.filter(cp => cp.name?.trim()).map(cp => ({ name: cp.name.trim(), designation: cp.designation?.trim() || null, email: cp.email?.trim() || null, phone: cp.phone?.replace(/\D/g, '') || null, birthday: safeDate(cp.birthday), din: cp.din?.trim() || null }));
+        const payload = { company_name: mdsForm.company_name?.trim() || '', client_type: mdsForm.client_type || 'proprietor', email: mdsForm.email?.trim() || '', phone: mdsForm.phone?.replace(/\D/g, '') || '', birthday: safeDate(mdsForm.birthday), address: mdsForm.address?.trim() || null, city: mdsForm.city?.trim() || null, state: mdsForm.state?.trim() || null, services: mdsForm.services || [], notes: mdsForm.notes?.trim() || null, status: mdsForm.status || 'active', contact_persons: contacts, dsc_details: [], assignments: [], assigned_to: null, referred_by: mdsForm.referred_by?.trim() || null };
         await api.post('/clients', payload);
         toast.success(`Client "${mdsForm.company_name}" saved successfully!`);
         fetchClients(); setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null);
@@ -839,6 +850,17 @@ export default function Clients() {
       const finalReferredBy = formData.referred_by?.trim() || null;
       if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
       const payload = { company_name: formData.company_name.trim(), client_type: formData.client_type, client_type_label: formData.client_type === 'other' ? (formData.client_type_other?.trim() || 'Other') : null, email: formData.email?.trim(), phone: cleanPhone, birthday: safeDate(formData.birthday), address: formData.address?.trim() || null, city: formData.city?.trim() || null, state: formData.state?.trim() || null, services: finalServices, notes: formData.notes?.trim() || null, assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments, status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC, referred_by: finalReferredBy };
+      // ── Duplicate company name check (frontend guard, backend also has unique index) ──
+      if (!editingClient) {
+        const duplicate = clients.find(c =>
+          c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim()
+        );
+        if (duplicate) {
+          toast.error(`"${payload.company_name}" already exists in your client list`);
+          setLoading(false);
+          return;
+        }
+      }
       if (editingClient) await api.put(`/clients/${editingClient.id}`, payload);
       else await api.post("/clients", payload);
       setDialogOpen(false); resetForm(); fetchClients();
@@ -886,11 +908,47 @@ export default function Clients() {
   const updateAssignmentUser = (idx, userId) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => i === idx ? { ...a, user_id: userId } : a) }));
   const toggleAssignmentService = (idx, svc) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => { if (i !== idx) return a; const services = a.services.includes(svc) ? a.services.filter(s => s !== svc) : [...a.services, svc]; return { ...a, services }; }) }));
   const toggleService = (s) => { setFormData(p => { const services = p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s]; return { ...p, services }; }); if (formErrors.services) setFormErrors(prev => ({ ...prev, services: undefined })); };
-  const addOtherService = () => { if (otherService.trim()) { setFormData(prev => ({ ...prev, services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${otherService.trim()}`] })); setOtherService(''); } };
+  const addOtherService = () => {
+    const trimmed = otherService.trim();
+    if (!trimmed) return;
+    // Case-insensitive duplicate check against existing Other: services AND built-in SERVICES list
+    const existingOthers = formData.services
+      .filter(s => s.startsWith('Other:'))
+      .map(s => s.replace('Other: ', '').toLowerCase());
+    const builtInMatch = SERVICES.find(s => s.toLowerCase() === trimmed.toLowerCase() && s !== 'Other');
+    if (builtInMatch) {
+      toast.info(`"${builtInMatch}" is already a standard service — select it from the list above`);
+      return;
+    }
+    if (existingOthers.includes(trimmed.toLowerCase())) {
+      toast.info(`"${trimmed}" is already added`);
+      setOtherService('');
+      return;
+    }
+    setFormData(prev => ({ ...prev, services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${trimmed}`] }));
+    setOtherService('');
+  };
   const getClientAssignments = (client) => { if (client?.assignments && client.assignments.length > 0) return client.assignments; if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }]; return []; };
   const handleReferrerSelectChange = (val) => { setReferrerSelectValue(val); if (val === '__other__') { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: '' })); } else { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: val === '' ? '' : val })); } };
   const handleReferrerInputChange = (val) => { setReferrerInput(val); setFormData(prev => ({ ...prev, referred_by: val })); };
-  const handleSaveReferrer = async () => { const name = referrerInput.trim(); if (!name) { toast.error('Please enter a referrer name'); return; } const saved = await saveReferrer(name); setReferrerSelectValue(saved); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: saved })); toast.success(`"${saved}" saved to referrer list`); };
+  const handleSaveReferrer = async () => {
+    const name = referrerInput.trim();
+    if (!name) { toast.error('Please enter a referrer name'); return; }
+    // Case-insensitive duplicate check
+    const duplicate = savedReferrers.find(r => r.toLowerCase() === name.toLowerCase());
+    if (duplicate) {
+      toast.info(`"${duplicate}" already exists — selected!`);
+      setReferrerSelectValue(duplicate);
+      setReferrerInput('');
+      setFormData(prev => ({ ...prev, referred_by: duplicate }));
+      return;
+    }
+    const saved = await saveReferrer(name);
+    setReferrerSelectValue(saved);
+    setReferrerInput('');
+    setFormData(prev => ({ ...prev, referred_by: saved }));
+    toast.success(`"${saved}" added to referrer list`);
+  };
 
   // ── List row ──────────────────────────────────────────────────────────
   const ListRow = ({ index, style }) => {
@@ -996,6 +1054,42 @@ export default function Clients() {
                   <div className="space-y-3">{selectedClient.dsc_details.map((dsc, i) => dsc.certificate_number && (<div key={i} className={`border rounded-xl p-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-white border-slate-200"}`}><p className={`font-semibold text-sm ${isDark ? "text-slate-100" : "text-slate-900"}`}>{dsc.certificate_number}</p><p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p><div className="flex gap-4 mt-2 text-xs text-slate-600">{dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}{dsc.expiry_date && <p>Expires: {format(new Date(dsc.expiry_date), 'MMM d, yyyy')}</p>}</div>{dsc.notes && <p className="text-xs text-slate-500 mt-2 italic">{dsc.notes}</p>}</div>))}</div>
                 </div>
               )}
+              {(clientAssignments.length > 0 || selectedClient.notes) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {clientAssignments.length > 0 && (
+                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
+                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-3 flex items-center gap-2`}><Briefcase className="h-3.5 w-3.5" /> Staff Assignments</h3>
+                      <div className="flex flex-col gap-2">
+                        {clientAssignments.map((a, i) => {
+                          const u = users.find(x => x.id === a.user_id);
+                          if (!u) return null;
+                          return (
+                            <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark ? "bg-slate-700/60 border-slate-600" : "bg-white border-slate-100"}`}>
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>
+                                {(u.full_name || u.name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{u.full_name || u.name}</p>
+                                {a.services && a.services.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {a.services.map((svc, si) => <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc}</span>)}
+                                  </div>
+                                ) : <p className="text-xs text-slate-400 mt-0.5">All services</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {selectedClient.notes && (
+                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
+                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-3`}>Notes</h3>
+                      <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
@@ -1062,6 +1156,12 @@ export default function Clients() {
                         <label className={labelCls}>Referred By</label>
                         <div className="relative"><Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" /><select className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer" value={referrerSelectValue} onChange={e => handleReferrerSelectChange(e.target.value)}><option value="">— Select referral source —</option><option value="Our Client">Our Client</option>{savedReferrers.filter(r => r !== 'Our Client').map(r => <option key={r} value={r}>{r}</option>)}<option value="__other__">+ Other</option></select></div>
                         {referrerSelectValue === '__other__' && <div className="flex gap-2 mt-2"><Input className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Type referrer's name…" value={referrerInput} onChange={e => handleReferrerInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }} autoFocus /><Button type="button" onClick={handleSaveReferrer} className="h-11 px-4 rounded-xl text-white text-sm font-semibold flex-shrink-0 gap-1.5 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Plus className="h-4 w-4" /> Save</Button></div>}
+                      {referrerSelectValue === '__other__' && (() => {
+                        const isDuplicate = referrerInput.trim() && savedReferrers.some(r => r.toLowerCase() === referrerInput.trim().toLowerCase());
+                        return isDuplicate
+                          ? <p className="text-[10px] text-amber-600 mt-1.5 flex items-center gap-1.5"><span>⚠</span> <span>&ldquo;{referrerInput.trim()}&rdquo; already exists — click <strong>Save</strong> to select it</span></p>
+                          : <p className="text-[10px] text-slate-400 mt-1.5">Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time</p>;
+                      })()}
                       </div>
                       <div className="md:col-span-2"><label className={labelCls}>Address</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
                       <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} /></div>
@@ -1112,7 +1212,7 @@ export default function Clients() {
                     <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" isDark={isDark} />
                     {formErrors.services && <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.services}</p>}
                     <div className="flex flex-wrap gap-2">{SERVICES.map(s => { const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))); return <button key={s} type="button" onClick={() => toggleService(s)} className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`} style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>{s}</button>; })}</div>
-                    {formData.services.includes('Other') && <div className="flex gap-3 items-end max-w-sm mt-4"><div className="flex-1"><label className={labelCls}>Specify Other Service</label><Input placeholder="e.g. IEC Registration" value={otherService} onChange={e => setOtherService(e.target.value)} className="h-10 rounded-xl text-sm border-slate-200" /></div><Button type="button" size="sm" onClick={addOtherService} className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>Add</Button></div>}
+                    {formData.services.includes('Other') && <div className="flex gap-3 items-end max-w-sm mt-4"><div className="flex-1"><label className={labelCls}>Specify Other Service</label><Input placeholder="e.g. IEC Registration" value={otherService} onChange={e => setOtherService(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOtherService(); } }} className="h-10 rounded-xl text-sm border-slate-200" /></div><Button type="button" size="sm" onClick={addOtherService} className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>Add</Button></div>}
                   </div>
                   {/* Notes */}
                   <div><label className={labelCls}>Internal Notes</label><Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Internal remarks…" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} /></div>
@@ -1236,30 +1336,55 @@ export default function Clients() {
       )}
 
       {/* ── FILTERS + SORT + VIEW TOGGLE ── */}
-      <div className={`flex flex-col sm:flex-row gap-3 p-3.5 rounded-2xl border shadow-sm ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search by company, email or phone…"
-            className={`pl-11 h-10 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100 placeholder:text-slate-400" : "bg-slate-50"}`}
-            value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+      <div className={`rounded-2xl border shadow-sm ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+        {/* ROW 1: Search bar */}
+        <div className={`flex items-center gap-3 px-3.5 pt-3.5 pb-2.5 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+            <Input
+              placeholder="Search by company, email or phone…"
+              className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100 placeholder:text-slate-400" : "bg-slate-50"}`}
+              value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+          {/* Count + view toggle always visible on right of search */}
+          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-300 border-slate-600" : "bg-slate-50 text-slate-600 border-slate-200"}`}>
+            {sortedClients.length} <span className="ml-1 font-normal text-slate-400">{sortedClients.length !== 1 ? 'clients' : 'client'}</span>
+          </div>
+          <div className={`flex items-center border rounded-xl p-0.5 gap-0.5 flex-shrink-0 ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-200"}`}>
+            <button onClick={() => setViewMode('board')}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
+              title="Board view"><LayoutGrid className="h-4 w-4" /></button>
+            <button onClick={() => setViewMode('list')}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
+              title="List view"><List className="h-4 w-4" /></button>
+          </div>
         </div>
-        <div className="flex gap-2 flex-shrink-0 flex-wrap items-center">
-          {filteredClients.length > 0 && (
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-xl p-1">
-              <button onClick={() => openBulkMsg('whatsapp')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-emerald-700 hover:bg-emerald-50 transition-all text-xs font-semibold">
-                <MessageCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">WhatsApp</span>
-                <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
-              </button>
-              <div className="w-px h-5 bg-slate-200" />
-              <button onClick={() => openBulkMsg('email')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-blue-700 hover:bg-blue-50 transition-all text-xs font-semibold">
-                <Mail className="h-3.5 w-3.5" /><span className="hidden sm:inline">Email</span>
-                <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
-              </button>
-            </div>
-          )}
 
-          {/* ── SORT CONTROL ─────────────────────────────── */}
-          <div className={`flex items-center border rounded-xl overflow-hidden ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
+        {/* ROW 2: All controls in one line */}
+        <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none">
+          {/* Bulk message buttons */}
+          <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
+            <button onClick={() => openBulkMsg('whatsapp')}
+              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-emerald-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
+              <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>WhatsApp</span>
+              <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
+            </button>
+            <div className={`w-px h-5 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
+            <button onClick={() => openBulkMsg('email')}
+              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-blue-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-blue-50'}`}>
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>Email</span>
+              <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
+
+          {/* Sort control */}
+          <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
             {SORT_OPTIONS.map((opt, i) => {
               const isActive = sortOrder === opt.value;
               return (
@@ -1267,45 +1392,42 @@ export default function Clients() {
                   key={opt.value}
                   onClick={() => setSortOrder(opt.value)}
                   title={opt.label}
-                  className="relative h-10 px-3 flex items-center gap-1.5 text-xs font-semibold transition-all"
+                  className="h-9 px-2.5 flex items-center gap-1 text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
                   style={{
                     background: isActive ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : 'transparent',
                     color: isActive ? '#ffffff' : isDark ? '#94a3b8' : '#64748b',
                     borderRight: i < SORT_OPTIONS.length - 1 ? `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` : 'none',
                   }}
                 >
-                  <span style={{ fontSize: 10, fontWeight: 900 }}>{opt.icon}</span>
-                  <span className="hidden md:inline">{opt.hint}</span>
+                  <span style={{ fontSize: 11, fontWeight: 900, lineHeight: 1 }}>{opt.icon}</span>
+                  <span style={{ fontSize: 10 }}>{opt.hint}</span>
                 </button>
               );
             })}
           </div>
 
+          {/* Divider */}
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
+
+          {/* Filters */}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className={`h-10 w-[120px] border-none rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All Status</SelectItem></SelectContent>
           </Select>
           <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
-            <SelectTrigger className={`h-10 w-[130px] border-none rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Types" /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Types" /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Types</SelectItem>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className={`h-10 w-[150px] border-none rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Services</SelectItem>{SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
           </Select>
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-              <SelectTrigger className={`h-10 w-[160px] border-none rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
+              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
               <SelectContent><SelectItem value="all">All Staff</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
             </Select>
           )}
-          <div className={`h-10 px-4 flex items-center rounded-xl text-xs font-semibold border whitespace-nowrap ${isDark ? "bg-slate-700 text-slate-400 border-slate-600" : "bg-slate-50 text-slate-500 border-slate-100"}`}>
-            {sortedClients.length} client{sortedClients.length !== 1 ? 's' : ''}
-          </div>
-          <div className={`flex items-center border rounded-xl p-1 gap-0.5 ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
-            <button onClick={() => setViewMode('board')} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="Board view"><LayoutGrid className="h-4 w-4" /></button>
-            <button onClick={() => setViewMode('list')} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="List view"><List className="h-4 w-4" /></button>
-          </div>
         </div>
       </div>
 
