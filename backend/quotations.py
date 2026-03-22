@@ -3,18 +3,11 @@ backend/quotations.py
 ─────────────────────────────────────────────────────────────────────────────
 Quotation Module — FastAPI Router
 
-ROOT CAUSE FIX (v3):
-  The real bug was that FPDF.cell() on older fpdf2/fpdf1 builds does NOT accept
-  new_x / new_y as keyword arguments AT ALL — not even as strings.
-  The previous shim still unpacked those dicts into cell() which crashed.
-
-  Solution: completely abandon new_x/new_y and use the universally-supported
-  `ln` parameter:
-    ln=0  → stay on same line (like new_x=RIGHT, new_y=TOP)
-    ln=1  → move to next line at left margin (like new_x=LMARGIN, new_y=NEXT)
-    ln=2  → move below current cell
-
-  This works on fpdf 1.x, fpdf2 2.x (all sub-versions) without any imports.
+PDF FIX (v4 - Complete Rewrite):
+  - _safe_pdf_output() correctly handles bytearray/bytes/str from all fpdf versions
+  - footer() methods no longer pass ln= kwarg (causes corruption on some builds)
+  - All cell() calls use positional ln arg only via _cell() / _mcell() wrappers
+  - No double-encoding of bytearray
 """
 
 import uuid
@@ -409,23 +402,35 @@ def _darken(color: tuple, factor: float = 0.6) -> tuple:
 def _safe_pdf_output(pdf) -> bytes:
     """
     Return raw PDF bytes compatible with ALL fpdf/fpdf2 versions.
+
     fpdf2 >= 2.x  → output() returns bytearray  → cast to bytes directly.
-    fpdf2 old / fpdf1 → output(dest='S') returns a latin-1 string.
-    We never call encode('latin-1') on a bytearray — that was corrupting the file.
+    fpdf1 / old   → output(dest='S') returns a latin-1 encoded string.
+
+    CRITICAL: Never call .encode('latin-1') on a bytearray — that was the
+    corruption bug. Only encode if result is actually a str.
     """
-    # Modern fpdf2: output() with no args returns bytearray
+    result = None
+
+    # Try modern fpdf2 first (no args)
     try:
         result = pdf.output()
-        if isinstance(result, (bytes, bytearray)):
-            return bytes(result)
-        # Fallback: old fpdf returns a string from output(dest='S')
-        return result.encode("latin-1")
     except TypeError:
-        # Some old builds require dest kwarg
-        result = pdf.output(dest="S")
-        if isinstance(result, (bytes, bytearray)):
-            return bytes(result)
+        pass
+
+    # Fallback for older builds that need dest kwarg
+    if result is None:
+        try:
+            result = pdf.output(dest="S")
+        except Exception as e:
+            raise RuntimeError(f"pdf.output() failed on all attempts: {e}")
+
+    # Convert to bytes without double-encoding
+    if isinstance(result, (bytes, bytearray)):
+        return bytes(result)
+    if isinstance(result, str):
         return result.encode("latin-1")
+
+    raise RuntimeError(f"Unexpected type from pdf.output(): {type(result)}")
 
 
 def _embed_logo(pdf, logo_b64: str, x: float, y: float, h: float) -> None:
@@ -454,27 +459,22 @@ def _embed_logo(pdf, logo_b64: str, x: float, y: float, h: float) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 # UNIVERSAL CELL HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
-# ROOT CAUSE: fpdf2 < 2.5 and fpdf 1.x do NOT accept new_x / new_y kwargs.
-# The previous shim still passed them which caused the 500 error.
-#
-# Fix: use the ln parameter which is supported by EVERY fpdf version:
-#   ln=0  → cursor stays right of cell  (equivalent to new_x=RIGHT)
-#   ln=1  → cursor moves to next line   (equivalent to new_x=LMARGIN, new_y=NEXT)
-#
-# We wrap cell() and multi_cell() so all call sites look the same.
+# Use ln=1 (next line) or ln=0 (same line) as positional-safe integer arg.
+# Never pass new_x / new_y — not supported on fpdf1 / old fpdf2 builds.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _cell(pdf, w, h, txt="", border=0, align="L", fill=False, nl=False):
     """
-    Universal cell wrapper. nl=True → move to next line (ln=1), nl=False → stay (ln=0).
-    Never passes new_x / new_y so it works on ALL fpdf versions.
+    Universal cell wrapper.
+    nl=True  → ln=1 (move to next line at left margin)
+    nl=False → ln=0 (stay on same line)
     """
-    pdf.cell(w, h, txt, border=border, ln=1 if nl else 0, align=align, fill=fill)
+    pdf.cell(w, h, txt, border, 1 if nl else 0, align, fill)
 
 
 def _mcell(pdf, w, h, txt, border=0, align="L", fill=False):
-    """Universal multi_cell wrapper — always moves to next line."""
-    pdf.multi_cell(w, h, txt, border=border, align=align, fill=fill)
+    """Universal multi_cell — always advances to next line."""
+    pdf.multi_cell(w, h, txt, border, align, fill)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -494,16 +494,24 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
     MUTED      = (100, 116, 139)
     WHITE      = (255, 255, 255)
 
+    # Capture q/MUTED in closure for footer
+    _q     = q
+    _MUTED = MUTED
+
     class PDF(FPDF):
-        def header(self): pass
+        def header(self):
+            pass
+
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*MUTED)
+            self.set_text_color(*_MUTED)
             self.cell(
                 0, 5,
-                _safe_str(f"Quotation No: {q.get('quotation_no', '')}  |  Page {self.page_no()}"),
-                ln=0, align="C",
+                _safe_str(
+                    f"Quotation No: {_q.get('quotation_no', '')}  |  Page {self.page_no()}"
+                ),
+                0, 0, "C"
             )
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
@@ -651,10 +659,10 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
             uprice = item.get("unit_price", 0)
             amt    = item.get("amount", 0)
 
-            _cell(pdf, sr_w,     7, str(idx),            align="C", fill=True, nl=False)
-            _cell(pdf, desc_w,   7, desc,                            fill=True, nl=False)
-            _cell(pdf, qty_w,    7, _safe_str(qty),      align="C", fill=True, nl=False)
-            _cell(pdf, unit_w,   7, unit,                align="C", fill=True, nl=False)
+            _cell(pdf, sr_w,     7, str(idx),             align="C", fill=True, nl=False)
+            _cell(pdf, desc_w,   7, desc,                             fill=True, nl=False)
+            _cell(pdf, qty_w,    7, _safe_str(qty),       align="C", fill=True, nl=False)
+            _cell(pdf, unit_w,   7, unit,                 align="C", fill=True, nl=False)
             _cell(pdf, uprice_w, 7, f"Rs. {uprice:,.2f}", align="R", fill=True, nl=False)
             _cell(pdf, amt_w,    7, f"Rs. {amt:,.2f}",   align="R", fill=True, nl=True)
 
@@ -777,16 +785,23 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     MUTED      = (100, 116, 139)
     WHITE      = (255, 255, 255)
 
+    _q     = q
+    _MUTED = MUTED
+
     class PDF(FPDF):
-        def header(self): pass
+        def header(self):
+            pass
+
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 7)
-            self.set_text_color(*MUTED)
+            self.set_text_color(*_MUTED)
             self.cell(
                 0, 5,
-                _safe_str(f"Document Checklist - {q.get('client_name', '')}  |  Page {self.page_no()}"),
-                ln=0, align="C",
+                _safe_str(
+                    f"Document Checklist - {_q.get('client_name', '')}  |  Page {self.page_no()}"
+                ),
+                0, 0, "C"
             )
 
     pdf = PDF(orientation="P", unit="mm", format="A4")
@@ -867,10 +882,10 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
         pdf.set_fill_color(*fill_color)
         pdf.set_text_color(*DARK_TEXT)
         pdf.set_font("Helvetica", "", 8)
-        _cell(pdf, col_sr,   8, str(idx),                         align="C", fill=True,          nl=False)
-        _cell(pdf, col_doc,  8, _safe_str(doc_name, max_len=60),              fill=True,          nl=False)
-        _cell(pdf, col_recv, 8, "",                               align="C", fill=True, border=1, nl=False)
-        _cell(pdf, col_rem,  8, "",                                           fill=True, border=1, nl=True)
+        _cell(pdf, col_sr,   8, str(idx),                          align="C", fill=True,          nl=False)
+        _cell(pdf, col_doc,  8, _safe_str(doc_name, max_len=60),               fill=True,          nl=False)
+        _cell(pdf, col_recv, 8, "",                                align="C", fill=True, border=1, nl=False)
+        _cell(pdf, col_rem,  8, "",                                            fill=True, border=1, nl=True)
 
     # ── Sign-off ──────────────────────────────────────────────────────────────
     pdf.ln(8)
@@ -1268,7 +1283,6 @@ async def send_quotation_email(
     if not company:
         raise HTTPException(404, "Company profile not found")
 
-    # Check SMTP config
     smtp_host = company.get("smtp_host", "").strip()
     smtp_user = company.get("smtp_user", "").strip()
     smtp_pass = company.get("smtp_password", "").strip()
@@ -1278,13 +1292,12 @@ async def send_quotation_email(
             "SMTP not configured. Please add SMTP settings to the company profile."
         )
 
-    # Build PDF
     try:
         if req.pdf_type == "checklist":
-            pdf_buf = _build_checklist_pdf(q, company)
+            pdf_buf  = _build_checklist_pdf(q, company)
             filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
         else:
-            pdf_buf = _build_quotation_pdf(q, company)
+            pdf_buf  = _build_quotation_pdf(q, company)
             filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     except Exception as e:
         logger.error(f"PDF build failed for email: {e}", exc_info=True)
