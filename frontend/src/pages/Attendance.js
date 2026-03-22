@@ -1,3 +1,4 @@
+import { useDark } from '@/hooks/useDark';
 // Attendance.jsx - v7 — REMINDER DELETE/PATCH 404 BUG FIXED
 //
 // ROOT CAUSE OF 404 ERRORS (now fixed):
@@ -460,7 +461,7 @@ function ReminderPopup({ reminder, onDismiss }) {
           <button onClick={onDismiss} className="text-purple-200 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
         </div>
         <div className="px-5 py-4">
-          <p className="font-black text-slate-800 text-lg leading-snug mb-1">{reminder.title}</p>
+          <p className={`font-black text-lg leading-snug mb-1 ${isDark?"text-slate-100":"text-slate-800"}`}>{reminder.title}</p>
           {reminder.description && <p className="text-slate-600 text-sm mb-3">{stripHtml(reminder.description)}</p>}
           <p className="text-xs text-slate-400 font-medium mb-4">⏰ {formatReminderTime(reminder.remind_at)}</p>
           <div className="flex gap-3">
@@ -469,7 +470,7 @@ function ReminderPopup({ reminder, onDismiss }) {
               style={{ backgroundColor: COLORS.deepBlue }}>
               <CalendarPlus className="w-3.5 h-3.5" /> Add to Google Calendar
             </a>
-            <button onClick={onDismiss} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-white border-2 border-slate-200 hover:bg-slate-50 active:scale-95 transition-all">Dismiss</button>
+            <button onClick={onDismiss} className={`px-4 py-2 rounded-xl text-xs font-bold border-2 active:scale-95 transition-all ${isDark?"text-slate-300 bg-slate-700 border-slate-600 hover:bg-slate-600":"text-slate-600 bg-white border-slate-200 hover:bg-slate-50"}`}>Dismiss</button>
           </div>
         </div>
       </div>
@@ -496,7 +497,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
   })();
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
         <div className="px-8 py-6 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
           <div className="flex items-start justify-between relative z-10">
@@ -513,21 +514,21 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
         <div className="p-8 space-y-4">
           <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ backgroundColor: `${COLORS.amber}10`, border: `1.5px solid ${COLORS.amber}25` }}>
             <CalendarIcon className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.amber }} />
-            <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Date</p><p className="font-bold text-slate-800">{dayOfWeek}</p></div>
+            <div><p className={`text-xs font-bold uppercase tracking-wide mb-0.5 ${isDark?"text-slate-500":"text-slate-400"}`}>Date</p><p className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{dayOfWeek}</p></div>
           </div>
           <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ backgroundColor: `${COLORS.deepBlue}08`, border: `1.5px solid ${COLORS.deepBlue}18` }}>
             <Clock className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.deepBlue }} />
             <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Countdown</p><p className="font-bold" style={{ color: COLORS.deepBlue }}>{daysLeft}</p></div>
           </div>
           {holiday.type && (
-            <div className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <div className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-200"}`}>
               <Info className="w-5 h-5 flex-shrink-0 text-slate-400" />
               <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Type</p><p className="font-semibold text-slate-700 capitalize">{holiday.type}</p></div>
             </div>
           )}
         </div>
         {isAdmin ? (
-          <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+          <div className={`px-8 py-5 border-t flex justify-between items-center ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
             <button onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }} className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
               <Trash2 className="w-4 h-4" /> Delete
             </button>
@@ -539,7 +540,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
             </div>
           </div>
         ) : (
-          <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end">
+          <div className={`px-8 py-5 border-t flex justify-end ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
             <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">Close</Button>
           </div>
         )}
@@ -560,7 +561,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
   const reminderId = resolveId(reminder);
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
         <div className="px-8 py-6 text-white relative overflow-hidden flex-shrink-0"
           style={{ background: isDue ? `linear-gradient(135deg, ${COLORS.red} 0%, #B91C1C 100%)` : `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
@@ -586,12 +587,12 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
             <Clock className="w-5 h-5 flex-shrink-0" style={{ color: isDue ? COLORS.red : COLORS.purple }} />
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Scheduled For</p>
-              <p className="font-bold text-slate-800">{formatReminderTime(reminder.remind_at)}</p>
+              <p className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{formatReminderTime(reminder.remind_at)}</p>
               {isDue && <p className="text-xs text-red-500 font-semibold mt-0.5">This reminder is overdue</p>}
             </div>
           </div>
           {descLines.length > 0 && (
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <div className={`p-4 rounded-2xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-200"}`}>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Details</p>
               <div className="space-y-1.5">
                 {descLines.map((line, i) => {
@@ -617,7 +618,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
             <CalendarPlus className="w-4 h-4" /> Add to Google Calendar
           </a>
         </div>
-        <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
+        <div className={`px-8 py-5 border-t flex justify-between items-center flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
           {!isViewingOther ? (
             <div className="flex gap-2">
               <button onClick={() => { onEdit(reminderId); onClose(); }} className="flex items-center gap-2 text-sm font-bold text-blue-500 hover:text-blue-700 active:scale-95 transition-all">
@@ -664,7 +665,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
   if (!isOpen) return null;
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
         <div className="px-8 py-6 text-white bg-gradient-to-r from-blue-500 to-blue-600">
           <h2 className="text-xl font-bold">Edit Reminder</h2>
         </div>
@@ -682,7 +683,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
             <input type="datetime-local" value={remindAt} onChange={e => setRemindAt(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
-        <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+        <div className={`px-8 py-5 border-t flex justify-end gap-2 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Cancel</Button>
           <Button onClick={handleSave} disabled={isSaving} className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl">
             {isSaving ? 'Saving...' : 'Save Changes'}
@@ -734,7 +735,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 
   return (
     <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+      <motion.div className={`w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 flex items-center justify-between flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><CalendarIcon className="w-5 h-5 text-white" /></div>
@@ -765,7 +766,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
               const hasDue     = dayRems.some(r => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } });
               const hasRems    = dayRems.length > 0;
               return (
-                <div key={dateStr} className={`min-h-[76px] p-1.5 rounded-xl border transition-all ${hasRems ? (hasDue ? 'border-red-200 bg-red-50' : 'border-purple-200 bg-purple-50 hover:bg-purple-100 cursor-pointer') : (isToday ? 'border-blue-300 bg-blue-50' : 'border-slate-100 bg-white')}`}>
+                <div key={dateStr} className={`min-h-[76px] p-1.5 rounded-xl border transition-all ${hasRems ? (hasDue ? 'border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800' : 'border-purple-200 bg-purple-50 hover:bg-purple-100 cursor-pointer dark:bg-purple-900/20 dark:border-purple-800') : (isToday ? 'border-blue-300 bg-blue-50 dark:bg-blue-900/20' : (isDark?'border-slate-700 bg-slate-700/30':'border-slate-100 bg-white'))}`}>
                   <div className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center ${isToday ? 'bg-blue-500 text-white' : hasRems ? (hasDue ? 'text-red-700' : 'text-purple-700') : 'text-slate-400'}`}>{day.getDate()}</div>
                   <div className="space-y-0.5">
                     {dayRems.slice(0, 3).map((r, idx) => {
@@ -791,7 +792,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
             })}
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0">
+        <div className={`px-6 py-4 border-t flex justify-between items-center flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
           <p className="text-xs text-slate-400">{safeReminders.length} total · click any chip to open details</p>
           <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Close</Button>
         </div>
@@ -805,6 +806,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
   const { user, hasPermission } = useAuth();
+  const isDark = useDark();
   const isAdmin        = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
 
@@ -1560,7 +1562,7 @@ export default function Attendance() {
       </AnimatePresence>
 
       <motion.div
-        className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
+        className={`min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9 ${isDark?"bg-[#0f172a]":""}`}
         style={{ background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)` }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
@@ -1580,7 +1582,7 @@ export default function Attendance() {
             {isAdmin && (
               <motion.select
                 variants={itemVariants}
-                className="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer"
+                className={`border-2 rounded-xl px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer ${isDark?"border-slate-600 bg-slate-700 text-slate-100":"border-slate-200 bg-white"}`}
                 value={selectedUserId || ''}
                 onChange={e => {
                   const val = e.target.value || null;
@@ -1608,7 +1610,7 @@ export default function Attendance() {
             )}
             <Button
               onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
-              className="att-ripple-btn border-2 border-slate-200 rounded-xl px-5 py-2.5 font-semibold hover:bg-slate-50"
+              className={`att-ripple-btn border-2 rounded-xl px-5 py-2.5 font-semibold ${isDark?"border-slate-600 text-slate-200 hover:bg-slate-700":"border-slate-200 hover:bg-slate-50"}`}
             >
               {exportingPDF ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</> : '↓ Export PDF'}
             </Button>
@@ -1754,8 +1756,8 @@ export default function Attendance() {
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {pendingHolidays.map(holiday => (
-                    <motion.div key={holiday.date} variants={itemVariants} className="bg-white p-5 rounded-xl border-2 border-amber-200 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
-                      <h4 className="font-bold text-slate-800 text-lg mb-2">{holiday.name}</h4>
+                    <motion.div key={holiday.date} variants={itemVariants} className={`p-5 rounded-xl border-2 border-amber-200 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 ${isDark?"bg-slate-800":"bg-white"}`}>
+                      <h4 className={`font-bold text-lg mb-2 ${isDark?"text-slate-100":"text-slate-800"}`}>{holiday.name}</h4>
                       <p className="text-sm text-slate-500 mb-4">{format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}</p>
                       <div className="flex gap-2">
                         <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg" onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
@@ -1786,7 +1788,7 @@ export default function Attendance() {
                         <span className="text-red-700 font-bold text-sm">{(item.user_name || '?')[0]}</span>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{item.user_name || 'Unknown'}</p>
+                        <p className={`text-sm font-bold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{item.user_name || 'Unknown'}</p>
                         <p className="text-xs text-red-600 font-semibold">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
                       </div>
                     </motion.div>
@@ -1831,11 +1833,11 @@ export default function Attendance() {
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gradient-to-br from-blue-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className={`bg-gradient-to-br p-4 rounded-xl border ${isDark?"from-blue-900/20 to-slate-800 border-slate-700":"from-blue-50 to-slate-50 border-slate-200"}`}>
                       <p className="text-xs text-slate-500 font-bold uppercase mb-1">Daily Goal</p>
-                      <p className="text-2xl font-bold text-slate-800">8.5h</p>
+                      <p className={`text-2xl font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>8.5h</p>
                     </div>
-                    <div className="bg-gradient-to-br from-emerald-50 to-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className={`bg-gradient-to-br p-4 rounded-xl border ${isDark?"from-emerald-900/20 to-slate-800 border-slate-700":"from-emerald-50 to-slate-50 border-slate-200"}`}>
                       <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
                       <p className="text-2xl font-bold text-emerald-600">
                         {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
@@ -1905,7 +1907,7 @@ export default function Attendance() {
                           <span className="text-sm leading-none font-black">{format(parseISO(h.date), 'd')}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-slate-800 truncate">{h.name}</p>
+                          <p className={`text-sm font-bold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{h.name}</p>
                           <p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p>
                         </div>
                         <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 flex-shrink-0" />
@@ -1979,7 +1981,7 @@ export default function Attendance() {
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate leading-snug">{r.title}</p>
+                        <p className={`text-sm font-bold truncate leading-snug ${isDark?"text-slate-100":"text-slate-800"}`}>{r.title}</p>
                         <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>
                           ⏰ {formatReminderTime(r.remind_at)}
                         </p>
@@ -2060,13 +2062,13 @@ export default function Attendance() {
                     </div>
                   ) : selectedAttendance?.punch_in ? (
                     <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4 h-full" style={{ borderColor: COLORS.emeraldGreen }}>
-                      <p className="font-bold text-slate-800 text-lg mb-4">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                      <p className={`font-bold text-lg mb-4 ${isDark?"text-slate-100":"text-slate-800"}`}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       <div className="space-y-3 text-sm">
                         <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch In</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_in)}</span></div>
                         {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch Out</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_out)}</span></div>}
                         {selectedAttendance.is_late && <div className="flex justify-between"><span className="text-slate-600 font-medium">Status</span><span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span></div>}
                         <div className="pt-3 border-t flex justify-between">
-                          <span className="font-bold text-slate-800">Duration</span>
+                          <span className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>Duration</span>
                           <Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge>
                         </div>
                       </div>
@@ -2093,7 +2095,7 @@ export default function Attendance() {
           {/* RECENT ATTENDANCE TABLE */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
             <Card className="border-0 shadow-md h-full">
-              <CardHeader className="border-b border-slate-100 py-3">
+              <CardHeader className={`border-b py-3 ${isDark?"border-slate-700":"border-slate-100"}`}>
                 <CardTitle style={{ color: COLORS.deepBlue }}>{isEveryoneView ? 'All Employees — Recent Attendance' : 'Recent Attendance'}</CardTitle>
                 <CardDescription>{isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}</CardDescription>
               </CardHeader>
@@ -2126,7 +2128,7 @@ export default function Attendance() {
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
                               {recordUserName && <p className="text-xs font-bold text-blue-700 mb-1 flex items-center gap-1"><Users className="w-3 h-3" />{recordUserName}</p>}
-                              <p className="font-bold text-slate-800 text-sm">{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
+                              <p className={`font-bold text-sm ${isDark?"text-slate-100":"text-slate-800"}`}>{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
                               <p className="text-xs text-slate-500 mt-1 font-mono">
                                 {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked)' : ''}`
                                   : isLeave ? '🟠 On Leave'
@@ -2173,7 +2175,7 @@ export default function Attendance() {
             <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setShowPunchInModal(false)}>
-              <motion.div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl"
+              <motion.div className={`rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl ${isDark?"bg-slate-800":"bg-white"}`}
                 onClick={e => e.stopPropagation()}
                 initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
                 <div className="mb-6">
@@ -2199,7 +2201,7 @@ export default function Attendance() {
           {showLeaveForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
+              <motion.div className={`w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto ${isDark?"bg-slate-800":"bg-white"}`}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="flex justify-between items-start mb-8">
                   <h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2>
@@ -2219,11 +2221,11 @@ export default function Attendance() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-3 block">From Date</label>
-                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom} disabled={date => isBefore(date, startOfDay(new Date()))} className="rounded-xl border border-slate-200" />
+                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom} disabled={date => isBefore(date, startOfDay(new Date()))} className={`rounded-xl border ${isDark?"border-slate-600":"border-slate-200"}`} />
                   </div>
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-3 block">To Date</label>
-                    <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo} disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true} className="rounded-xl border border-slate-200" />
+                    <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo} disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true} className={`rounded-xl border ${isDark?"border-slate-600":"border-slate-200"}`} />
                   </div>
                 </div>
                 {leaveFrom && (
@@ -2238,7 +2240,7 @@ export default function Attendance() {
                   <label className="text-sm font-bold text-slate-700 mb-2 block">Reason</label>
                   <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
                     placeholder="Reason for leave…"
-                    className="w-full min-h-[100px] p-4 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-400 resize-none" />
+                    className={`w-full min-h-[100px] p-4 border-2 rounded-xl focus:outline-none focus:border-blue-400 resize-none ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                 </div>
                 <div className="flex justify-end gap-3">
                   <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
@@ -2254,7 +2256,7 @@ export default function Attendance() {
           {showHolidayModal && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden"
+              <motion.div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
                   <div className="flex items-center justify-between mb-4">
@@ -2273,10 +2275,10 @@ export default function Attendance() {
                       <motion.div key={idx} className="grid grid-cols-[1fr_160px_40px] gap-3 items-center">
                         <input type="text" value={row.name}
                           onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], name: e.target.value }; setHolidayRows(updated); }}
-                          placeholder="e.g., Diwali" className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                          placeholder="e.g., Diwali" className={`px-4 py-2.5 text-sm border-2 rounded-lg focus:outline-none focus:border-amber-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                         <input type="date" value={row.date}
                           onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], date: e.target.value }; setHolidayRows(updated); }}
-                          className="px-4 py-2.5 text-sm border-2 border-slate-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                          className={`px-4 py-2.5 text-sm border-2 rounded-lg focus:outline-none focus:border-amber-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                         <button onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))} disabled={holidayRows.length === 1}
                           className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 disabled:opacity-30 font-bold text-lg">×</button>
                       </motion.div>
@@ -2287,7 +2289,7 @@ export default function Attendance() {
                     <span className="w-6 h-6 rounded-full border-2 border-amber-500 flex items-center justify-center">+</span>Add Another
                   </button>
                 </div>
-                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+                <div className={`px-8 py-5 border-t flex justify-end gap-3 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
                   <Button variant="ghost" onClick={() => setShowHolidayModal(false)}>Cancel</Button>
                   <Button disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0} onClick={handleAddHolidays}
                     className="font-bold text-white" style={{ backgroundColor: COLORS.amber }}>Save</Button>
@@ -2302,7 +2304,7 @@ export default function Attendance() {
           {editingHoliday && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+              <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
                   <h2 className="text-xl font-black">Edit Holiday</h2>
@@ -2312,15 +2314,15 @@ export default function Attendance() {
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">Holiday Name</label>
                     <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm" />
+                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-amber-400 text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">Date</label>
                     <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 text-sm" />
+                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-amber-400 text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                 </div>
-                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+                <div className={`px-8 py-5 border-t flex justify-end gap-3 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
                   <Button variant="ghost" onClick={() => setEditingHoliday(null)}>Cancel</Button>
                   <Button disabled={!editName.trim() || !editDate || editLoading} onClick={handleEditHolidaySave}
                     className="font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
@@ -2337,7 +2339,7 @@ export default function Attendance() {
           {showReminderForm && (
             <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+              <motion.div className={`w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
                 <div className="px-8 py-6 text-white flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
                   <div className="flex items-center justify-between">
@@ -2375,7 +2377,7 @@ export default function Attendance() {
                         ].filter(f => f.value).map(({ label, value, bold }) => (
                           <div key={label}>
                             <p className="text-slate-400 text-[10px] uppercase font-bold">{label}</p>
-                            <p className={`text-slate-800 mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`}>{value}</p>
+                            <p className={`mt-0.5 ${bold ? 'font-bold' : 'font-medium'} ${isDark?"text-slate-100":"text-slate-800"}`}>{value}</p>
                           </div>
                         ))}
                       </div>
@@ -2385,22 +2387,22 @@ export default function Attendance() {
                     <label className="text-sm font-bold text-slate-700 mb-2 block">Title *</label>
                     <input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)}
                       placeholder="e.g., Trademark Hearing, GST filing…"
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400" />
+                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">Date & Time *</label>
                     <input type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)}
                       min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400" />
+                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                   <div>
                     <label className="text-sm font-bold text-slate-700 mb-2 block">Description</label>
                     <textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)}
                       placeholder="Add notes, agenda, details…" rows={4}
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 resize-none text-sm font-mono" />
+                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 resize-none text-sm font-mono ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                 </div>
-                <div className="px-8 py-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
+                <div className={`px-8 py-5 border-t flex justify-end gap-3 flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
                   <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}>Cancel</Button>
                   <Button disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder}
                     className="font-bold text-white px-6" style={{ backgroundColor: COLORS.purple }}>
