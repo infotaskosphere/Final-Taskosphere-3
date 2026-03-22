@@ -40,6 +40,33 @@ const UNIT_OPTIONS = ['service', 'month', 'hour', 'year', 'session', 'document',
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
 
+/**
+ * FIX: Extract a human-readable error message from an axios blob response.
+ * When responseType is 'blob', axios can't read the error body as text automatically.
+ * We convert the blob back to text to get the actual server error message.
+ */
+const extractBlobError = async (error) => {
+  try {
+    if (error?.response?.data instanceof Blob) {
+      const text = await error.response.data.text();
+      try {
+        const json = JSON.parse(text);
+        return json?.detail || json?.message || text || 'PDF generation failed';
+      } catch {
+        return text || 'PDF generation failed';
+      }
+    }
+    return (
+      error?.response?.data?.detail ||
+      error?.response?.data?.message ||
+      error?.message ||
+      'PDF generation failed'
+    );
+  } catch {
+    return 'PDF generation failed';
+  }
+};
+
 /* ─── CompanyManager ─────────────────────────────────────────────────────── */
 function CompanyManager({ onClose, onSaved, editingCompany }) {
   const { user } = useAuth();
@@ -123,7 +150,6 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
 
 /* ─── QuotationDetailModal ───────────────────────────────────────────────── */
 function QuotationDetailModal({ quotation, company, open, onClose, onStatusChange, onDownloadPdf, onDownloadChecklist, downloading }) {
-  // FIX: isDark must be called here inside this component, not inherited from parent scope
   const isDark = useDark();
 
   if (!quotation) return null;
@@ -349,51 +375,92 @@ export default function Quotations() {
     } catch { toast.error('Failed to update status'); }
   };
 
-  /* ── PDF download ── */
+  /* ── PDF download ──────────────────────────────────────────────────────────
+   * FIX: When axios gets a blob response with a non-2xx status code, the
+   * error.response.data is a Blob, not a parsed JSON object. We must convert
+   * it back to text to read the actual error detail from FastAPI.
+   * Without this fix the catch block only shows "Request failed with status 500"
+   * and the real reason (e.g. "fpdf2 not installed") is invisible to the user.
+   * ─────────────────────────────────────────────────────────────────────── */
   const handleDownloadPdf = async (qtnId, qtnNo) => {
     setDownloading(qtnId + '-pdf');
     try {
-      const token = getToken();
+      const token   = getToken();
       const baseURL = (api.defaults?.baseURL || '/api').replace(/\/$/, '');
       const response = await axios.get(`${baseURL}/quotations/${qtnId}/pdf`, {
         responseType: 'blob',
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      // Verify the response is actually a PDF (not an error JSON wrapped in blob)
+      const contentType = response.headers?.['content-type'] || '';
+      if (!contentType.includes('application/pdf')) {
+        // Server returned an error as blob — convert and show it
+        const text = await response.data.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json?.detail || 'PDF generation failed');
+        } catch {
+          throw new Error(text || 'PDF generation failed');
+        }
+      }
+
       const url  = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
       link.download = `quotation-${(qtnNo || qtnId).replace(/\//g, '-')}.pdf`;
-      document.body.appendChild(link); link.click();
+      document.body.appendChild(link);
+      link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       toast.success('Quotation PDF downloaded');
     } catch (err) {
       console.error('PDF download error:', err);
-      toast.error('PDF generation failed. Check console for details.');
-    } finally { setDownloading(null); }
+      // FIX: extract real message from blob error response
+      const message = await extractBlobError(err);
+      toast.error(message);
+    } finally {
+      setDownloading(null);
+    }
   };
 
   const handleDownloadChecklist = async (qtnId, qtnNo) => {
     setDownloading(qtnId + '-checklist');
     try {
-      const token = getToken();
+      const token   = getToken();
       const baseURL = (api.defaults?.baseURL || '/api').replace(/\/$/, '');
       const response = await axios.get(`${baseURL}/quotations/${qtnId}/checklist-pdf`, {
         responseType: 'blob',
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      const contentType = response.headers?.['content-type'] || '';
+      if (!contentType.includes('application/pdf')) {
+        const text = await response.data.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json?.detail || 'Checklist PDF generation failed');
+        } catch {
+          throw new Error(text || 'Checklist PDF generation failed');
+        }
+      }
+
       const url  = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
       link.download = `checklist-${(qtnNo || qtnId).replace(/\//g, '-')}.pdf`;
-      document.body.appendChild(link); link.click();
+      document.body.appendChild(link);
+      link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       toast.success('Checklist PDF downloaded');
     } catch (err) {
       console.error('Checklist download error:', err);
-      toast.error('Checklist PDF generation failed.');
-    } finally { setDownloading(null); }
+      const message = await extractBlobError(err);
+      toast.error(message);
+    } finally {
+      setDownloading(null);
+    }
   };
 
   /* ── delete ── */
@@ -565,13 +632,8 @@ export default function Quotations() {
                 <div className="grid grid-cols-4 gap-2">
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Qty</p>
-                    <Input
-                      type="number"
-                      value={item.quantity}
-                      onChange={e => updateItem(i, 'quantity', e.target.value)}
-                      placeholder="1"
-                      className={`h-8 rounded-xl text-sm text-center ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}
-                    />
+                    <Input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} placeholder="1"
+                      className={`h-8 rounded-xl text-sm text-center ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit</p>
@@ -582,13 +644,8 @@ export default function Quotations() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit Price (₹)</p>
-                    <Input
-                      type="number"
-                      value={item.unit_price}
-                      onChange={e => updateItem(i, 'unit_price', e.target.value)}
-                      placeholder="0"
-                      className={`h-8 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}
-                    />
+                    <Input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} placeholder="0"
+                      className={`h-8 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Amount (₹)</p>
@@ -727,7 +784,8 @@ export default function Quotations() {
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search quotations…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className={`pl-10 rounded-2xl ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`} />
+          <Input placeholder="Search quotations…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            className={`pl-10 rounded-2xl ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`} />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className={`w-36 rounded-2xl text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white'}`}><SelectValue placeholder="All Status" /></SelectTrigger>
