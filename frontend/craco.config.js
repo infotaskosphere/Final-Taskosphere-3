@@ -1,25 +1,33 @@
 // craco.config.js
 const path = require("path");
 require("dotenv").config();
+
 const isDevServer = process.env.NODE_ENV !== "production";
+
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
   enableVisualEdits: isDevServer,
 };
+
+// Optional Plugins (Loaded only when needed)
 let setupDevServer;
 let babelMetadataPlugin;
+
 if (config.enableVisualEdits) {
   setupDevServer = require("./plugins/visual-edits/dev-server-setup");
   babelMetadataPlugin = require("./plugins/visual-edits/babel-metadata-plugin");
 }
+
 let WebpackHealthPlugin;
 let setupHealthEndpoints;
 let healthPluginInstance;
+
 if (config.enableHealthCheck) {
   WebpackHealthPlugin = require("./plugins/health-check/webpack-health-plugin");
   setupHealthEndpoints = require("./plugins/health-check/health-endpoints");
   healthPluginInstance = new WebpackHealthPlugin();
 }
+
 module.exports = {
   eslint: {
     configure: {
@@ -30,28 +38,29 @@ module.exports = {
       },
     },
   },
+
   webpack: {
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
-    configure: (webpackConfig) => {
-      // Prevent webpack from trying to parse these large libraries
-      // that cause "Maximum call stack size exceeded" during bundling
-      webpackConfig.module.noParse = /papaparse|xlsx/;
 
-      // Prevent webpack from trying to polyfill Node.js built-ins
-      // that xlsx and other libs reference (causes stack overflow)
+    configure: (webpackConfig) => {
+      // ✅ Fix: Avoid parsing very large libs (safe version)
+      webpackConfig.module.noParse = /papaparse/;
+
+      // ✅ Fix: Proper browser polyfills (CRITICAL for production builds)
       webpackConfig.resolve.fallback = {
         ...webpackConfig.resolve.fallback,
         fs: false,
-        path: false,
-        crypto: false,
-        stream: false,
-        buffer: false,
-        process: false,
-        zlib: false,
+        path: require.resolve("path-browserify"),
+        crypto: require.resolve("crypto-browserify"),
+        stream: require.resolve("stream-browserify"),
+        buffer: require.resolve("buffer/"),
+        process: require.resolve("process/browser"),
+        zlib: require.resolve("browserify-zlib"),
       };
 
+      // ✅ Fix: Improve watch performance (safe)
       webpackConfig.watchOptions = {
         ...webpackConfig.watchOptions,
         ignored: [
@@ -63,29 +72,51 @@ module.exports = {
           "**/public/**",
         ],
       };
+
+      // ✅ Inject Buffer + Process globals (VERY IMPORTANT)
+      const webpack = require("webpack");
+      webpackConfig.plugins.push(
+        new webpack.ProvidePlugin({
+          Buffer: ["buffer", "Buffer"],
+          process: ["process"],
+        })
+      );
+
+      // Optional health plugin
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
+
       return webpackConfig;
     },
   },
+
   babel: config.enableVisualEdits
     ? { plugins: [babelMetadataPlugin] }
     : {},
+
   devServer: (devServerConfig) => {
     if (config.enableVisualEdits && setupDevServer) {
       devServerConfig = setupDevServer(devServerConfig);
     }
-    if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
+
+    if (
+      config.enableHealthCheck &&
+      setupHealthEndpoints &&
+      healthPluginInstance
+    ) {
       const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
+
       devServerConfig.setupMiddlewares = (middlewares, devServer) => {
         if (originalSetupMiddlewares) {
           middlewares = originalSetupMiddlewares(middlewares, devServer);
         }
+
         setupHealthEndpoints(devServer, healthPluginInstance);
         return middlewares;
       };
     }
+
     return devServerConfig;
   },
 };
