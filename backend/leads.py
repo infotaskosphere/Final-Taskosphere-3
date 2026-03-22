@@ -12,7 +12,6 @@ from backend.dependencies import (
     db,
     get_current_user,
     create_audit_log,
-    # Matrix-aware helpers — replaces the old apply_data_scope + verify_record_access
     can_view_lead,
     can_edit_lead,
     can_delete_lead,
@@ -31,24 +30,20 @@ logger = logging.getLogger(__name__)
 class LeadBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    # ---------------- BASIC DETAILS ----------------
     company_name: str = Field(..., description="Name of the company or business")
     contact_name: Optional[str] = Field(None)
     email: Optional[EmailStr] = Field(None)
     phone: Optional[str] = Field(None)
 
-    # ---------------- SERVICES & DEAL ----------------
     services: List[str] = Field(default_factory=list)
     quotation_amount: Optional[float] = Field(None)
 
-    # ---------------- PIPELINE STATUS ----------------
     status: Literal[
         "new", "contacted", "meeting", "proposal",
         "negotiation", "on_hold", "won", "lost"
     ] = "new"
     source: Optional[str] = "direct"
 
-    # ---------------- DATES & ASSIGNMENT ----------------
     date_of_meeting: Optional[datetime] = None
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
@@ -56,14 +51,16 @@ class LeadBase(BaseModel):
     converted_client_id: Optional[str] = None
     closure_probability: Optional[float] = None
 
-    # ====================== VALIDATORS ======================
+    # Pipeline tracking flags (post-won workflow)
+    checklist_sent: Optional[bool] = False
+    documents_received: Optional[bool] = False
+
     @field_validator(
         'quotation_amount', 'assigned_to', 'contact_name',
         'email', 'phone', mode='before'
     )
     @classmethod
     def empty_string_to_none(cls, v):
-        """Converts empty strings from frontend to None"""
         if v == "" or v is None:
             return None
         return v
@@ -71,7 +68,6 @@ class LeadBase(BaseModel):
     @field_validator('services', mode='before')
     @classmethod
     def ensure_list_format(cls, v):
-        """Convert comma-separated string to list if needed"""
         if isinstance(v, str):
             return [s.strip() for s in v.split(',') if s.strip()]
         return v or []
@@ -89,7 +85,6 @@ class LeadUpdate(BaseModel):
     services: Optional[List[str]] = None
     quotation_amount: Optional[float] = None
     date_of_meeting: Optional[datetime] = None
-    # Covers all valid statuses from LeadBase + qualified for compatibility
     status: Optional[Literal[
         "new", "contacted", "meeting", "proposal",
         "negotiation", "on_hold", "qualified", "won", "lost"
@@ -102,6 +97,8 @@ class LeadUpdate(BaseModel):
     assigned_to: Optional[str] = None
     converted_client_id: Optional[str] = None
     closure_probability: Optional[float] = None
+    checklist_sent: Optional[bool] = None
+    documents_received: Optional[bool] = None
 
 
 class Lead(LeadBase):
@@ -122,11 +119,9 @@ def normalize_lead_doc(doc: dict) -> dict:
     if not doc:
         return doc
 
-    # Ensure string id is always present
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
 
-    # Safely convert datetime fields to ISO strings
     for field in ["created_at", "updated_at", "next_follow_up", "date_of_meeting"]:
         if field in doc and doc[field]:
             doc[field] = (
@@ -135,11 +130,16 @@ def normalize_lead_doc(doc: dict) -> dict:
                 else doc[field]
             )
 
+    # Ensure tracking flags always present
+    if "checklist_sent" not in doc:
+        doc["checklist_sent"] = False
+    if "documents_received" not in doc:
+        doc["documents_received"] = False
+
     return doc
 
 
 def validate_obj_id(id_str: str) -> ObjectId:
-    """Validates and returns a MongoDB ObjectId, raising 400 on bad format."""
     if not ObjectId.is_valid(id_str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -149,7 +149,6 @@ def validate_obj_id(id_str: str) -> ObjectId:
 
 
 def calculate_closure_probability(notes: str) -> float:
-    """Estimates closure probability from keywords in notes."""
     if not notes:
         return 0.0
     notes_lower = notes.lower()
@@ -174,19 +173,14 @@ def calculate_closure_probability(notes: str) -> float:
 def _build_lead_query(current_user) -> dict:
     """
     LEADS – View query builder.
-    Matrix evaluation order:
       1. Admin         → all records
       2. Universal     → can_view_all_leads → all records
       3. Ownership     → assigned_to == user OR created_by == user
-      4. Deny          (empty result set via impossible filter)
     """
     if current_user.role == "admin":
         return {}
-
     if _get_perm(current_user, "can_view_all_leads"):
         return {}
-
-    # Ownership: own assigned or own created
     return {
         "$or": [
             {"assigned_to": current_user.id},
@@ -212,13 +206,8 @@ async def get_unique_services(current_user=Depends(get_current_user)):
 
 @router.get("/followups")
 async def get_due_followups(current_user=Depends(get_current_user)):
-    """
-    Returns leads with follow-up dates that are due.
-    Matrix: Admin → can_view_all_leads → ownership (assigned_to / created_by)
-    """
+    """Returns leads with follow-up dates that are due."""
     now = datetime.now(timezone.utc)
-
-    # Build scope filter using the matrix
     scope_filter = _build_lead_query(current_user)
 
     query = {
@@ -226,7 +215,6 @@ async def get_due_followups(current_user=Depends(get_current_user)):
         "status": {"$nin": ["won", "lost"]},
     }
     if scope_filter:
-        # Merge scope filter safely
         if "$or" in scope_filter:
             query["$or"] = scope_filter["$or"]
         else:
@@ -241,17 +229,10 @@ async def import_leads(
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
 ):
-    """
-    CSV import for leads.
-    Matrix: Any authenticated user can import (leads are auto-assigned to creator).
-    """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files allowed")
-
     contents = await file.read()
     df = pd.read_csv(BytesIO(contents))
-
-    # TODO: implement proper import logic with validation + assigned_to mapping
     return {"message": f"Imported {len(df)} leads (processing logic pending)"}
 
 
@@ -260,13 +241,9 @@ async def create_lead(
     lead_data: LeadCreate,
     current_user=Depends(get_current_user),
 ):
-    """
-    Create a new lead.
-    Matrix: Any authenticated user can create leads (they become the creator).
-    """
+    """Create a new lead."""
     now = datetime.now(timezone.utc)
     lead_dict = lead_data.model_dump()
-
     lead_dict.update({
         "created_by": current_user.id,
         "created_at": now,
@@ -295,33 +272,21 @@ async def get_leads(
     ]] = Query(None, alias="status"),
     current_user=Depends(get_current_user),
 ):
-    """
-    List leads.
-    Matrix:
-      1. Admin → all leads
-      2. Universal: can_view_all_leads → all leads
-      3. Ownership: assigned_to == user OR created_by == user
-    """
+    """List leads with permission matrix applied."""
     query = _build_lead_query(current_user)
-
     if status_filter:
         query["status"] = status_filter
 
     cursor = db.leads.find(query).sort("updated_at", -1)
     leads_raw = await cursor.to_list(length=1000)
-
     return [normalize_lead_doc(lead) for lead in leads_raw]
 
 
-@router.get("/{lead_id}", response_model=Lead)
-async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
+@router.get("/{lead_id}/quotations")
+async def get_lead_quotations(lead_id: str, current_user=Depends(get_current_user)):
     """
-    Get a single lead by ID.
-    Matrix:
-      1. Admin → allow
-      2. Universal: can_view_all_leads → allow
-      3. Ownership: assigned_to == user OR created_by == user → allow
-      4. Deny
+    Returns all quotations linked to a specific lead.
+    Powers the Quotations panel inside the Lead card on LeadsPage.
     """
     obj_id = validate_obj_id(lead_id)
 
@@ -329,7 +294,51 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     if not raw_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Enforce matrix view check
+    if not can_view_lead(current_user, raw_lead):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this lead"
+        )
+
+    quotations = await db.quotations.find(
+        {"lead_id": lead_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+
+    return quotations
+
+
+@router.get("/{lead_id}/quotation-count")
+async def get_lead_quotation_count(lead_id: str, current_user=Depends(get_current_user)):
+    """
+    Returns count of quotations linked to a lead.
+    Lightweight badge count for lead cards.
+    """
+    obj_id = validate_obj_id(lead_id)
+
+    raw_lead = await db.leads.find_one({"_id": obj_id})
+    if not raw_lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if not can_view_lead(current_user, raw_lead):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this lead"
+        )
+
+    count = await db.quotations.count_documents({"lead_id": lead_id})
+    return {"lead_id": lead_id, "count": count}
+
+
+@router.get("/{lead_id}", response_model=Lead)
+async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
+    """Get a single lead by ID."""
+    obj_id = validate_obj_id(lead_id)
+
+    raw_lead = await db.leads.find_one({"_id": obj_id})
+    if not raw_lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
     if not can_view_lead(current_user, raw_lead):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -345,20 +354,13 @@ async def update_lead(
     updates: LeadUpdate,
     current_user=Depends(get_current_user),
 ):
-    """
-    Update a lead.
-    Matrix:
-      1. Admin → allow
-      2. Ownership: assigned_to == user OR created_by == user → allow
-      3. Deny
-    """
+    """Update a lead."""
     obj_id = validate_obj_id(lead_id)
 
     existing = await db.leads.find_one({"_id": obj_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Matrix: Admin OR assigned_to OR created_by
     if not can_edit_lead(current_user, existing):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -369,17 +371,11 @@ async def update_lead(
     if not update_dict:
         return normalize_lead_doc(existing)
 
-    # Validate assignee exists
     if update_dict.get("assigned_to"):
         user_exists = await db.users.find_one({"id": update_dict["assigned_to"]})
         if not user_exists:
             raise HTTPException(status_code=400, detail="Assigned user not found")
 
-    # Guard won status — must go through the /convert endpoint UNLESS
-    # the caller is explicitly deferring conversion by also passing
-    # converted_client_id (even as None).  This allows the frontend
-    # "Convert Later" flow to mark a lead as Won without creating a
-    # client immediately.
     if update_dict.get("status") == "won" and not existing.get("converted_client_id"):
         if "converted_client_id" not in update_dict:
             raise HTTPException(
@@ -387,7 +383,6 @@ async def update_lead(
                 detail="Use the /convert endpoint to mark a lead as won"
             )
 
-    # Reject past follow-up dates
     if update_dict.get("next_follow_up"):
         if update_dict["next_follow_up"] < datetime.now(timezone.utc):
             raise HTTPException(
@@ -395,7 +390,6 @@ async def update_lead(
                 detail="Follow-up date cannot be in the past"
             )
 
-    # Auto-recalculate closure probability when notes change
     if "notes" in update_dict:
         update_dict["closure_probability"] = calculate_closure_probability(
             update_dict["notes"]
@@ -423,17 +417,13 @@ async def convert_lead_to_client(
     lead_id: str,
     current_user=Depends(get_current_user),
 ):
-    """
-    Convert a lead to a client.
-    Matrix: Admin OR assigned_to OR created_by (same as edit).
-    """
+    """Convert a lead to a client."""
     obj_id = validate_obj_id(lead_id)
 
     lead = await db.leads.find_one({"_id": obj_id})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Matrix: Admin OR assigned_to OR created_by
     if not can_edit_lead(current_user, lead):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -445,7 +435,6 @@ async def convert_lead_to_client(
 
     now = datetime.now(timezone.utc)
 
-    # Build client record from lead data
     client_id = str(uuid.uuid4())
     client_data = {
         "id": client_id,
@@ -459,14 +448,11 @@ async def convert_lead_to_client(
         "created_by": current_user.id,
         "created_at": now,
         "updated_at": now,
-        "notes": (
-            f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}"
-        ),
+        "notes": f"Converted from Lead. Original Notes: {lead.get('notes', 'N/A')}",
     }
 
     await db.clients.insert_one(client_data)
 
-    # Mark lead as won
     await db.leads.update_one(
         {"_id": obj_id},
         {
@@ -478,7 +464,6 @@ async def convert_lead_to_client(
         }
     )
 
-    # Create an onboarding task for the assigned user
     task = {
         "id": str(uuid.uuid4()),
         "title": f"Client Onboarding - {lead['company_name']}",
@@ -494,7 +479,6 @@ async def convert_lead_to_client(
     }
     await db.tasks.insert_one(task)
 
-    # Audit log
     await create_audit_log(
         current_user=current_user,
         action="LEAD_CONVERTED",
@@ -504,7 +488,6 @@ async def convert_lead_to_client(
         new_data={"client_id": client_id},
     )
 
-    # Notifications
     target_user = lead.get("assigned_to") or current_user.id
 
     await create_notification(
@@ -531,11 +514,7 @@ async def convert_lead_to_client(
 
 @router.delete("/{lead_id}")
 async def delete_lead(lead_id: str, current_user=Depends(get_current_user)):
-    """
-    Delete a lead permanently.
-    Matrix: Admin OR can_manage_users
-    """
-    # Matrix: Admin OR can_manage_users
+    """Delete a lead permanently. Matrix: Admin OR can_manage_users"""
     if not can_delete_lead(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -567,17 +546,13 @@ async def predict_lead_closure(
     lead_id: str,
     current_user=Depends(get_current_user),
 ):
-    """
-    Predict closure probability for a lead.
-    Matrix: Same as view — Admin OR can_view_all_leads OR ownership.
-    """
+    """Predict closure probability for a lead."""
     obj_id = validate_obj_id(lead_id)
 
     lead = await db.leads.find_one({"_id": obj_id})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Matrix: Admin → can_view_all_leads → ownership → deny
     if not can_view_lead(current_user, lead):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
