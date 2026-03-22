@@ -395,7 +395,9 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MODERN SAAS CLIENT CARD — full paradigm shift
+// PREMIUM CLIENT CARD — fixed height, rigid grid, zero layout shift
+// Every field slot is ALWAYS rendered (empty or filled) so all cards are
+// pixel-identical in height regardless of data.
 // ═══════════════════════════════════════════════════════════════════════════
 const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, fetchClients, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
   const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
@@ -413,242 +415,282 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
     return diff >= 0 && diff <= 60;
   });
 
-  // Contact person birthday reminder
   const hasBirthdayToday = client.contact_persons?.some(cp => {
     if (!cp?.birthday) return false;
     const bday = new Date(cp.birthday);
     return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
   });
 
+  // Assigned staff — always show first slot, blank if none
+  const firstAssignee = (() => {
+    const a = clientAssignments[0];
+    if (!a) return null;
+    return users.find(x => x.id === a.user_id) || null;
+  })();
+  const extraAssignees = clientAssignments.length > 1 ? clientAssignments.length - 1 : 0;
+
+  // Services — always render exactly 3 pill slots (blank if fewer)
+  const svcSlots = [0, 1, 2].map(i => client.services?.[i]?.replace('Other: ', '') || null);
+  const extraSvcs = serviceCount > 3 ? serviceCount - 3 : 0;
+
+  const dim = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  const iconBg = isDark ? 'rgba(255,255,255,0.07)' : cfg.bg;
+
   return (
     <div
-      className={`group relative flex flex-col rounded-2xl overflow-hidden cursor-pointer transition-all duration-200
-        ${isDark ? 'bg-slate-800/90 hover:bg-slate-800' : 'bg-white hover:bg-white'}
-        ${isArchived ? 'opacity-60' : ''}
-      `}
+      className={`group relative flex flex-col overflow-hidden cursor-pointer select-none ${isArchived ? 'opacity-55' : ''}`}
       style={{
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}`,
-        boxShadow: isDark
-          ? '0 1px 3px rgba(0,0,0,0.4), 0 0 0 0 transparent'
-          : '0 1px 3px rgba(0,0,0,0.06), 0 0 0 0 transparent',
-        transition: 'box-shadow 0.2s, transform 0.2s',
+        borderRadius: 16,
+        background: isDark ? '#1e293b' : '#ffffff',
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
+        boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
       }}
       onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-3px)';
         e.currentTarget.style.boxShadow = isDark
-          ? '0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
-          : '0 8px 24px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
+          ? '0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.1)'
+          : `0 12px 32px rgba(0,0,0,0.1), 0 0 0 1px ${cfg.border}`;
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = isDark
-          ? '0 1px 3px rgba(0,0,0,0.4)'
-          : '0 1px 3px rgba(0,0,0,0.06)';
         e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)';
       }}
       onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
     >
-      {/* Accent line top */}
-      <div className="h-0.5 w-full flex-shrink-0" style={{ background: `linear-gradient(90deg, ${cfg.strip}, ${cfg.strip}60, transparent)` }} />
 
-      {/* Card Header */}
-      <div className="px-4 pt-4 pb-3 flex items-start gap-3">
-        {/* Avatar */}
-        <div className="relative flex-shrink-0">
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-white text-base font-black shadow-md"
-            style={{ background: avatarGrad }}
-          >
-            {client.company_name?.charAt(0).toUpperCase() || '?'}
-          </div>
-          {hasBirthdayToday && (
-            <div className="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 rounded-full flex items-center justify-center text-[8px]" title="Birthday today!">🎂</div>
-          )}
-          {isArchived && (
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center">
-              <Archive className="w-2.5 h-2.5 text-white" />
+      {/* ── LEFT COLOUR RAIL ── */}
+      <div
+        style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+          borderRadius: '16px 0 0 16px',
+          background: `linear-gradient(180deg, ${cfg.strip} 0%, ${cfg.strip}55 100%)`,
+        }}
+      />
+
+      {/* ── HEADER BAND ── */}
+      <div
+        style={{
+          padding: '14px 14px 12px 18px',
+          background: isDark
+            ? `linear-gradient(135deg, ${cfg.strip}18 0%, transparent 60%)`
+            : `linear-gradient(135deg, ${cfg.strip}0f 0%, transparent 60%)`,
+          borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          {/* Avatar */}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div
+              style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: avatarGrad,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontSize: 16, fontWeight: 900,
+                boxShadow: `0 4px 12px ${cfg.strip}55`,
+                flexShrink: 0,
+              }}
+            >
+              {client.company_name?.charAt(0).toUpperCase() || '?'}
             </div>
-          )}
-        </div>
+            {hasBirthdayToday && (
+              <div style={{ position: 'absolute', top: -4, right: -4, width: 16, height: 16, background: '#ec4899', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, border: '2px solid #fff' }}>🎂</div>
+            )}
+            {isArchived && (
+              <div style={{ position: 'absolute', bottom: -4, right: -4, width: 14, height: 14, background: '#f59e0b', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Archive style={{ width: 8, height: 8, color: '#fff' }} />
+              </div>
+            )}
+          </div>
 
-        {/* Name + type */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-1 mb-1">
-            <h3 className={`font-bold text-sm leading-snug break-words pr-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+          {/* Name block */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Index + type pill row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+              <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#475569' : '#cbd5e1', flexShrink: 0 }}>
+                #{getClientNumber(index)}
+              </span>
+              <TypePill type={client.client_type} customLabel={client.client_type_label} />
+              {expiringDSC && (
+                <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 20, background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', flexShrink: 0 }}>DSC⚠</span>
+              )}
+            </div>
+            {/* Company name — always exactly 2 lines tall */}
+            <h3
+              style={{
+                fontSize: 12, fontWeight: 700, lineHeight: 1.35,
+                color: isDark ? '#f1f5f9' : '#0f172a',
+                overflow: 'hidden', display: '-webkit-box',
+                WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                wordBreak: 'break-word',
+                minHeight: '2.7em', /* always 2 lines */
+                margin: 0,
+              }}
+            >
               {client.company_name}
             </h3>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[9px] font-mono font-bold ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
-              #{getClientNumber(index)}
-            </span>
-            <TypePill type={client.client_type} customLabel={client.client_type_label} />
-            {expiringDSC && (
-              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 border border-orange-200">
-                DSC ⚠
-              </span>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Divider */}
-      <div className="mx-4 h-px" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }} />
+      {/* ── BODY — 4 fixed-height rows, always rendered ── */}
+      <div style={{ padding: '10px 14px 10px 18px', display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
 
-      {/* Info rows */}
-      <div className="px-4 py-3 space-y-2.5 flex-1">
-        {/* Primary contact */}
-        <div className="flex items-start gap-2">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
-            style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-            <User className="w-3 h-3" style={{ color: cfg.strip }} />
+        {/* ROW 1 — Contact person (fixed 34px) */}
+        <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 22, height: 22, borderRadius: 6, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <User style={{ width: 11, height: 11, color: cfg.strip }} />
           </div>
-          <div className="flex-1 min-w-0">
-            {primaryContact?.name ? (
-              <>
-                <p className={`text-xs font-semibold truncate leading-tight ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {primaryContact.name}
-                </p>
-                {primaryContact.designation && (
-                  <p className={`text-[10px] leading-tight truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {primaryContact.designation}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className={`text-[10px] italic ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>No contact person</p>
-            )}
-          </div>
-        </div>
-
-        {/* Phone */}
-        {client.phone && (
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-              <Phone className="w-3 h-3" style={{ color: cfg.strip }} />
-            </div>
-            <p className={`text-xs font-medium truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{client.phone}</p>
-          </div>
-        )}
-
-        {/* Email */}
-        {client.email && (
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-              <Mail className="w-3 h-3" style={{ color: cfg.strip }} />
-            </div>
-            <p className={`text-[10px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{client.email}</p>
-          </div>
-        )}
-
-        {/* Services */}
-        {serviceCount > 0 && (
-          <div className="flex items-start gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
-              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-              <BarChart3 className="w-3 h-3" style={{ color: cfg.strip }} />
-            </div>
-            <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-              {client.services?.slice(0, 3).map((svc, i) => (
-                <span key={i}
-                  className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                  style={{ background: isDark ? `${cfg.strip}22` : cfg.bg, color: cfg.text, border: `1px solid ${isDark ? cfg.strip + '40' : cfg.border}` }}>
-                  {svc.replace('Other: ', '')}
-                </span>
-              ))}
-              {serviceCount > 3 && (
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                  +{serviceCount - 3}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Assigned to */}
-        {clientAssignments.length > 0 && (
-          <div className="flex items-start gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
-              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-              <Briefcase className="w-3 h-3" style={{ color: cfg.strip }} />
-            </div>
-            <div className="flex-1 min-w-0">
-              {clientAssignments.slice(0, 2).map((a, i) => {
-                const u = users.find(x => x.id === a.user_id);
-                return u ? (
-                  <p key={i} className={`text-[10px] font-medium truncate leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {u.full_name || u.name}
-                  </p>
-                ) : null;
-              })}
-              {clientAssignments.length > 2 && (
-                <p className={`text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>+{clientAssignments.length - 2} more</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Referred by */}
-        {client.referred_by && (
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : cfg.bg }}>
-              <Share2 className="w-3 h-3" style={{ color: cfg.strip }} />
-            </div>
-            <p className={`text-[10px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              via <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{client.referred_by}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#e2e8f0' : '#1e293b', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
+              {primaryContact?.name || <span style={{ color: isDark ? '#475569' : '#cbd5e1', fontStyle: 'italic' }}>No contact</span>}
+            </p>
+            <p style={{ fontSize: 10, color: isDark ? '#64748b' : '#94a3b8', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.2 }}>
+              {primaryContact?.designation || '\u00a0'}
             </p>
           </div>
-        )}
+        </div>
+
+        {/* ROW 2 — Phone + Email side by side (fixed 24px) */}
+        <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Phone style={{ width: 10, height: 10, color: cfg.strip }} />
+            </div>
+            <span style={{ fontSize: 10, fontWeight: 500, color: client.phone ? (isDark ? '#cbd5e1' : '#334155') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {client.phone || '—'}
+            </span>
+          </div>
+          <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Mail style={{ width: 10, height: 10, color: cfg.strip }} />
+            </div>
+            <span style={{ fontSize: 10, color: client.email ? (isDark ? '#94a3b8' : '#475569') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {client.email || '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* ROW 3 — Services (fixed 24px, always 3 slots + overflow badge) */}
+        <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <BarChart3 style={{ width: 10, height: 10, color: cfg.strip }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            {svcSlots.map((svc, i) => (
+              <span key={i} style={{
+                fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20, flexShrink: 0,
+                background: svc ? (isDark ? `${cfg.strip}28` : cfg.bg) : 'transparent',
+                color: svc ? cfg.text : 'transparent',
+                border: `1px solid ${svc ? (isDark ? cfg.strip + '45' : cfg.border) : 'transparent'}`,
+                whiteSpace: 'nowrap', maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {svc || '·'}
+              </span>
+            ))}
+            {extraSvcs > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 20, background: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9', color: isDark ? '#64748b' : '#64748b', flexShrink: 0 }}>
+                +{extraSvcs}
+              </span>
+            )}
+            {serviceCount === 0 && (
+              <span style={{ fontSize: 10, color: isDark ? '#334155' : '#e2e8f0', fontStyle: 'italic' }}>No services</span>
+            )}
+          </div>
+        </div>
+
+        {/* ROW 4 — Assigned + Referred (fixed 24px) */}
+        <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Briefcase style={{ width: 10, height: 10, color: cfg.strip }} />
+            </div>
+            <span style={{ fontSize: 10, color: firstAssignee ? (isDark ? '#94a3b8' : '#475569') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {firstAssignee
+                ? <>{firstAssignee.full_name || firstAssignee.name}{extraAssignees > 0 && <span style={{ color: isDark ? '#475569' : '#94a3b8' }}> +{extraAssignees}</span>}</>
+                : '—'
+              }
+            </span>
+          </div>
+          {client.referred_by && (
+            <>
+              <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Share2 style={{ width: 10, height: 10, color: cfg.strip }} />
+                </div>
+                <span style={{ fontSize: 10, color: isDark ? '#64748b' : '#64748b', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                  {client.referred_by}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
       </div>
 
-      {/* Action Footer */}
+      {/* ── ACTION FOOTER — fixed 38px ── */}
       <div
-        className="flex items-stretch mt-auto flex-shrink-0"
         style={{
-          borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`,
+          height: 38, display: 'flex', alignItems: 'stretch', flexShrink: 0,
+          borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
         }}
       >
+        {/* WhatsApp */}
         <button
           onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-          className="flex-1 flex items-center justify-center gap-1 py-2.5 text-emerald-600 transition-colors text-[10px] font-bold tracking-wide group/btn"
-          style={{ borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}` }}
-          title="WhatsApp"
+          style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+            color: '#16a34a', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >
-          <div className="w-5 h-5 rounded-md bg-emerald-50 group-hover/btn:bg-emerald-100 flex items-center justify-center transition-colors">
-            <MessageCircle className="h-3 w-3 text-emerald-600" />
-          </div>
-          <span className="hidden sm:inline">Chat</span>
+          <MessageCircle style={{ width: 12, height: 12 }} />
+          Chat
         </button>
 
+        {/* Edit */}
         <button
           onClick={e => { e.stopPropagation(); handleEdit(client); }}
-          className="flex-1 flex items-center justify-center gap-1 py-2.5 text-blue-600 transition-colors text-[10px] font-bold tracking-wide group/btn"
-          style={canDeleteData ? { borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}` } : {}}
-          title="Edit"
+          style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            borderRight: canDeleteData ? `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` : 'none',
+            color: '#2563eb', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >
-          <div className="w-5 h-5 rounded-md bg-blue-50 group-hover/btn:bg-blue-100 flex items-center justify-center transition-colors">
-            <Edit className="h-3 w-3 text-blue-600" />
-          </div>
-          <span className="hidden sm:inline">Edit</span>
+          <Edit style={{ width: 12, height: 12 }} />
+          Edit
         </button>
 
+        {/* Delete */}
         {canDeleteData && (
           <button
             onClick={e => {
               e.stopPropagation();
-              if (confirm("Delete this client permanently?")) {
+              if (confirm('Delete this client permanently?')) {
                 api.delete(`/clients/${client.id}`).then(() => fetchClients());
               }
             }}
-            className="flex-1 flex items-center justify-center gap-1 py-2.5 text-red-500 transition-colors text-[10px] font-bold tracking-wide group/btn"
-            title="Delete"
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: '#ef4444', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+              transition: 'background 0.12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
-            <div className="w-5 h-5 rounded-md bg-red-50 group-hover/btn:bg-red-100 flex items-center justify-center transition-colors">
-              <Trash2 className="h-3 w-3 text-red-500" />
-            </div>
-            <span className="hidden sm:inline">Del</span>
+            <Trash2 style={{ width: 12, height: 12 }} />
+            Del
           </button>
         )}
       </div>
@@ -1120,7 +1162,7 @@ export default function Clients() {
     const client = filteredClients[index];
     if (index >= filteredClients.length || !client) return null;
     return (
-      <div style={style} className="p-2 box-border">
+      <div style={{ ...style, padding: '0 6px 10px 6px', boxSizing: 'border-box' }}>
         <ModernClientCard
           client={client}
           index={index}
@@ -1835,7 +1877,7 @@ export default function Clients() {
         ) : viewMode === 'board' ? (
           <AutoSizer>
             {({ height, width }) => {
-              const CARD_MIN = 280;
+              const CARD_MIN = 255;
               const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
               const columnWidth = Math.floor(width / columnCount);
               const rowCount = Math.ceil(filteredClients.length / columnCount);
@@ -1845,7 +1887,7 @@ export default function Clients() {
                   columnWidth={columnWidth}
                   height={height}
                   rowCount={rowCount}
-                  rowHeight={380}
+                  rowHeight={296}
                   width={width}
                   overscanColumnCount={2}
                   overscanRowCount={4}
