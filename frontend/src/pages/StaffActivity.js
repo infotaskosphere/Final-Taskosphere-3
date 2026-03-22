@@ -160,17 +160,8 @@ const CAT_COLORS = {
 export default function StaffActivity() {
   const { user, hasPermission } = useAuth();
 
-  // ── Dark-mode detection ───────────────────────────────────────────────────
-  const [isDark, setIsDark] = useState(
-    () => typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    const obs = new MutationObserver(() =>
-      setIsDark(document.documentElement.classList.contains('dark'))
-    );
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => obs.disconnect();
-  }, []);
+  // ── Dark-mode detection ────────────────────────────────────────────────
+  const isDark = useDark();
 
   // ── Permissions ───────────────────────────────────────────────────────────
   const isAdmin            = user?.role === 'admin';
@@ -447,7 +438,7 @@ export default function StaffActivity() {
   const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark
     ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
-    : 'bg-white border-slate-200/80 hover:border-slate-300';
+    : (isDark ? 'bg-slate-700 border-slate-600 hover:border-slate-500' : 'bg-white border-slate-200/80 hover:border-slate-300');
 
   const TABS = [
     { value: 'activity_log', label: 'Activity Log', Icon: Activity        },
