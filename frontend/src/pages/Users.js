@@ -710,7 +710,7 @@ export default function Users() {
                     : <UserIcon className="h-14 w-14 text-slate-300" />}
                 </div>
                 <label htmlFor="profile-upload"
-                  className={`absolute -bottom-2 -right-2 rounded-xl p-2.5 shadow-xl border c ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-100"}`ursor-pointer hover:bg-slate-50">
+                  className={`absolute -bottom-2 -right-2 rounded-xl p-2.5 shadow-xl border cursor-pointer ${isDark?"bg-slate-700 border-slate-600 hover:bg-slate-600":"bg-white border-slate-100 hover:bg-slate-50"}`}>
                   <Camera className="h-5 w-5 text-blue-600" />
                   <input id="profile-upload" type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
                 </label>
