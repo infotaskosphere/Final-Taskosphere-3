@@ -62,14 +62,6 @@ const NAV_GROUPS = [
     ],
   },
   {
-    id: 'proposals',
-    dividerLabel: 'Client Proposals',
-    items: [
-      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
-      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
-    ],
-  },
-  {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
@@ -77,6 +69,14 @@ const NAV_GROUPS = [
       { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
       { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
       { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
+    ],
+  },
+  {
+    id: 'proposals',
+    dividerLabel: 'Client Proposals',
+    items: [
+      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
+      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
     ],
   },
   {
@@ -234,37 +234,13 @@ const DashboardLayout = ({ children }) => {
     );
   };
 
-  const NavDivider = ({ label, isProposals }) => (
+  // ── Nav divider — identical plain text style for ALL sections ─────────────
+  const NavDivider = ({ label }) => (
     <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
-        isProposals ? (
-          /* ── Client Proposals — styled pill divider ── */
-          <div className="flex items-center gap-2 px-1 mb-1">
-            <div
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}14, ${COLORS.mediumBlue}10)` }}
-            >
-              <Receipt
-                className="h-3 w-3 flex-shrink-0"
-                style={{ color: COLORS.mediumBlue }}
-              />
-              <p
-                className="text-[10px] font-bold uppercase tracking-widest"
-                style={{ color: COLORS.deepBlue }}
-              >
-                {label}
-              </p>
-            </div>
-            <div
-              className="flex-1 h-px"
-              style={{ background: `linear-gradient(to right, ${COLORS.mediumBlue}30, transparent)` }}
-            />
-          </div>
-        ) : (
-          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
-            {label}
-          </p>
-        )
+        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
+          {label}
+        </p>
       ) : (
         <div className="border-t border-slate-100 dark:border-slate-700/60 mx-1" />
       )}
@@ -339,10 +315,7 @@ const DashboardLayout = ({ children }) => {
           {NAV_GROUPS.map((group, gi) => (
             <React.Fragment key={group.id}>
               {gi > 0 && (
-                <NavDivider
-                  label={group.dividerLabel}
-                  isProposals={group.id === 'proposals'}
-                />
+                <NavDivider label={group.dividerLabel} />
               )}
               {group.items.map(item => (
                 <NavItem key={item.path} item={item} />
