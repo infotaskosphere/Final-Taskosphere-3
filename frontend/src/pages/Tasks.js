@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { useLocation } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
@@ -211,7 +212,7 @@ const TaskRow = ({
   return (
     <motion.div variants={itemVariants} layout>
       <div className={`relative rounded-xl border transition-all duration-200 overflow-hidden group
-        ${isCompleted ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}>
+        ${isCompleted ? (isDark?'bg-slate-800/60 border-slate-700 opacity-70':'bg-slate-50 border-slate-200 opacity-70') : (isDark?'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm':'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
         {/* Left accent stripe */}
         <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
 
@@ -244,7 +245,7 @@ const TaskRow = ({
           {/* 3 · Title */}
           <button
             className={`min-w-0 text-left font-medium truncate transition-colors pl-1 pr-2
-              ${isCompleted ? 'text-slate-400 line-through text-sm' : 'text-slate-800 hover:text-blue-700 text-sm'}`}
+              ${isCompleted ? 'text-slate-400 line-through text-sm' : (isDark?'text-slate-100 hover:text-blue-400 text-sm':'text-slate-800 hover:text-blue-700 text-sm')}`}
             onClick={() => openTaskDetail(task)}
           >
             {task.title}
@@ -255,9 +256,9 @@ const TaskRow = ({
             {canModifyTask(task) ? (
               <>
                 {[
-                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
-                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
-                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
+                  { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-red-400 hover:text-red-400':'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
+                  { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-amber-400 hover:text-amber-400':'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: isDark?'bg-slate-700 text-slate-400 border-slate-600 hover:border-blue-400 hover:text-blue-400':'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
                 ].map(({ s, label, active, idle }) => (
                   <button key={s} onClick={() => handleQuickStatusChange(task, s)}
                     className={`h-[20px] px-2 text-[9px] font-semibold tracking-wide rounded border transition-all whitespace-nowrap
@@ -373,7 +374,7 @@ const TaskRow = ({
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="mx-5 mb-4 space-y-3 border-t border-slate-100 pt-3">
+              <div className={`mx-5 mb-4 space-y-3 border-t pt-3 ${isDark?"border-slate-700":"border-slate-100"}`}>
                 {/* Checklist */}
                 {checklistItems.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
@@ -397,7 +398,7 @@ const TaskRow = ({
                             onCheckedChange={() => toggleChecklistItem(task.id, idx)}
                             className="mt-0.5 flex-shrink-0"
                           />
-                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : 'text-slate-700 group-hover/check:text-slate-900'}`}>
+                          <span className={`text-xs leading-relaxed ${checkedItems.includes(idx) ? 'line-through text-slate-400' : (isDark?'text-slate-300 group-hover/check:text-slate-100':'text-slate-700 group-hover/check:text-slate-900')}`}>
                             {item}
                           </span>
                         </label>
@@ -411,7 +412,7 @@ const TaskRow = ({
                   <div className="space-y-2">
                     <div className="max-h-28 overflow-y-auto space-y-1">
                       {(comments[task.id] || []).map((comment, i) => (
-                        <div key={i} className="text-xs bg-slate-50 rounded-lg px-3 py-2 text-slate-600 border border-slate-100">
+                        <div key={i} className={`text-xs rounded-lg px-3 py-2 border ${isDark?"bg-slate-700 text-slate-300 border-slate-600":"bg-slate-50 text-slate-600 border-slate-100"}`}>
                           {comment.text}
                         </div>
                       ))}
@@ -460,7 +461,7 @@ const BoardCard = ({
   return (
     <motion.div variants={itemVariants} layout>
       <div className={`relative rounded-xl border overflow-hidden transition-all duration-200 group
-        ${isCompleted ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md'}`}>
+        ${isCompleted ? (isDark?'bg-slate-800/60 border-slate-700 opacity-75':'bg-slate-50 border-slate-200 opacity-75') : (isDark?'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md':'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
         {/* Top accent stripe */}
         <div className={`h-1 w-full ${stripeColor}`} />
 
@@ -470,7 +471,7 @@ const BoardCard = ({
             <button
               onClick={() => openTaskDetail(task)}
               className={`font-semibold text-sm leading-snug text-left flex-1 transition-colors
-                ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-800 hover:text-blue-700'}`}>
+                ${isCompleted ? 'text-slate-400 line-through' : (isDark?'text-slate-100 hover:text-blue-400':'text-slate-800 hover:text-blue-700')}`}>
               {task.title}
             </button>
             {/* Dot menu */}
@@ -540,7 +541,7 @@ const BoardCard = ({
           )}
 
           {/* Meta info */}
-          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+          <div className={`pt-2 border-t space-y-1.5 ${isDark?"border-slate-700":"border-slate-100"}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
                 <User className="h-3.5 w-3.5 flex-shrink-0" />
@@ -572,7 +573,7 @@ const BoardCard = ({
               ].map(({ s, label, active }) => (
                 <button key={s} onClick={() => handleQuickStatusChange(task, s)}
                   className={`h-6 text-[10px] font-semibold rounded-lg border transition-all
-                    ${task.status === s ? active : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                    ${task.status === s ? active : (isDark?'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500':'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
                   {label}
                 </button>
               ))}
@@ -583,7 +584,7 @@ const BoardCard = ({
           {canModifyTask(task) && (
             <button
               onClick={() => { setOpenCommentTaskId(openCommentTaskId === task.id ? null : task.id); fetchComments(task.id); }}
-              className="w-full flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-indigo-600 py-1 rounded-lg hover:bg-indigo-50 transition-colors border border-dashed border-slate-200 hover:border-indigo-200">
+              className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-indigo-600 py-1 rounded-lg transition-colors border border-dashed ${isDark?"border-slate-600 hover:bg-indigo-900/30 hover:border-indigo-700":"border-slate-200 hover:bg-indigo-50 hover:border-indigo-200"}`}>
               <MessageSquare className="h-3 w-3" />
               {openCommentTaskId === task.id ? 'Close Comments' : 'Add Comment'}
             </button>
@@ -593,7 +594,7 @@ const BoardCard = ({
             <div className="space-y-2">
               <div className="max-h-24 overflow-y-auto space-y-1">
                 {(comments[task.id] || []).map((c, i) => (
-                  <div key={i} className="text-[10px] bg-slate-50 rounded-lg px-2 py-1.5 text-slate-600 border border-slate-100">
+                  <div key={i} className={`text-[10px] rounded-lg px-2 py-1.5 border ${isDark?"bg-slate-700 text-slate-300 border-slate-600":"bg-slate-50 text-slate-600 border-slate-100"}`}>
                     {c.text}
                   </div>
                 ))}
@@ -632,7 +633,7 @@ const StatCard = ({ label, value, color, icon: Icon, active, onClick, activeClas
       className={`relative rounded-xl border p-4 text-left w-full overflow-hidden transition-colors duration-200
         ${active
           ? `${activeBg} ${activeBorder} ring-1 ${activeRing} shadow-sm`
-          : 'border-slate-200 bg-white'}`}
+          : isDark?'border-slate-700 bg-slate-800':'border-slate-200 bg-white'}`}
     >
       {/* Top accent bar — slides in when active, no bottom line */}
       <motion.div
@@ -707,6 +708,7 @@ export default function Tasks() {
   const [showNotifications,   setShowNotifications]   = useState(false);
 
   const location = useLocation();
+  const isDark = useDark();
 
   // ── Filters & sorting ───────────────────────────────────────────────────────
   const [searchQuery,      setSearchQuery]      = useState('');
@@ -1065,16 +1067,16 @@ export default function Tasks() {
   // RENDER
   // ════════════════════════════════════════════════════════════════════════════
   return (
-    <motion.div className="space-y-5 min-h-screen bg-slate-50 p-5 rounded-2xl"
+    <motion.div className={`space-y-5 min-h-screen p-5 rounded-2xl ${isDark ? 'bg-[#0f172a]' : 'bg-slate-50'}`}
       variants={containerVariants} initial="hidden" animate="visible">
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}>
-        <Card className="border border-slate-200 shadow-sm rounded-2xl overflow-hidden">
+        <Card className={`border shadow-sm rounded-2xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
           <div className="h-1 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-500" />
           <CardContent className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>
+              <h1 className={`text-xl font-bold tracking-tight`} style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>
                 Task Management
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -1110,11 +1112,11 @@ export default function Tasks() {
                     )}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-80 p-0 rounded-2xl shadow-xl border border-slate-200 overflow-hidden" align="end">
-                  <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+                <PopoverContent className={`w-80 p-0 rounded-2xl shadow-xl border overflow-hidden ${isDark?"border-slate-700 bg-slate-800":"border-slate-200"}`} align="end">
+                  <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isDark?"border-slate-700 bg-slate-700/60":"border-slate-100 bg-slate-50"}`}>
                     <div className="flex items-center gap-2">
                       <Bell className="h-4 w-4 text-slate-600" />
-                      <h3 className="font-semibold text-slate-800 text-sm">Notifications</h3>
+                      <h3 className={`font-semibold text-sm ${isDark?"text-slate-100":"text-slate-800"}`}>Notifications</h3>
                       {unreadCount > 0 && (
                         <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{unreadCount} new</span>
                       )}
@@ -1133,11 +1135,11 @@ export default function Tasks() {
                         <p className="text-sm text-slate-400">No notifications</p>
                       </div>
                     ) : notifications.map((n) => (
-                      <div key={n.id} className={`px-5 py-3.5 transition-colors hover:bg-slate-50 ${!n.read ? 'bg-blue-50/40' : ''}`}>
+                      <div key={n.id} className={`px-5 py-3.5 transition-colors ${!n.read ? (isDark?'bg-blue-900/20':'bg-blue-50/40') : ''} ${isDark?'hover:bg-slate-700/50':'hover:bg-slate-50'}`}>
                         <div className="flex gap-3">
                           {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
                           <div className={`flex-1 ${n.read ? 'pl-4' : ''}`}>
-                            <p className={`text-xs leading-relaxed ${!n.read ? 'font-semibold text-slate-800' : 'text-slate-600'}`}>
+                            <p className={`text-xs leading-relaxed ${!n.read ? (isDark?'font-semibold text-slate-100':'font-semibold text-slate-800') : (isDark?'text-slate-400':'text-slate-600')}`}>
                               {n.message}
                             </p>
                             <p className="text-[10px] text-slate-400 mt-1">
@@ -1299,7 +1301,7 @@ export default function Tasks() {
                       </div>
 
                       {/* Recurring */}
-                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+                      <div className={`border rounded-xl p-4 space-y-3 ${isDark?"border-slate-600 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Repeat className="h-4 w-4 text-slate-500" />
@@ -1309,7 +1311,7 @@ export default function Tasks() {
                             onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
                         </div>
                         {formData.is_recurring && (
-                          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200">
+                          <div className={`grid grid-cols-2 gap-3 pt-3 border-t ${isDark?"border-slate-600":"border-slate-200"}`}>
                             <div className="space-y-1.5">
                               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Repeat</Label>
                               <Select value={formData.recurrence_pattern}
@@ -1340,7 +1342,7 @@ export default function Tasks() {
                         )}
                       </div>
 
-                      <DialogFooter className="pt-3 border-t border-slate-200">
+                      <DialogFooter className={`pt-3 border-t ${isDark?"border-slate-600":"border-slate-200"}`}>
                         <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}
                           className="h-9 text-sm rounded-lg">Cancel</Button>
                         <Button type="submit" disabled={loading} className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800">
@@ -1358,9 +1360,9 @@ export default function Tasks() {
 
       {/* ── Stat Cards ───────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard label="Total"       value={stats.total}      color="text-slate-800"  icon={SlidersHorizontal}
+        <StatCard label="Total"       value={stats.total}      color={isDark?'text-slate-300':'text-slate-800'}  icon={SlidersHorizontal}
           active={filterStatus === 'all'}
-          activeClasses={{ bg: 'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
+          activeClasses={{ bg: isDark?'bg-slate-700':'bg-slate-50', border: 'border-slate-400', ring: 'ring-slate-200', icon: 'bg-slate-200', iconFg: 'text-slate-700', bar: 'bg-slate-600' }}
           onClick={() => setFilterStatus('all')} />
         <StatCard label="To Do"       value={stats.todo}       color="text-red-600"    icon={Circle}
           active={filterStatus === 'pending'}
@@ -1382,18 +1384,18 @@ export default function Tasks() {
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
       <motion.div variants={itemVariants}
-        className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-3">
+        className={`flex flex-wrap items-center gap-2 border rounded-xl px-4 py-3 ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`}>
         {/* Search */}
         <div className="relative flex-1 min-w-40">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <Input placeholder="Search tasks…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-8 text-sm bg-slate-50 rounded-lg border-slate-200" />
+            className={`pl-9 h-8 text-sm rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400":"bg-slate-50 border-slate-200"}`} />
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           {/* Status */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="h-8 w-36 text-xs rounded-lg bg-slate-50 border-slate-200"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="pending">To Do</SelectItem>
@@ -1405,7 +1407,7 @@ export default function Tasks() {
 
           {/* Priority */}
           <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className="h-8 w-36 text-xs rounded-lg bg-slate-50 border-slate-200"><SelectValue placeholder="Priority" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Priority" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Priorities</SelectItem>
               <SelectItem value="low">Low</SelectItem>
@@ -1417,7 +1419,7 @@ export default function Tasks() {
 
           {/* Category */}
           <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className="h-8 w-36 text-xs rounded-lg bg-slate-50 border-slate-200"><SelectValue placeholder="Department" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Department" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Depts</SelectItem>
               {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
@@ -1426,7 +1428,7 @@ export default function Tasks() {
 
           {/* Assignee */}
           <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className="h-8 w-36 text-xs rounded-lg bg-slate-50 border-slate-200"><SelectValue placeholder="Assignee" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Assignees</SelectItem>
               {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
@@ -1436,7 +1438,7 @@ export default function Tasks() {
           {/* Sort */}
           <Select value={`${sortBy}-${sortDirection}`}
             onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
-            <SelectTrigger className="h-8 w-36 text-xs rounded-lg bg-slate-50 border-slate-200"><SelectValue placeholder="Sort" /></SelectTrigger>
+            <SelectTrigger className={`h-8 w-36 text-xs rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-slate-50 border-slate-200"}`}><SelectValue placeholder="Sort" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
               <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
@@ -1455,12 +1457,12 @@ export default function Tasks() {
           <div className="flex bg-slate-100 p-0.5 rounded-lg">
             <button onClick={() => setViewMode('list')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                ${viewMode === 'list' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <List className="h-3.5 w-3.5" />
             </button>
             <button onClick={() => setViewMode('board')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
-                ${viewMode === 'board' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                ${viewMode === 'board' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -1492,7 +1494,7 @@ export default function Tasks() {
           <motion.div className="space-y-1.5" variants={containerVariants}>
             {/* ── Column headers — CSS grid, exact mirror of TaskRow grid ── */}
             <div
-              className="hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none border-b border-slate-100 mb-1.5"
+              className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5 ${isDark?"text-slate-500 border-slate-700":"text-slate-400 border-slate-100"}`}
               style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
             >
               <span />{/* stripe */}
@@ -1604,7 +1606,7 @@ export default function Tasks() {
                       );
                     })}
                     {colTasks.length === 0 && (
-                      <div className="flex items-center justify-center h-24 rounded-xl border-2 border-dashed border-slate-200">
+                      <div className={`flex items-center justify-center h-24 rounded-xl border-2 border-dashed ${isDark?"border-slate-700":"border-slate-200"}`}>
                         <p className="text-xs text-slate-400">No tasks</p>
                       </div>
                     )}
@@ -1637,7 +1639,7 @@ export default function Tasks() {
               <div className="space-y-5 mt-2">
                 {/* Title + badges */}
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 mb-2 leading-snug">{selectedDetailTask.title}</h2>
+                  <h2 className={`text-xl font-bold mb-2 leading-snug ${isDark?"text-slate-100":"text-slate-900"}`}>{selectedDetailTask.title}</h2>
                   <div className="flex flex-wrap gap-1.5">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>
                       {taskIsOverdue ? 'Overdue' : statusStyle.label}
@@ -1658,7 +1660,7 @@ export default function Tasks() {
 
                 {/* Description */}
                 {selectedDetailTask.description && (
-                  <div className="border border-slate-200 rounded-xl p-4 bg-slate-50">
+                  <div className={`border rounded-xl p-4 ${isDark?"border-slate-600 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
                     <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Notes</p>
                     <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                       {selectedDetailTask.description}
@@ -1680,16 +1682,16 @@ export default function Tasks() {
                         ? `Every ${selectedDetailTask.recurrence_interval} ${selectedDetailTask.recurrence_pattern}(s)`
                         : 'One-time' },
                   ].map(({ label, value }) => (
-                    <div key={label} className="border border-slate-200 rounded-xl p-3.5 bg-white">
+                    <div key={label} className={`border rounded-xl p-3.5 ${isDark?"border-slate-600 bg-slate-700":"border-slate-200 bg-white"}`}>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{label}</p>
-                      <p className="text-sm font-semibold text-slate-800">{value}</p>
+                      <p className={`text-sm font-semibold ${isDark?"text-slate-100":"text-slate-800"}`}>{value}</p>
                     </div>
                   ))}
                 </div>
 
                 {/* Co-assignees */}
                 {selectedDetailTask.sub_assignees?.length > 0 && (
-                  <div className="border border-slate-200 rounded-xl p-3.5">
+                  <div className={`border rounded-xl p-3.5 ${isDark?"border-slate-600":"border-slate-200"}`}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Co-assignees</p>
                     <div className="flex flex-wrap gap-1.5">
                       {selectedDetailTask.sub_assignees.map(uid => (
@@ -1729,7 +1731,7 @@ export default function Tasks() {
                 )}
 
                 {/* Actions */}
-                <div className="flex gap-2 border-t border-slate-100 pt-4">
+                <div className={`flex gap-2 border-t pt-4 ${isDark?"border-slate-700":"border-slate-100"}`}>
                   {canModifyTask(selectedDetailTask) && (
                     <Button onClick={() => { handleEdit(selectedDetailTask); setTaskDetailOpen(false); }}
                       className="h-9 text-sm rounded-lg bg-blue-700 hover:bg-blue-800 text-white gap-1.5">
@@ -1768,7 +1770,7 @@ export default function Tasks() {
           </DialogHeader>
 
           {/* Workflow filters */}
-          <div className="flex gap-3 sticky top-0 bg-white z-10 py-3 border-b border-slate-100">
+          <div className={`flex gap-3 sticky top-0 z-10 py-3 border-b ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input placeholder="Search templates…" value={workflowSearch}
@@ -1799,7 +1801,7 @@ export default function Tasks() {
               const priorityStyle = PRIORITY_STYLES[wf.priority] || PRIORITY_STYLES.medium;
               return (
                 <button key={wf.id} onClick={() => applyComplianceWorkflow(wf)}
-                  className="text-left border border-slate-200 rounded-xl p-5 hover:border-emerald-400 hover:shadow-md transition-all group bg-white">
+                  className={`text-left border rounded-xl p-5 hover:border-emerald-400 hover:shadow-md transition-all group ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
@@ -1810,7 +1812,7 @@ export default function Tasks() {
                           {priorityStyle.label}
                         </span>
                       </div>
-                      <h3 className="font-bold text-slate-800 group-hover:text-emerald-700 transition-colors leading-snug">{wf.name}</h3>
+                      <h3 className={`font-bold group-hover:text-emerald-600 transition-colors leading-snug ${isDark?"text-slate-100":"text-slate-800"}`}>{wf.name}</h3>
                     </div>
                     <div className="text-right flex-shrink-0 ml-3">
                       <div className="text-lg font-bold text-emerald-600">{wf.estimatedHours}h</div>
@@ -1818,7 +1820,7 @@ export default function Tasks() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mb-3 line-clamp-1">{wf.title}</p>
-                  <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                  <div className={`rounded-lg p-3 border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Key Steps</p>
                     <div className="space-y-1">
                       {steps.slice(0, 4).map((s, i) => (
@@ -1854,7 +1856,7 @@ export default function Tasks() {
           <div className="space-y-3 mt-2">
             <div className="max-h-60 overflow-y-auto space-y-2">
               {(comments[selectedTask?.id] || []).map((c, i) => (
-                <div key={i} className="bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-100">
+                <div key={i} className={`rounded-lg px-3 py-2.5 border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
                   <p className="text-sm text-slate-700">{c.text}</p>
                   <p className="text-[10px] text-slate-400 mt-1">
                     {getUserName(c.user_id)} · {format(new Date(c.created_at), 'MMM dd, hh:mm a')}
