@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -173,7 +174,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                         <FileText className="h-8 w-8 text-blue-500"/>
                       </div>
                       <p className="font-semibold text-slate-700">{file.name}</p>
-                      <p className="text-xs text-slate-400">{(file.size/1024).toFixed(1)} KB</p>
+                      <p className={`text-xs ${isDark?"text-slate-500":"text-slate-400"}`}>{(file.size/1024).toFixed(1)} KB</p>
                       <button
                         onClick={e=>{e.stopPropagation();setFile(null);}}
                         className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
@@ -230,9 +231,9 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
             {/* ── STEP 2: REVIEW ── */}
             {step === 'review' && (
               <motion.div key="review" initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-20}} className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-200"}`}>
                   <p className="text-sm text-slate-600">
-                    <span className="font-bold text-slate-800">{extractedDates.length}</span> found ·{' '}
+                    <span className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{extractedDates.length}</span> found ·{' '}
                     <span className="font-bold" style={{color:COLORS.mediumBlue}}>{selCount}</span> selected
                   </p>
                   <div className="flex gap-2">
@@ -249,7 +250,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                       <motion.div
                         key={item._id} layout
                         onClick={()=>toggle(item._id)}
-                        className={`rounded-xl border-2 p-4 cursor-pointer transition-all duration-200 ${isSel?'border-blue-300 bg-blue-50':'border-slate-200 bg-white opacity-60'}`}
+                        className={`rounded-xl border-2 p-4 cursor-pointer transition-all duration-200 ${isSel?(isDark?'border-blue-300 bg-blue-50':'border-slate-200 bg-white opacity-60'}`}
                       >
                         <div className="flex items-start gap-3">
                           <div className={`flex-shrink-0 w-5 h-5 rounded-md mt-0.5 flex items-center justify-center border-2 transition-all ${isSel?'bg-blue-500 border-blue-500':'border-slate-300 bg-white'}`}>
@@ -257,7 +258,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-semibold text-slate-800 text-sm">{item.title}</p>
+                              <p className={`font-semibold text-sm ${isDark?"text-slate-100":"text-slate-800"}`}>{item.title}</p>
                               <Badge className="text-[10px] px-2 py-0" style={{background:'#EEF4FF',color:COLORS.mediumBlue}}>{item.category}</Badge>
                               <Badge className="text-[10px] px-2 py-0 bg-slate-100 text-slate-600">{item.department}</Badge>
                             </div>
@@ -316,6 +317,7 @@ function SmartImportModal({ open, onClose, clients, users, user, onImportDone })
 // ─────────────────────────────────────────────
 export default function DueDates() {
   const { user } = useAuth();
+  const isDark = useDark();
   const [dueDates, setDueDates]         = useState([]);
   const [clients, setClients]           = useState([]);
   const [users, setUsers]               = useState([]);
@@ -424,13 +426,13 @@ export default function DueDates() {
   );
 
   return (
-    <motion.div className="space-y-6" variants={cv} initial="hidden" animate="visible">
+    <motion.div className={`space-y-6 ${isDark?"bg-[#0f172a] min-h-screen p-6 rounded-2xl":""}`} variants={cv} initial="hidden" animate="visible">
 
       {/* Header */}
       <motion.div variants={iv} className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight" style={{color:COLORS.deepBlue}}>Compliance Calendar</h1>
-          <p className="text-slate-500 mt-1 text-sm">Track and manage all statutory filing deadlines</p>
+          <h1 className="text-3xl font-bold tracking-tight" style={{color:isDark?"#93c5fd":COLORS.deepBlue}}>Compliance Calendar</h1>
+          <p className={`mt-1 text-sm ${isDark?"text-slate-400":"text-slate-500"}`}>Track and manage all statutory filing deadlines</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Button
@@ -553,11 +555,11 @@ export default function DueDates() {
       <motion.div variants={iv} className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
-          <Input placeholder="Search due dates..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="pl-10 bg-white border-slate-200"/>
+          <Input placeholder="Search due dates..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className={`pl-10 ${isDark?"bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-400":"bg-white border-slate-200"}`}/>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-36 bg-white border-slate-200">
+            <SelectTrigger className={`w-36 ${isDark?"bg-slate-800 border-slate-600":"bg-white border-slate-200"}`}>
               <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Status"/>
             </SelectTrigger>
             <SelectContent>
@@ -569,14 +571,14 @@ export default function DueDates() {
             </SelectContent>
           </Select>
           <Select value={filterCat} onValueChange={setFilterCat}>
-            <SelectTrigger className="w-36 bg-white border-slate-200"><SelectValue placeholder="Category"/></SelectTrigger>
+            <SelectTrigger className={`w-36 ${isDark?"bg-slate-800 border-slate-600":"bg-white border-slate-200"}`}><SelectValue placeholder="Category"/></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Categories</SelectItem>
               {CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterMonth} onValueChange={setFilterMonth}>
-            <SelectTrigger className="w-36 bg-white border-slate-200">
+            <SelectTrigger className={`w-36 ${isDark?"bg-slate-800 border-slate-600":"bg-white border-slate-200"}`}>
               <Calendar className="h-3.5 w-3.5 mr-1.5 text-slate-400"/><SelectValue placeholder="Month"/>
             </SelectTrigger>
             <SelectContent>
@@ -589,13 +591,13 @@ export default function DueDates() {
 
       {/* Table */}
       <motion.div variants={iv}>
-        <Card className="border border-slate-200 overflow-hidden" style={{boxShadow:'0 2px 12px rgba(0,0,0,0.06)'}}>
+        <Card className={`overflow-hidden ${isDark?"border-slate-700":"border-slate-200"}`} style={{boxShadow:'0 2px 12px rgba(0,0,0,0.06)'}}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr style={{background:'linear-gradient(to right,#f8fafc,#f1f5f9)'}}>
+                <tr style={{background:isDark?'linear-gradient(to right,#1e293b,#263348)':'linear-gradient(to right,#f8fafc,#f1f5f9)'}}>
                   {['Status','Title','Category','Client','Due Date','Assigned To','Days Left',''].map(h=>(
-                    <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-5 py-3.5 border-b border-slate-200">{h}</th>
+                    <th key={h} className={`text-left text-[11px] font-semibold uppercase tracking-wider px-5 py-3.5 border-b ${isDark?"text-slate-400 border-slate-700":"text-slate-500 border-slate-200"}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -603,10 +605,10 @@ export default function DueDates() {
                 {filtered.length===0 ? (
                   <tr><td colSpan={8} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
-                      <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isDark?"bg-slate-800":"bg-slate-100"}`}>
                         <Calendar className="h-6 w-6 text-slate-300"/>
                       </div>
-                      <p className="text-slate-400 text-sm font-medium">No due dates found</p>
+                      <p className={`text-sm font-medium ${isDark?"text-slate-500":"text-slate-400"}`}>No due dates found</p>
                       <p className="text-slate-300 text-xs">Try Smart Import to extract from a compliance document</p>
                     </div>
                   </td></tr>
@@ -618,7 +620,7 @@ export default function DueDates() {
                     <motion.tr
                       key={dd.id}
                       initial={{opacity:0}} animate={{opacity:1}} transition={{delay:idx*0.03}}
-                      className="hover:bg-slate-50/70 transition-colors group border-b border-slate-100 last:border-0"
+                      className={`transition-colors group border-b last:border-0 ${isDark?"hover:bg-slate-700/30 border-slate-700/50":"hover:bg-slate-50/70 border-slate-100"}`}
                     >
                       <td className="px-5 py-4">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${sty.bg} ${sty.text} ${sty.border}`}>
@@ -627,10 +629,10 @@ export default function DueDates() {
                       </td>
                       <td className="px-5 py-4 max-w-xs">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-semibold text-sm" style={{color:COLORS.deepBlue}}>{dd.title}</p>
+                          <p className="font-semibold text-sm" style={{color:isDark?"#93c5fd":COLORS.deepBlue}}>{dd.title}</p>
                           {dd.assigned_to===user?.id && <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-700 border-0">You</Badge>}
                         </div>
-                        {dd.description && <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{dd.description}</p>}
+                        {dd.description && <p className={`text-xs mt-0.5 line-clamp-1 ${isDark?"text-slate-500":"text-slate-400"}`}>{dd.description}</p>}
                       </td>
                       <td className="px-5 py-4">
                         <Badge variant="outline" className="text-[11px] font-medium" style={{borderColor:COLORS.mediumBlue+'60',color:COLORS.mediumBlue,background:'#EEF4FF'}}>
@@ -639,8 +641,8 @@ export default function DueDates() {
                       </td>
                       <td className="px-5 py-4">
                         {dd.client_id
-                          ? <div className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-300"/><span className="text-xs text-slate-500">{getClientName(dd.client_id)}</span></div>
-                          : <span className="text-slate-300 text-xs">—</span>
+                          ? <div className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-300"/><span className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>{getClientName(dd.client_id)}</span></div>
+                          : <span className={`text-xs ${isDark?"text-slate-600":"text-slate-300"}`}>—</span>
                         }
                       </td>
                       <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
@@ -649,7 +651,7 @@ export default function DueDates() {
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-1.5">
                           <User className="h-3.5 w-3.5 text-slate-300"/>
-                          <span className="text-xs text-slate-500">{getUserName(dd.assigned_to)}</span>
+                          <span className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>{getUserName(dd.assigned_to)}</span>
                         </div>
                       </td>
                       <td className="px-5 py-4">
@@ -682,10 +684,10 @@ export default function DueDates() {
             </table>
           </div>
           {filtered.length>0 && (
-            <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50">
+            <div className={`px-5 py-3 border-t ${isDark?"border-slate-700 bg-slate-800/30":"border-slate-100 bg-slate-50/50"}`}>
               <p className="text-xs text-slate-400">
-                Showing <span className="font-semibold text-slate-600">{filtered.length}</span> of{' '}
-                <span className="font-semibold text-slate-600">{dueDates.length}</span> due dates
+                Showing <span className={`font-semibold ${isDark?"text-slate-300":"text-slate-600"}`}>{filtered.length}</span> of{' '}
+                <span className={`font-semibold ${isDark?"text-slate-300":"text-slate-600"}`}>{dueDates.length}</span> due dates
               </p>
             </div>
           )}
