@@ -736,6 +736,10 @@ export default function Clients() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
+  // Board pagination
+  const [boardPage, setBoardPage] = useState(1);
+  const BOARD_PAGE_SIZE = 24;
+
   const [bulkMsgOpen, setBulkMsgOpen] = useState(false);
   const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp');
 
@@ -872,6 +876,9 @@ export default function Clients() {
       return matchesSearch && matchesService && matchesStatus && matchesAssigned && matchesClientType;
     });
   }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setBoardPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, clients]);
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
@@ -1154,31 +1161,6 @@ export default function Clients() {
     setReferrerSelectValue(saved); setReferrerInput('');
     setFormData(prev => ({ ...prev, referred_by: saved }));
     toast.success(`"${saved}" saved to referrer list`);
-  };
-
-  // ── Virtual board grid renderer ───────────────────────────────────────
-  const ClientCard = ({ columnIndex, rowIndex, style, columnCount }) => {
-    const index = rowIndex * columnCount + columnIndex;
-    const client = filteredClients[index];
-    if (index >= filteredClients.length || !client) return null;
-    return (
-      <div style={{ ...style, padding: '0 6px 10px 6px', boxSizing: 'border-box' }}>
-        <ModernClientCard
-          client={client}
-          index={index}
-          isDark={isDark}
-          users={users}
-          getClientAssignments={getClientAssignments}
-          openWhatsApp={openWhatsApp}
-          handleEdit={handleEdit}
-          canDeleteData={canDeleteData}
-          fetchClients={fetchClients}
-          setSelectedClient={setSelectedClient}
-          setDetailDialogOpen={setDetailDialogOpen}
-          getClientNumber={getClientNumber}
-        />
-      </div>
-    );
   };
 
   // ── List row ──────────────────────────────────────────────────────────
@@ -1857,51 +1839,163 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* ── CLIENT GRID / LIST ── */}
-      <div
-        className="rounded-2xl overflow-hidden border shadow-sm"
-        style={{
-          height: '70vh', minHeight: '480px',
-          background: isDark ? '#1e293b' : '#F8FAFC',
-          borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-        }}
-      >
-        {filteredClients.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400">
+      {/* ── CLIENT BOARD / LIST + PAGINATION ── */}
+      {(() => {
+        const totalPages = Math.ceil(filteredClients.length / BOARD_PAGE_SIZE);
+        const safePage = Math.min(boardPage, Math.max(1, totalPages));
+        const pageStart = (safePage - 1) * BOARD_PAGE_SIZE;
+        const pageClients = filteredClients.slice(pageStart, pageStart + BOARD_PAGE_SIZE);
+
+        // Page window: always show at most 7 page buttons
+        const pageWindow = (() => {
+          if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+          if (safePage <= 4) return [1, 2, 3, 4, 5, '…', totalPages];
+          if (safePage >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+          return [1, '…', safePage - 1, safePage, safePage + 1, '…', totalPages];
+        })();
+
+        const PaginationBar = () => totalPages <= 1 ? null : (
+          <div
+            className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+            style={{
+              borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+              background: isDark ? '#1e293b' : '#F8FAFC',
+            }}
+          >
+            {/* Left — range info */}
+            <p style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', margin: 0 }}>
+              <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>
+                {pageStart + 1}–{Math.min(pageStart + BOARD_PAGE_SIZE, filteredClients.length)}
+              </span>
+              {' '}of{' '}
+              <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>
+                {filteredClients.length}
+              </span>
+              {' '}clients
+            </p>
+
+            {/* Centre — page buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {/* Prev */}
+              <button
+                onClick={() => setBoardPage(p => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+                style={{
+                  width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePage === 1 ? 'not-allowed' : 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
+                  color: safePage === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700, transition: 'background 0.12s',
+                  opacity: safePage === 1 ? 0.4 : 1,
+                }}
+                onMouseEnter={e => { if (safePage !== 1) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+              >‹</button>
+
+              {/* Page numbers */}
+              {pageWindow.map((p, i) => p === '…' ? (
+                <span key={`ellipsis-${i}`} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: isDark ? '#475569' : '#94a3b8' }}>…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setBoardPage(p)}
+                  style={{
+                    width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: p === safePage
+                      ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)'
+                      : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'),
+                    color: p === safePage ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                    fontSize: 11, fontWeight: p === safePage ? 700 : 500,
+                    transition: 'background 0.12s',
+                    boxShadow: p === safePage ? '0 2px 8px rgba(13,59,102,0.35)' : 'none',
+                  }}
+                  onMouseEnter={e => { if (p !== safePage) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+                  onMouseLeave={e => { if (p !== safePage) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+                >{p}</button>
+              ))}
+
+              {/* Next */}
+              <button
+                onClick={() => setBoardPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+                style={{
+                  width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePage === totalPages ? 'not-allowed' : 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
+                  color: safePage === totalPages ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700, transition: 'background 0.12s',
+                  opacity: safePage === totalPages ? 0.4 : 1,
+                }}
+                onMouseEnter={e => { if (safePage !== totalPages) e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.12)' : '#e2e8f0'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'; }}
+              >›</button>
+            </div>
+
+            {/* Right — page size hint */}
+            <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>
+              Page {safePage} / {totalPages}
+            </p>
+          </div>
+        );
+
+        if (filteredClients.length === 0) return (
+          <div
+            className="rounded-2xl border flex flex-col items-center justify-center shadow-sm"
+            style={{ minHeight: 320, background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}
+          >
             <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
               <Users className="h-7 w-7 opacity-30" />
             </div>
             <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
             <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
           </div>
-        ) : viewMode === 'board' ? (
-          <AutoSizer>
-            {({ height, width }) => {
-              const CARD_MIN = 255;
-              const columnCount = Math.max(1, Math.floor(width / CARD_MIN));
-              const columnWidth = Math.floor(width / columnCount);
-              const rowCount = Math.ceil(filteredClients.length / columnCount);
-              return (
-                <Grid
-                  columnCount={columnCount}
-                  columnWidth={columnWidth}
-                  height={height}
-                  rowCount={rowCount}
-                  rowHeight={296}
-                  width={width}
-                  overscanColumnCount={2}
-                  overscanRowCount={4}
-                  style={{ background: isDark ? '#1e293b' : '#F8FAFC' }}
-                >
-                  {({ columnIndex, rowIndex, style }) => (
-                    <ClientCard columnIndex={columnIndex} rowIndex={rowIndex} style={style} columnCount={columnCount} />
-                  )}
-                </Grid>
-              );
-            }}
-          </AutoSizer>
-        ) : (
-          <div className="h-full flex flex-col">
+        );
+
+        if (viewMode === 'board') return (
+          <div
+            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+            style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}
+          >
+            {/* Card grid — CSS grid, no virtualisation, no scroll */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))',
+                gap: 10,
+                padding: '10px 10px 4px 10px',
+              }}
+            >
+              {pageClients.map((client, localIndex) => {
+                const globalIndex = pageStart + localIndex;
+                return (
+                  <ModernClientCard
+                    key={client.id}
+                    client={client}
+                    index={globalIndex}
+                    isDark={isDark}
+                    users={users}
+                    getClientAssignments={getClientAssignments}
+                    openWhatsApp={openWhatsApp}
+                    handleEdit={handleEdit}
+                    canDeleteData={canDeleteData}
+                    fetchClients={fetchClients}
+                    setSelectedClient={setSelectedClient}
+                    setDetailDialogOpen={setDetailDialogOpen}
+                    getClientNumber={getClientNumber}
+                  />
+                );
+              })}
+            </div>
+            <PaginationBar />
+          </div>
+        );
+
+        // List view — keep FixedSizeList for virtualisation (single-direction only)
+        return (
+          <div
+            className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+            style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}
+          >
             <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? "bg-slate-700/60 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
               <div className="w-1 flex-shrink-0" /><div className="w-8 flex-shrink-0" />
               <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
@@ -1912,7 +2006,7 @@ export default function Clients() {
               <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
               <div className="w-24 flex-shrink-0" />
             </div>
-            <div className="flex-1">
+            <div style={{ height: 520, flex: 1 }}>
               <AutoSizer>
                 {({ height, width }) => (
                   <FixedSizeList height={height} width={width} itemCount={filteredClients.length} itemSize={56}>
@@ -1921,9 +2015,10 @@ export default function Clients() {
                 )}
               </AutoSizer>
             </div>
+            <PaginationBar />
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* ── MODALS ── */}
       <ClientDetailPopup />
