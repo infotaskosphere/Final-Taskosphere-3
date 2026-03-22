@@ -1,1019 +1,968 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import {
   BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
-  AlertTriangle, Target, Download, RefreshCw, ChevronRight,
-  Activity, Calendar, Star, Zap, Shield, FileText, ArrowUp,
-  ArrowDown, Minus, Eye, Filter, X,
+  AlertTriangle, Target, Download, RefreshCw, Activity,
+  Calendar, Star, Zap, Shield,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, AreaChart, Area, Legend, RadarChart,
-  Radar, PolarGrid, PolarAngleAxis,
+  ResponsiveContainer, AreaChart, Area, Legend,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// ─── Brand palette ──────────────────────────────────────────────────────────
-const COLORS = {
+// ─── Colors ──────────────────────────────────────────────────────────────────
+const C = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
   emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
   amber:        '#F59E0B',
   coral:        '#EF4444',
 };
-const CHART_PALETTE = ['#0D3B66', '#1F6FB2', '#1FAF5A', '#5CCB5F', '#F59E0B', '#EF4444'];
+const PALETTE = ['#0D3B66','#1F6FB2','#1FAF5A','#5CCB5F','#F59E0B','#EF4444'];
 
-// ─── Animation variants ─────────────────────────────────────────────────────
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.07 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.38, ease: [0.23, 1, 0.32, 1] } },
+// ─── Animations ───────────────────────────────────────────────────────────────
+const cV = { hidden:{opacity:0}, visible:{opacity:1,transition:{staggerChildren:0.06}} };
+const iV = { hidden:{opacity:0,y:16}, visible:{opacity:1,y:0,transition:{duration:0.35,ease:[0.23,1,0.32,1]}} };
+
+// ─── Dark-mode observer ───────────────────────────────────────────────────────
+function useDark() {
+  const [dark, setDark] = useState(
+    () => typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
+  useEffect(() => {
+    const o = new MutationObserver(() =>
+      setDark(document.documentElement.classList.contains('dark'))
+    );
+    o.observe(document.documentElement, { attributes:true, attributeFilter:['class'] });
+    return () => o.disconnect();
+  }, []);
+  return dark;
+}
+
+// ─── Theme tokens (light / dark) ─────────────────────────────────────────────
+const tok = (dark) => ({
+  pageBg:   dark ? '#0f172a' : '#f8fafc',
+  card:     dark ? '#1e293b' : '#ffffff',
+  card2:    dark ? '#263348' : '#f8fafc',
+  border:   dark ? '#334155' : '#e2e8f0',
+  border2:  dark ? '#1e293b' : '#f1f5f9',
+  text:     dark ? '#e2e8f0' : '#1e293b',
+  textSub:  dark ? '#94a3b8' : '#64748b',
+  textMute: dark ? '#475569' : '#94a3b8',
+  hover:    dark ? '#1a2942' : '#f8fafc',
+  inputBg:  dark ? '#263348' : '#ffffff',
+  inputBdr: dark ? '#334155' : '#e2e8f0',
+  shadow:   dark ? '0 1px 4px rgba(0,0,0,0.45)' : '0 1px 4px rgba(0,0,0,0.06)',
+});
+
+// ─── Format helpers ───────────────────────────────────────────────────────────
+const fmt     = m  => !m||m===0 ? '0h 0m' : `${Math.floor(m/60)}h ${m%60}m`;
+const fmtH    = h  => !h||h===0 ? '0h 0m' : `${Math.floor(h)}h ${Math.round((h%1)*60)}m`;
+// Compact: never wraps — no minutes when ≥100h
+const fmtC    = m  => {
+  if (!m||m===0) return '0h';
+  const h=Math.floor(m/60), mn=m%60;
+  return h>=100 ? `${h}h` : mn>0 ? `${h}h ${mn}m` : `${h}h`;
 };
 
-// ─── Custom tooltip ─────────────────────────────────────────────────────────
-const ChartTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
+// ─── Custom chart tooltip ─────────────────────────────────────────────────────
+const ChartTip = ({ active, payload, label, dark }) => {
+  const t = tok(dark);
+  if (!active||!payload?.length) return null;
   return (
-    <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-xl text-sm">
-      <p className="font-semibold text-slate-800 mb-1">{label}</p>
-      {payload.map((e, i) => (
-        <p key={i} className="flex items-center gap-2" style={{ color: e.color }}>
-          <span className="w-2 h-2 rounded-full inline-block" style={{ background: e.color }} />
-          {e.name}: <span className="font-bold ml-1">{e.value}</span>
+    <div className="rounded-xl px-3 py-2 shadow-xl text-xs"
+      style={{background:t.card, border:`1px solid ${t.border}`, color:t.text}}>
+      {label&&<p className="font-semibold mb-1">{label}</p>}
+      {payload.map((e,i)=>(
+        <p key={i} className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background:e.color}}/>
+          {e.name}: <strong>{e.value}</strong>
         </p>
       ))}
     </div>
   );
 };
 
-// ─── KPI Tile ───────────────────────────────────────────────────────────────
-const KpiTile = ({ label, value, sub, color, icon: Icon, trend, loading }) => (
-  <motion.div variants={itemVariants}>
-    <Card className="rounded-xl border border-slate-200 hover:shadow-md transition-all duration-200 overflow-hidden">
-      <div className="h-0.5 w-full" style={{ background: color }} />
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</p>
-            {loading ? (
-              <div className="h-8 w-16 bg-slate-100 rounded animate-pulse mt-1" />
-            ) : (
-              <p className="text-3xl font-bold" style={{ color }}>{value}</p>
-            )}
-            {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
-          </div>
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${color}15` }}>
-            <Icon className="w-5 h-5" style={{ color }} />
-          </div>
-        </div>
-        {trend != null && (
-          <div className={`mt-3 flex items-center gap-1 text-xs font-medium ${trend > 0 ? 'text-emerald-600' : trend < 0 ? 'text-red-500' : 'text-slate-400'}`}>
-            {trend > 0 ? <ArrowUp className="w-3.5 h-3.5" /> : trend < 0 ? <ArrowDown className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
-            {trend > 0 ? '+' : ''}{trend}% vs last week
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  </motion.div>
-);
-
-// ─── Section wrapper ─────────────────────────────────────────────────────────
-const Section = ({ title, desc, children, action }) => (
-  <motion.div variants={itemVariants}>
-    <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.emeraldGreen})` }} />
-      <CardHeader className="pb-3 pt-5 px-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base font-bold text-slate-800">{title}</CardTitle>
-            {desc && <CardDescription className="text-xs mt-0.5">{desc}</CardDescription>}
-          </div>
-          {action}
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{children}</CardContent>
-    </Card>
-  </motion.div>
-);
-
-// ─── Empty state ─────────────────────────────────────────────────────────────
-const EmptyState = ({ icon: Icon, text }) => (
-  <div className="h-64 flex flex-col items-center justify-center gap-3 text-slate-400">
-    <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center">
-      <Icon className="w-6 h-6 text-slate-300" />
-    </div>
-    <p className="text-sm font-medium">{text}</p>
-  </div>
-);
-
-// ─── Performer card ───────────────────────────────────────────────────────────
-const PerformerCard = ({ member, rank }) => {
-  const isGold   = rank === 1;
-  const isSilver = rank === 2;
-  const isBronze = rank === 3;
-  const medal    = isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : `#${rank}`;
-  const gradient = isGold
-    ? 'linear-gradient(135deg, #7B5A0A 0%, #C9920A 40%, #FFD700 100%)'
-    : isSilver ? 'linear-gradient(135deg, #3A3A3A 0%, #707070 40%, #C0C0C0 100%)'
-    : isBronze ? 'linear-gradient(135deg, #5C2E00 0%, #A0521A 40%, #CD7F32 100%)'
-    : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`;
-
-  const isPodium = isGold || isSilver || isBronze;
-
+// ─── KPI Card — strict equal-height layout ────────────────────────────────────
+const KpiCard = ({ label, value, sub, color, icon:Icon, dark }) => {
+  const t = tok(dark);
   return (
-    <motion.div
-      whileHover={{ y: -2, transition: { type: 'spring', stiffness: 300, damping: 20 } }}
-      className="flex items-center justify-between p-3 rounded-xl transition-all hover:shadow-md cursor-default"
-      style={{ background: gradient, border: isPodium ? 'none' : '1px solid #e2e8f0' }}
-    >
-      <div className="flex items-center gap-3">
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${isPodium ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
-          {medal}
-        </div>
-        <div className={`w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 ring-2 ${isGold ? 'ring-yellow-300/60' : isSilver ? 'ring-slate-300/60' : isBronze ? 'ring-orange-300/60' : 'ring-slate-200'}`}>
-          {member.profile_picture
-            ? <img src={member.profile_picture} alt={member.user_name} className="w-full h-full object-cover" />
-            : <div className="w-full h-full flex items-center justify-center font-bold text-sm"
-                style={{ background: isPodium ? 'rgba(0,0,0,0.25)' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' }}>
-                {member.user_name?.charAt(0)?.toUpperCase() || '?'}
-              </div>}
-        </div>
-        <div className="min-w-0">
-          <p className={`font-semibold text-sm leading-tight truncate max-w-[120px] ${isPodium ? 'text-white' : 'text-slate-800'}`}>
-            {member.user_name || 'Unknown'}
-          </p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isPodium ? 'bg-black/20 text-white' : 'bg-emerald-100 text-emerald-700'}`}>
-              {member.overall_score}%
-            </span>
-            <span className={`text-[10px] truncate max-w-[70px] ${isPodium ? 'text-white/65' : 'text-slate-400'}`}>
-              {member.badge || 'Good Performer'}
-            </span>
+    <motion.div variants={iV} className="h-full">
+      {/* outer wrapper fills the grid cell height */}
+      <div className="rounded-xl overflow-hidden flex flex-col h-full"
+        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
+        {/* accent stripe */}
+        <div className="h-[3px] w-full flex-shrink-0" style={{background:color}} />
+        {/* content — flex-1 so all cards stretch equally */}
+        <div className="p-4 flex flex-col flex-1">
+          {/* label + icon row — fixed height */}
+          <div className="flex items-start justify-between gap-2 h-8">
+            <p className="text-[10px] font-bold uppercase tracking-widest leading-tight"
+              style={{color:t.textMute}}>{label}</p>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{background:`${color}1a`}}>
+              <Icon className="w-4 h-4" style={{color}} />
+            </div>
           </div>
+          {/* value — fixed line-height so numbers don't shift */}
+          <p className="mt-2 text-2xl font-black leading-none tracking-tight" style={{color}}>
+            {value}
+          </p>
+          {/* sub — always renders (even empty) to keep spacing identical */}
+          <p className="mt-1.5 text-xs font-medium leading-snug flex-1"
+            style={{color:t.textSub, minHeight:'1.2rem'}}>
+            {sub || '\u00A0'}
+          </p>
         </div>
-      </div>
-      <div className="text-right flex-shrink-0">
-        <p className={`text-sm font-bold ${isPodium ? 'text-white' : 'text-slate-700'}`}>
-          {member.total_hours
-            ? `${Math.floor(member.total_hours)}h ${Math.round((member.total_hours % 1) * 60)}m`
-            : '0h 0m'}
-        </p>
-        <p className={`text-[10px] ${isPodium ? 'text-white/55' : 'text-slate-400'}`}>total hrs</p>
       </div>
     </motion.div>
   );
 };
 
-// ─── Main component ──────────────────────────────────────────────────────────
+// ─── Section wrapper ─────────────────────────────────────────────────────────
+const Sec = ({ title, desc, children, action, dark }) => {
+  const t = tok(dark);
+  return (
+    <motion.div variants={iV}>
+      <div className="rounded-xl overflow-hidden"
+        style={{background:t.card, border:`1px solid ${t.border}`, boxShadow:t.shadow}}>
+        <div className="h-[2px] w-full"
+          style={{background:`linear-gradient(90deg,${C.deepBlue},${C.emeraldGreen})`}} />
+        <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-bold" style={{color:t.text}}>{title}</p>
+            {desc&&<p className="text-xs mt-0.5" style={{color:t.textSub}}>{desc}</p>}
+          </div>
+          {action}
+        </div>
+        <div className="px-5 pb-5">{children}</div>
+      </div>
+    </motion.div>
+  );
+};
+
+// ─── Empty state ─────────────────────────────────────────────────────────────
+const Empty = ({ icon:Icon, text, dark }) => {
+  const t = tok(dark);
+  return (
+    <div className="h-44 flex flex-col items-center justify-center gap-3">
+      <div className="w-11 h-11 rounded-xl flex items-center justify-center"
+        style={{background:t.card2}}>
+        <Icon className="w-5 h-5" style={{color:t.textMute}} />
+      </div>
+      <p className="text-xs font-medium" style={{color:t.textMute}}>{text}</p>
+    </div>
+  );
+};
+
+// ─── Performer row ────────────────────────────────────────────────────────────
+const PerfRow = ({ m, rank, dark }) => {
+  const t = tok(dark);
+  const G=rank===1, S=rank===2, B=rank===3, P=G||S||B;
+  const medal = G?'🥇':S?'🥈':B?'🥉':`#${rank}`;
+  const grad  = G?'linear-gradient(135deg,#7B5A0A,#C9920A,#FFD700)'
+              : S?'linear-gradient(135deg,#3A3A3A,#707070,#C0C0C0)'
+              : B?'linear-gradient(135deg,#5C2E00,#A0521A,#CD7F32)':undefined;
+  return (
+    <div className="flex items-center justify-between p-2.5 rounded-xl"
+      style={P?{background:grad}:{background:t.card2,border:`1px solid ${t.border}`}}>
+      <div className="flex items-center gap-2.5">
+        <span className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0"
+          style={P?{background:'rgba(0,0,0,0.2)',color:'#fff'}:{background:t.border,color:t.textSub}}>
+          {medal}
+        </span>
+        <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+          {m.profile_picture
+            ? <img src={m.profile_picture} alt={m.user_name} className="w-full h-full object-cover"/>
+            : <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold"
+                style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
+                {m.user_name?.charAt(0)?.toUpperCase()||'?'}
+              </div>}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-tight truncate max-w-[110px]"
+            style={P?{color:'#fff'}:{color:t.text}}>{m.user_name||'Unknown'}</p>
+          <p className="text-[10px]"
+            style={P?{color:'rgba(255,255,255,0.6)'}:{color:t.textMute}}>{m.badge||'Good Performer'}</p>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className="text-sm font-black" style={P?{color:'#fff'}:{color:C.deepBlue}}>{m.overall_score}%</p>
+        <p className="text-[10px]" style={P?{color:'rgba(255,255,255,0.5)'}:{color:t.textMute}}>{fmtH(m.total_hours)}</p>
+      </div>
+    </div>
+  );
+};
+
+// ─── Tab button ───────────────────────────────────────────────────────────────
+const TabBtn = ({ id, label, icon:Icon, active, onClick, dark }) => {
+  const t = tok(dark);
+  return (
+    <button onClick={()=>onClick(id)}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap"
+      style={active
+        ?{background:C.deepBlue,color:'#fff',boxShadow:'0 2px 6px rgba(13,59,102,0.35)'}
+        :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+      <Icon className="w-3.5 h-3.5"/>{label}
+    </button>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN
+// ════════════════════════════════════════════════════════════════════════════
 export default function Reports() {
   const { user, hasPermission } = useAuth();
+  const dark = useDark();
+  const t    = tok(dark);
 
-  const isAdmin            = user?.role === 'admin';
-  const canViewReports     = isAdmin || hasPermission('can_view_reports');
-  const canDownloadReports = isAdmin || hasPermission('can_download_reports');
+  const isAdmin  = user?.role === 'admin';
+  const canDL    = isAdmin || hasPermission('can_download_reports');
 
   // ── State ──────────────────────────────────────────────────────────────────
-  const [tasks,          setTasks]          = useState([]);
-  const [dashboardStats, setDashboardStats] = useState(null);
-  const [attendance,     setAttendance]     = useState([]);
-  const [allUsers,       setAllUsers]       = useState([]);
-  const [starPerformers, setStarPerformers] = useState([]);
-  const [rankingPeriod,  setRankingPeriod]  = useState('monthly');
-  const [loading,        setLoading]        = useState(true);
-  const [refreshing,     setRefreshing]     = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState('all');
-  const [activeTab,      setActiveTab]      = useState('overview');
+  const [tasks,      setTasks]      = useState([]);
+  const [dashStats,  setDashStats]  = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [allUsers,   setAllUsers]   = useState([]);
+  const [performers, setPerformers] = useState([]);
+  const [rankPeriod, setRankPeriod] = useState('monthly');
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selUser,    setSelUser]    = useState('all');
+  const [tab,        setTab]        = useState('overview');
 
-  // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchAllData = async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchAll = async (ref=false) => {
+    ref ? setRefreshing(true) : setLoading(true);
+    const [r1,r2,r3,r4] = await Promise.allSettled([
+      api.get('/tasks'),
+      api.get('/dashboard/stats'),
+      api.get('/attendance/history'),
+      isAdmin ? api.get('/users') : Promise.resolve({data:[]}),
+    ]);
+    if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
+    if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
+    if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
+    if (r4.status==='fulfilled') setAllUsers(r4.value?.data||[]);
+    setLoading(false); setRefreshing(false);
+  };
+
+  const fetchPerf = async () => {
     try {
-      const results = await Promise.allSettled([
-        api.get('/tasks'),
-        api.get('/dashboard/stats'),
-        api.get('/attendance/history'),
-        isAdmin ? api.get('/users') : Promise.resolve({ data: [] }),
-      ]);
-
-      if (results[0].status === 'fulfilled') setTasks(results[0].value?.data || []);
-      if (results[1].status === 'fulfilled') setDashboardStats(results[1].value?.data || null);
-      if (results[2].status === 'fulfilled') setAttendance(results[2].value?.data || []);
-      if (results[3].status === 'fulfilled') setAllUsers(results[3].value?.data || []);
-    } catch {
-      toast.error('Failed to load report data');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      const p = rankPeriod==='all'?'all_time':rankPeriod;
+      const r = await api.get('/reports/performance-rankings',{params:{period:p}});
+      setPerformers(r.data||[]);
+    } catch { setPerformers([]); }
   };
 
-  const fetchStarPerformers = async () => {
-    try {
-      const period = rankingPeriod === 'all' ? 'all_time' : rankingPeriod;
-      const r = await api.get('/reports/performance-rankings', { params: { period } });
-      setStarPerformers(r.data || []);
-    } catch {
-      setStarPerformers([]);
-    }
-  };
+  useEffect(()=>{ if(user) fetchAll(); },[user]);
+  useEffect(()=>{ fetchPerf(); },[rankPeriod]);
 
-  useEffect(() => {
-    if (user) fetchAllData();
-  }, [user]);
+  // ── Derived: tasks ────────────────────────────────────────────────────────
+  const fTasks = useMemo(()=>
+    selUser==='all'?tasks:tasks.filter(t=>t.assigned_to===selUser||t.created_by===selUser),
+    [tasks,selUser]);
 
-  useEffect(() => {
-    fetchStarPerformers();
-  }, [rankingPeriod]);
+  const done   = useMemo(()=>fTasks.filter(t=>t.status==='completed'),[fTasks]);
+  const wip    = useMemo(()=>fTasks.filter(t=>t.status==='in_progress'),[fTasks]);
+  const pend   = useMemo(()=>fTasks.filter(t=>t.status==='pending'),[fTasks]);
+  const overdue= useMemo(()=>{
+    const now=new Date();
+    return fTasks.filter(t=>t.due_date&&new Date(t.due_date)<now&&t.status!=='completed');
+  },[fTasks]);
+  const compRate= fTasks.length>0?Math.round((done.length/fTasks.length)*100):0;
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  const formatTime = (min) => {
-    if (!min || min === 0) return '0h 0m';
-    return `${Math.floor(min / 60)}h ${min % 60}m`;
-  };
+  // ── Derived: attendance ───────────────────────────────────────────────────
+  const fAtt    = useMemo(()=>selUser==='all'?attendance:attendance.filter(a=>a.user_id===selUser),[attendance,selUser]);
+  const totMins = useMemo(()=>fAtt.reduce((s,a)=>s+(a.duration_minutes||0),0),[fAtt]);
+  const presDays= useMemo(()=>fAtt.filter(a=>a.status==='present'&&a.punch_in).length,[fAtt]);
+  const avgMins = presDays>0?Math.round(totMins/presDays):0;
+  const lateDays= useMemo(()=>fAtt.filter(a=>a.is_late).length,[fAtt]);
 
-  const formatHours = (hours) => {
-    if (!hours || hours === 0) return '0h 0m';
-    return `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`;
-  };
-
-  // ── Derived metrics from REAL data sources ─────────────────────────────────
-
-  // Tasks derived from /tasks endpoint (real data)
-  const filteredTasks = useMemo(() => {
-    if (selectedUserId === 'all') return tasks;
-    return tasks.filter(t => t.assigned_to === selectedUserId || t.created_by === selectedUserId);
-  }, [tasks, selectedUserId]);
-
-  const completedTasks = useMemo(() => filteredTasks.filter(t => t.status === 'completed'), [filteredTasks]);
-  const pendingTasks   = useMemo(() => filteredTasks.filter(t => t.status === 'pending' || t.status === 'in_progress'), [filteredTasks]);
-  const overdueTasks   = useMemo(() => {
-    const now = new Date();
-    return filteredTasks.filter(t => t.due_date && new Date(t.due_date) < now && t.status !== 'completed');
-  }, [filteredTasks]);
-
-  const completionRate = filteredTasks.length > 0
-    ? Math.round((completedTasks.length / filteredTasks.length) * 100) : 0;
-
-  // Attendance derived from /attendance/history (real data)
-  const filteredAttendance = useMemo(() => {
-    if (selectedUserId === 'all') return attendance;
-    return attendance.filter(a => a.user_id === selectedUserId);
-  }, [attendance, selectedUserId]);
-
-  const totalMinutes = useMemo(() =>
-    filteredAttendance.reduce((s, a) => s + (a.duration_minutes || 0), 0),
-    [filteredAttendance]
-  );
-
-  const presentDays = useMemo(() =>
-    filteredAttendance.filter(a => a.status === 'present' && a.punch_in).length,
-    [filteredAttendance]
-  );
-
-  const avgDailyMinutes = presentDays > 0 ? Math.round(totalMinutes / presentDays) : 0;
-
-  const lateDays = useMemo(() =>
-    filteredAttendance.filter(a => a.is_late).length,
-    [filteredAttendance]
-  );
-
-  // Unique users for filter dropdown
-  const uniqueUsers = useMemo(() => {
+  // ── Unique users (dropdown) ───────────────────────────────────────────────
+  const uUsers = useMemo(()=>{
     if (!isAdmin) return [];
-    const map = new Map();
-    allUsers.forEach(u => { if (u.id && u.full_name) map.set(u.id, u); });
-    return Array.from(map.values());
-  }, [allUsers, isAdmin]);
+    const m=new Map();
+    allUsers.forEach(u=>{if(u.id&&u.full_name)m.set(u.id,u);});
+    return Array.from(m.values());
+  },[allUsers,isAdmin]);
 
-  // ── Chart data builders ────────────────────────────────────────────────────
+  // ── Chart data ─────────────────────────────────────────────────────────────
+  const statusData = useMemo(()=>[
+    {name:'Completed',  value:done.length, color:C.emeraldGreen},
+    {name:'In Progress',value:wip.length,  color:C.mediumBlue  },
+    {name:'Pending',    value:pend.length, color:C.amber       },
+  ].filter(d=>d.value>0),[done,wip,pend]);
 
-  // Task status pie — real tasks
-  const taskStatusData = useMemo(() => {
-    const p = filteredTasks.filter(t => t.status === 'pending').length;
-    const w = filteredTasks.filter(t => t.status === 'in_progress').length;
-    const c = filteredTasks.filter(t => t.status === 'completed').length;
-    return [
-      { name: 'Completed',    value: c, color: COLORS.emeraldGreen },
-      { name: 'In Progress',  value: w, color: COLORS.mediumBlue   },
-      { name: 'Pending',      value: p, color: COLORS.amber        },
-    ].filter(d => d.value > 0);
-  }, [filteredTasks]);
-
-  // Task by category — real tasks
-  const taskCategoryData = useMemo(() => {
-    const cc = {};
-    filteredTasks.forEach(t => { const c = t.category || 'Other'; cc[c] = (cc[c] || 0) + 1; });
+  const catData = useMemo(()=>{
+    const cc={};
+    fTasks.forEach(t=>{const c=t.category||'Other';cc[c]=(cc[c]||0)+1;});
     return Object.entries(cc)
-      .map(([name, count], i) => ({
-        name: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        tasks: count,
-        fill: CHART_PALETTE[i % CHART_PALETTE.length],
-      }))
-      .sort((a, b) => b.tasks - a.tasks).slice(0, 7);
-  }, [filteredTasks]);
+      .map(([name,count],i)=>({name:name.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase()),tasks:count,fill:PALETTE[i%PALETTE.length]}))
+      .sort((a,b)=>b.tasks-a.tasks).slice(0,7);
+  },[fTasks]);
 
-  // Weekly trend from real tasks
-  const weeklyTrendData = useMemo(() => {
-    const today = new Date();
-    const diff  = today.getDay() - 1;
-    const mon   = new Date(today);
-    mon.setDate(today.getDate() - (diff >= 0 ? diff : diff + 7));
-    mon.setHours(0, 0, 0, 0);
-    const days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(mon); d.setDate(mon.getDate() + i);
-      return { name: d.toLocaleDateString('en-US', { weekday: 'short' }), completed: 0, pending: 0, overdue: 0 };
+  const weeklyData = useMemo(()=>{
+    const today=new Date(), diff=today.getDay()-1;
+    const mon=new Date(today); mon.setDate(today.getDate()-(diff>=0?diff:diff+7)); mon.setHours(0,0,0,0);
+    const days=Array.from({length:7},(_,i)=>{
+      const d=new Date(mon); d.setDate(mon.getDate()+i);
+      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),completed:0,pending:0};
     });
-    filteredTasks.forEach(t => {
-      const getStart = (ds) => { const d = new Date(ds); d.setHours(0, 0, 0, 0); return d; };
-      if (t.status === 'completed' && t.completed_at) {
-        const idx = Math.floor((getStart(t.completed_at) - mon) / 86400000);
-        if (idx >= 0 && idx < 7) days[idx].completed += 1;
-      }
-      if (t.status !== 'completed' && t.created_at) {
-        const idx = Math.floor((getStart(t.created_at) - mon) / 86400000);
-        if (idx >= 0 && idx < 7) days[idx].pending += 1;
-      }
+    fTasks.forEach(t=>{
+      const gs=ds=>{const d=new Date(ds);d.setHours(0,0,0,0);return d;};
+      if (t.status==='completed'&&t.completed_at){const i=Math.floor((gs(t.completed_at)-mon)/86400000);if(i>=0&&i<7)days[i].completed++;}
+      if (t.status!=='completed'&&t.created_at){const i=Math.floor((gs(t.created_at)-mon)/86400000);if(i>=0&&i<7)days[i].pending++;}
     });
     return days;
-  }, [filteredTasks]);
+  },[fTasks]);
 
-  // Attendance trend — last 7 days from real attendance
-  const attendanceTrendData = useMemo(() => {
-    const today = new Date();
-    const days  = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() - (6 - i));
-      return {
-        name: d.toLocaleDateString('en-US', { weekday: 'short' }),
-        date: d.toISOString().slice(0, 10),
-        hours: 0,
-        present: 0,
-      };
+  const attTrend = useMemo(()=>{
+    const today=new Date();
+    const days=Array.from({length:7},(_,i)=>{
+      const d=new Date(today); d.setDate(today.getDate()-(6-i));
+      return {name:d.toLocaleDateString('en-US',{weekday:'short'}),date:d.toISOString().slice(0,10),hours:0};
     });
-    filteredAttendance.forEach(a => {
-      const day = days.find(d => d.date === a.date);
-      if (day) {
-        day.hours = Math.round((a.duration_minutes || 0) / 60 * 10) / 10;
-        day.present = a.status === 'present' ? 1 : 0;
-      }
-    });
+    fAtt.forEach(a=>{const day=days.find(d=>d.date===a.date);if(day)day.hours=Math.round((a.duration_minutes||0)/60*10)/10;});
     return days;
-  }, [filteredAttendance]);
+  },[fAtt]);
 
-  // Team workload from dashboard stats (real)
-  const teamWorkload = useMemo(() =>
-    (dashboardStats?.team_workload || []).slice(0, 10),
-    [dashboardStats]
-  );
+  const prioData = useMemo(()=>{
+    const cc={critical:0,urgent:0,high:0,medium:0,low:0};
+    fTasks.forEach(t=>{const p=(t.priority||'medium').toLowerCase();if(cc[p]!==undefined)cc[p]++;});
+    return [
+      {name:'Critical',value:cc.critical,color:'#dc2626'},
+      {name:'Urgent',  value:cc.urgent,  color:'#ea580c'},
+      {name:'High',    value:cc.high,    color:C.amber  },
+      {name:'Medium',  value:cc.medium,  color:C.mediumBlue},
+      {name:'Low',     value:cc.low,     color:C.emeraldGreen},
+    ].filter(d=>d.value>0);
+  },[fTasks]);
 
-  // Per-user efficiency cards — derived from tasks + attendance (real data)
-  const efficiencyCards = useMemo(() => {
+  const radarData = useMemo(()=>{
+    const p=performers[0]; if(!p) return [];
+    return [
+      {metric:'Attendance',score:p.attendance_percent||0},
+      {metric:'Task Done', score:p.task_completion_percent||0},
+      {metric:'On Time',   score:p.timely_punchin_percent||0},
+      {metric:'Todo Rate', score:p.todo_ontime_percent||0},
+      {metric:'Overall',   score:p.overall_score||0},
+    ];
+  },[performers]);
+
+  // ── Efficiency cards — real tasks + real attendance ───────────────────────
+  const effCards = useMemo(()=>{
     if (!isAdmin) {
-      // Self summary
-      const myTasks  = tasks.filter(t => t.assigned_to === user?.id);
-      const myAtt    = attendance.filter(a => a.user_id === user?.id);
-      const myMins   = myAtt.reduce((s, a) => s + (a.duration_minutes || 0), 0);
-      const myDays   = myAtt.filter(a => a.status === 'present').length;
+      const myT=tasks.filter(t=>t.assigned_to===user?.id);
+      const myA=attendance.filter(a=>a.user_id===user?.id);
+      const myM=myA.reduce((s,a)=>s+(a.duration_minutes||0),0);
+      const myD=myA.filter(a=>a.status==='present').length;
       return [{
-        user_id:   user?.id,
-        user_name: user?.full_name || 'You',
-        tasks_total:    myTasks.length,
-        tasks_done:     myTasks.filter(t => t.status === 'completed').length,
-        tasks_pending:  myTasks.filter(t => t.status !== 'completed').length,
-        screen_time:    myMins,
-        days_logged:    myDays,
-        completion_pct: myTasks.length > 0
-          ? Math.round((myTasks.filter(t => t.status === 'completed').length / myTasks.length) * 100) : 0,
+        user_id:user?.id,user_name:user?.full_name||'You',
+        total:myT.length,done:myT.filter(t=>t.status==='completed').length,
+        pend:myT.filter(t=>t.status!=='completed').length,
+        mins:myM,days:myD,
+        pct:myT.length>0?Math.round((myT.filter(t=>t.status==='completed').length/myT.length)*100):0,
       }];
     }
-    // Admin: build per-user cards from real tasks + real attendance
-    const userMap = {};
-    allUsers.forEach(u => {
-      userMap[u.id] = {
-        user_id:       u.id,
-        user_name:     u.full_name,
-        tasks_total:   0,
-        tasks_done:    0,
-        tasks_pending: 0,
-        screen_time:   0,
-        days_logged:   0,
-        completion_pct: 0,
-      };
-    });
-    tasks.forEach(t => {
-      const uid = t.assigned_to;
-      if (uid && userMap[uid]) {
-        userMap[uid].tasks_total++;
-        if (t.status === 'completed') userMap[uid].tasks_done++;
-        else userMap[uid].tasks_pending++;
-      }
-    });
-    attendance.forEach(a => {
-      const uid = a.user_id;
-      if (uid && userMap[uid]) {
-        userMap[uid].screen_time += (a.duration_minutes || 0);
-        if (a.status === 'present') userMap[uid].days_logged++;
-      }
-    });
-    Object.values(userMap).forEach(u => {
-      u.completion_pct = u.tasks_total > 0 ? Math.round((u.tasks_done / u.tasks_total) * 100) : 0;
-    });
+    const uMap={};
+    allUsers.forEach(u=>{uMap[u.id]={user_id:u.id,user_name:u.full_name,total:0,done:0,pend:0,mins:0,days:0,pct:0};});
+    tasks.forEach(t=>{const u=t.assigned_to;if(u&&uMap[u]){uMap[u].total++;t.status==='completed'?uMap[u].done++:uMap[u].pend++;}});
+    attendance.forEach(a=>{const u=a.user_id;if(u&&uMap[u]){uMap[u].mins+=(a.duration_minutes||0);if(a.status==='present')uMap[u].days++;}});
+    Object.values(uMap).forEach(u=>{u.pct=u.total>0?Math.round((u.done/u.total)*100):0;});
+    let cards=Object.values(uMap);
+    if(selUser!=='all') cards=cards.filter(c=>c.user_id===selUser);
+    return cards.sort((a,b)=>b.done-a.done);
+  },[tasks,attendance,allUsers,isAdmin,user,selUser]);
 
-    let cards = Object.values(userMap);
-    if (selectedUserId !== 'all') cards = cards.filter(c => c.user_id === selectedUserId);
-    return cards.sort((a, b) => b.tasks_done - a.tasks_done);
-  }, [tasks, attendance, allUsers, isAdmin, user, selectedUserId]);
+  const teamWL = useMemo(()=>(dashStats?.team_workload||[]).slice(0,12),[dashStats]);
 
-  // Priority breakdown from real tasks
-  const priorityData = useMemo(() => {
-    const counts = { critical: 0, urgent: 0, high: 0, medium: 0, low: 0 };
-    filteredTasks.forEach(t => {
-      const p = (t.priority || 'medium').toLowerCase();
-      if (counts[p] !== undefined) counts[p]++;
-    });
-    return [
-      { name: 'Critical', value: counts.critical, color: '#dc2626' },
-      { name: 'Urgent',   value: counts.urgent,   color: '#ea580c' },
-      { name: 'High',     value: counts.high,     color: COLORS.amber },
-      { name: 'Medium',   value: counts.medium,   color: COLORS.mediumBlue },
-      { name: 'Low',      value: counts.low,       color: COLORS.emeraldGreen },
-    ].filter(d => d.value > 0);
-  }, [filteredTasks]);
-
-  // Radar data for compliance/performance
-  const radarData = useMemo(() => {
-    const topPerformer = starPerformers[0];
-    if (!topPerformer) return [];
-    return [
-      { metric: 'Attendance',  score: topPerformer.attendance_percent || 0 },
-      { metric: 'Task Done',   score: topPerformer.task_completion_percent || 0 },
-      { metric: 'On Time',     score: topPerformer.timely_punchin_percent || 0 },
-      { metric: 'Todo Rate',   score: topPerformer.todo_ontime_percent || 0 },
-      { metric: 'Overall',     score: topPerformer.overall_score || 0 },
-    ];
-  }, [starPerformers]);
-
-  // ── Export handlers ────────────────────────────────────────────────────────
-  const handleDownloadCsv = () => {
-    const headers = ['User', 'Total Tasks', 'Completed', 'Pending', 'Completion %', 'Screen Time (min)', 'Days Present'];
-    const rows = efficiencyCards.map(d => [
-      d.user_name, d.tasks_total, d.tasks_done, d.tasks_pending,
-      `${d.completion_pct}%`, d.screen_time, d.days_logged,
-    ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'efficiency_reports.csv';
-    a.click();
+  // ── CSV export ────────────────────────────────────────────────────────────
+  const handleCsv = () => {
+    const h=['User','Total Tasks','Completed','Pending','Completion%','Screen Time(min)','Days Present'];
+    const rows=effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,d.mins,d.days]);
+    const csv=[h,...rows].map(r=>r.join(',')).join('\n');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='efficiency_reports.csv';a.click();
     toast.success('CSV downloaded!');
   };
 
-  const handleExportPdf = async () => {
+  // ── PDF export ────────────────────────────────────────────────────────────
+  const handlePdf = async () => {
     try {
-      const doc = new jsPDF('p', 'mm', 'a4');
-      let y = 15;
+      const doc=new jsPDF('p','mm','a4'); let y=15;
+      doc.setFontSize(20);doc.setTextColor(13,59,102);
+      doc.text('Efficiency Reports & Analytics',15,y);y+=9;
+      doc.setFontSize(10);doc.setTextColor(100,100,100);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} | Period: ${rankPeriod}`,15,y);y+=10;
 
-      doc.setFontSize(20); doc.setTextColor(13, 59, 102);
-      doc.text('Efficiency Reports & Analytics', 15, y); y += 10;
-      doc.setFontSize(10); doc.setTextColor(100, 100, 100);
-      doc.text(`Generated: ${new Date().toLocaleDateString()} | Period: ${rankingPeriod}`, 15, y); y += 10;
-
-      // KPI Summary
-      doc.setFontSize(12); doc.setTextColor(13, 59, 102);
-      doc.text('Key Performance Indicators', 15, y); y += 8;
+      doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Key Performance Indicators',15,y);y+=8;
       doc.autoTable({
-        head: [['Metric', 'Value']],
-        body: [
-          ['Total Tasks', filteredTasks.length.toString()],
-          ['Completed Tasks', completedTasks.length.toString()],
-          ['Completion Rate', `${completionRate}%`],
-          ['Overdue Tasks', overdueTasks.length.toString()],
-          ['Days Present', presentDays.toString()],
-          ['Total Screen Time', formatTime(totalMinutes)],
-          ['Avg Daily Hours', formatTime(avgDailyMinutes)],
-          ['Late Punch-ins', lateDays.toString()],
+        head:[['Metric','Value']],
+        body:[
+          ['Total Tasks',fTasks.length.toString()],['Completed',done.length.toString()],
+          ['In Progress',wip.length.toString()],['Overdue',overdue.length.toString()],
+          ['Completion Rate',`${compRate}%`],['Days Present',presDays.toString()],
+          ['Total Screen Time',fmt(totMins)],['Avg Daily Hours',fmt(avgMins)],
+          ['Late Punch-ins',lateDays.toString()],
         ],
-        startY: y, margin: 15, theme: 'grid',
-        headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [240, 240, 240] },
+        startY:y,margin:15,theme:'grid',
+        headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[240,240,240]},
       });
-      y = doc.lastAutoTable.finalY + 12;
+      y=doc.lastAutoTable.finalY+12;
 
-      // Task Status
-      if (taskStatusData.length > 0) {
-        doc.setFontSize(12); doc.setTextColor(13, 59, 102);
-        doc.text('Task Status Distribution', 15, y); y += 8;
+      if(effCards.length>0){
+        if(y>180){doc.addPage();y=15;}
+        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Efficiency Breakdown',15,y);y+=8;
         doc.autoTable({
-          head: [['Status', 'Count', 'Percentage']],
-          body: taskStatusData.map(d => [d.name, d.value.toString(), `${((d.value / filteredTasks.length) * 100).toFixed(1)}%`]),
-          startY: y, margin: 15, theme: 'grid',
-          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          head:[['User','Tasks','Completed','Pending','Completion%','Screen Time','Days']],
+          body:effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,fmt(d.mins),d.days]),
+          startY:y,margin:15,theme:'grid',
+          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
         });
-        y = doc.lastAutoTable.finalY + 12;
+        y=doc.lastAutoTable.finalY+12;
       }
 
-      // Team efficiency
-      if (efficiencyCards.length > 0) {
-        if (y > 200) { doc.addPage(); y = 15; }
-        doc.setFontSize(12); doc.setTextColor(13, 59, 102);
-        doc.text('Team Efficiency Breakdown', 15, y); y += 8;
+      if(performers.length>0){
+        doc.addPage();y=15;
+        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Star Performers',15,y);y+=8;
         doc.autoTable({
-          head: [['User', 'Tasks Total', 'Completed', 'Pending', 'Completion %', 'Screen Time', 'Days Present']],
-          body: efficiencyCards.map(d => [
-            d.user_name, d.tasks_total, d.tasks_done, d.tasks_pending,
-            `${d.completion_pct}%`, formatTime(d.screen_time), d.days_logged,
-          ]),
-          startY: y, margin: 15, theme: 'grid',
-          headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
-        });
-        y = doc.lastAutoTable.finalY + 12;
-      }
-
-      // Star performers
-      if (starPerformers.length > 0) {
-        doc.addPage(); y = 15;
-        doc.setFontSize(12); doc.setTextColor(13, 59, 102);
-        doc.text('Star Performers', 15, y); y += 8;
-        doc.autoTable({
-          head: [['Rank', 'Name', 'Score', 'Attendance %', 'Task Completion %', 'Total Hours', 'Badge']],
-          body: starPerformers.map((m, i) => [
-            `#${i + 1}`, m.user_name, `${m.overall_score}%`,
-            `${m.attendance_percent}%`, `${m.task_completion_percent}%`,
-            formatHours(m.total_hours), m.badge || 'Good Performer',
-          ]),
-          startY: y, margin: 15, theme: 'grid',
-          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          head:[['Rank','Name','Score','Attendance%','Task Done%','Punch-In%','Hours','Badge']],
+          body:performers.map((m,i)=>[`#${i+1}`,m.user_name,`${m.overall_score}%`,`${m.attendance_percent}%`,`${m.task_completion_percent}%`,`${m.timely_punchin_percent}%`,fmtH(m.total_hours),m.badge||'Good']),
+          startY:y,margin:15,theme:'grid',
+          headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
         });
       }
-
-      // Team workload (admin)
-      if (isAdmin && teamWorkload.length > 0) {
-        doc.addPage(); y = 15;
-        doc.setFontSize(12); doc.setTextColor(13, 59, 102);
-        doc.text('Team Workload Distribution', 15, y); y += 8;
-        doc.autoTable({
-          head: [['Employee', 'Total Tasks', 'Pending', 'Completed', 'Progress %']],
-          body: teamWorkload.map(m => {
-            const pct = m.total_tasks > 0 ? Math.round((m.completed_tasks / m.total_tasks) * 100) : 0;
-            return [m.user_name, m.total_tasks, m.pending_tasks, m.completed_tasks, `${pct}%`];
-          }),
-          startY: y, margin: 15, theme: 'grid',
-          headStyles: { fillColor: [13, 59, 102], textColor: [255, 255, 255], fontStyle: 'bold' },
-        });
-      }
-
       doc.save('efficiency_reports.pdf');
-      toast.success('PDF exported successfully!');
-    } catch (err) {
-      console.error('PDF export error:', err);
-      toast.error('Failed to export PDF');
-    }
+      toast.success('PDF exported!');
+    } catch(e){console.error(e);toast.error('PDF failed');}
   };
 
-  // ── Loading state ──────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="w-12 h-12 rounded-full border-4 border-slate-200 border-t-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-slate-500 font-medium">Loading reports…</p>
-        </div>
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="flex items-center justify-center h-96" style={{background:t.pageBg}}>
+      <div className="text-center">
+        <div className="w-12 h-12 rounded-full border-4 border-t-blue-600 animate-spin mx-auto mb-4"
+          style={{borderColor:`${t.border} ${t.border} ${t.border} ${C.mediumBlue}`}}/>
+        <p className="text-sm font-medium" style={{color:t.textSub}}>Loading reports…</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // ── Tabs ───────────────────────────────────────────────────────────────────
-  const tabs = [
-    { id: 'overview',     label: 'Overview',     icon: BarChart3 },
-    { id: 'tasks',        label: 'Tasks',        icon: Target    },
-    { id: 'attendance',   label: 'Attendance',   icon: Clock     },
-    { id: 'performers',   label: 'Performers',   icon: Award     },
-    ...(isAdmin ? [{ id: 'team', label: 'Team', icon: Users }] : []),
+  const tabs=[
+    {id:'overview',   label:'Overview',    icon:BarChart3 },
+    {id:'tasks',      label:'Tasks',       icon:Target    },
+    {id:'attend',     label:'Attendance',  icon:Clock     },
+    {id:'efficiency', label:'Efficiency',  icon:Zap       },
+    {id:'performers', label:'Performers',  icon:Award     },
+    ...(isAdmin?[{id:'team',label:'Team',icon:Users}]:[]),
   ];
 
-  return (
-    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-5 p-4 md:p-6">
+  const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
 
-      {/* ── Header ── */}
-      <motion.div variants={itemVariants}>
-        <Card className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue}, ${COLORS.emeraldGreen})` }} />
-          <CardContent className="p-4 md:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+  // ── JSX ───────────────────────────────────────────────────────────────────
+  return (
+    <motion.div variants={cV} initial="hidden" animate="visible"
+      className="space-y-4 p-4 md:p-6 min-h-screen"
+      style={{background:t.pageBg}}>
+
+      {/* ══ HEADER ══ */}
+      <motion.div variants={iV}>
+        <div className="rounded-2xl overflow-hidden"
+          style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+          <div className="h-1 w-full"
+            style={{background:`linear-gradient(90deg,${C.deepBlue},${C.mediumBlue},${C.emeraldGreen})`}}/>
+          <div className="p-4 md:p-5">
+            {/* title row */}
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
-                <h1 className="text-xl font-bold tracking-tight" style={{ color: COLORS.deepBlue }}>Reports & Analytics</h1>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  Live metrics from tasks, attendance &amp; team performance
-                  {filteredTasks.length > 0 && <span className="ml-2 text-xs text-emerald-600 font-semibold">● {filteredTasks.length} tasks loaded</span>}
+                <h1 className="text-xl font-black tracking-tight" style={{color:C.deepBlue}}>
+                  Reports &amp; Analytics
+                </h1>
+                <p className="text-sm mt-0.5 flex flex-wrap items-center gap-2" style={{color:t.textSub}}>
+                  Live metrics from tasks, attendance &amp; performance
+                  {fTasks.length>0&&(
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{background:`${C.emeraldGreen}18`,color:C.emeraldGreen}}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"/>
+                      {fTasks.length} tasks
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {/* User filter — admin only */}
-                {isAdmin && uniqueUsers.length > 1 && (
-                  <select
-                    value={selectedUserId}
-                    onChange={e => setSelectedUserId(e.target.value)}
-                    className="h-8 px-3 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
+                {isAdmin&&uUsers.length>0&&(
+                  <select value={selUser} onChange={e=>setSelUser(e.target.value)}
+                    className="h-8 px-3 text-xs rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{background:t.inputBg,border:`1px solid ${t.inputBdr}`,color:t.text}}>
                     <option value="all">All Users</option>
-                    {uniqueUsers.map(u => (
-                      <option key={u.id} value={u.id}>{u.full_name}</option>
-                    ))}
+                    {uUsers.map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
                   </select>
                 )}
-                <Button variant="outline" size="sm" className="h-8 rounded-xl text-xs gap-1.5"
-                  onClick={() => fetchAllData(true)} disabled={refreshing}>
-                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                  {refreshing ? 'Refreshing…' : 'Refresh'}
-                </Button>
-                {canDownloadReports && (
+                <button onClick={()=>fetchAll(true)} disabled={refreshing}
+                  className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                  style={{background:t.card2,border:`1px solid ${t.border}`,color:t.text}}>
+                  <RefreshCw className={`w-3.5 h-3.5 ${refreshing?'animate-spin':''}`}/>
+                  {refreshing?'Refreshing…':'Refresh'}
+                </button>
+                {canDL&&(
                   <>
-                    <Button size="sm" className="h-8 rounded-xl text-xs gap-1.5 bg-slate-800 hover:bg-slate-900 text-white" onClick={handleDownloadCsv}>
-                      <Download className="h-3.5 w-3.5" /> CSV
-                    </Button>
-                    <Button size="sm" className="h-8 rounded-xl text-xs gap-1.5 text-white" style={{ background: COLORS.deepBlue }} onClick={handleExportPdf}>
-                      <Download className="h-3.5 w-3.5" /> PDF
-                    </Button>
+                    <button onClick={handleCsv}
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
+                      style={{background:'#1e293b'}}>
+                      <Download className="w-3.5 h-3.5"/> CSV
+                    </button>
+                    <button onClick={handlePdf}
+                      className="h-8 px-3 text-xs font-semibold rounded-xl flex items-center gap-1.5 text-white transition-all"
+                      style={{background:C.deepBlue}}>
+                      <Download className="w-3.5 h-3.5"/> PDF
+                    </button>
                   </>
                 )}
               </div>
             </div>
-
-            {/* Tab bar */}
-            <div className="flex items-center gap-1 mt-4 flex-wrap">
-              {tabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                    activeTab === tab.id
-                      ? 'text-white shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-                  }`}
-                  style={activeTab === tab.id ? { background: COLORS.deepBlue } : {}}
-                >
-                  <tab.icon className="w-3.5 h-3.5" />
-                  {tab.label}
-                </button>
+            {/* tabs */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {tabs.map(tb=>(
+                <TabBtn key={tb.id} id={tb.id} label={tb.label} icon={tb.icon}
+                  active={tab===tb.id} onClick={setTab} dark={dark}/>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </motion.div>
 
-      {/* ── KPI TILES (always visible) ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiTile label="Total Tasks"    value={filteredTasks.length}   sub="All assigned"        color={COLORS.deepBlue}     icon={Target}       />
-        <KpiTile label="Completed"      value={completedTasks.length}  sub={`${completionRate}% rate`} color={COLORS.emeraldGreen} icon={CheckCircle2} />
-        <KpiTile label="In Progress"    value={filteredTasks.filter(t => t.status === 'in_progress').length} sub="Active now" color={COLORS.mediumBlue} icon={Activity} />
-        <KpiTile label="Overdue"        value={overdueTasks.length}    sub="Needs attention"     color="#dc2626"              icon={AlertTriangle} />
-        <KpiTile label="Days Present"   value={presentDays}            sub={`${presentDays > 0 ? Math.round(totalMinutes / presentDays / 60 * 10) / 10 : 0}h avg/day`} color={COLORS.mediumBlue} icon={Calendar} />
-        <KpiTile label="Screen Time"    value={formatTime(totalMinutes)} sub="Total logged"      color={COLORS.amber}         icon={Clock}        />
+      {/* ══ KPI ROW — 6 cards, uniform height via grid ══ */}
+      {/* grid-rows-1 + items-stretch ensures every card in the row is the same height */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch">
+        {[
+          {label:'Total Tasks',   value:fTasks.length,        sub:`${compRate}% completion`,    color:C.deepBlue,     icon:Target       },
+          {label:'Completed',     value:done.length,           sub:`${done.length} of ${fTasks.length}`,color:C.emeraldGreen,icon:CheckCircle2},
+          {label:'In Progress',   value:wip.length,            sub:'Currently active',           color:C.mediumBlue,   icon:Activity     },
+          {label:'Overdue',       value:overdue.length,        sub:'Past due date',              color:C.coral,        icon:AlertTriangle},
+          {label:'Days Present',  value:presDays,              sub:`${fmt(avgMins)} avg/day`,    color:C.mediumBlue,   icon:Calendar     },
+          {label:'Screen Time',   value:fmtC(totMins),         sub:`${presDays} days logged`,   color:C.amber,        icon:Clock        },
+        ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
       </div>
 
-      {/* ══════════════ OVERVIEW TAB ══════════════ */}
+      {/* ══ TAB PANELS ══ */}
       <AnimatePresence mode="wait">
-        {activeTab === 'overview' && (
-          <motion.div key="overview" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
 
-            {/* Charts row 1 */}
+        {/* ──────── OVERVIEW ──────── */}
+        {tab==='overview'&&(
+          <motion.div key="ov" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* Task Status Donut */}
-              <Section title="Task Status" desc="Current distribution">
-                {taskStatusData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={240}>
+
+              {/* Task status donut */}
+              <Sec title="Task Status" desc="Current distribution" dark={dark}>
+                {statusData.length>0?(
+                  <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
-                      <Pie data={taskStatusData} cx="50%" cy="50%" innerRadius={60} outerRadius={95}
-                        paddingAngle={4} dataKey="value"
-                        label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
-                        labelLine={false}>
-                        {taskStatusData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={88}
+                        paddingAngle={3} dataKey="value"
+                        label={({name,percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false}>
+                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
                       </Pie>
-                      <Tooltip content={<ChartTooltip />} />
-                      <Legend />
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Legend wrapperStyle={{fontSize:11,color:t.textSub}}/>
                     </PieChart>
                   </ResponsiveContainer>
-                ) : <EmptyState icon={Target} text="No task data yet" />}
-              </Section>
+                ):<Empty icon={Target} text="No task data" dark={dark}/>}
+              </Sec>
 
-              {/* Priority breakdown */}
-              <Section title="Priority Mix" desc="Task urgency levels">
-                {priorityData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={priorityData} layout="vertical" barSize={14}>
-                      <XAxis type="number" tick={{ fontSize: 10 }} />
-                      <YAxis dataKey="name" type="category" width={60} tick={{ fontSize: 10 }} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Bar dataKey="value" name="Tasks" radius={[0, 6, 6, 0]}>
-                        {priorityData.map((d, i) => <Cell key={i} fill={d.color} />)}
+              {/* Priority mix */}
+              <Sec title="Priority Mix" desc="Task urgency levels" dark={dark}>
+                {prioData.length>0?(
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={prioData} layout="vertical" barSize={12}>
+                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis dataKey="name" type="category" width={58} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Bar dataKey="value" name="Tasks" radius={[0,6,6,0]}>
+                        {prioData.map((d,i)=><Cell key={i} fill={d.color}/>)}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                ) : <EmptyState icon={Shield} text="No priority data" />}
-              </Section>
+                ):<Empty icon={Shield} text="No priority data" dark={dark}/>}
+              </Sec>
 
-              {/* Compliance score */}
-              <Section title="Compliance Score" desc="Overall health">
-                <div className="flex flex-col items-center justify-center h-[240px] gap-4">
-                  {dashboardStats?.compliance_status ? (
+              {/* Compliance gauge */}
+              <Sec title="Compliance Score" desc="Overall health" dark={dark}>
+                <div className="flex flex-col items-center justify-center h-[220px] gap-3">
+                  {dashStats?.compliance_status?(
                     <>
-                      <div className="relative w-36 h-36">
+                      <div className="relative w-32 h-32">
                         <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                          <circle cx="50" cy="50" r="42" fill="none" stroke="#f1f5f9" strokeWidth="10" />
-                          <circle cx="50" cy="50" r="42" fill="none"
-                            stroke={dashboardStats.compliance_status.score >= 80 ? COLORS.emeraldGreen : dashboardStats.compliance_status.score >= 50 ? COLORS.amber : '#dc2626'}
-                            strokeWidth="10" strokeLinecap="round"
-                            strokeDasharray={`${2.64 * dashboardStats.compliance_status.score} 264`}
-                            style={{ transition: 'stroke-dasharray 1s ease' }}
-                          />
+                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10"
+                            style={{stroke:dark?'#1e293b':'#f1f5f9'}}/>
+                          <circle cx="50" cy="50" r="42" fill="none" strokeWidth="10" strokeLinecap="round"
+                            stroke={dashStats.compliance_status.score>=80?C.emeraldGreen:dashStats.compliance_status.score>=50?C.amber:'#dc2626'}
+                            strokeDasharray={`${2.64*dashStats.compliance_status.score} 264`}/>
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <p className="text-3xl font-black" style={{ color: COLORS.deepBlue }}>{dashboardStats.compliance_status.score}%</p>
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Score</p>
+                          <p className="text-2xl font-black" style={{color:C.deepBlue}}>{dashStats.compliance_status.score}%</p>
+                          <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Score</p>
                         </div>
                       </div>
                       <div className="w-full space-y-1.5">
                         {[
-                          { label: 'Overdue Tasks',       val: dashboardStats.compliance_status.overdue_tasks,          color: '#dc2626' },
-                          { label: 'Expiring DSC Certs',  val: dashboardStats.compliance_status.expiring_certificates,  color: COLORS.amber },
-                          { label: 'Status',              val: dashboardStats.compliance_status.status?.toUpperCase(),   color: dashboardStats.compliance_status.score >= 80 ? COLORS.emeraldGreen : COLORS.amber },
-                        ].map((item, i) => (
+                          {label:'Overdue Tasks', val:dashStats.compliance_status.overdue_tasks,         col:'#dc2626'},
+                          {label:'Expiring DSC',  val:dashStats.compliance_status.expiring_certificates, col:C.amber  },
+                          {label:'Status',        val:(dashStats.compliance_status.status||'').toUpperCase(),
+                            col:dashStats.compliance_status.score>=80?C.emeraldGreen:C.amber},
+                        ].map((it,i)=>(
                           <div key={i} className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500">{item.label}</span>
-                            <span className="font-bold" style={{ color: item.color }}>{item.val}</span>
+                            <span style={{color:t.textSub}}>{it.label}</span>
+                            <span className="font-bold" style={{color:it.col}}>{it.val}</span>
                           </div>
                         ))}
                       </div>
                     </>
-                  ) : <EmptyState icon={Shield} text="No compliance data" />}
+                  ):<Empty icon={Shield} text="No compliance data" dark={dark}/>}
                 </div>
-              </Section>
+              </Sec>
             </div>
 
             {/* Weekly trend */}
-            <Section title="Weekly Activity Trend" desc="Task completions and new tasks this week">
-              <ResponsiveContainer width="100%" height={240}>
-                <AreaChart data={weeklyTrendData}>
+            <Sec title="Weekly Activity Trend" desc="Task completions vs new tasks this week" dark={dark}>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={weeklyData}>
                   <defs>
-                    <linearGradient id="gcompleted" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={COLORS.emeraldGreen} stopOpacity={0.35} />
-                      <stop offset="100%" stopColor={COLORS.emeraldGreen} stopOpacity={0.02} />
+                    <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={C.emeraldGreen} stopOpacity={0.3}/>
+                      <stop offset="100%" stopColor={C.emeraldGreen} stopOpacity={0.02}/>
                     </linearGradient>
-                    <linearGradient id="gpending" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity={0.30} />
-                      <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity={0.02} />
+                    <linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={C.mediumBlue} stopOpacity={0.25}/>
+                      <stop offset="100%" stopColor={C.mediumBlue} stopOpacity={0.02}/>
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend />
-                  <Area type="monotone" dataKey="completed" stroke={COLORS.emeraldGreen} strokeWidth={2} fill="url(#gcompleted)" name="Completed" />
-                  <Area type="monotone" dataKey="pending"   stroke={COLORS.mediumBlue}   strokeWidth={2} fill="url(#gpending)"   name="New/Pending" />
+                  <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                  <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                  <Legend wrapperStyle={{fontSize:11,color:t.textSub}}/>
+                  <Area type="monotone" dataKey="completed" stroke={C.emeraldGreen} strokeWidth={2} fill="url(#gc)" name="Completed"/>
+                  <Area type="monotone" dataKey="pending"   stroke={C.mediumBlue}   strokeWidth={2} fill="url(#gp)"  name="New/Pending"/>
                 </AreaChart>
               </ResponsiveContainer>
-            </Section>
+            </Sec>
           </motion.div>
         )}
 
-        {/* ══════════════ TASKS TAB ══════════════ */}
-        {activeTab === 'tasks' && (
-          <motion.div key="tasks" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+        {/* ──────── TASKS ──────── */}
+        {tab==='tasks'&&(
+          <motion.div key="tk" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Tasks by department/category */}
-              <Section title="Tasks by Category" desc="Volume per service department">
-                {taskCategoryData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={taskCategoryData} layout="vertical">
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 10 }} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Bar dataKey="tasks" name="Tasks" radius={[0, 6, 6, 0]}>
-                        {taskCategoryData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+              <Sec title="Tasks by Category" desc="Volume per department" dark={dark}>
+                {catData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={catData} layout="vertical">
+                      <XAxis type="number" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis dataKey="name" type="category" width={100} tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Bar dataKey="tasks" name="Tasks" radius={[0,6,6,0]}>
+                        {catData.map((d,i)=><Cell key={i} fill={d.fill}/>)}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                ) : <EmptyState icon={BarChart3} text="No category data" />}
-              </Section>
+                ):<Empty icon={BarChart3} text="No category data" dark={dark}/>}
+              </Sec>
 
-              {/* Task status donut */}
-              <Section title="Task Status Mix" desc="Completion overview">
-                {taskStatusData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={280}>
+              <Sec title="Status Distribution" dark={dark}>
+                {statusData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
                     <PieChart>
-                      <Pie data={taskStatusData} cx="50%" cy="50%" innerRadius={70} outerRadius={110}
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={65} outerRadius={105}
                         paddingAngle={4} dataKey="value"
-                        label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}>
-                        {taskStatusData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        label={({name,value,percent})=>`${name}: ${value} (${(percent*100).toFixed(0)}%)`}>
+                        {statusData.map((d,i)=><Cell key={i} fill={d.color}/>)}
                       </Pie>
-                      <Tooltip content={<ChartTooltip />} />
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
                     </PieChart>
                   </ResponsiveContainer>
-                ) : <EmptyState icon={Target} text="No task data" />}
-              </Section>
+                ):<Empty icon={Target} text="No task data" dark={dark}/>}
+              </Sec>
             </div>
 
-            {/* Overdue tasks list */}
-            {overdueTasks.length > 0 && (
-              <Section title={`Overdue Tasks (${overdueTasks.length})`} desc="Tasks past their due date — require immediate attention">
-                <div className="space-y-2 max-h-72 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-                  {overdueTasks.slice(0, 15).map((t, i) => {
-                    const daysOver = Math.floor((new Date() - new Date(t.due_date)) / 86400000);
+            {overdue.length>0&&(
+              <Sec title={`Overdue Tasks (${overdue.length})`} desc="Past due — immediate attention required" dark={dark}>
+                <div className="space-y-2 max-h-72 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                  {overdue.slice(0,15).map((tk,i)=>{
+                    const days=Math.floor((new Date()-new Date(tk.due_date))/86400000);
                     return (
-                      <div key={t.id || i} className="flex items-center justify-between p-3 rounded-xl bg-red-50 border border-red-200">
+                      <div key={tk.id||i} className="flex items-center justify-between p-3 rounded-xl"
+                        style={{background:dark?'rgba(239,68,68,0.1)':'#fef2f2',border:'1px solid rgba(239,68,68,0.25)'}}>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{t.title || 'Untitled'}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {t.assigned_to_name && <span>Assigned to: <span className="font-medium">{t.assigned_to_name}</span> · </span>}
-                            Due: {t.due_date ? new Date(t.due_date).toLocaleDateString() : '—'}
+                          <p className="text-sm font-semibold truncate" style={{color:t.text}}>{tk.title||'Untitled'}</p>
+                          <p className="text-xs mt-0.5" style={{color:t.textSub}}>
+                            {tk.assigned_to_name&&<><span className="font-medium">{tk.assigned_to_name}</span> · </>}
+                            Due: {tk.due_date?new Date(tk.due_date).toLocaleDateString():'—'}
                           </p>
                         </div>
-                        <span className="flex-shrink-0 text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-600 ml-3">
-                          {daysOver}d overdue
-                        </span>
+                        <span className="flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-lg ml-3"
+                          style={{background:'#fee2e2',color:'#dc2626'}}>{days}d overdue</span>
                       </div>
                     );
                   })}
                 </div>
-              </Section>
+              </Sec>
             )}
           </motion.div>
         )}
 
-        {/* ══════════════ ATTENDANCE TAB ══════════════ */}
-        {activeTab === 'attendance' && (
-          <motion.div key="attendance" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
-
-            {/* Attendance KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiTile label="Days Present"    value={presentDays}                                color={COLORS.emeraldGreen} icon={CheckCircle2} sub="This period" />
-              <KpiTile label="Total Hours"     value={formatTime(totalMinutes)}                   color={COLORS.deepBlue}     icon={Clock}        sub="Logged time" />
-              <KpiTile label="Avg Daily Hours" value={formatTime(avgDailyMinutes)}               color={COLORS.mediumBlue}   icon={Activity}     sub="Per present day" />
-              <KpiTile label="Late Punch-ins"  value={lateDays}                                   color={COLORS.amber}        icon={AlertTriangle} sub="Days arrived late" />
+        {/* ──────── ATTENDANCE ──────── */}
+        {tab==='attend'&&(
+          <motion.div key="at" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+              {[
+                {label:'Days Present',  value:presDays,         sub:'This period',        color:C.emeraldGreen, icon:CheckCircle2},
+                {label:'Total Hours',   value:fmtC(totMins),    sub:'Logged time',         color:C.deepBlue,     icon:Clock       },
+                {label:'Avg / Day',     value:fmt(avgMins),     sub:'Per present day',     color:C.mediumBlue,   icon:Activity    },
+                {label:'Late Days',     value:lateDays,         sub:'Arrived after time',  color:C.amber,        icon:AlertTriangle},
+              ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
             </div>
 
-            {/* Attendance trend chart */}
-            <Section title="Daily Hours — Last 7 Days" desc="Logged work hours per day from punch records">
-              {attendanceTrendData.some(d => d.hours > 0) ? (
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={attendanceTrendData} barSize={32}>
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} unit="h" />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="hours" name="Hours" radius={[6, 6, 0, 0]}>
-                      {attendanceTrendData.map((d, i) => (
-                        <Cell key={i} fill={d.hours >= 8 ? COLORS.emeraldGreen : d.hours >= 4 ? COLORS.mediumBlue : '#e2e8f0'} />
+            <Sec title="Daily Hours — Last 7 Days" desc="From actual punch records" dark={dark}>
+              {attTrend.some(d=>d.hours>0)?(
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={attTrend} barSize={28}>
+                    <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:11,fill:t.textSub}} unit="h" axisLine={false} tickLine={false}/>
+                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                    <Bar dataKey="hours" name="Hours" radius={[6,6,0,0]}>
+                      {attTrend.map((d,i)=>(
+                        <Cell key={i} fill={d.hours>=8?C.emeraldGreen:d.hours>=4?C.mediumBlue:dark?'#334155':'#e2e8f0'}/>
                       ))}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              ) : (
-                <EmptyState icon={Clock} text="No attendance records for the last 7 days" />
-              )}
-            </Section>
+              ):<Empty icon={Clock} text="No attendance records for the last 7 days" dark={dark}/>}
+            </Sec>
 
-            {/* Attendance log table */}
-            {filteredAttendance.length > 0 && (
-              <Section title="Recent Attendance Log" desc="Detailed punch-in/out records">
-                <div className="overflow-x-auto rounded-xl border border-slate-100">
-                  <table className="w-full text-sm">
+            {fAtt.length>0&&(
+              <Sec title="Attendance Log" desc="Recent punch records" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[600px]">
                     <thead>
-                      <tr className="bg-slate-50 text-left">
-                        {(isAdmin ? ['Employee', 'Date', 'Punch In', 'Punch Out', 'Duration', 'Status', 'Flags'] : ['Date', 'Punch In', 'Punch Out', 'Duration', 'Status', 'Flags']).map(h => (
-                          <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+                      <tr style={{background:t.card2}}>
+                        {(isAdmin?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
+                          <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
+                            style={{color:t.textMute}}>{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredAttendance.slice(0, 20).map((a, i) => {
-                        const punchIn  = a.punch_in  ? new Date(a.punch_in ).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—';
-                        const punchOut = a.punch_out ? new Date(a.punch_out).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—';
-                        const statusColor = a.status === 'present' ? 'text-emerald-600 bg-emerald-50' : a.status === 'absent' ? 'text-red-500 bg-red-50' : 'text-amber-600 bg-amber-50';
-                        const flags = [a.is_late && '⏰ Late', a.punched_out_early && '🚪 Early Out', a.auto_marked && '🤖 Auto'].filter(Boolean);
+                    <tbody>
+                      {fAtt.slice(0,20).map((a,i)=>{
+                        const pi=a.punch_in ?new Date(a.punch_in ).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
+                        const po=a.punch_out?new Date(a.punch_out).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
+                        const sc=a.status==='present'
+                          ?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}
+                          :a.status==='absent'
+                          ?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}
+                          :{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
+                        const flags=[a.is_late&&'⏰ Late',a.punched_out_early&&'🚪 Early',a.auto_marked&&'🤖 Auto'].filter(Boolean);
                         return (
-                          <tr key={i} className="hover:bg-slate-50 transition-colors">
-                            {isAdmin && <td className="px-4 py-3 font-medium text-slate-800 text-xs">{a.user_name || a.user_id?.slice(0, 8) || '—'}</td>}
-                            <td className="px-4 py-3 text-slate-600 font-medium">{a.date}</td>
-                            <td className="px-4 py-3 text-slate-600">{punchIn}</td>
-                            <td className="px-4 py-3 text-slate-600">{punchOut}</td>
-                            <td className="px-4 py-3 font-semibold" style={{ color: COLORS.deepBlue }}>{formatTime(a.duration_minutes || 0)}</td>
-                            <td className="px-4 py-3">
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-md capitalize ${statusColor}`}>{a.status}</span>
+                          <tr key={i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            {isAdmin&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
+                            <td className="px-4 py-2.5 font-medium text-xs" style={{color:t.text}}>{a.date}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{pi}</td>
+                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{po}</td>
+                            <td className="px-4 py-2.5 text-xs font-bold" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize"
+                                style={{background:sc.bg,color:sc.col}}>{a.status}</span>
                             </td>
-                            <td className="px-4 py-3 text-xs text-slate-400 space-x-1">
-                              {flags.map((f, fi) => <span key={fi}>{f}</span>)}
-                              {flags.length === 0 && <span className="text-emerald-400">✓ OK</span>}
+                            <td className="px-4 py-2.5 text-[10px]" style={{color:t.textMute}}>
+                              {flags.length?flags.join(' '):<span style={{color:C.emeraldGreen}}>✓ OK</span>}
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  {filteredAttendance.length > 20 && (
-                    <p className="text-xs text-slate-400 text-center py-2">Showing 20 of {filteredAttendance.length} records</p>
+                  {fAtt.length>20&&(
+                    <p className="text-xs text-center py-2" style={{color:t.textMute}}>
+                      Showing 20 of {fAtt.length} records
+                    </p>
                   )}
                 </div>
-              </Section>
+              </Sec>
             )}
           </motion.div>
         )}
 
-        {/* ══════════════ PERFORMERS TAB ══════════════ */}
-        {activeTab === 'performers' && (
-          <motion.div key="performers" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+        {/* ──────── EFFICIENCY ──────── */}
+        {tab==='efficiency'&&(
+          <motion.div key="ef" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            <Sec title="Efficiency Breakdown"
+              desc="Computed from real task assignments + attendance records"
+              dark={dark}>
+              {effCards.length>0?(
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {effCards.map((d,i)=>{
+                    const bc=d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626';
+                    return (
+                      <motion.div key={d.user_id||i} variants={iV}
+                        className="rounded-xl p-4"
+                        style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+                        {/* header */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white text-sm flex-shrink-0"
+                            style={{background:PALETTE[i%PALETTE.length]}}>
+                            {(d.user_name||'U').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm truncate" style={{color:t.text}}>{d.user_name}</p>
+                            <p className="text-xs" style={{color:t.textMute}}>{d.days} days present</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-xl font-black leading-none" style={{color:bc}}>{d.pct}%</p>
+                            <p className="text-[9px] font-bold uppercase tracking-wider mt-0.5" style={{color:t.textMute}}>Done</p>
+                          </div>
+                        </div>
+                        {/* bar */}
+                        <div className="h-1.5 rounded-full overflow-hidden mb-3" style={{background:dark?'#334155':'#f1f5f9'}}>
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{width:`${d.pct}%`,background:bc}}/>
+                        </div>
+                        {/* stats */}
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            {label:'Done',   val:d.done,          color:C.emeraldGreen},
+                            {label:'Pending',val:d.pend,          color:C.amber       },
+                            {label:'Hours',  val:fmtC(d.mins),    color:C.mediumBlue  },
+                          ].map((it,j)=>(
+                            <div key={j} className="rounded-lg p-2 text-center" style={{background:t.card2}}>
+                              <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{it.label}</p>
+                              <p className="text-sm font-black mt-0.5 leading-none" style={{color:it.color}}>{it.val}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-xs">
+                          <span style={{color:t.textMute}}>Total assigned</span>
+                          <span className="font-bold" style={{color:t.text}}>{d.total} tasks</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ):<Empty icon={Zap} text="No efficiency data" dark={dark}/>}
+            </Sec>
+
+            {/* comparison bar */}
+            {effCards.length>1&&(
+              <Sec title="Completion Rate Comparison" desc="Side-by-side across team" dark={dark}>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={effCards.slice(0,10).map(d=>({name:d.user_name?.split(' ')[0]||'?',pct:d.pct,done:d.done}))} barSize={24}>
+                    <XAxis dataKey="name" tick={{fontSize:10,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:10,fill:t.textSub}} unit="%" axisLine={false} tickLine={false} domain={[0,100]}/>
+                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                    <Bar dataKey="pct" name="Completion%" radius={[6,6,0,0]}>
+                      {effCards.slice(0,10).map((d,i)=>(
+                        <Cell key={i} fill={d.pct>=70?C.emeraldGreen:d.pct>=40?C.amber:'#dc2626'}/>
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Sec>
+            )}
+          </motion.div>
+        )}
+
+        {/* ──────── PERFORMERS ──────── */}
+        {tab==='performers'&&(
+          <motion.div key="pf" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Star performers list */}
-              <Section
-                title={isAdmin ? 'Star Performers' : 'Your Performance Rank'}
-                desc="Ranked by overall performance score"
-                action={isAdmin && (
+              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
+                action={isAdmin&&(
                   <div className="flex gap-1">
-                    {['all', 'monthly', 'weekly'].map(p => (
-                      <Button key={p} variant={rankingPeriod === p ? 'default' : 'outline'} size="sm"
-                        onClick={() => setRankingPeriod(p)} className="h-7 px-3 text-xs rounded-lg"
-                        style={rankingPeriod === p ? { background: COLORS.deepBlue } : {}}>
-                        {p === 'all' ? 'All Time' : p.charAt(0).toUpperCase() + p.slice(1)}
-                      </Button>
+                    {['all','monthly','weekly'].map(p=>(
+                      <button key={p} onClick={()=>setRankPeriod(p)}
+                        className="h-6 px-2.5 text-[10px] font-bold rounded-lg transition-all"
+                        style={rankPeriod===p
+                          ?{background:C.deepBlue,color:'#fff'}
+                          :{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+                        {p==='all'?'All Time':p.charAt(0).toUpperCase()+p.slice(1)}
+                      </button>
                     ))}
                   </div>
-                )}
-              >
-                {starPerformers.length > 0 ? (
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {starPerformers.map((m, i) => <PerformerCard key={m.user_id || i} member={m} rank={i + 1} />)}
+                )}>
+                {performers.length>0?(
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                    {performers.map((m,i)=><PerfRow key={m.user_id||i} m={m} rank={i+1} dark={dark}/>)}
                   </div>
-                ) : <EmptyState icon={Award} text="No performance data available" />}
-              </Section>
+                ):<Empty icon={Award} text="No performance data" dark={dark}/>}
+              </Sec>
 
-              {/* Radar chart for top performer */}
-              <Section title="Top Performer Breakdown" desc={starPerformers[0] ? `${starPerformers[0].user_name} — detailed metrics` : 'Score components'}>
-                {radarData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={280}>
+              <Sec title="Top Performer Breakdown" desc={performers[0]?`${performers[0].user_name} — components`:'Score radar'} dark={dark}>
+                {radarData.length>0?(
+                  <ResponsiveContainer width="100%" height={260}>
                     <RadarChart data={radarData}>
-                      <PolarGrid stroke="#e2e8f0" />
-                      <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: '#64748b' }} />
-                      <Radar name="Score" dataKey="score" stroke={COLORS.deepBlue} fill={COLORS.deepBlue} fillOpacity={0.18} strokeWidth={2} />
-                      <Tooltip content={<ChartTooltip />} />
+                      <PolarGrid stroke={dark?'#334155':'#e2e8f0'}/>
+                      <PolarAngleAxis dataKey="metric" tick={{fontSize:10,fill:t.textSub}}/>
+                      <Radar name="Score" dataKey="score" stroke={C.deepBlue} fill={C.deepBlue} fillOpacity={0.18} strokeWidth={2}/>
+                      <Tooltip content={<ChartTip dark={dark}/>}/>
                     </RadarChart>
                   </ResponsiveContainer>
-                ) : <EmptyState icon={Star} text="No performer data" />}
-              </Section>
+                ):<Empty icon={Star} text="No data" dark={dark}/>}
+              </Sec>
             </div>
 
-            {/* Performance metrics table */}
-            {starPerformers.length > 0 && (
-              <Section title="Detailed Score Breakdown" desc="All components of the performance score">
-                <div className="overflow-x-auto rounded-xl border border-slate-100">
-                  <table className="w-full text-sm">
+            {performers.length>0&&(
+              <Sec title="Full Score Breakdown" desc="All 5 performance dimensions" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[700px]">
                     <thead>
-                      <tr className="bg-slate-50 text-left">
-                        {['Rank', 'Employee', 'Overall', 'Attendance', 'Task Done', 'On-Time In', 'Todo Rate', 'Hours', 'Badge'].map(h => (
-                          <th key={h} className="px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      <tr style={{background:t.card2}}>
+                        {['Rank','Employee','Overall','Attendance','Task Done','Punch-In','Todo','Hours','Badge'].map(h=>(
+                          <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
+                            style={{color:t.textMute}}>{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {starPerformers.map((m, i) => {
-                        const scoreColor = m.overall_score >= 85 ? COLORS.emeraldGreen : m.overall_score >= 60 ? COLORS.amber : '#dc2626';
+                    <tbody>
+                      {performers.map((m,i)=>{
+                        const sc=m.overall_score>=85?C.emeraldGreen:m.overall_score>=60?C.amber:'#dc2626';
                         return (
-                          <tr key={m.user_id || i} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-3 py-3 font-bold" style={{ color: COLORS.deepBlue }}>
-                              {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td className="px-3 py-2.5 text-sm">
+                              {i===0?'🥇':i===1?'🥈':i===2?'🥉':<span style={{color:t.textMute}}>#{i+1}</span>}
                             </td>
-                            <td className="px-3 py-3">
+                            <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
                                 <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                                  {m.user_name?.charAt(0)?.toUpperCase() || '?'}
+                                  style={{background:`linear-gradient(135deg,${C.deepBlue},${C.mediumBlue})`}}>
+                                  {m.user_name?.charAt(0)?.toUpperCase()||'?'}
                                 </div>
-                                <span className="font-semibold text-slate-800 whitespace-nowrap">{m.user_name}</span>
+                                <span className="font-semibold text-xs whitespace-nowrap" style={{color:t.text}}>{m.user_name}</span>
                               </div>
                             </td>
-                            <td className="px-3 py-3">
-                              <span className="font-black text-base" style={{ color: scoreColor }}>{m.overall_score}%</span>
+                            <td className="px-3 py-2.5">
+                              <span className="text-base font-black" style={{color:sc}}>{m.overall_score}%</span>
                             </td>
-                            <td className="px-3 py-3 text-slate-600 font-medium">{m.attendance_percent}%</td>
-                            <td className="px-3 py-3 text-slate-600 font-medium">{m.task_completion_percent}%</td>
-                            <td className="px-3 py-3 text-slate-600 font-medium">{m.timely_punchin_percent}%</td>
-                            <td className="px-3 py-3 text-slate-600 font-medium">{m.todo_ontime_percent}%</td>
-                            <td className="px-3 py-3 text-slate-600 font-medium">{formatHours(m.total_hours)}</td>
-                            <td className="px-3 py-3">
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                m.badge === 'Star Performer' ? 'bg-yellow-100 text-yellow-700' :
-                                m.badge === 'Top Performer' ? 'bg-emerald-100 text-emerald-700' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>{m.badge || 'Good Performer'}</span>
+                            {[m.attendance_percent,m.task_completion_percent,m.timely_punchin_percent,m.todo_ontime_percent].map((v,j)=>(
+                              <td key={j} className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{v}%</td>
+                            ))}
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{fmtH(m.total_hours)}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                                style={m.badge==='Star Performer'?{background:'#fef9c3',color:'#854d0e'}
+                                     :m.badge==='Top Performer' ?{background:'#d1fae5',color:'#065f46'}
+                                     :{background:t.card2,color:t.textSub}}>
+                                {m.badge||'Good Performer'}
+                              </span>
                             </td>
                           </tr>
                         );
@@ -1021,44 +970,47 @@ export default function Reports() {
                     </tbody>
                   </table>
                 </div>
-              </Section>
+              </Sec>
             )}
           </motion.div>
         )}
 
-        {/* ══════════════ TEAM TAB (Admin) ══════════════ */}
-        {activeTab === 'team' && isAdmin && (
-          <motion.div key="team" variants={containerVariants} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
-
-            {/* Team workload table from dashboard stats */}
-            {teamWorkload.length > 0 && (
-              <Section title="Team Workload Distribution" desc="Individual breakdown across all staff — live from task assignments">
-                <div className="overflow-x-auto rounded-xl border border-slate-100">
-                  <table className="w-full text-sm">
+        {/* ──────── TEAM (admin) ──────── */}
+        {tab==='team'&&isAdmin&&(
+          <motion.div key="tm" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            {teamWL.length>0?(
+              <Sec title="Team Workload Distribution"
+                desc="Individual breakdown — live from task assignments" dark={dark}>
+                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                  <table className="w-full text-sm min-w-[520px]">
                     <thead>
-                      <tr className="bg-slate-50 text-left">
-                        {['Employee', 'Total', 'Pending', 'Completed', 'Progress'].map(h => (
-                          <th key={h} className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+                      <tr style={{background:t.card2}}>
+                        {['Employee','Total','Pending','Completed','Progress'].map(h=>(
+                          <th key={h} className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
+                            style={{color:t.textMute}}>{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {teamWorkload.map(m => {
-                        const pct = m.total_tasks > 0 ? Math.round((m.completed_tasks / m.total_tasks) * 100) : 0;
-                        const barColor = pct >= 70 ? COLORS.emeraldGreen : pct >= 40 ? COLORS.amber : '#dc2626';
+                    <tbody>
+                      {teamWL.map((m,i)=>{
+                        const pct=m.total_tasks>0?Math.round((m.completed_tasks/m.total_tasks)*100):0;
+                        const bc=pct>=70?C.emeraldGreen:pct>=40?C.amber:'#dc2626';
                         return (
-                          <tr key={m.user_id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-5 py-3.5 font-medium text-slate-800">{m.user_name}</td>
-                            <td className="px-5 py-3.5 font-bold" style={{ color: COLORS.deepBlue }}>{m.total_tasks}</td>
-                            <td className="px-5 py-3.5 text-amber-600 font-medium">{m.pending_tasks}</td>
-                            <td className="px-5 py-3.5 text-emerald-600 font-medium">{m.completed_tasks}</td>
-                            <td className="px-5 py-3.5">
+                          <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td className="px-5 py-3 font-semibold text-sm" style={{color:t.text}}>{m.user_name}</td>
+                            <td className="px-5 py-3 font-bold" style={{color:C.deepBlue}}>{m.total_tasks}</td>
+                            <td className="px-5 py-3 font-semibold" style={{color:C.amber}}>{m.pending_tasks}</td>
+                            <td className="px-5 py-3 font-semibold" style={{color:C.emeraldGreen}}>{m.completed_tasks}</td>
+                            <td className="px-5 py-3">
                               <div className="flex items-center gap-3">
-                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="flex-1 h-2 rounded-full overflow-hidden"
+                                  style={{background:dark?'#334155':'#f1f5f9'}}>
                                   <div className="h-full rounded-full transition-all duration-700"
-                                    style={{ width: `${pct}%`, background: barColor }} />
+                                    style={{width:`${pct}%`,background:bc}}/>
                                 </div>
-                                <span className="text-xs font-semibold text-slate-600 w-10 text-right">{pct}%</span>
+                                <span className="text-xs font-bold w-9 text-right" style={{color:t.textSub}}>{pct}%</span>
                               </div>
                             </td>
                           </tr>
@@ -1067,65 +1019,11 @@ export default function Reports() {
                     </tbody>
                   </table>
                 </div>
-              </Section>
-            )}
-
-            {/* Per-user efficiency cards — built from real tasks + real attendance */}
-            <Section
-              title="Individual Efficiency Summary"
-              desc="Computed from actual tasks assigned and attendance records — not activity logs"
-            >
-              {efficiencyCards.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {efficiencyCards.map((d, i) => (
-                    <motion.div key={d.user_id || i} variants={itemVariants}
-                      className="border border-slate-200 rounded-xl p-4 hover:shadow-sm transition-all bg-white">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white text-sm flex-shrink-0"
-                          style={{ background: CHART_PALETTE[i % CHART_PALETTE.length] }}>
-                          {(d.user_name || 'U').charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-800 text-sm truncate">{d.user_name}</p>
-                          <p className="text-xs text-slate-400">{d.days_logged} days present</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-lg font-black"
-                            style={{ color: d.completion_pct >= 70 ? COLORS.emeraldGreen : d.completion_pct >= 40 ? COLORS.amber : '#dc2626' }}>
-                            {d.completion_pct}%
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Completion</p>
-                        </div>
-                      </div>
-                      {/* Progress bar */}
-                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
-                        <div className="h-full rounded-full transition-all duration-700"
-                          style={{
-                            width: `${d.completion_pct}%`,
-                            background: d.completion_pct >= 70 ? COLORS.emeraldGreen : d.completion_pct >= 40 ? COLORS.amber : '#dc2626',
-                          }} />
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { label: 'Done',        val: d.tasks_done,   color: COLORS.emeraldGreen },
-                          { label: 'Pending',      val: d.tasks_pending, color: COLORS.amber },
-                          { label: 'Screen Time',  val: formatTime(d.screen_time), color: COLORS.mediumBlue },
-                        ].map((item, j) => (
-                          <div key={j} className="bg-slate-50 rounded-lg p-2 text-center">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase">{item.label}</p>
-                            <p className="text-sm font-bold mt-0.5" style={{ color: item.color }}>{item.val}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState icon={Users} text="No efficiency data available" />
-              )}
-            </Section>
+              </Sec>
+            ):<Empty icon={Users} text="No team workload data" dark={dark}/>}
           </motion.div>
         )}
+
       </AnimatePresence>
     </motion.div>
   );
