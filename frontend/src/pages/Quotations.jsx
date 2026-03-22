@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import axios from 'axios';
@@ -141,8 +142,8 @@ function QuotationDetailModal({ quotation, company, open, onClose, onStatusChang
 
         <div className="space-y-4 py-2">
           {/* Client */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 grid grid-cols-2 gap-2 text-sm">
-            <div className="col-span-2 font-bold text-slate-800">{quotation.client_name}</div>
+          <div className={`p-4 rounded-2xl border grid grid-cols-2 gap-2 text-sm ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
+            <div className={`col-span-2 font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{quotation.client_name}</div>
             {quotation.client_phone && <p className="text-slate-500 flex items-center gap-1.5"><Phone className="h-3.5 w-3.5"/>{quotation.client_phone}</p>}
             {quotation.client_email && <p className="text-slate-500 flex items-center gap-1.5"><Mail className="h-3.5 w-3.5"/>{quotation.client_email}</p>}
             {quotation.client_address && <p className="text-slate-400 col-span-2 text-xs">{quotation.client_address}</p>}
@@ -155,7 +156,7 @@ function QuotationDetailModal({ quotation, company, open, onClose, onStatusChang
               <div className="rounded-2xl border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-slate-50 text-slate-500 text-xs">
+                    <tr className={`text-xs ${isDark?"bg-slate-700 text-slate-400":"bg-slate-50 text-slate-500"}`}>
                       <th className="text-left px-3 py-2 font-semibold">Description</th>
                       <th className="text-center px-3 py-2 font-semibold">Qty</th>
                       <th className="text-center px-3 py-2 font-semibold">Unit</th>
@@ -165,7 +166,7 @@ function QuotationDetailModal({ quotation, company, open, onClose, onStatusChang
                   </thead>
                   <tbody>
                     {quotation.items.map((item,i)=>(
-                      <tr key={i} className={cn('border-t border-slate-100',i%2===0?'bg-white':'bg-slate-50/50')}>
+                      <tr key={i} className={cn('border-t border-slate-100',i%2===0?(isDark?'bg-slate-800':'bg-white'):(isDark?'bg-slate-700/50':'bg-slate-50/50'))}>
                         <td className="px-3 py-2">{item.description}</td>
                         <td className="px-3 py-2 text-center">{item.quantity}</td>
                         <td className="px-3 py-2 text-center text-slate-500">{item.unit}</td>
@@ -177,8 +178,8 @@ function QuotationDetailModal({ quotation, company, open, onClose, onStatusChang
                 </table>
               </div>
               <div className="mt-2 space-y-1 text-sm text-right pr-1">
-                <p className="text-slate-500">Sub Total: <span className="font-semibold text-slate-800">₹{(quotation.subtotal||0).toLocaleString()}</span></p>
-                {quotation.gst_rate>0 && <p className="text-slate-500">GST @ {quotation.gst_rate}%: <span className="font-semibold text-slate-800">₹{(quotation.gst_amount||0).toLocaleString()}</span></p>}
+                <p className={`${isDark?"text-slate-400":"text-slate-500"}`}>Sub Total: <span className={`font-semibold ${isDark?"text-slate-100":"text-slate-800"}`}>₹{(quotation.subtotal||0).toLocaleString()}</span></p>
+                {quotation.gst_rate>0 && <p className={`${isDark?"text-slate-400":"text-slate-500"}`}>GST @ {quotation.gst_rate}%: <span className="font-semibold text-slate-800">₹{(quotation.gst_amount||0).toLocaleString()}</span></p>}
                 <p className="text-base font-bold" style={{color:COLORS.deepBlue}}>Total: ₹{(quotation.total||0).toLocaleString()}</p>
               </div>
             </div>
@@ -216,6 +217,7 @@ function QuotationDetailModal({ quotation, company, open, onClose, onStatusChang
    MAIN COMPONENT
 ═══════════════════════════════════════════════════════════════════════════ */
 export default function Quotations() {
+  const isDark = useDark();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const perms = user?.permissions || {};
@@ -285,10 +287,10 @@ export default function Quotations() {
   }, []);
 
   if (!canAccess) return (
-    <div className="flex items-center justify-center h-64">
+    <div className={`flex items-center justify-center h-64 ${isDark?"bg-[#0f172a]":""}`}>
       <div className="text-center">
         <Receipt className="h-16 w-16 text-slate-200 mx-auto mb-4"/>
-        <h2 className="text-xl font-bold text-slate-400">No Access</h2>
+        <h2 className={`text-xl font-bold ${isDark?"text-slate-500":"text-slate-400"}`}>No Access</h2>
         <p className="text-slate-400 text-sm">You don't have permission to use the Quotations module.</p>
       </div>
     </div>
@@ -528,27 +530,27 @@ export default function Quotations() {
               <button onClick={addItem} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3"/>Add item</button>
             </div>
             {form.items.map((item,i)=>(
-              <div key={i} className="p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
+              <div key={i} className={`p-3 rounded-2xl border space-y-2 ${isDark?"border-slate-600 bg-slate-700":"border-slate-200 bg-slate-50"}`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-500">Item {i+1}</span>
                   <button onClick={()=>removeItem(i)} className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3.5 w-3.5"/></button>
                 </div>
-                <Input value={item.description} onChange={e=>updateItem(i,'description',e.target.value)} placeholder="Description of service / work" className="h-9 rounded-xl text-sm bg-white"/>
+                <Input className={isDark?"bg-slate-700 border-slate-600 text-slate-100":""} value={item.description} onChange={e=>updateItem(i,'description',e.target.value)} placeholder="Description of service / work" className="h-9 rounded-xl text-sm bg-white"/>
                 <div className="grid grid-cols-4 gap-2">
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Qty</p>
-                    <Input type="number" value={item.quantity} onChange={e=>updateItem(i,'quantity',e.target.value)} placeholder="1" className="h-8 rounded-xl text-sm bg-white text-center"/>
+                    <Input type="number" className={isDark?"bg-slate-700 border-slate-600 text-slate-100":""} value={item.quantity} onChange={e=>updateItem(i,'quantity',e.target.value)} placeholder="1" className="h-8 rounded-xl text-sm bg-white text-center"/>
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit</p>
                     <Select value={item.unit||'service'} onValueChange={v=>updateItem(i,'unit',v)}>
-                      <SelectTrigger className="h-8 rounded-xl text-xs bg-white"><SelectValue/></SelectTrigger>
+                      <SelectTrigger className={`h-8 rounded-xl text-xs ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white"}`}><SelectValue/></SelectTrigger>
                       <SelectContent>{UNIT_OPTIONS.map(u=><SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit Price (₹)</p>
-                    <Input type="number" value={item.unit_price} onChange={e=>updateItem(i,'unit_price',e.target.value)} placeholder="0" className="h-8 rounded-xl text-sm bg-white"/>
+                    <Input type="number" className={isDark?"bg-slate-700 border-slate-600 text-slate-100":""} value={item.unit_price} onChange={e=>updateItem(i,'unit_price',e.target.value)} placeholder="0" className="h-8 rounded-xl text-sm bg-white"/>
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Amount (₹)</p>
@@ -659,16 +661,16 @@ export default function Quotations() {
 
   /* ─── RENDER ─────────────────────────────────────────────────────────────── */
   return (
-    <motion.div className="space-y-5 p-2 md:p-4" variants={containerVariants} initial="hidden" animate="visible">
+    <motion.div className={`space-y-5 p-2 md:p-4 min-h-screen rounded-2xl ${isDark?"bg-[#0f172a]":""}`} variants={containerVariants} initial="hidden" animate="visible">
 
       {/* ── Header ── */}
       <motion.div variants={itemVariants}>
-        <Card className="rounded-3xl overflow-hidden border border-slate-200 shadow-sm">
+        <Card className={`rounded-3xl overflow-hidden border shadow-sm ${isDark?"border-slate-700 bg-slate-800":"border-slate-200"}`}>
           <div className="h-1.5 w-full bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600"/>
           <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight" style={{color:COLORS.deepBlue}}>Quotations</h1>
-              <p className="text-sm text-slate-500 mt-0.5">{quotations.length} total · {quotations.filter(q=>q.status==='accepted').length} accepted</p>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{color:isDark?"#93c5fd":COLORS.deepBlue}}>Quotations</h1>
+              <p className={`text-sm mt-0.5 ${isDark?"text-slate-400":"text-slate-500"}`}>{quotations.length} total · {quotations.filter(q=>q.status==='accepted').length} accepted</p>
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" className="h-9 rounded-2xl gap-1.5" onClick={()=>setCompanyManagerOpen(true)}>
@@ -687,10 +689,10 @@ export default function Quotations() {
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
-          <Input placeholder="Search quotations…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="pl-10 bg-white rounded-2xl"/>
+          <Input placeholder="Search quotations…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className={`pl-10 rounded-2xl ${isDark?"bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500":"bg-white"}`}/>
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-36 bg-white rounded-2xl text-sm"><SelectValue placeholder="All Status"/></SelectTrigger>
+          <SelectTrigger className={`w-36 rounded-2xl text-sm ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white"}`}><SelectValue placeholder="All Status"/></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
             {['draft','sent','accepted','rejected'].map(s=><SelectItem key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</SelectItem>)}
@@ -700,21 +702,21 @@ export default function Quotations() {
 
       {/* ── Quotation Cards ── */}
       {loading
-        ? <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-24 rounded-2xl bg-slate-100 animate-pulse"/>)}</div>
+        ? <div className="space-y-3">{[1,2,3].map(i=><div key={i} className={`h-24 rounded-2xl animate-pulse ${isDark?"bg-slate-800":"bg-slate-100"}`}/>)}</div>
         : filteredQtns.length === 0
-          ? <div className="text-center py-20"><Receipt className="h-16 w-16 text-slate-200 mx-auto mb-4"/><p className="text-slate-400 font-medium">No quotations yet</p><p className="text-xs text-slate-300 mt-1">Click "New Quotation" to create one</p></div>
+          ? <div className="text-center py-20"><Receipt className={`h-16 w-16 mx-auto mb-4 ${isDark?"text-slate-700":"text-slate-200"}`}/><p className={`font-medium ${isDark?"text-slate-500":"text-slate-400"}`}>No quotations yet</p><p className={`text-xs mt-1 ${isDark?"text-slate-600":"text-slate-300"}`}>Click "New Quotation" to create one</p></div>
           : (
             <motion.div className="space-y-3" variants={containerVariants}>
               {filteredQtns.map(q => {
                 const linkedLead = q.lead_id ? leads.find(l=>l.id===q.lead_id) : null;
                 return (
                   <motion.div key={q.id} variants={itemVariants}>
-                    <Card className="rounded-2xl border border-slate-200 hover:shadow-md transition-all hover:-translate-y-[1px] cursor-pointer" onClick={()=>setDetailQtn(q)}>
+                    <Card className={`rounded-2xl border hover:shadow-md transition-all hover:-translate-y-[1px] cursor-pointer ${isDark?"border-slate-700 bg-slate-800":"border-slate-200"}`} onClick={()=>setDetailQtn(q)}>
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-3 flex-wrap">
                           <div className="flex flex-col gap-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-bold text-slate-800">{q.quotation_no}</span>
+                              <span className={`text-sm font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{q.quotation_no}</span>
                               <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border capitalize',STATUS_STYLES[q.status]||STATUS_STYLES.draft)}>{q.status}</span>
                               {/* Linked lead badge */}
                               {q.lead_id && (
@@ -723,8 +725,8 @@ export default function Quotations() {
                                 </span>
                               )}
                             </div>
-                            <p className="text-base font-semibold text-slate-700">{q.client_name}</p>
-                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <p className={`text-base font-semibold ${isDark?"text-slate-200":"text-slate-700"}`}>{q.client_name}</p>
+                            <div className={`flex flex-wrap items-center gap-3 text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
                               <span className="flex items-center gap-1"><Tag className="h-3.5 w-3.5"/>{q.service}</span>
                               <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5"/>{q.date}</span>
                               {q.client_phone && <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5"/>{q.client_phone}</span>}
@@ -732,16 +734,16 @@ export default function Quotations() {
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0">
                             <div className="text-right">
-                              <p className="text-lg font-bold" style={{color:COLORS.deepBlue}}>₹{(q.total||0).toLocaleString()}</p>
-                              <p className="text-[10px] text-slate-400">{q.items?.length||0} item{q.items?.length!==1?'s':''}</p>
+                              <p className="text-lg font-bold" style={{color:isDark?"#93c5fd":COLORS.deepBlue}}>₹{(q.total||0).toLocaleString()}</p>
+                              <p className={`text-[10px] ${isDark?"text-slate-500":"text-slate-400"}`}>{q.items?.length||0} item{q.items?.length!==1?'s':''}</p>
                             </div>
                             <div className="flex gap-1" onClick={e=>e.stopPropagation()}>
                               <button onClick={()=>handleDownloadPdf(q.id,q.quotation_no)} disabled={!!downloading}
-                                className="p-2 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all active:scale-90" title="Download PDF">
+                                className={`p-2 rounded-xl text-slate-400 hover:text-blue-600 transition-all active:scale-90 ${isDark?"hover:bg-blue-900/30":"hover:bg-blue-50"}`} title="Download PDF">
                                 {downloading===q.id+'-pdf'?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Download className="h-3.5 w-3.5"/>}
                               </button>
-                              <button onClick={()=>openEdit(q)} className="p-2 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all active:scale-90" title="Edit"><Edit className="h-3.5 w-3.5"/></button>
-                              <button onClick={()=>handleDelete(q.id)} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all active:scale-90" title="Delete"><Trash2 className="h-3.5 w-3.5"/></button>
+                              <button onClick={()=>openEdit(q)} className={`p-2 rounded-xl text-slate-400 hover:text-blue-600 transition-all active:scale-90 ${isDark?"hover:bg-blue-900/30":"hover:bg-blue-50"}`} title="Edit"><Edit className="h-3.5 w-3.5"/></button>
+                              <button onClick={()=>handleDelete(q.id)} className={`p-2 rounded-xl text-slate-400 hover:text-red-600 transition-all active:scale-90 ${isDark?"hover:bg-red-900/30":"hover:bg-red-50"}`} title="Delete"><Trash2 className="h-3.5 w-3.5"/></button>
                             </div>
                           </div>
                         </div>
@@ -778,10 +780,10 @@ export default function Quotations() {
                 {companies.length === 0
                   ? <p className="text-slate-400 text-sm text-center py-8">No companies yet.</p>
                   : <div className="space-y-2">{companies.map(c=>(
-                      <div key={c.id} className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 bg-slate-50">
+                      <div key={c.id} className={`flex items-center justify-between p-3 rounded-2xl border ${isDark?"border-slate-700 bg-slate-800":"border-slate-200 bg-slate-50"}`}>
                         <div className="flex items-center gap-3">
-                          {c.logo_base64 && <img src={c.logo_base64} alt="logo" className="h-8 w-8 object-contain rounded-lg border border-slate-200 bg-white p-0.5"/>}
-                          <div><p className="text-sm font-semibold text-slate-800">{c.name}</p><p className="text-xs text-slate-500">{c.email}</p></div>
+                          {c.logo_base64 && <img src={c.logo_base64} alt="logo" className={`h-8 w-8 object-contain rounded-lg border p-0.5 ${isDark?"border-slate-600 bg-slate-700":"border-slate-200 bg-white"}`}/>}
+                          <div><p className={`text-sm font-semibold ${isDark?"text-slate-100":"text-slate-800"}`}>{c.name}</p><p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>{c.email}</p></div>
                         </div>
                         <div className="flex gap-1">
                           <button onClick={()=>setEditingCompany(c)} className="p-2 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all"><Edit className="h-3.5 w-3.5"/></button>
@@ -808,12 +810,12 @@ export default function Quotations() {
               <React.Fragment key={s}>
                 <div className={cn('flex items-center gap-1.5 text-xs font-semibold transition-all',i===currentStep?'text-indigo-700':i<currentStep?'text-emerald-600':'text-slate-400')}>
                   <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2 flex-shrink-0',
-                    i===currentStep?'bg-indigo-600 text-white border-indigo-600':i<currentStep?'bg-emerald-500 text-white border-emerald-500':'bg-white border-slate-300 text-slate-400')}>
+                    i===currentStep?'bg-indigo-600 text-white border-indigo-600':i<currentStep?'bg-emerald-500 text-white border-emerald-500':isDark?'bg-slate-700 border-slate-500 text-slate-400':'bg-white border-slate-300 text-slate-400')}>
                     {i<currentStep?<Check className="h-3 w-3"/>:i+1}
                   </div>
                   <span className="hidden sm:inline">{s}</span>
                 </div>
-                {i<STEPS.length-1 && <div className={cn('flex-1 h-0.5 rounded-full',i<currentStep?'bg-emerald-400':'bg-slate-200')}/>}
+                {i<STEPS.length-1 && <div className={cn('flex-1 h-0.5 rounded-full',i<currentStep?'bg-emerald-400':isDark?'bg-slate-600':'bg-slate-200')}/>}
               </React.Fragment>
             ))}
           </div>
