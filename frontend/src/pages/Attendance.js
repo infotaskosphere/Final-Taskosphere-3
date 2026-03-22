@@ -1,44 +1,37 @@
 import { useDark } from '@/hooks/useDark';
-// Attendance.jsx - v7 — REMINDER DELETE/PATCH 404 BUG FIXED
+// Attendance.jsx - v8 — FULL LITE DARK THEME
 //
-// ROOT CAUSE OF 404 ERRORS (now fixed):
+// ROOT CAUSE OF 404 ERRORS (fixed in v7, preserved here):
 //
 //  BUG 1 — handleDeleteReminder passed `null` id for auto-saved reminders.
-//    Auto-saved reminders from email (v8 backend and earlier) had NO string
-//    "id" field — only MongoDB "_id" (ObjectId). normalizeReminder() correctly
-//    set r.id = String(r._id), BUT when the backend returned these documents
-//    via GET /reminders, it serialised them WITHOUT an "id" field at all —
-//    so r.id was undefined and r._id was the raw ObjectId string.
-//    handleDeleteReminder received id=undefined → called DELETE /reminders/undefined → 404.
+//  FIX 1 — normalizeReminder() resolves id from r.id || r._id || r["_id"],
+//    and handleDeleteReminder resolves reminderId with the same triple-fallback.
 //
-//  FIX 1 — normalizeReminder() now resolves id from r.id || r._id || r["_id"],
-//    and handleDeleteReminder resolves reminderId with the same triple-fallback
-//    BEFORE the optimistic removal. The delete call always uses a real string id.
-//
-//  BUG 2 — handleUpdateReminder called PATCH /reminders/${reminderId} with
-//    reminderId from editingReminder.id — same null problem for auto-saved docs.
-//
+//  BUG 2 — handleUpdateReminder called PATCH with undefined id.
 //  FIX 2 — handleUpdateReminder now resolves id with triple-fallback.
 //
 //  BUG 3 — Reminder list render used `key={rid || index}` where rid = r.id.
-//    If r.id was null/undefined the key collapsed to the numeric index,
-//    causing React reconciliation bugs and the delete button sending the wrong id.
-//
-//  FIX 3 — rid now always resolved via normalizeReminder's triple-fallback.
-//    The delete button onClick uses the same resolved rid.
+//  FIX 3 — rid always resolved via normalizeReminder's triple-fallback.
 //
 //  BUG 4 — handleDismissPopup used firedReminder.id || firedReminder._id
-//    but called PATCH /reminders/${reminderId} which 404'd for auto-saved docs
-//    that had _id as ObjectId (not a plain string).
-//
-//  FIX 4 — resolveId() helper always returns a plain string or null,
-//    used consistently in dismiss, delete, update, and edit flows.
+//  FIX 4 — resolveId() helper always returns a plain string or null.
 //
 //  EXTRA — Backend one-time migration:
 //    Call POST /email/migrate-fix-ids ONCE after deploying backend v9.
-//    This backfills the string "id" field on all existing auto-saved
-//    reminders/todos/visits so future fetches always have r.id set.
-//    Until that migration runs, the triple-fallback here keeps the UI working.
+//
+// DARK THEME v8:
+//  - Every card, modal, header, table row, badge, input, select, textarea
+//    now reads isDark and applies appropriate bg/border/text/ring classes.
+//  - Palette:
+//      dark bg-card    : #0f172a  (slate-900)
+//      dark bg-surface : #1e293b  (slate-800)
+//      dark bg-raised  : #263348  (slate-750 custom)
+//      dark border     : #334155  (slate-700)
+//      dark border-dim : #1e293b  (slate-800)
+//      dark text-primary : #f1f5f9 (slate-100)
+//      dark text-muted   : #94a3b8 (slate-400)
+//      dark text-dimmer  : #64748b (slate-500)
+//  - All colour accent variables kept identical so charts/badges stay vivid.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -96,7 +89,7 @@ import {
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// INTERACTION STYLES
+// INTERACTION + DARK THEME STYLES
 // ═══════════════════════════════════════════════════════════════════════════
 const ATTENDANCE_INTERACTION_STYLES = `
   @keyframes att-ripple {
@@ -120,9 +113,12 @@ const ATTENDANCE_INTERACTION_STYLES = `
   .absent-pulse   { animation: att-pulse-red   1.5s ease-in-out infinite; }
   .slim-scroll::-webkit-scrollbar { width: 4px; }
   .slim-scroll::-webkit-scrollbar-track { background: transparent; border-radius: 10px; }
-  .slim-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; }
-  .slim-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
-  .slim-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.15) transparent; }
+  .slim-scroll::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius: 10px; }
+  .slim-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.55); }
+  .slim-scroll { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,0.35) transparent; }
+  /* Dark mode scrollbar */
+  .dark .slim-scroll::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.25); }
+  .dark .slim-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.45); }
 `;
 if (typeof document !== 'undefined' && !document.getElementById('att-interaction-styles')) {
   const s = document.createElement('style');
@@ -145,6 +141,9 @@ function addAttRipple(e) {
   setTimeout(() => circle.remove(), 600);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DESIGN TOKENS
+// ═══════════════════════════════════════════════════════════════════════════
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -157,6 +156,19 @@ const COLORS = {
   slate200:     '#E2E8F0',
   purple:       '#8B5CF6',
 };
+
+// Dark palette helpers — used inline for dynamic styles
+const D = {
+  bg:        '#0f172a',   // slate-900 — page background
+  card:      '#1e293b',   // slate-800 — card background
+  raised:    '#263348',   // slate-750 — slightly elevated surface
+  border:    '#334155',   // slate-700 — standard border
+  borderDim: '#1e293b',   // slate-800 — subtle border
+  text:      '#f1f5f9',   // slate-100 — primary text
+  muted:     '#94a3b8',   // slate-400 — secondary text
+  dimmer:    '#64748b',   // slate-500 — placeholder/hint text
+};
+
 const IST_TIMEZONE           = 'Asia/Kolkata';
 const ABSENT_CUTOFF_HOUR_IST = 19;
 
@@ -178,11 +190,7 @@ if (typeof document !== 'undefined' && !document.getElementById('roboto-mono-fon
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FIX: resolveId — triple-fallback id resolver used everywhere
-// Handles all 3 cases:
-//   1. New auto-saved docs (v9 backend): have string "id" field
-//   2. Old auto-saved docs (v8 backend): only have "_id" (ObjectId as string)
-//   3. Manually-saved docs: have UUID string "id" field
+// FIX: resolveId — triple-fallback id resolver
 // ═══════════════════════════════════════════════════════════════════════════
 function resolveId(r) {
   if (!r) return null;
@@ -190,16 +198,13 @@ function resolveId(r) {
   return id ? String(id) : null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// FIX: normalizeReminder — always sets id as a resolved string
-// ═══════════════════════════════════════════════════════════════════════════
 function normalizeReminder(r) {
   if (!r) return r;
   return { ...r, id: resolveId(r) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// sessionStorage helpers — prevent popup re-firing on navigation
+// sessionStorage helpers
 // ═══════════════════════════════════════════════════════════════════════════
 function getFiredIds() {
   try {
@@ -351,22 +356,47 @@ function LiveClock() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STAT CARD
+// STAT CARD — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function StatCard({ icon: Icon, label, value, unit, color, trend }) {
+function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
   return (
     <motion.div variants={itemVariants}>
-      <Card className="border-0 shadow-md h-full">
+      <Card
+        className="border-0 shadow-md h-full"
+        style={{
+          backgroundColor: isDark ? D.card : '#ffffff',
+          border: isDark ? `1px solid ${D.border}` : undefined,
+        }}
+      >
         <CardContent className="p-5">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${color}18` }}>
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: isDark ? `${color}22` : `${color}18` }}
+            >
               <Icon className="w-5 h-5" style={{ color }} />
             </div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide leading-tight">{label}</p>
+            <p
+              className="text-xs font-bold uppercase tracking-wide leading-tight"
+              style={{ color: isDark ? D.muted : '#64748b' }}
+            >
+              {label}
+            </p>
           </div>
-          <p className="text-3xl font-black tracking-tight mb-0.5" style={{ color }}>{value}</p>
-          <p className="text-xs text-slate-400 font-medium">{unit}</p>
-          {trend && <p className="text-[11px] text-slate-400 mt-1 font-medium truncate">{trend}</p>}
+          <p className="text-3xl font-black tracking-tight mb-0.5" style={{ color }}>
+            {value}
+          </p>
+          <p className="text-xs font-medium" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+            {unit}
+          </p>
+          {trend && (
+            <p
+              className="text-[11px] mt-1 font-medium truncate"
+              style={{ color: isDark ? D.dimmer : '#94a3b8' }}
+            >
+              {trend}
+            </p>
+          )}
         </CardContent>
       </Card>
     </motion.div>
@@ -390,7 +420,7 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-100 active:scale-95">
+        <button className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 hover:bg-slate-700/40 active:scale-95">
           {ringColor ? (
             <motion.span
               className="absolute flex items-center justify-center rounded-full border-2"
@@ -439,9 +469,9 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER POPUP
+// REMINDER POPUP — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function ReminderPopup({ reminder, onDismiss }) {
+function ReminderPopup({ reminder, onDismiss, isDark }) {
   return (
     <motion.div
       className="fixed top-6 right-6 z-[99999] w-96 max-w-[calc(100vw-2rem)]"
@@ -450,7 +480,15 @@ function ReminderPopup({ reminder, onDismiss }) {
       exit={{    opacity: 0, x: 80, scale: 0.9 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
     >
-      <div className="rounded-2xl shadow-2xl overflow-hidden border border-purple-200" style={{ background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)' }}>
+      <div
+        className="rounded-2xl shadow-2xl overflow-hidden border"
+        style={{
+          background: isDark
+            ? `linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)`
+            : `linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)`,
+          borderColor: isDark ? '#4c1d95' : '#ddd6fe',
+        }}
+      >
         <div className="flex items-center justify-between px-5 py-3" style={{ backgroundColor: COLORS.purple }}>
           <div className="flex items-center gap-2">
             <motion.div animate={{ rotate: [0, -15, 15, -10, 10, 0] }} transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 1.4 }}>
@@ -458,19 +496,47 @@ function ReminderPopup({ reminder, onDismiss }) {
             </motion.div>
             <span className="text-white font-bold text-sm uppercase tracking-wider">Reminder</span>
           </div>
-          <button onClick={onDismiss} className="text-purple-200 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+          <button onClick={onDismiss} className="text-purple-200 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
         </div>
         <div className="px-5 py-4">
-          <p className={`font-black text-lg leading-snug mb-1 ${isDark?"text-slate-100":"text-slate-800"}`}>{reminder.title}</p>
-          {reminder.description && <p className="text-slate-600 text-sm mb-3">{stripHtml(reminder.description)}</p>}
-          <p className="text-xs text-slate-400 font-medium mb-4">⏰ {formatReminderTime(reminder.remind_at)}</p>
+          <p
+            className="font-black text-lg leading-snug mb-1"
+            style={{ color: isDark ? D.text : '#1e293b' }}
+          >
+            {reminder.title}
+          </p>
+          {reminder.description && (
+            <p style={{ color: isDark ? D.muted : '#475569' }} className="text-sm mb-3">
+              {stripHtml(reminder.description)}
+            </p>
+          )}
+          <p
+            className="text-xs font-medium mb-4"
+            style={{ color: isDark ? D.dimmer : '#94a3b8' }}
+          >
+            ⏰ {formatReminderTime(reminder.remind_at)}
+          </p>
           <div className="flex gap-3">
-            <a href={buildGCalURL(reminder)} target="_blank" rel="noopener noreferrer"
+            <a
+              href={buildGCalURL(reminder)} target="_blank" rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 active:scale-95"
-              style={{ backgroundColor: COLORS.deepBlue }}>
+              style={{ backgroundColor: COLORS.deepBlue }}
+            >
               <CalendarPlus className="w-3.5 h-3.5" /> Add to Google Calendar
             </a>
-            <button onClick={onDismiss} className={`px-4 py-2 rounded-xl text-xs font-bold border-2 active:scale-95 transition-all ${isDark?"text-slate-300 bg-slate-700 border-slate-600 hover:bg-slate-600":"text-slate-600 bg-white border-slate-200 hover:bg-slate-50"}`}>Dismiss</button>
+            <button
+              onClick={onDismiss}
+              className="px-4 py-2 rounded-xl text-xs font-bold border-2 active:scale-95 transition-all"
+              style={{
+                color: isDark ? D.text : '#475569',
+                backgroundColor: isDark ? D.raised : '#ffffff',
+                borderColor: isDark ? D.border : '#e2e8f0',
+              }}
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       </div>
@@ -479,9 +545,9 @@ function ReminderPopup({ reminder, onDismiss }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HOLIDAY DETAIL POPUP
+// HOLIDAY DETAIL POPUP — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
+function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDark }) {
   if (!holiday) return null;
   let dayOfWeek = '';
   try { dayOfWeek = format(parseISO(holiday.date), 'EEEE, MMMM d, yyyy'); } catch {}
@@ -496,8 +562,17 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
     } catch { return ''; }
   })();
   return (
-    <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : undefined }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="px-8 py-6 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
           <div className="flex items-start justify-between relative z-10">
@@ -508,40 +583,85 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
                 <h2 className="text-2xl font-black leading-tight">{holiday.name}</h2>
               </div>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all mt-1"><X className="w-4 h-4 text-white" /></button>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all mt-1">
+              <X className="w-4 h-4 text-white" />
+            </button>
           </div>
         </div>
         <div className="p-8 space-y-4">
-          <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ backgroundColor: `${COLORS.amber}10`, border: `1.5px solid ${COLORS.amber}25` }}>
+          <div
+            className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{ backgroundColor: isDark ? `${COLORS.amber}18` : `${COLORS.amber}10`, border: `1.5px solid ${COLORS.amber}25` }}
+          >
             <CalendarIcon className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.amber }} />
-            <div><p className={`text-xs font-bold uppercase tracking-wide mb-0.5 ${isDark?"text-slate-500":"text-slate-400"}`}>Date</p><p className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{dayOfWeek}</p></div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Date</p>
+              <p className="font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>{dayOfWeek}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ backgroundColor: `${COLORS.deepBlue}08`, border: `1.5px solid ${COLORS.deepBlue}18` }}>
-            <Clock className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.deepBlue }} />
-            <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Countdown</p><p className="font-bold" style={{ color: COLORS.deepBlue }}>{daysLeft}</p></div>
+          <div
+            className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{ backgroundColor: isDark ? `${COLORS.deepBlue}28` : `${COLORS.deepBlue}08`, border: `1.5px solid ${COLORS.deepBlue}${isDark ? '40' : '18'}` }}
+          >
+            <Clock className="w-5 h-5 flex-shrink-0" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Countdown</p>
+              <p className="font-bold" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>{daysLeft}</p>
+            </div>
           </div>
           {holiday.type && (
-            <div className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-200"}`}>
-              <Info className="w-5 h-5 flex-shrink-0 text-slate-400" />
-              <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Type</p><p className="font-semibold text-slate-700 capitalize">{holiday.type}</p></div>
+            <div
+              className="flex items-center gap-3 p-4 rounded-2xl"
+              style={{ backgroundColor: isDark ? D.raised : '#f8fafc', border: `1px solid ${isDark ? D.border : '#e2e8f0'}` }}
+            >
+              <Info className="w-5 h-5 flex-shrink-0" style={{ color: isDark ? D.muted : '#94a3b8' }} />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Type</p>
+                <p className="font-semibold capitalize" style={{ color: isDark ? D.text : '#374151' }}>{holiday.type}</p>
+              </div>
             </div>
           )}
         </div>
         {isAdmin ? (
-          <div className={`px-8 py-5 border-t flex justify-between items-center ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
-            <button onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }} className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
+          <div
+            className="px-8 py-5 flex justify-between items-center"
+            style={{ borderTop: `1px solid ${isDark ? D.border : '#f1f5f9'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+          >
+            <button
+              onClick={() => { onDelete(holiday.date, holiday.name); onClose(); }}
+              className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-400 active:scale-95 transition-all"
+            >
               <Trash2 className="w-4 h-4" /> Delete
             </button>
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">Close</Button>
-              <Button onClick={() => { onEdit(holiday); onClose(); }} className="font-bold text-white rounded-xl px-5 active:scale-95 transition-all" style={{ backgroundColor: COLORS.amber }}>
+              <Button
+                variant="ghost" onClick={onClose}
+                className="font-bold rounded-xl active:scale-95 transition-all"
+                style={{ color: isDark ? D.muted : undefined }}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => { onEdit(holiday); onClose(); }}
+                className="font-bold text-white rounded-xl px-5 active:scale-95 transition-all"
+                style={{ backgroundColor: COLORS.amber }}
+              >
                 <Edit2 className="w-4 h-4 mr-1.5" /> Edit
               </Button>
             </div>
           </div>
         ) : (
-          <div className={`px-8 py-5 border-t flex justify-end ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
-            <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">Close</Button>
+          <div
+            className="px-8 py-5 flex justify-end"
+            style={{ borderTop: `1px solid ${isDark ? D.border : '#f1f5f9'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+          >
+            <Button
+              variant="ghost" onClick={onClose}
+              className="font-bold rounded-xl active:scale-95 transition-all"
+              style={{ color: isDark ? D.muted : undefined }}
+            >
+              Close
+            </Button>
           </div>
         )}
       </motion.div>
@@ -550,25 +670,37 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER DETAIL POPUP
+// REMINDER DETAIL POPUP — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEdit }) {
+function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEdit, isDark }) {
   if (!reminder) return null;
   const isDue      = reminder.remind_at ? isPast(new Date(reminder.remind_at)) : false;
   const gcalUrl    = buildGCalURL(reminder);
   const descLines  = reminder.description ? stripHtml(reminder.description).split('\n').filter(Boolean) : [];
-  // FIX: always resolve id with triple-fallback
   const reminderId = resolveId(reminder);
   return (
-    <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
-        <div className="px-8 py-6 text-white relative overflow-hidden flex-shrink-0"
-          style={{ background: isDue ? `linear-gradient(135deg, ${COLORS.red} 0%, #B91C1C 100%)` : `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : undefined }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div
+          className="px-8 py-6 text-white relative overflow-hidden flex-shrink-0"
+          style={{ background: isDue ? `linear-gradient(135deg, ${COLORS.red} 0%, #B91C1C 100%)` : `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}
+        >
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%, -30%)' }} />
           <div className="flex items-start justify-between relative z-10">
             <div className="flex items-center gap-4">
-              <motion.div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center"
-                animate={isDue ? { scale: [1, 1.1, 1] } : {}} transition={{ duration: 1, repeat: Infinity }}>
+              <motion.div
+                className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center"
+                animate={isDue ? { scale: [1, 1.1, 1] } : {}} transition={{ duration: 1, repeat: Infinity }}
+              >
                 <AlarmClock className="w-7 h-7 text-white" />
               </motion.div>
               <div>
@@ -582,18 +714,28 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
           </div>
         </div>
         <div className="p-8 space-y-4 overflow-y-auto slim-scroll flex-1">
-          <div className="flex items-center gap-3 p-4 rounded-2xl"
-            style={{ backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10`, border: `1.5px solid ${isDue ? COLORS.red : COLORS.purple}25` }}>
+          <div
+            className="flex items-center gap-3 p-4 rounded-2xl"
+            style={{
+              backgroundColor: isDark
+                ? isDue ? 'rgba(239,68,68,0.15)' : 'rgba(139,92,246,0.15)'
+                : isDue ? `${COLORS.red}10` : `${COLORS.purple}10`,
+              border: `1.5px solid ${isDue ? COLORS.red : COLORS.purple}25`,
+            }}
+          >
             <Clock className="w-5 h-5 flex-shrink-0" style={{ color: isDue ? COLORS.red : COLORS.purple }} />
             <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Scheduled For</p>
-              <p className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>{formatReminderTime(reminder.remind_at)}</p>
+              <p className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Scheduled For</p>
+              <p className="font-bold" style={{ color: isDark ? D.text : '#1e293b' }}>{formatReminderTime(reminder.remind_at)}</p>
               {isDue && <p className="text-xs text-red-500 font-semibold mt-0.5">This reminder is overdue</p>}
             </div>
           </div>
           {descLines.length > 0 && (
-            <div className={`p-4 rounded-2xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-200"}`}>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Details</p>
+            <div
+              className="p-4 rounded-2xl"
+              style={{ backgroundColor: isDark ? D.raised : '#f8fafc', border: `1px solid ${isDark ? D.border : '#e2e8f0'}` }}
+            >
+              <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Details</p>
               <div className="space-y-1.5">
                 {descLines.map((line, i) => {
                   const colonIdx = line.indexOf(':');
@@ -602,34 +744,51 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
                     const val   = line.slice(colonIdx + 1).trim();
                     if (val) return (
                       <div key={i} className="flex gap-2 text-sm">
-                        <span className="font-bold text-slate-600 flex-shrink-0 min-w-[110px]">{label}:</span>
-                        <span className="text-slate-700">{val}</span>
+                        <span className="font-bold flex-shrink-0 min-w-[110px]" style={{ color: isDark ? D.muted : '#475569' }}>{label}:</span>
+                        <span style={{ color: isDark ? D.text : '#374151' }}>{val}</span>
                       </div>
                     );
                   }
-                  return <p key={i} className="text-sm text-slate-600 italic">{line}</p>;
+                  return <p key={i} className="text-sm italic" style={{ color: isDark ? D.muted : '#475569' }}>{line}</p>;
                 })}
               </div>
             </div>
           )}
-          <a href={gcalUrl} target="_blank" rel="noopener noreferrer"
+          <a
+            href={gcalUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
-            style={{ backgroundColor: COLORS.deepBlue }}>
+            style={{ backgroundColor: COLORS.deepBlue }}
+          >
             <CalendarPlus className="w-4 h-4" /> Add to Google Calendar
           </a>
         </div>
-        <div className={`px-8 py-5 border-t flex justify-between items-center flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
+        <div
+          className="px-8 py-5 flex justify-between items-center flex-shrink-0"
+          style={{ borderTop: `1px solid ${isDark ? D.border : '#f1f5f9'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+        >
           {!isViewingOther ? (
             <div className="flex gap-2">
-              <button onClick={() => { onEdit(reminderId); onClose(); }} className="flex items-center gap-2 text-sm font-bold text-blue-500 hover:text-blue-700 active:scale-95 transition-all">
+              <button
+                onClick={() => { onEdit(reminderId); onClose(); }}
+                className="flex items-center gap-2 text-sm font-bold text-blue-400 hover:text-blue-300 active:scale-95 transition-all"
+              >
                 <Edit2 className="w-4 h-4" /> Edit
               </button>
-              <button onClick={() => { onDelete(reminderId); onClose(); }} className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-700 active:scale-95 transition-all">
+              <button
+                onClick={() => { onDelete(reminderId); onClose(); }}
+                className="flex items-center gap-2 text-sm font-bold text-red-500 hover:text-red-400 active:scale-95 transition-all"
+              >
                 <Trash2 className="w-4 h-4" /> Delete
               </button>
             </div>
           ) : <div />}
-          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl active:scale-95 transition-all">Close</Button>
+          <Button
+            variant="ghost" onClick={onClose}
+            className="font-bold rounded-xl active:scale-95 transition-all"
+            style={{ color: isDark ? D.muted : undefined }}
+          >
+            Close
+          </Button>
         </div>
       </motion.div>
     </motion.div>
@@ -637,9 +796,9 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER EDIT MODAL
+// REMINDER EDIT MODAL — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
+function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
   const [title,       setTitle]       = useState(reminder?.title || '');
   const [description, setDescription] = useState(reminder?.description ? stripHtml(reminder.description) : '');
   const [remindAt, setRemindAt] = useState(() => {
@@ -659,33 +818,73 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
       });
       onClose();
     } catch { toast.error('Failed to update reminder'); }
-    finally   { setIsSaving(false); }
+    finally { setIsSaving(false); }
   };
 
   if (!isOpen) return null;
+
+  const inputCls = `w-full px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 border`;
+  const inputStyle = {
+    backgroundColor: isDark ? D.raised : '#ffffff',
+    borderColor: isDark ? D.border : '#d1d5db',
+    color: isDark ? D.text : '#1e293b',
+  };
+
   return (
-    <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : undefined }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="px-8 py-6 text-white bg-gradient-to-r from-blue-500 to-blue-600">
           <h2 className="text-xl font-bold">Edit Reminder</h2>
         </div>
         <div className="p-8 space-y-4">
           <div>
-            <label className="text-sm font-bold text-slate-600 mb-2 block">Title</label>
-            <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Reminder title" />
+            <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Title</label>
+            <input
+              type="text" value={title} onChange={e => setTitle(e.target.value)}
+              className={inputCls} style={inputStyle}
+              placeholder="Reminder title"
+            />
           </div>
           <div>
-            <label className="text-sm font-bold text-slate-600 mb-2 block">Description</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" rows={3} placeholder="Add details..." />
+            <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Description</label>
+            <textarea
+              value={description} onChange={e => setDescription(e.target.value)}
+              className={`${inputCls} resize-none`} style={inputStyle}
+              rows={3} placeholder="Add details..."
+            />
           </div>
           <div>
-            <label className="text-sm font-bold text-slate-600 mb-2 block">Remind At</label>
-            <input type="datetime-local" value={remindAt} onChange={e => setRemindAt(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Remind At</label>
+            <input
+              type="datetime-local" value={remindAt} onChange={e => setRemindAt(e.target.value)}
+              className={inputCls} style={inputStyle}
+            />
           </div>
         </div>
-        <div className={`px-8 py-5 border-t flex justify-end gap-2 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
-          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Cancel</Button>
-          <Button onClick={handleSave} disabled={isSaving} className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl">
+        <div
+          className="px-8 py-5 flex justify-end gap-2"
+          style={{ borderTop: `1px solid ${isDark ? D.border : '#f1f5f9'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+        >
+          <Button
+            variant="ghost" onClick={onClose}
+            className="font-bold rounded-xl"
+            style={{ color: isDark ? D.muted : undefined }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave} disabled={isSaving}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl"
+          >
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
@@ -695,9 +894,9 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REMINDER CALENDAR MODAL
+// REMINDER CALENDAR MODAL — dark theme aware
 // ═══════════════════════════════════════════════════════════════════════════
-function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMonth }) {
+function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMonth, isDark }) {
   const [viewMonth, setViewMonth] = useState(currentMonth || new Date());
   const monthStart = startOfMonth(viewMonth);
   const monthEnd   = endOfMonth(viewMonth);
@@ -734,8 +933,17 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
   }).length;
 
   return (
-    <motion.div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.div className={`w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`} initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }} onClick={e => e.stopPropagation()}>
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : undefined }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="px-6 py-4 flex items-center justify-between flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><CalendarIcon className="w-5 h-5 text-white" /></div>
@@ -754,7 +962,13 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
         <div className="flex-1 overflow-y-auto p-4">
           <div className="grid grid-cols-7 mb-1">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-              <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider py-1.5">{d}</div>
+              <div
+                key={d}
+                className="text-center text-[10px] font-bold uppercase tracking-wider py-1.5"
+                style={{ color: isDark ? D.dimmer : '#94a3b8' }}
+              >
+                {d}
+              </div>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-1">
@@ -766,23 +980,58 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
               const hasDue     = dayRems.some(r => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } });
               const hasRems    = dayRems.length > 0;
               return (
-                <div key={dateStr} className={`min-h-[76px] p-1.5 rounded-xl border transition-all ${hasRems ? (hasDue ? 'border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800' : 'border-purple-200 bg-purple-50 hover:bg-purple-100 cursor-pointer dark:bg-purple-900/20 dark:border-purple-800') : (isToday ? 'border-blue-300 bg-blue-50 dark:bg-blue-900/20' : (isDark?'border-slate-700 bg-slate-700/30':'border-slate-100 bg-white'))}`}>
-                  <div className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center ${isToday ? 'bg-blue-500 text-white' : hasRems ? (hasDue ? 'text-red-700' : 'text-purple-700') : 'text-slate-400'}`}>{day.getDate()}</div>
+                <div
+                  key={dateStr}
+                  className="min-h-[76px] p-1.5 rounded-xl border transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: hasRems
+                      ? hasDue
+                        ? isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2'
+                        : isDark ? 'rgba(139,92,246,0.12)' : '#f5f3ff'
+                      : isToday
+                        ? isDark ? 'rgba(59,130,246,0.12)' : '#eff6ff'
+                        : isDark ? D.raised : '#ffffff',
+                    borderColor: hasRems
+                      ? hasDue
+                        ? isDark ? '#7f1d1d' : '#fecaca'
+                        : isDark ? '#4c1d95' : '#ddd6fe'
+                      : isToday
+                        ? isDark ? '#1d4ed8' : '#bfdbfe'
+                        : isDark ? D.border : '#e2e8f0',
+                  }}
+                  onClick={() => dayRems.length > 0 && onClickReminder(dayRems[0])}
+                >
+                  <div
+                    className={`text-xs font-bold mb-1 w-5 h-5 rounded-full flex items-center justify-center`}
+                    style={{
+                      backgroundColor: isToday ? '#3b82f6' : 'transparent',
+                      color: isToday ? '#ffffff' : hasRems ? (hasDue ? COLORS.red : COLORS.purple) : isDark ? D.dimmer : '#94a3b8',
+                    }}
+                  >
+                    {day.getDate()}
+                  </div>
                   <div className="space-y-0.5">
                     {dayRems.slice(0, 3).map((r, idx) => {
-                      const isDue = (() => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } })();
-                      // FIX: always resolve id
-                      const rid   = resolveId(r);
+                      const isDueR = (() => { try { return r.remind_at ? isPast(new Date(r.remind_at)) : false; } catch { return false; } })();
+                      const rid    = resolveId(r);
                       return (
-                        <motion.div key={rid || idx} whileHover={{ scale: 1.02 }} onClick={() => onClickReminder(r)}
+                        <motion.div
+                          key={rid || idx}
+                          whileHover={{ scale: 1.02 }}
+                          onClick={() => onClickReminder(r)}
                           className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md truncate leading-tight cursor-pointer"
-                          style={{ backgroundColor: isDue ? '#FEE2E2' : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple, border: `1px solid ${isDue ? '#FCA5A5' : COLORS.purple + '30'}` }}>
+                          style={{
+                            backgroundColor: isDueR ? isDark ? 'rgba(239,68,68,0.25)' : '#fee2e2' : isDark ? `${COLORS.purple}28` : `${COLORS.purple}18`,
+                            color: isDueR ? COLORS.red : COLORS.purple,
+                            border: `1px solid ${isDueR ? '#fca5a5' : COLORS.purple + '30'}`,
+                          }}
+                        >
                           {r.remind_at ? format(new Date(r.remind_at), 'h:mma') : '--'} {r.title}
                         </motion.div>
                       );
                     })}
                     {dayRems.length > 3 && (
-                      <div onClick={() => onClickReminder(dayRems[3])} className="text-[9px] text-purple-500 font-bold px-1 cursor-pointer hover:underline">
+                      <div onClick={() => onClickReminder(dayRems[3])} className="text-[9px] font-bold px-1 cursor-pointer hover:underline" style={{ color: COLORS.purple }}>
                         +{dayRems.length - 3} more
                       </div>
                     )}
@@ -792,9 +1041,20 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
             })}
           </div>
         </div>
-        <div className={`px-6 py-4 border-t flex justify-between items-center flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-100 bg-slate-50"}`}>
-          <p className="text-xs text-slate-400">{safeReminders.length} total · click any chip to open details</p>
-          <Button variant="ghost" onClick={onClose} className="font-bold rounded-xl">Close</Button>
+        <div
+          className="px-6 py-4 flex justify-between items-center flex-shrink-0"
+          style={{ borderTop: `1px solid ${isDark ? D.border : '#f1f5f9'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+        >
+          <p className="text-xs font-medium" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+            {safeReminders.length} total · click any chip to open details
+          </p>
+          <Button
+            variant="ghost" onClick={onClose}
+            className="font-bold rounded-xl"
+            style={{ color: isDark ? D.muted : undefined }}
+          >
+            Close
+          </Button>
         </div>
       </motion.div>
     </motion.div>
@@ -912,7 +1172,6 @@ export default function Attendance() {
       const now = new Date();
       const persistedFiredIds = getFiredIds();
       for (const r of (Array.isArray(reminders) ? reminders : [])) {
-        // FIX: always resolve id with triple-fallback
         const rid = resolveId(r);
         if (!rid) continue;
         if (r.is_dismissed || persistedFiredIds.has(rid)) continue;
@@ -1061,7 +1320,6 @@ export default function Attendance() {
       if (uid === 'everyone') return;
       const url = uid ? `/reminders?user_id=${uid}` : '/reminders';
       const res = await api.get(url);
-      // FIX: normalizeReminder now uses triple-fallback resolveId
       const normalized = (Array.isArray(res.data) ? res.data : []).map(normalizeReminder);
       setReminders(Array.isArray(normalized) ? normalized : []);
     } catch (err) {
@@ -1188,7 +1446,6 @@ export default function Attendance() {
       });
       toast.success('✓ Reminder set!');
       setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null);
-      // FIX: normalizeReminder uses triple-fallback resolveId
       const newReminder = normalizeReminder(res.data);
       setReminders(prev => {
         const safe = Array.isArray(prev) ? prev : [];
@@ -1219,7 +1476,6 @@ export default function Attendance() {
     if (reminder) { setEditingReminder(reminder); setIsEditModalOpen(true); }
   }, [reminders]);
 
-  // FIX: handleUpdateReminder uses resolveId triple-fallback
   const handleUpdateReminder = useCallback(async (updates) => {
     const reminderId = resolveId(editingReminder);
     if (!reminderId) {
@@ -1273,67 +1529,38 @@ export default function Attendance() {
     finally { setTrademarkLoading(false); }
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FIX: handleDeleteReminder — core fix for the 404 error
-  //
-  // OLD (broken):
-  //   const reminder   = reminders.find(r => r.id === id || r._id === id);
-  //   const reminderId = reminder?.id || reminder?._id || id;
-  //   → if r.id was null, reminderId could be an ObjectId object (not string),
-  //     or if id arg was null, the URL became /reminders/null → 404
-  //
-  // NEW (fixed):
-  //   1. resolveId(r) always returns a plain string or null
-  //   2. We find the reminder by comparing resolveId(r) === String(id)
-  //   3. reminderId is always resolveId(found) — a guaranteed plain string
-  //   4. If reminderId is null (truly can't identify), show error and bail
-  //   5. Optimistic removal uses resolveId comparison (not raw .id / ._id)
-  // ═══════════════════════════════════════════════════════════════════════
   const handleDeleteReminder = useCallback(async (id) => {
     if (!id) {
       toast.error('Cannot delete: reminder ID is missing');
       return;
     }
     const idStr = String(id);
-
-    // FIX: find reminder using resolveId triple-fallback
     const reminder   = (Array.isArray(reminders) ? reminders : []).find(r => resolveId(r) === idStr);
     const reminderId = resolveId(reminder) || idStr;
-
     if (!reminderId) {
       toast.error('Cannot delete: could not resolve reminder ID');
       return;
     }
-
-    // Optimistic removal — compare using resolveId so null ids don't ghost
     setReminders(prev =>
       (Array.isArray(prev) ? prev : []).filter(r => resolveId(r) !== reminderId)
     );
-
     try {
       await api.delete(`/reminders/${reminderId}`);
       toast.success('Reminder removed');
     } catch (err) {
       const httpStatus = err?.response?.status;
       if (httpStatus === 404) {
-        // Document exists in our UI but not on server (e.g. already deleted,
-        // or old record without proper id). Try marking as dismissed instead.
         try {
           await api.patch(`/reminders/${reminderId}`, { is_dismissed: true });
           toast.success('Reminder removed');
         } catch {
-          // Even patch failed — silently accept the optimistic removal
           toast.success('Reminder removed');
         }
       } else {
-        // Unexpected error — restore the list
         toast.error('Failed to delete reminder — please try again');
         await fetchReminders();
       }
     }
-
-    // For email auto-saved reminders, also mark as dismissed so it won't
-    // re-appear on next email scan
     if (reminder?.source === 'email_auto') {
       try {
         await api.patch(`/reminders/${reminderId}`, { is_dismissed: true }).catch(() => {});
@@ -1341,7 +1568,6 @@ export default function Attendance() {
     }
   }, [reminders, fetchReminders]);
 
-  // FIX: handleDismissPopup uses resolveId triple-fallback
   const handleDismissPopup = useCallback(async () => {
     if (!firedReminder) return;
     const reminderId = resolveId(firedReminder);
@@ -1503,6 +1729,21 @@ export default function Attendance() {
     [holidays, todayDateStr]
   );
 
+  // ── Dark-theme-aware shared styles ────────────────────────────────────────
+  const cardBg    = isDark ? D.card    : '#ffffff';
+  const cardBorder = isDark ? D.border : '#e2e8f0';
+  const raisedBg  = isDark ? D.raised  : '#f8fafc';
+  const pageBg    = isDark ? D.bg      : undefined;
+  const textPrimary  = isDark ? D.text   : '#1e293b';
+  const textMuted    = isDark ? D.muted  : '#64748b';
+  const textDimmer   = isDark ? D.dimmer : '#94a3b8';
+  const inputStyle   = {
+    backgroundColor: isDark ? D.raised : '#ffffff',
+    borderColor: isDark ? D.border : '#d1d5db',
+    color: isDark ? D.text : '#1e293b',
+  };
+  const inputCls = `w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`;
+
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
@@ -1510,14 +1751,14 @@ export default function Attendance() {
     <TooltipProvider>
       {/* ── Reminder Popup ── */}
       <AnimatePresence>
-        {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} />}
+        {firedReminder && <ReminderPopup reminder={firedReminder} onDismiss={handleDismissPopup} isDark={isDark} />}
       </AnimatePresence>
 
       {/* ── Holiday Detail ── */}
       <AnimatePresence>
         {selectedHolidayDetail && (
           <HolidayDetailPopup
-            holiday={selectedHolidayDetail} isAdmin={isAdmin}
+            holiday={selectedHolidayDetail} isAdmin={isAdmin} isDark={isDark}
             onClose={() => setSelectedHolidayDetail(null)}
             onEdit={(h) => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
             onDelete={handleDeleteHoliday}
@@ -1529,7 +1770,7 @@ export default function Attendance() {
       <AnimatePresence>
         {selectedReminderDetail && (
           <ReminderDetailPopup
-            reminder={selectedReminderDetail} isViewingOther={isViewingOther}
+            reminder={selectedReminderDetail} isViewingOther={isViewingOther} isDark={isDark}
             onClose={() => setSelectedReminderDetail(null)}
             onDelete={handleDeleteReminder}
             onEdit={handleEditReminder}
@@ -1541,7 +1782,7 @@ export default function Attendance() {
       <AnimatePresence>
         {isEditModalOpen && editingReminder && (
           <ReminderEditModal
-            isOpen={isEditModalOpen}
+            isOpen={isEditModalOpen} isDark={isDark}
             onClose={() => { setIsEditModalOpen(false); setEditingReminder(null); }}
             reminder={editingReminder}
             onSave={handleUpdateReminder}
@@ -1553,7 +1794,7 @@ export default function Attendance() {
       <AnimatePresence>
         {showReminderCalendar && (
           <ReminderCalendarModal
-            reminders={upcomingReminders}
+            reminders={upcomingReminders} isDark={isDark}
             currentMonth={selectedDate}
             onClose={() => setShowReminderCalendar(false)}
             onClickReminder={(r) => { setSelectedReminderDetail(r); setShowReminderCalendar(false); }}
@@ -1562,17 +1803,24 @@ export default function Attendance() {
       </AnimatePresence>
 
       <motion.div
-        className={`min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9 ${isDark?"bg-[#0f172a]":""}`}
-        style={{ background: `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)` }}
+        className="min-h-screen overflow-y-auto p-5 md:p-7 lg:p-9"
+        style={{
+          background: isDark
+            ? D.bg
+            : `linear-gradient(135deg, ${COLORS.slate50} 0%, #FFFFFF 100%)`,
+        }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
         {/* ── PAGE HEADER ── */}
         <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-4xl font-black tracking-tight" style={{ color: COLORS.deepBlue, letterSpacing: '-0.02em' }}>
+            <h1
+              className="text-4xl font-black tracking-tight"
+              style={{ color: isDark ? D.text : COLORS.deepBlue, letterSpacing: '-0.02em' }}
+            >
               {isAdmin ? 'Attendance Management' : 'My Attendance'}
             </h1>
-            <p className="text-slate-500 mt-2 text-sm font-medium">
+            <p className="mt-2 text-sm font-medium" style={{ color: textMuted }}>
               {isAdmin
                 ? 'Manage team attendance — auto-absent marks at 7:00 PM IST daily'
                 : 'Track your daily hours — auto-absent at 7:00 PM if not punched in'}
@@ -1582,7 +1830,11 @@ export default function Attendance() {
             {isAdmin && (
               <motion.select
                 variants={itemVariants}
-                className={`border-2 rounded-xl px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:border-blue-400 transition-colors font-medium cursor-pointer ${isDark?"border-slate-600 bg-slate-700 text-slate-100":"border-slate-200 bg-white"}`}
+                className="rounded-xl px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 font-medium cursor-pointer border-2 transition-colors"
+                style={{
+                  ...inputStyle,
+                  borderColor: isDark ? D.border : '#e2e8f0',
+                }}
                 value={selectedUserId || ''}
                 onChange={e => {
                   const val = e.target.value || null;
@@ -1602,7 +1854,12 @@ export default function Attendance() {
               <Button
                 onClick={(e) => { addAttRipple(e); handleMarkAbsentBulk(); }}
                 disabled={absentLoading} variant="outline"
-                className="att-ripple-btn border-2 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-400 font-semibold rounded-xl px-4 py-2.5"
+                className="att-ripple-btn border-2 font-semibold rounded-xl px-4 py-2.5"
+                style={{
+                  borderColor: isDark ? '#7f1d1d' : '#fecaca',
+                  color: isDark ? '#f87171' : '#b91c1c',
+                  backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : undefined,
+                }}
               >
                 <UserX className="w-4 h-4 mr-2" />
                 {absentLoading ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Marking…</> : 'Mark Absent Now'}
@@ -1610,7 +1867,12 @@ export default function Attendance() {
             )}
             <Button
               onClick={handleExportPDF} disabled={exportingPDF} variant="outline"
-              className={`att-ripple-btn border-2 rounded-xl px-5 py-2.5 font-semibold ${isDark?"border-slate-600 text-slate-200 hover:bg-slate-700":"border-slate-200 hover:bg-slate-50"}`}
+              className="att-ripple-btn border-2 rounded-xl px-5 py-2.5 font-semibold"
+              style={{
+                borderColor: isDark ? D.border : '#e2e8f0',
+                color: isDark ? D.muted : '#374151',
+                backgroundColor: isDark ? D.raised : undefined,
+              }}
             >
               {exportingPDF ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</> : '↓ Export PDF'}
             </Button>
@@ -1619,36 +1881,70 @@ export default function Attendance() {
 
         {/* ── ALERTS ── */}
         {dataError && (
-          <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-200 bg-red-50">
-            <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0" />
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2"
+            style={{
+              borderColor: isDark ? '#7f1d1d' : '#fecaca',
+              backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2',
+            }}
+          >
+            <ShieldAlert className="w-5 h-5 text-red-500 flex-shrink-0" />
             <div className="flex-1">
-              <span className="text-sm font-bold text-red-800">Connection error: </span>
-              <span className="text-sm text-red-700">{dataError}</span>
+              <span className="text-sm font-bold text-red-500">Connection error: </span>
+              <span className="text-sm" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>{dataError}</span>
             </div>
-            <button onClick={() => fetchData()} className="text-red-600 text-xs font-bold underline ml-2 hover:text-red-800">Retry</button>
+            <button
+              onClick={() => fetchData()}
+              className="text-red-400 text-xs font-bold underline ml-2 hover:text-red-300"
+            >
+              Retry
+            </button>
           </motion.div>
         )}
         {absentCountdown && !isViewingOther && !isEveryoneView && (
-          <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-red-300 absent-pulse" style={{ backgroundColor: '#FFF1F2' }}>
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 absent-pulse"
+            style={{
+              borderColor: isDark ? '#991b1b' : '#fca5a5',
+              backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fff1f2',
+            }}
+          >
             <motion.div animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 0.9, repeat: Infinity }}>
-              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <AlertTriangle className="w-5 h-5 text-red-500" />
             </motion.div>
-            <span className="text-sm font-bold text-red-800 flex-1">⚠️ You haven't punched in today! {absentCountdown}</span>
-            <Button size="sm" onClick={(e) => { addAttRipple(e); handlePunchAction('punch_in'); }} className="att-ripple-btn bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4">
+            <span className="text-sm font-bold flex-1" style={{ color: isDark ? '#f87171' : '#991b1b' }}>
+              ⚠️ You haven't punched in today! {absentCountdown}
+            </span>
+            <Button
+              size="sm"
+              onClick={(e) => { addAttRipple(e); handlePunchAction('punch_in'); }}
+              className="att-ripple-btn bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg px-4"
+            >
               <LogIn className="w-4 h-4 mr-1" /> Punch In Now
             </Button>
           </motion.div>
         )}
         {(isViewingOther || isEveryoneView) && (
-          <motion.div variants={itemVariants} className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-blue-200" style={{ backgroundColor: '#EFF6FF' }}>
-            <Users className="w-4 h-4 text-blue-700" />
-            <span className="text-sm font-semibold text-blue-900">
+          <motion.div
+            variants={itemVariants}
+            className="mb-6 flex items-center gap-3 px-5 py-3.5 rounded-xl border-2"
+            style={{
+              borderColor: isDark ? '#1d4ed8' : '#bfdbfe',
+              backgroundColor: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff',
+            }}
+          >
+            <Users className="w-4 h-4 text-blue-500" />
+            <span className="text-sm font-semibold" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
               {isEveryoneView
                 ? 'Viewing attendance for all employees'
                 : <>Viewing attendance for: <span className="underline decoration-dotted">{viewedUserName}</span></>}
             </span>
-            <button className="ml-auto text-blue-600 hover:text-blue-800 text-xs font-bold underline"
-              onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}>
+            <button
+              className="ml-auto text-blue-400 hover:text-blue-300 text-xs font-bold underline"
+              onClick={() => { setSelectedUserId(null); fetchData(null); fetchReminders(null); }}
+            >
               Clear — show my data
             </button>
           </motion.div>
@@ -1662,7 +1958,10 @@ export default function Attendance() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
                   <div className="text-white space-y-4">
                     <div className="flex items-center gap-3">
-                      <motion.div className="w-16 h-16 bg-white/15 backdrop-blur rounded-2xl flex items-center justify-center" animate={{ scale: [1, 1.05, 1] }} transition={{ duration: 2, repeat: Infinity }}>
+                      <motion.div
+                        className="w-16 h-16 bg-white/15 backdrop-blur rounded-2xl flex items-center justify-center"
+                        animate={{ scale: [1, 1.05, 1] }} transition={{ duration: 2, repeat: Infinity }}
+                      >
                         <Clock className="w-8 h-8 text-white" />
                       </motion.div>
                       <div>
@@ -1704,24 +2003,30 @@ export default function Attendance() {
                         {!todayAttendance?.punch_in && todayAttendance?.status !== 'absent' ? (
                           <>
                             {isTodaySelected && (
-                              <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
+                              <motion.button
+                                whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
                                 onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading}
-                                className={`att-ripple-btn bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg ${!loading ? 'punch-in-pulse' : ''}`}>
+                                className={`att-ripple-btn bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg ${!loading ? 'punch-in-pulse' : ''}`}
+                              >
                                 {loading
                                   ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching In…</>
                                   : <><LogIn className="w-5 h-5 inline mr-2" />Punch In</>}
                               </motion.button>
                             )}
-                            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                            <motion.button
+                              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                               onClick={() => setShowLeaveForm(true)}
-                              className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10">
+                              className="att-ripple-btn border-2 border-white text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/10"
+                            >
                               Apply Leave
                             </motion.button>
                           </>
                         ) : !todayAttendance?.punch_out && todayAttendance?.punch_in && isTodaySelected ? (
-                          <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
+                          <motion.button
+                            whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
                             onClick={(e) => handlePunchAction('punch_out', e)} disabled={loading}
-                            className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl">
+                            className="att-ripple-btn bg-white/20 hover:bg-white/30 backdrop-blur text-white font-bold px-6 py-2.5 rounded-xl"
+                          >
                             {loading
                               ? <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Punching Out…</>
                               : <><LogOut className="w-5 h-5 inline mr-2" />Punch Out</>}
@@ -1748,20 +2053,43 @@ export default function Attendance() {
         {/* ── PENDING HOLIDAY REVIEW ── */}
         {isAdmin && Array.isArray(pendingHolidays) && pendingHolidays.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
-            <Card className="border-2 border-amber-200 bg-amber-50 shadow-md">
-              <div className="bg-amber-100 px-6 py-3 border-b border-amber-200 flex items-center">
-                <AlertTriangle className="w-5 h-5 text-amber-700 mr-3" />
-                <span className="text-sm font-black uppercase text-amber-900">Holiday Review ({pendingHolidays.length})</span>
+            <Card
+              className="shadow-md"
+              style={{
+                backgroundColor: isDark ? D.card : '#fffbeb',
+                border: `2px solid ${isDark ? '#78350f' : '#fde68a'}`,
+              }}
+            >
+              <div
+                className="px-6 py-3 flex items-center"
+                style={{ backgroundColor: isDark ? '#1c1508' : '#fef9c3', borderBottom: `1px solid ${isDark ? '#78350f' : '#fde68a'}` }}
+              >
+                <AlertTriangle className="w-5 h-5 mr-3" style={{ color: COLORS.amber }} />
+                <span className="text-sm font-black uppercase" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                  Holiday Review ({pendingHolidays.length})
+                </span>
               </div>
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {pendingHolidays.map(holiday => (
-                    <motion.div key={holiday.date} variants={itemVariants} className={`p-5 rounded-xl border-2 border-amber-200 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 ${isDark?"bg-slate-800":"bg-white"}`}>
-                      <h4 className={`font-bold text-lg mb-2 ${isDark?"text-slate-100":"text-slate-800"}`}>{holiday.name}</h4>
-                      <p className="text-sm text-slate-500 mb-4">{format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}</p>
+                    <motion.div
+                      key={holiday.date} variants={itemVariants}
+                      className="p-5 rounded-xl shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 border-2"
+                      style={{
+                        backgroundColor: cardBg,
+                        borderColor: isDark ? '#78350f' : '#fde68a',
+                      }}
+                    >
+                      <h4 className="font-bold text-lg mb-2" style={{ color: textPrimary }}>{holiday.name}</h4>
+                      <p className="text-sm mb-4" style={{ color: textMuted }}>
+                        {format(parseISO(holiday.date), 'EEEE, MMMM do, yyyy')}
+                      </p>
                       <div className="flex gap-2">
-                        <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg" onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
-                        <Button size="sm" variant="outline" className="flex-1 border-red-300 text-red-600 hover:bg-red-50 font-bold rounded-lg" onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
+                        <Button size="sm" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg"
+                          onClick={() => handleHolidayDecision(holiday.date, 'confirmed')}>Confirm</Button>
+                        <Button size="sm" variant="outline" className="flex-1 font-bold rounded-lg"
+                          style={{ borderColor: isDark ? '#991b1b' : '#fca5a5', color: isDark ? '#f87171' : '#dc2626', backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : undefined }}
+                          onClick={() => handleHolidayDecision(holiday.date, 'rejected')}>Reject</Button>
                       </div>
                     </motion.div>
                   ))}
@@ -1774,22 +2102,46 @@ export default function Attendance() {
         {/* ── ABSENT SUMMARY ── */}
         {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
           <motion.div variants={itemVariants} className="mb-8">
-            <Card className="border-2 border-red-100 shadow-md">
-              <div className="px-6 py-4 flex items-center gap-3 border-b border-red-100" style={{ backgroundColor: '#FFF1F2' }}>
-                <UserX className="w-5 h-5 text-red-600" />
-                <span className="text-sm font-black uppercase text-red-800">Absent This Month — {absentSummary.length} Staff</span>
-                <span className="ml-auto text-xs text-red-500 font-medium">Auto-marked at 7:00 PM IST</span>
+            <Card
+              className="shadow-md"
+              style={{
+                backgroundColor: cardBg,
+                border: `2px solid ${isDark ? '#7f1d1d' : '#fee2e2'}`,
+              }}
+            >
+              <div
+                className="px-6 py-4 flex items-center gap-3"
+                style={{
+                  backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fff1f2',
+                  borderBottom: `1px solid ${isDark ? '#7f1d1d' : '#fecaca'}`,
+                }}
+              >
+                <UserX className="w-5 h-5 text-red-500" />
+                <span className="text-sm font-black uppercase" style={{ color: isDark ? '#f87171' : '#991b1b' }}>
+                  Absent This Month — {absentSummary.length} Staff
+                </span>
+                <span className="ml-auto text-xs font-medium" style={{ color: isDark ? '#f87171' : '#ef4444' }}>
+                  Auto-marked at 7:00 PM IST
+                </span>
               </div>
               <CardContent className="p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {absentSummary.map(item => (
-                    <motion.div key={item.user_id} whileHover={{ scale: 1.03 }} className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
-                      <div className="w-9 h-9 rounded-full bg-red-200 flex items-center justify-center flex-shrink-0">
-                        <span className="text-red-700 font-bold text-sm">{(item.user_name || '?')[0]}</span>
+                    <motion.div
+                      key={item.user_id} whileHover={{ scale: 1.03 }}
+                      className="flex items-center gap-3 p-3 rounded-xl border"
+                      style={{
+                        backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2',
+                        borderColor: isDark ? '#7f1d1d' : '#fecaca',
+                      }}
+                    >
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.25)' : '#fecaca' }}>
+                        <span className="font-bold text-sm text-red-500">{(item.user_name || '?')[0]}</span>
                       </div>
                       <div className="min-w-0">
-                        <p className={`text-sm font-bold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{item.user_name || 'Unknown'}</p>
-                        <p className="text-xs text-red-600 font-semibold">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
+                        <p className="text-sm font-bold truncate" style={{ color: textPrimary }}>{item.user_name || 'Unknown'}</p>
+                        <p className="text-xs font-semibold text-red-500">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
                       </div>
                     </motion.div>
                   ))}
@@ -1800,31 +2152,41 @@ export default function Attendance() {
         )}
 
         {/* ── STAT CARDS ── */}
-        <motion.div className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
-          <StatCard icon={Timer}        label={isEveryoneView ? 'Total (All Staff)' : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"     color={COLORS.deepBlue}     trend={`${monthDaysPresent} days present`} />
-          <StatCard icon={CheckCircle2} label="Tasks Done"    value={tasksCompleted}        unit="completed"  color={COLORS.emeraldGreen} trend=" " />
-          <StatCard icon={CalendarX}    label="Days Late"     value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}       trend=" " />
-          <StatCard icon={UserX}        label="Days Absent"   value={monthDaysAbsent}         unit="this month" color={COLORS.red}          trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
+        <motion.div
+          className={`grid gap-4 mb-8 items-stretch ${canViewRankings ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}
+        >
+          <StatCard isDark={isDark} icon={Timer}        label={isEveryoneView ? 'Total (All Staff)' : 'This Month'} value={formatDuration(monthTotalMinutes).split('h')[0]} unit="hours"     color={COLORS.deepBlue}     trend={`${monthDaysPresent} days present`} />
+          <StatCard isDark={isDark} icon={CheckCircle2} label="Tasks Done"    value={tasksCompleted}        unit="completed"  color={COLORS.emeraldGreen} trend=" " />
+          <StatCard isDark={isDark} icon={CalendarX}    label="Days Late"     value={totalDaysLateThisMonth} unit="this month" color={COLORS.orange}       trend=" " />
+          <StatCard isDark={isDark} icon={UserX}        label="Days Absent"   value={monthDaysAbsent}         unit="this month" color={COLORS.red}          trend={monthDaysAbsent > 0 ? 'Auto-marked at 7 PM' : 'Perfect attendance!'} />
           {canViewRankings && !isEveryoneView && (
-            <StatCard icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
+            <StatCard isDark={isDark} icon={TrendingUp} label={isViewingOther ? 'Their Rank' : 'Your Rank'} value={myRank} unit="overall" color={COLORS.deepBlue} trend=" " />
           )}
         </motion.div>
 
         {/* ── DAILY PROGRESS ── */}
         {!isEveryoneView && (
           <motion.div variants={itemVariants} className="mb-8">
-            <Card className="border-0 shadow-md overflow-hidden">
+            <Card
+              className="border-0 shadow-md overflow-hidden"
+              style={{ backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+            >
               <CardContent className="p-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
                   <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Daily Progress</p>
-                    <motion.p key={displayLiveDuration} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: textDimmer }}>Daily Progress</p>
+                    <motion.p
+                      key={displayLiveDuration}
+                      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       className="text-5xl font-black tracking-tight mb-1"
-                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
+                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}
+                    >
                       {displayTodayAttendance?.status === 'absent' ? 'Absent' : todayIsHoliday ? 'Holiday' : displayLiveDuration}
                     </motion.p>
-                    <p className="text-xs font-bold uppercase tracking-wider"
-                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}>
+                    <p
+                      className="text-xs font-bold uppercase tracking-wider"
+                      style={{ color: displayTodayAttendance?.status === 'absent' ? COLORS.red : todayIsHoliday ? COLORS.amber : COLORS.emeraldGreen }}
+                    >
                       {displayTodayAttendance?.status === 'absent' ? '❌ Auto-marked absent'
                         : todayIsHoliday ? '🎉 Office closed today'
                         : (!isViewingOther && displayTodayAttendance?.punch_in && !displayTodayAttendance?.punch_out
@@ -1833,20 +2195,30 @@ export default function Attendance() {
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className={`bg-gradient-to-br p-4 rounded-xl border ${isDark?"from-blue-900/20 to-slate-800 border-slate-700":"from-blue-50 to-slate-50 border-slate-200"}`}>
-                      <p className="text-xs text-slate-500 font-bold uppercase mb-1">Daily Goal</p>
-                      <p className={`text-2xl font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>8.5h</p>
+                    <div
+                      className="p-4 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}
+                    >
+                      <p className="text-xs font-bold uppercase mb-1" style={{ color: textDimmer }}>Daily Goal</p>
+                      <p className="text-2xl font-bold" style={{ color: textPrimary }}>8.5h</p>
                     </div>
-                    <div className={`bg-gradient-to-br p-4 rounded-xl border ${isDark?"from-emerald-900/20 to-slate-800 border-slate-700":"from-emerald-50 to-slate-50 border-slate-200"}`}>
-                      <p className="text-xs text-slate-500 font-bold uppercase mb-1">Progress</p>
-                      <p className="text-2xl font-bold text-emerald-600">
+                    <div
+                      className="p-4 rounded-xl border"
+                      style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0' }}
+                    >
+                      <p className="text-xs font-bold uppercase mb-1" style={{ color: textDimmer }}>Progress</p>
+                      <p className="text-2xl font-bold text-emerald-500">
                         {displayTodayAttendance?.status === 'absent' ? '0%' : todayIsHoliday ? '—' : `${progressPct}%`}
                       </p>
                     </div>
                   </div>
                 </div>
-                <div className="mt-6 bg-slate-100 rounded-full h-3 overflow-hidden">
-                  <motion.div className="h-full rounded-full"
+                <div
+                  className="mt-6 rounded-full h-3 overflow-hidden"
+                  style={{ backgroundColor: isDark ? D.raised : '#f1f5f9' }}
+                >
+                  <motion.div
+                    className="h-full rounded-full"
                     style={{ background: displayTodayAttendance?.status === 'absent'
                       ? `linear-gradient(90deg, ${COLORS.red}, #FCA5A5)`
                       : todayIsHoliday
@@ -1872,19 +2244,41 @@ export default function Attendance() {
                 try { return format(parseISO(h.date), 'yyyy-MM') === format(selectedDate, 'yyyy-MM'); } catch { return false; }
               });
               return (
-                <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
-                  <div className="px-5 py-3 flex items-center justify-between flex-shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`, borderBottom: `2px solid ${COLORS.amber}25` }}>
+                <Card
+                  className="border-0 shadow-md overflow-hidden flex flex-col"
+                  style={{ maxHeight: 320, backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+                >
+                  <div
+                    className="px-5 py-3 flex items-center justify-between flex-shrink-0"
+                    style={{
+                      background: isDark
+                        ? `linear-gradient(135deg, rgba(245,158,11,0.1), rgba(245,158,11,0.04))`
+                        : `linear-gradient(135deg, ${COLORS.amber}18, ${COLORS.amber}08)`,
+                      borderBottom: `2px solid ${isDark ? 'rgba(245,158,11,0.2)' : `${COLORS.amber}25`}`,
+                    }}
+                  >
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.amber}22` }}><span className="text-base">🎉</span></div>
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.18)' : `${COLORS.amber}22` }}
+                      >
+                        <span className="text-base">🎉</span>
+                      </div>
                       <div>
-                        <h3 className="font-black text-sm" style={{ color: COLORS.deepBlue }}>Holidays — {format(selectedDate, 'MMM yyyy')}</h3>
-                        <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">{monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''}</p>
+                        <h3 className="font-black text-sm" style={{ color: isDark ? D.text : COLORS.deepBlue }}>
+                          Holidays — {format(selectedDate, 'MMM yyyy')}
+                        </h3>
+                        <p className="text-[11px] font-medium leading-none mt-0.5" style={{ color: textDimmer }}>
+                          {monthHolidaysGrid.length} holiday{monthHolidaysGrid.length !== 1 ? 's' : ''}
+                        </p>
                       </div>
                     </div>
                     {isAdmin && (
-                      <Button onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }}
-                        size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs" style={{ backgroundColor: COLORS.amber }}>
+                      <Button
+                        onClick={() => { setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]); setShowHolidayModal(true); }}
+                        size="sm" className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs"
+                        style={{ backgroundColor: COLORS.amber }}
+                      >
                         <Plus className="w-3.5 h-3.5 mr-1" /> Add
                       </Button>
                     )}
@@ -1893,30 +2287,44 @@ export default function Attendance() {
                     {monthHolidaysGrid.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full py-8">
                         <span className="text-3xl block mb-2">🗓️</span>
-                        <p className="text-slate-400 font-medium text-xs">No holidays this month</p>
+                        <p className="font-medium text-xs" style={{ color: textDimmer }}>No holidays this month</p>
                       </div>
                     ) : monthHolidaysGrid.map(h => (
-                      <motion.div key={h.date}
+                      <motion.div
+                        key={h.date}
                         className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm"
-                        style={{ borderColor: `${COLORS.amber}35`, backgroundColor: `${COLORS.amber}06` }}
-                        whileHover={{ backgroundColor: `${COLORS.amber}12` }}
-                        onClick={() => setSelectedHolidayDetail(h)}>
-                        <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
-                          style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                        style={{ borderColor: isDark ? 'rgba(245,158,11,0.22)' : `${COLORS.amber}35`, backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : `${COLORS.amber}06` }}
+                        whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}12` }}
+                        onClick={() => setSelectedHolidayDetail(h)}
+                      >
+                        <div
+                          className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
+                          style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}
+                        >
                           <span className="text-[8px] leading-none uppercase">{format(parseISO(h.date), 'MMM')}</span>
                           <span className="text-sm leading-none font-black">{format(parseISO(h.date), 'd')}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-bold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{h.name}</p>
-                          <p className="text-[11px] text-slate-500 font-medium">{format(parseISO(h.date), 'EEEE')}</p>
+                          <p className="text-sm font-bold truncate" style={{ color: textPrimary }}>{h.name}</p>
+                          <p className="text-[11px] font-medium" style={{ color: textMuted }}>
+                            {format(parseISO(h.date), 'EEEE')}
+                          </p>
                         </div>
-                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 flex-shrink-0" />
+                        <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: isDark ? D.dimmer : '#cbd5e1' }} />
                         {isAdmin && (
                           <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-                            <button onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
-                              className="w-6 h-6 flex items-center justify-center rounded text-blue-500 hover:bg-blue-50"><Edit2 className="w-3 h-3" /></button>
-                            <button onClick={() => handleDeleteHoliday(h.date, h.name)}
-                              className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50"><Trash2 className="w-3 h-3" /></button>
+                            <button
+                              onClick={() => { setEditingHoliday(h); setEditName(h.name); setEditDate(h.date); }}
+                              className="w-6 h-6 flex items-center justify-center rounded text-blue-400 hover:bg-blue-500/20"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteHoliday(h.date, h.name)}
+                              className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-500/20"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                           </div>
                         )}
                       </motion.div>
@@ -1927,32 +2335,56 @@ export default function Attendance() {
             })()}
 
             {/* REMINDER CARD */}
-            <Card className="border-0 shadow-md overflow-hidden flex flex-col" style={{ maxHeight: 320 }}>
-              <div className="px-5 py-3 flex items-center justify-between flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`, borderBottom: `2px solid ${COLORS.purple}25` }}>
+            <Card
+              className="border-0 shadow-md overflow-hidden flex flex-col"
+              style={{ maxHeight: 320, backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+            >
+              <div
+                className="px-5 py-3 flex items-center justify-between flex-shrink-0"
+                style={{
+                  background: isDark
+                    ? `linear-gradient(135deg, rgba(139,92,246,0.1), rgba(139,92,246,0.04))`
+                    : `linear-gradient(135deg, ${COLORS.purple}18, ${COLORS.purple}08)`,
+                  borderBottom: `2px solid ${isDark ? 'rgba(139,92,246,0.2)' : `${COLORS.purple}25`}`,
+                }}
+              >
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${COLORS.purple}20` }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.18)' : `${COLORS.purple}20` }}>
                     <AlarmClock className="w-4 h-4" style={{ color: COLORS.purple }} />
                   </div>
                   <div>
-                    <h3 className="font-black text-sm cursor-pointer hover:underline" style={{ color: COLORS.deepBlue }}
-                      onClick={() => setShowReminderCalendar(true)} title="Click to view full calendar">
+                    <h3
+                      className="font-black text-sm cursor-pointer hover:underline"
+                      style={{ color: isDark ? D.text : COLORS.deepBlue }}
+                      onClick={() => setShowReminderCalendar(true)} title="Click to view full calendar"
+                    >
                       {isViewingOther ? `${viewedUserName?.split(' ')[0]}'s Reminders` : 'Reminders & Meetings'}
                     </h3>
-                    <p className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">
+                    <p className="text-[11px] font-medium leading-none mt-0.5" style={{ color: textDimmer }}>
                       {upcomingReminders.length} upcoming ·{' '}
-                      <span className="text-purple-500 cursor-pointer hover:underline" onClick={() => setShowReminderCalendar(true)}>📅 calendar view</span>
+                      <span className="cursor-pointer hover:underline" style={{ color: COLORS.purple }} onClick={() => setShowReminderCalendar(true)}>📅 calendar view</span>
                     </p>
                   </div>
                 </div>
                 {!isViewingOther && (
                   <div className="flex items-center gap-2">
-                    <Button onClick={() => setShowEmailImporter(true)} size="sm" variant="outline"
-                      className="font-bold rounded-lg h-8 px-3 text-xs border-purple-200 text-purple-700 hover:bg-purple-50">
+                    <Button
+                      onClick={() => setShowEmailImporter(true)} size="sm" variant="outline"
+                      className="font-bold rounded-lg h-8 px-3 text-xs"
+                      style={{
+                        borderColor: isDark ? 'rgba(139,92,246,0.4)' : '#ddd6fe',
+                        color: isDark ? '#c4b5fd' : '#7c3aed',
+                        backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : undefined,
+                      }}
+                    >
                       <Mail className="w-3.5 h-3.5 mr-1" /> From Email
                     </Button>
-                    <Button onClick={() => setShowReminderForm(true)} size="sm"
-                      className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs" style={{ backgroundColor: COLORS.purple }}>
+                    <Button
+                      onClick={() => setShowReminderForm(true)} size="sm"
+                      className="att-ripple-btn font-bold rounded-lg text-white h-8 px-3 text-xs"
+                      style={{ backgroundColor: COLORS.purple }}
+                    >
                       <Plus className="w-3.5 h-3.5 mr-1" /> New
                     </Button>
                   </div>
@@ -1961,40 +2393,56 @@ export default function Attendance() {
               <div className="flex-1 overflow-y-auto slim-scroll p-3 space-y-1.5 min-h-0">
                 {upcomingReminders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-8">
-                    <Bell className="w-8 h-8 mx-auto text-slate-200 mb-2" />
-                    <p className="text-slate-400 font-medium text-xs text-center">
+                    <Bell className="w-8 h-8 mx-auto mb-2" style={{ color: isDark ? D.dimmer : '#cbd5e1' }} />
+                    <p className="font-medium text-xs text-center" style={{ color: textDimmer }}>
                       {isViewingOther ? 'No upcoming reminders' : 'No reminders yet. Create one!'}
                     </p>
                   </div>
                 ) : upcomingReminders.map((r, index) => {
                   const isDue = r.remind_at ? isPast(new Date(r.remind_at)) : false;
-                  // FIX: always use resolveId — never raw r.id which may be null
                   const rid   = resolveId(r);
                   return (
-                    <motion.div key={rid || `idx-${index}`}
+                    <motion.div
+                      key={rid || `idx-${index}`}
                       className="relative flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer group transition-all hover:shadow-sm hover:-translate-y-0.5"
-                      style={{ borderColor: isDue ? `${COLORS.red}35` : `${COLORS.purple}25`, backgroundColor: isDue ? `${COLORS.red}06` : `${COLORS.purple}05` }}
-                      whileHover={{ backgroundColor: isDue ? `${COLORS.red}10` : `${COLORS.purple}10` }}
-                      onClick={() => setSelectedReminderDetail(r)}>
-                      <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 font-black text-xs"
-                        style={{ backgroundColor: isDue ? `${COLORS.red}18` : `${COLORS.purple}18`, color: isDue ? COLORS.red : COLORS.purple }}>
+                      style={{
+                        borderColor: isDue ? isDark ? '#7f1d1d' : `${COLORS.red}35` : isDark ? 'rgba(139,92,246,0.22)' : `${COLORS.purple}25`,
+                        backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.08)' : `${COLORS.red}06` : isDark ? 'rgba(139,92,246,0.06)' : `${COLORS.purple}05`,
+                      }}
+                      whileHover={{ backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.14)' : `${COLORS.red}10` : isDark ? 'rgba(139,92,246,0.12)' : `${COLORS.purple}10` }}
+                      onClick={() => setSelectedReminderDetail(r)}
+                    >
+                      <div
+                        className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 font-black text-xs"
+                        style={{
+                          backgroundColor: isDue ? isDark ? 'rgba(239,68,68,0.2)' : `${COLORS.red}18` : isDark ? 'rgba(139,92,246,0.2)' : `${COLORS.purple}18`,
+                          color: isDue ? COLORS.red : COLORS.purple,
+                        }}
+                      >
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-bold truncate leading-snug ${isDark?"text-slate-100":"text-slate-800"}`}>{r.title}</p>
+                        <p className="text-sm font-bold truncate leading-snug" style={{ color: textPrimary }}>{r.title}</p>
                         <p className="text-[11px] font-mono font-semibold truncate" style={{ color: isDue ? COLORS.red : COLORS.purple }}>
                           ⏰ {formatReminderTime(r.remind_at)}
                         </p>
                       </div>
-                      {isDue && <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block">Due</span>}
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 flex-shrink-0" />
+                      {isDue && (
+                        <span
+                          className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 hidden sm:block"
+                          style={{ color: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.2)' : '#fee2e2' }}
+                        >
+                          Due
+                        </span>
+                      )}
+                      <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: isDark ? D.dimmer : '#cbd5e1' }} />
                       {!isViewingOther && (
                         <div className="absolute right-8 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          {/* FIX: pass rid (resolved string) not r.id (may be null) */}
                           <button
                             onClick={() => { if (rid) handleDeleteReminder(rid); else toast.error('Cannot delete: ID missing'); }}
-                            className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50 active:scale-90 transition-all"
-                            title="Delete reminder">
+                            className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:bg-red-500/20 active:scale-90 transition-all"
+                            title="Delete reminder"
+                          >
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
@@ -2011,15 +2459,25 @@ export default function Attendance() {
         <motion.div className={`grid gap-8 items-stretch ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
           {!isEveryoneView && (
             <motion.div variants={itemVariants} className="xl:col-span-1 space-y-6 h-full flex flex-col">
-              <Card className="border-0 shadow-md flex-shrink-0">
+              <Card
+                className="border-0 shadow-md flex-shrink-0"
+                style={{ backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+              >
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+                    <CardTitle className="flex items-center gap-2 text-sm font-black" style={{ color: isDark ? D.text : COLORS.deepBlue }}>
                       <CalendarIcon className="w-5 h-5" /> Attendance Calendar
                     </CardTitle>
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedDate(new Date())} className="text-xs font-bold">Today</Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => setSelectedDate(new Date())}
+                      className="text-xs font-bold"
+                      style={{ color: isDark ? D.muted : undefined }}
+                    >
+                      Today
+                    </Button>
                   </div>
-                  <CardDescription className="text-xs">Click a date for details</CardDescription>
+                  <CardDescription className="text-xs" style={{ color: textDimmer }}>Click a date for details</CardDescription>
                 </CardHeader>
                 <CardContent className="p-4">
                   <Calendar
@@ -2030,15 +2488,17 @@ export default function Attendance() {
                     classNames={{
                       months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
                       head_row: 'flex w-full justify-between mb-2',
-                      head_cell: 'text-slate-400 rounded-lg w-9 font-bold text-[0.75rem] text-center',
+                      head_cell: 'rounded-lg w-9 font-bold text-[0.75rem] text-center',
                       row: 'flex w-full mt-2 justify-between',
                       cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all hover:bg-slate-100',
+                      day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all',
                       day_today: 'font-black',
                     }}
+                    style={{ color: isDark ? D.text : undefined }}
                     components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                   />
-                  <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4">
+                  <div className="flex flex-wrap gap-x-3 gap-y-2 mt-6 text-xs justify-center border-t pt-4"
+                    style={{ borderColor: isDark ? D.border : '#e2e8f0' }}>
                     {[
                       { color: COLORS.emeraldGreen, label: 'Present'     },
                       { color: COLORS.red,          label: 'Late/Absent' },
@@ -2047,44 +2507,82 @@ export default function Attendance() {
                     ].map(({ color, label }) => (
                       <div key={label} className="flex items-center gap-1.5">
                         <span className="w-4 h-4 rounded-full border-2 flex-shrink-0" style={{ borderColor: color, backgroundColor: `${color}25` }} />
-                        <span className="text-slate-600">{label}</span>
+                        <span style={{ color: textMuted }}>{label}</span>
                       </div>
                     ))}
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-0 shadow-md overflow-hidden flex-1 min-h-0">
+
+              {/* Selected Date Detail */}
+              <Card
+                className="border-0 shadow-md overflow-hidden flex-1 min-h-0"
+                style={{ backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+              >
                 <CardContent className="p-0 h-full overflow-y-auto">
                   {selectedAttendance?.status === 'absent' ? (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-500 h-full">
-                      <p className="font-bold text-lg mb-1 text-red-700">❌ Absent</p>
-                      <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div
+                      className="p-6 border-l-4 h-full"
+                      style={{ borderColor: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2' }}
+                    >
+                      <p className="font-bold text-lg mb-1 text-red-500">❌ Absent</p>
+                      <p className="text-sm" style={{ color: textMuted }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedAttendance?.punch_in ? (
-                    <div className="p-6 bg-gradient-to-br from-emerald-50 to-slate-50 border-l-4 h-full" style={{ borderColor: COLORS.emeraldGreen }}>
-                      <p className={`font-bold text-lg mb-4 ${isDark?"text-slate-100":"text-slate-800"}`}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                    <div
+                      className="p-6 border-l-4 h-full"
+                      style={{ borderColor: COLORS.emeraldGreen, backgroundColor: isDark ? 'rgba(31,175,90,0.06)' : '#f0fdf4' }}
+                    >
+                      <p className="font-bold text-lg mb-4" style={{ color: textPrimary }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                       <div className="space-y-3 text-sm">
-                        <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch In</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_in)}</span></div>
-                        {selectedAttendance.punch_out && <div className="flex justify-between"><span className="text-slate-600 font-medium">Punch Out</span><span className="font-mono font-bold">{formatAttendanceTime(selectedAttendance.punch_out)}</span></div>}
-                        {selectedAttendance.is_late && <div className="flex justify-between"><span className="text-slate-600 font-medium">Status</span><span className="text-xs font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span></div>}
-                        <div className="pt-3 border-t flex justify-between">
-                          <span className={`font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>Duration</span>
-                          <Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>{formatDuration(selectedAttendance.duration_minutes)}</Badge>
+                        <div className="flex justify-between">
+                          <span className="font-medium" style={{ color: textMuted }}>Punch In</span>
+                          <span className="font-mono font-bold" style={{ color: textPrimary }}>{formatAttendanceTime(selectedAttendance.punch_in)}</span>
+                        </div>
+                        {selectedAttendance.punch_out && (
+                          <div className="flex justify-between">
+                            <span className="font-medium" style={{ color: textMuted }}>Punch Out</span>
+                            <span className="font-mono font-bold" style={{ color: textPrimary }}>{formatAttendanceTime(selectedAttendance.punch_out)}</span>
+                          </div>
+                        )}
+                        {selectedAttendance.is_late && (
+                          <div className="flex justify-between">
+                            <span className="font-medium" style={{ color: textMuted }}>Status</span>
+                            <span className="text-xs font-bold text-red-500 uppercase px-2 py-1 rounded"
+                              style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.2)' : '#fee2e2' }}>Late</span>
+                          </div>
+                        )}
+                        <div className="pt-3 flex justify-between" style={{ borderTop: `1px solid ${isDark ? D.border : '#e2e8f0'}` }}>
+                          <span className="font-bold" style={{ color: textPrimary }}>Duration</span>
+                          <Badge className="font-mono font-bold" style={{ backgroundColor: COLORS.emeraldGreen, color: 'white' }}>
+                            {formatDuration(selectedAttendance.duration_minutes)}
+                          </Badge>
                         </div>
                       </div>
                     </div>
                   ) : selectedAttendance?.status === 'leave' ? (
-                    <div className="p-6 border-l-4 h-full" style={{ borderColor: COLORS.orange, background: 'linear-gradient(to bottom right, #FFF7ED, #F8FAFC)' }}>
+                    <div
+                      className="p-6 border-l-4 h-full"
+                      style={{ borderColor: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.06)' : '#fff7ed' }}
+                    >
                       <p className="font-bold text-lg mb-1" style={{ color: COLORS.orange }}>🟠 On Leave</p>
-                      <p className="text-sm text-slate-600">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
+                      <p className="text-sm" style={{ color: textMuted }}>{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                     </div>
                   ) : selectedHoliday ? (
-                    <div className="p-6 bg-gradient-to-br from-amber-50 to-slate-50 border-l-4 border-amber-400 h-full">
-                      <p className="text-sm font-bold text-amber-900">🎉 {selectedHoliday.name}</p>
+                    <div
+                      className="p-6 border-l-4 h-full"
+                      style={{ borderColor: COLORS.amber, backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}
+                    >
+                      <p className="text-sm font-bold" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>🎉 {selectedHoliday.name}</p>
                     </div>
                   ) : (
-                    <div className="p-6 bg-gradient-to-br from-red-50 to-slate-50 border-l-4 border-red-400 h-full">
-                      <p className="text-sm font-bold text-red-900">No record for {format(selectedDate, 'MMM d')}</p>
+                    <div
+                      className="p-6 border-l-4 h-full"
+                      style={{ borderColor: COLORS.red, backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}
+                    >
+                      <p className="text-sm font-bold" style={{ color: isDark ? '#f87171' : '#991b1b' }}>
+                        No record for {format(selectedDate, 'MMM d')}
+                      </p>
                     </div>
                   )}
                 </CardContent>
@@ -2094,19 +2592,29 @@ export default function Attendance() {
 
           {/* RECENT ATTENDANCE TABLE */}
           <motion.div variants={itemVariants} className={isEveryoneView ? '' : 'xl:col-span-2 h-full'}>
-            <Card className="border-0 shadow-md h-full">
-              <CardHeader className={`border-b py-3 ${isDark?"border-slate-700":"border-slate-100"}`}>
-                <CardTitle style={{ color: COLORS.deepBlue }}>{isEveryoneView ? 'All Employees — Recent Attendance' : 'Recent Attendance'}</CardTitle>
-                <CardDescription>{isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}</CardDescription>
+            <Card
+              className="border-0 shadow-md h-full"
+              style={{ backgroundColor: cardBg, border: `1px solid ${cardBorder}` }}
+            >
+              <CardHeader className="py-3" style={{ borderBottom: `1px solid ${isDark ? D.border : '#f1f5f9'}` }}>
+                <CardTitle style={{ color: isDark ? D.text : COLORS.deepBlue }}>
+                  {isEveryoneView ? 'All Employees — Recent Attendance' : 'Recent Attendance'}
+                </CardTitle>
+                <CardDescription style={{ color: textDimmer }}>
+                  {isEveryoneView ? 'Latest 25 records' : 'Last 15 records'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 {loading && attendanceHistory.length === 0 ? (
                   <div className="flex items-center justify-center py-16">
-                    <motion.div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-                    <span className="ml-3 text-slate-500 font-medium">Loading…</span>
+                    <motion.div
+                      className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"
+                      animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                    />
+                    <span className="ml-3 font-medium" style={{ color: textMuted }}>Loading…</span>
                   </div>
                 ) : recentAttendance.length === 0 ? (
-                  <p className="text-center py-12 text-slate-500 font-medium">No records yet</p>
+                  <p className="text-center py-12 font-medium" style={{ color: textMuted }}>No records yet</p>
                 ) : (
                   <div className="space-y-2 max-h-[700px] overflow-y-auto slim-scroll">
                     {recentAttendance.map((record, idx) => {
@@ -2117,44 +2625,84 @@ export default function Attendance() {
                       const isLeave        = record.status === 'leave';
                       const isPresent      = record.punch_in && record.status === 'present';
                       return (
-                        <motion.div key={`${record.date}-${record.user_id || idx}`} variants={itemVariants} whileHover={{ x: 2 }}
+                        <motion.div
+                          key={`${record.date}-${record.user_id || idx}`}
+                          variants={itemVariants} whileHover={{ x: 2 }}
                           className="p-3 rounded-lg transition-all border"
                           style={{
-                            backgroundColor: isAbsent ? '#FFF1F2' : isLeave ? '#FFF7ED' : isPresent ? '#F0FDF4' : '#F8FAFC',
-                            borderColor:     isAbsent ? '#FEE2E2' : isLeave ? '#FED7AA' : isPresent ? '#BBF7D0' : '#E2E8F0',
+                            backgroundColor: isDark
+                              ? isAbsent ? 'rgba(239,68,68,0.08)' : isLeave ? 'rgba(249,115,22,0.06)' : isPresent ? 'rgba(31,175,90,0.06)' : D.raised
+                              : isAbsent ? '#fff1f2' : isLeave ? '#fff7ed' : isPresent ? '#f0fdf4' : '#f8fafc',
+                            borderColor: isDark
+                              ? isAbsent ? '#7f1d1d' : isLeave ? '#7c2d12' : isPresent ? '#14532d' : D.border
+                              : isAbsent ? '#fecaca' : isLeave ? '#fed7aa' : isPresent ? '#bbf7d0' : '#e2e8f0',
                             borderLeftWidth: 4,
-                            borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : COLORS.slate200,
-                          }}>
+                            borderLeftColor: isAbsent ? COLORS.red : isLeave ? COLORS.orange : isPresent ? COLORS.emeraldGreen : isDark ? D.border : COLORS.slate200,
+                          }}
+                        >
                           <div className="flex justify-between items-start gap-3">
                             <div className="flex-1 min-w-0">
-                              {recordUserName && <p className="text-xs font-bold text-blue-700 mb-1 flex items-center gap-1"><Users className="w-3 h-3" />{recordUserName}</p>}
-                              <p className={`font-bold text-sm ${isDark?"text-slate-100":"text-slate-800"}`}>{format(parseISO(record.date), 'EEE, MMM d, yyyy')}</p>
-                              <p className="text-xs text-slate-500 mt-1 font-mono">
+                              {recordUserName && (
+                                <p className="text-xs font-bold mb-1 flex items-center gap-1 text-blue-400">
+                                  <Users className="w-3 h-3" />{recordUserName}
+                                </p>
+                              )}
+                              <p className="font-bold text-sm" style={{ color: textPrimary }}>
+                                {format(parseISO(record.date), 'EEE, MMM d, yyyy')}
+                              </p>
+                              <p className="text-xs mt-1 font-mono" style={{ color: textMuted }}>
                                 {isAbsent ? `❌ Absent${record.auto_marked ? ' (auto-marked)' : ''}`
                                   : isLeave ? '🟠 On Leave'
                                   : record.punch_in ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : 'Ongoing'}`
                                   : '—'}
                               </p>
                               {inLocLabel && !isAbsent && (
-                                <p className="text-[11px] text-slate-500 mt-1 flex items-start gap-1">
+                                <p className="text-[11px] mt-1 flex items-start gap-1" style={{ color: textDimmer }}>
                                   <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.emeraldGreen }} />
-                                  <span><span className="font-semibold text-emerald-700">In: </span>{inLocLabel}</span>
+                                  <span><span className="font-semibold text-emerald-500">In: </span>{inLocLabel}</span>
                                 </p>
                               )}
                               {outLocLabel && !isAbsent && (
-                                <p className="text-[11px] text-slate-500 mt-0.5 flex items-start gap-1">
+                                <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: textDimmer }}>
                                   <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: COLORS.orange }} />
-                                  <span><span className="font-semibold text-orange-600">Out: </span>{outLocLabel}</span>
+                                  <span><span className="font-semibold text-orange-400">Out: </span>{outLocLabel}</span>
                                 </p>
                               )}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                              {isAbsent
-                                ? <span className="text-[10px] font-black uppercase px-2 py-1 rounded bg-red-100 text-red-700">Absent</span>
-                                : isLeave
-                                  ? <span className="text-[10px] font-bold uppercase px-2 py-1 rounded" style={{ color: COLORS.orange, backgroundColor: `${COLORS.orange}20` }}>Leave</span>
-                                  : <Badge className="font-mono text-xs font-bold px-2 py-1" style={{ backgroundColor: record.duration_minutes > 0 ? `${COLORS.emeraldGreen}20` : COLORS.slate200, color: record.duration_minutes > 0 ? COLORS.emeraldGreen : COLORS.deepBlue }}>{formatDuration(record.duration_minutes)}</Badge>}
-                              {record.is_late && !isAbsent && <span className="text-[10px] font-bold text-red-600 uppercase px-2 py-1 bg-red-100 rounded">Late</span>}
+                              {isAbsent ? (
+                                <span
+                                  className="text-[10px] font-black uppercase px-2 py-1 rounded text-red-500"
+                                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.2)' : '#fee2e2' }}
+                                >
+                                  Absent
+                                </span>
+                              ) : isLeave ? (
+                                <span
+                                  className="text-[10px] font-bold uppercase px-2 py-1 rounded"
+                                  style={{ color: COLORS.orange, backgroundColor: isDark ? 'rgba(249,115,22,0.15)' : `${COLORS.orange}20` }}
+                                >
+                                  Leave
+                                </span>
+                              ) : (
+                                <Badge
+                                  className="font-mono text-xs font-bold px-2 py-1"
+                                  style={{
+                                    backgroundColor: record.duration_minutes > 0 ? isDark ? 'rgba(31,175,90,0.2)' : `${COLORS.emeraldGreen}20` : isDark ? D.raised : COLORS.slate200,
+                                    color: record.duration_minutes > 0 ? COLORS.emeraldGreen : isDark ? D.muted : COLORS.deepBlue,
+                                  }}
+                                >
+                                  {formatDuration(record.duration_minutes)}
+                                </Badge>
+                              )}
+                              {record.is_late && !isAbsent && (
+                                <span
+                                  className="text-[10px] font-bold uppercase px-2 py-1 rounded text-red-500"
+                                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.2)' : '#fee2e2' }}
+                                >
+                                  Late
+                                </span>
+                              )}
                             </div>
                           </div>
                         </motion.div>
@@ -2172,25 +2720,42 @@ export default function Attendance() {
         {/* Punch In Modal */}
         <AnimatePresence>
           {showPunchInModal && !isViewingOther && !isEveryoneView && (
-            <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+            <motion.div
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowPunchInModal(false)}>
-              <motion.div className={`rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl ${isDark?"bg-slate-800":"bg-white"}`}
+              onClick={() => setShowPunchInModal(false)}
+            >
+              <motion.div
+                className="rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl"
+                style={{ backgroundColor: cardBg, border: isDark ? `1px solid ${D.border}` : undefined }}
                 onClick={e => e.stopPropagation()}
-                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
+                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+              >
                 <div className="mb-6">
-                  <motion.div className="mx-auto w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center punch-in-pulse">
-                    <LogIn className="w-10 h-10 text-emerald-600" />
+                  <motion.div
+                    className="mx-auto w-20 h-20 rounded-3xl flex items-center justify-center punch-in-pulse"
+                    style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.18)' : '#dcfce7' }}
+                  >
+                    <LogIn className="w-10 h-10 text-emerald-500" />
                   </motion.div>
                 </div>
-                <h2 className="text-3xl font-black mb-3" style={{ color: COLORS.deepBlue }}>Good Morning! 👋</h2>
-                <p className="text-slate-600 text-lg mb-2">Let's punch in and start your day</p>
+                <h2 className="text-3xl font-black mb-3" style={{ color: isDark ? D.text : COLORS.deepBlue }}>Good Morning! 👋</h2>
+                <p className="text-lg mb-2" style={{ color: textMuted }}>Let's punch in and start your day</p>
                 <p className="text-xs text-red-500 font-semibold mb-8">⚠️ Auto-absent marks at 7:00 PM if you don't punch in</p>
-                <Button onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading}
-                  className="att-ripple-btn w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white" style={{ backgroundColor: COLORS.emeraldGreen }}>
+                <Button
+                  onClick={(e) => handlePunchAction('punch_in', e)} disabled={loading}
+                  className="att-ripple-btn w-full mb-4 py-3 text-lg font-bold rounded-2xl text-white"
+                  style={{ backgroundColor: COLORS.emeraldGreen }}
+                >
                   {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Punching In…</> : 'Punch In Now'}
                 </Button>
-                <button onClick={() => setShowPunchInModal(false)} className="text-slate-500 hover:text-slate-700 text-sm underline">I'll do it later</button>
+                <button
+                  onClick={() => setShowPunchInModal(false)}
+                  className="text-sm underline"
+                  style={{ color: textDimmer }}
+                >
+                  I'll do it later
+                </button>
               </motion.div>
             </motion.div>
           )}
@@ -2199,20 +2764,28 @@ export default function Attendance() {
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className={`w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto ${isDark?"bg-slate-800":"bg-white"}`}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="w-full max-w-2xl rounded-3xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
+                style={{ backgroundColor: cardBg, border: isDark ? `1px solid ${D.border}` : undefined }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              >
                 <div className="flex justify-between items-start mb-8">
-                  <h2 className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>Request Leave</h2>
-                  <button onClick={() => setShowLeaveForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-light">✕</button>
+                  <h2 className="text-2xl font-black" style={{ color: isDark ? D.text : COLORS.deepBlue }}>Request Leave</h2>
+                  <button onClick={() => setShowLeaveForm(false)} className="text-2xl font-light" style={{ color: textDimmer }}>✕</button>
                 </div>
                 <div className="mb-8">
                   <div className="flex flex-wrap gap-2">
                     {[1, 3, 7, 15, 30].map(days => (
-                      <Button key={days} variant="outline" size="sm"
+                      <Button
+                        key={days} variant="outline" size="sm"
                         onClick={() => { const from = new Date(), to = new Date(); to.setDate(from.getDate() + days - 1); setLeaveFrom(from); setLeaveTo(to); }}
-                        className="rounded-lg font-semibold">
+                        className="rounded-lg font-semibold"
+                        style={{ borderColor: isDark ? D.border : undefined, color: isDark ? D.text : undefined, backgroundColor: isDark ? D.raised : undefined }}
+                      >
                         {days === 1 ? '1 Day' : `${days} Days`}
                       </Button>
                     ))}
@@ -2220,31 +2793,53 @@ export default function Attendance() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-3 block">From Date</label>
-                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom} disabled={date => isBefore(date, startOfDay(new Date()))} className={`rounded-xl border ${isDark?"border-slate-600":"border-slate-200"}`} />
+                    <label className="text-sm font-bold mb-3 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
+                    <Calendar
+                      mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                      disabled={date => isBefore(date, startOfDay(new Date()))}
+                      className="rounded-xl border"
+                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }}
+                    />
                   </div>
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-3 block">To Date</label>
-                    <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo} disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true} className={`rounded-xl border ${isDark?"border-slate-600":"border-slate-200"}`} />
+                    <label className="text-sm font-bold mb-3 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
+                    <Calendar
+                      mode="single" selected={leaveTo} onSelect={setLeaveTo}
+                      disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
+                      className="rounded-xl border"
+                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }}
+                    />
                   </div>
                 </div>
                 {leaveFrom && (
-                  <motion.div className="p-5 rounded-2xl mb-8" style={{ backgroundColor: `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}>
-                    <p className="text-xs text-slate-600 font-medium mb-1">Total Duration</p>
-                    <p className="text-2xl font-black" style={{ color: COLORS.deepBlue }}>
+                  <motion.div
+                    className="p-5 rounded-2xl mb-8"
+                    style={{ backgroundColor: isDark ? `${COLORS.deepBlue}28` : `${COLORS.deepBlue}10`, borderLeft: `4px solid ${COLORS.deepBlue}` }}
+                  >
+                    <p className="text-xs font-medium mb-1" style={{ color: textMuted }}>Total Duration</p>
+                    <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                       {Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)} days
                     </p>
                   </motion.div>
                 )}
                 <div className="mb-8">
-                  <label className="text-sm font-bold text-slate-700 mb-2 block">Reason</label>
-                  <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
+                  <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Reason</label>
+                  <textarea
+                    value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
                     placeholder="Reason for leave…"
-                    className={`w-full min-h-[100px] p-4 border-2 rounded-xl focus:outline-none focus:border-blue-400 resize-none ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                    className="w-full min-h-[100px] p-4 border-2 rounded-xl focus:outline-none focus:border-blue-400 resize-none"
+                    style={inputStyle}
+                  />
                 </div>
                 <div className="flex justify-end gap-3">
-                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)}>Cancel</Button>
-                  <Button disabled={!leaveFrom} onClick={handleApplyLeave} className="font-bold text-white" style={{ backgroundColor: COLORS.deepBlue }}>Submit Request</Button>
+                  <Button variant="ghost" onClick={() => setShowLeaveForm(false)} style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
+                  <Button
+                    disabled={!leaveFrom} onClick={handleApplyLeave}
+                    className="font-bold text-white"
+                    style={{ backgroundColor: COLORS.deepBlue }}
+                  >
+                    Submit Request
+                  </Button>
                 </div>
               </motion.div>
             </motion.div>
@@ -2254,18 +2849,27 @@ export default function Attendance() {
         {/* Holiday Modal */}
         <AnimatePresence>
           {showHolidayModal && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden"
+                style={{ backgroundColor: cardBg, border: isDark ? `1px solid ${D.border}` : undefined }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              >
                 <div className="px-8 py-6 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber} 0%, #D97706 100%)` }}>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-2xl font-black">Add Holidays</h2>
-                    <button onClick={() => setShowHolidayModal(false)} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="w-5 h-5 text-white" /></button>
+                    <button onClick={() => setShowHolidayModal(false)} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center">
+                      <X className="w-5 h-5 text-white" />
+                    </button>
                   </div>
                   <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfImport} className="hidden" />
-                  <button onClick={() => pdfInputRef.current?.click()} disabled={pdfImporting}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15">
+                  <button
+                    onClick={() => pdfInputRef.current?.click()} disabled={pdfImporting}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15"
+                  >
                     {pdfImporting ? <><Loader2 className="w-4 h-4 animate-spin" />Extracting…</> : <><FileUp className="w-4 h-4" />Import from PDF</>}
                   </button>
                 </div>
@@ -2273,26 +2877,52 @@ export default function Attendance() {
                   <div className="space-y-3 max-h-[50vh] overflow-y-auto slim-scroll mb-6">
                     {holidayRows.map((row, idx) => (
                       <motion.div key={idx} className="grid grid-cols-[1fr_160px_40px] gap-3 items-center">
-                        <input type="text" value={row.name}
+                        <input
+                          type="text" value={row.name}
                           onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], name: e.target.value }; setHolidayRows(updated); }}
-                          placeholder="e.g., Diwali" className={`px-4 py-2.5 text-sm border-2 rounded-lg focus:outline-none focus:border-amber-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
-                        <input type="date" value={row.date}
+                          placeholder="e.g., Diwali"
+                          className={`${inputCls} focus:border-amber-400`}
+                          style={inputStyle}
+                        />
+                        <input
+                          type="date" value={row.date}
                           onChange={e => { const updated = [...holidayRows]; updated[idx] = { ...updated[idx], date: e.target.value }; setHolidayRows(updated); }}
-                          className={`px-4 py-2.5 text-sm border-2 rounded-lg focus:outline-none focus:border-amber-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
-                        <button onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))} disabled={holidayRows.length === 1}
-                          className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 disabled:opacity-30 font-bold text-lg">×</button>
+                          className={`${inputCls} focus:border-amber-400`}
+                          style={inputStyle}
+                        />
+                        <button
+                          onClick={() => setHolidayRows(holidayRows.filter((_, i) => i !== idx))}
+                          disabled={holidayRows.length === 1}
+                          className="w-10 h-10 flex items-center justify-center rounded-lg text-xl font-bold disabled:opacity-30"
+                          style={{ color: isDark ? D.dimmer : '#94a3b8' }}
+                        >
+                          ×
+                        </button>
                       </motion.div>
                     ))}
                   </div>
-                  <button onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
-                    className="flex items-center gap-2 text-sm font-bold text-amber-600 hover:text-amber-800 mb-6">
-                    <span className="w-6 h-6 rounded-full border-2 border-amber-500 flex items-center justify-center">+</span>Add Another
+                  <button
+                    onClick={() => setHolidayRows([...holidayRows, { name: '', date: format(new Date(), 'yyyy-MM-dd') }])}
+                    className="flex items-center gap-2 text-sm font-bold mb-6"
+                    style={{ color: COLORS.amber }}
+                  >
+                    <span className="w-6 h-6 rounded-full border-2 border-amber-500 flex items-center justify-center">+</span>
+                    Add Another
                   </button>
                 </div>
-                <div className={`px-8 py-5 border-t flex justify-end gap-3 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
-                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)}>Cancel</Button>
-                  <Button disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0} onClick={handleAddHolidays}
-                    className="font-bold text-white" style={{ backgroundColor: COLORS.amber }}>Save</Button>
+                <div
+                  className="px-8 py-5 flex justify-end gap-3"
+                  style={{ borderTop: `1px solid ${isDark ? D.border : '#e2e8f0'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                >
+                  <Button variant="ghost" onClick={() => setShowHolidayModal(false)} style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
+                  <Button
+                    disabled={holidayRows.filter(r => r.name.trim() && r.date).length === 0}
+                    onClick={handleAddHolidays}
+                    className="font-bold text-white"
+                    style={{ backgroundColor: COLORS.amber }}
+                  >
+                    Save
+                  </Button>
                 </div>
               </motion.div>
             </motion.div>
@@ -2302,30 +2932,50 @@ export default function Attendance() {
         {/* Edit Holiday Modal */}
         <AnimatePresence>
           {editingHoliday && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className={`w-full max-w-md rounded-3xl shadow-2xl overflow-hidden ${isDark?"bg-slate-800":"bg-white"}`}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+                style={{ backgroundColor: cardBg, border: isDark ? `1px solid ${D.border}` : undefined }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              >
                 <div className="px-8 py-6 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
                   <h2 className="text-xl font-black">Edit Holiday</h2>
-                  <button onClick={() => setEditingHoliday(null)} className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-5 h-5 text-white" /></button>
+                  <button onClick={() => setEditingHoliday(null)} className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-5 h-5 text-white" />
+                  </button>
                 </div>
                 <div className="p-8 space-y-5">
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-2 block">Holiday Name</label>
-                    <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
-                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-amber-400 text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                    <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Holiday Name</label>
+                    <input
+                      type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                      className={`${inputCls} py-3 focus:border-amber-400`}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-2 block">Date</label>
-                    <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
-                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-amber-400 text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                    <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Date</label>
+                    <input
+                      type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
+                      className={`${inputCls} py-3 focus:border-amber-400`}
+                      style={inputStyle}
+                    />
                   </div>
                 </div>
-                <div className={`px-8 py-5 border-t flex justify-end gap-3 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
-                  <Button variant="ghost" onClick={() => setEditingHoliday(null)}>Cancel</Button>
-                  <Button disabled={!editName.trim() || !editDate || editLoading} onClick={handleEditHolidaySave}
-                    className="font-bold text-white" style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                <div
+                  className="px-8 py-5 flex justify-end gap-3"
+                  style={{ borderTop: `1px solid ${isDark ? D.border : '#e2e8f0'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                >
+                  <Button variant="ghost" onClick={() => setEditingHoliday(null)} style={{ color: isDark ? D.muted : undefined }}>Cancel</Button>
+                  <Button
+                    disabled={!editName.trim() || !editDate || editLoading}
+                    onClick={handleEditHolidaySave}
+                    className="font-bold text-white"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}
+                  >
                     {editLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : <><CheckCircle2 className="w-4 h-4 mr-2" />Save Changes</>}
                   </Button>
                 </div>
@@ -2337,10 +2987,15 @@ export default function Attendance() {
         {/* New Reminder Modal */}
         <AnimatePresence>
           {showReminderForm && (
-            <motion.div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className={`w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col ${isDark?"bg-slate-800":"bg-white"}`}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}>
+            <motion.div
+              className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+                style={{ backgroundColor: cardBg, border: isDark ? `1px solid ${D.border}` : undefined }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              >
                 <div className="px-8 py-6 text-white flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.purple} 0%, #6D28D9 100%)` }}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -2350,21 +3005,34 @@ export default function Attendance() {
                         <p className="text-purple-200 text-sm mt-0.5">Manual entry or auto-fill from PDF</p>
                       </div>
                     </div>
-                    <button onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
-                      className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"><X className="w-4 h-4 text-white" /></button>
+                    <button
+                      onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
+                      className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center"
+                    >
+                      <X className="w-4 h-4 text-white" />
+                    </button>
                   </div>
                   <div className="mt-4 flex items-center gap-3">
                     <input ref={trademarkPdfRef} type="file" accept=".pdf" onChange={handleTrademarkPdfUpload} className="hidden" />
-                    <button onClick={() => trademarkPdfRef.current?.click()} disabled={trademarkLoading}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60">
+                    <button
+                      onClick={() => trademarkPdfRef.current?.click()} disabled={trademarkLoading}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border-2 border-white/30 text-white hover:bg-white/15 disabled:opacity-60"
+                    >
                       {trademarkLoading ? <><Loader2 className="w-4 h-4 animate-spin" />Reading PDF…</> : <><FileUp className="w-4 h-4" />Upload Notice PDF</>}
                     </button>
                   </div>
                 </div>
                 <div className="p-8 space-y-5 overflow-y-auto slim-scroll flex-1">
                   {trademarkData && (
-                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl overflow-hidden border-2 border-purple-200">
-                      <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.purple}15, ${COLORS.purple}05)` }}>
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                      className="rounded-2xl overflow-hidden border-2"
+                      style={{ borderColor: isDark ? 'rgba(139,92,246,0.35)' : '#ddd6fe' }}
+                    >
+                      <div
+                        className="px-4 py-2.5 flex items-center gap-2"
+                        style={{ background: isDark ? `rgba(139,92,246,0.15)` : `${COLORS.purple}15` }}
+                      >
                         <CheckCircle2 className="w-4 h-4" style={{ color: COLORS.purple }} />
                         <span className="text-xs font-black uppercase tracking-widest" style={{ color: COLORS.purple }}>Extracted from PDF</span>
                       </div>
@@ -2376,36 +3044,57 @@ export default function Attendance() {
                           { label: 'Hearing Date',    value: trademarkData.hearing_date               },
                         ].filter(f => f.value).map(({ label, value, bold }) => (
                           <div key={label}>
-                            <p className="text-slate-400 text-[10px] uppercase font-bold">{label}</p>
-                            <p className={`mt-0.5 ${bold ? 'font-bold' : 'font-medium'} ${isDark?"text-slate-100":"text-slate-800"}`}>{value}</p>
+                            <p className="text-[10px] uppercase font-bold" style={{ color: textDimmer }}>{label}</p>
+                            <p className={`mt-0.5 ${bold ? 'font-bold' : 'font-medium'}`} style={{ color: textPrimary }}>{value}</p>
                           </div>
                         ))}
                       </div>
                     </motion.div>
                   )}
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-2 block">Title *</label>
-                    <input type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)}
+                    <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Title *</label>
+                    <input
+                      type="text" value={reminderTitle} onChange={e => setReminderTitle(e.target.value)}
                       placeholder="e.g., Trademark Hearing, GST filing…"
-                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                      className={`${inputCls} py-3 focus:border-purple-400`}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-2 block">Date & Time *</label>
-                    <input type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)}
+                    <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Date &amp; Time *</label>
+                    <input
+                      type="datetime-local" value={reminderDatetime} onChange={e => setReminderDatetime(e.target.value)}
                       min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
-                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                      className={`${inputCls} py-3 focus:border-purple-400`}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
-                    <label className="text-sm font-bold text-slate-700 mb-2 block">Description</label>
-                    <textarea value={reminderDesc} onChange={e => setReminderDesc(e.target.value)}
+                    <label className="text-sm font-bold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Description</label>
+                    <textarea
+                      value={reminderDesc} onChange={e => setReminderDesc(e.target.value)}
                       placeholder="Add notes, agenda, details…" rows={4}
-                      className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-purple-400 resize-none text-sm font-mono ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
+                      className={`${inputCls} py-3 resize-none font-mono focus:border-purple-400`}
+                      style={inputStyle}
+                    />
                   </div>
                 </div>
-                <div className={`px-8 py-5 border-t flex justify-end gap-3 flex-shrink-0 ${isDark?"border-slate-700 bg-slate-700/40":"border-slate-200 bg-slate-50"}`}>
-                  <Button variant="ghost" onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}>Cancel</Button>
-                  <Button disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder}
-                    className="font-bold text-white px-6" style={{ backgroundColor: COLORS.purple }}>
+                <div
+                  className="px-8 py-5 flex justify-end gap-3 flex-shrink-0"
+                  style={{ borderTop: `1px solid ${isDark ? D.border : '#e2e8f0'}`, backgroundColor: isDark ? D.raised : '#f8fafc' }}
+                >
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setShowReminderForm(false); setReminderTitle(''); setReminderDesc(''); setReminderDatetime(''); setTrademarkData(null); }}
+                    style={{ color: isDark ? D.muted : undefined }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={!reminderTitle.trim() || !reminderDatetime} onClick={handleCreateReminder}
+                    className="font-bold text-white px-6"
+                    style={{ backgroundColor: COLORS.purple }}
+                  >
                     <Bell className="w-4 h-4 mr-2" /> Set Reminder
                   </Button>
                 </div>
