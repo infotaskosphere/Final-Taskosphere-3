@@ -6,339 +6,119 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select, SelectContent, SelectItem,
-  SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import {
-  Plus, Edit, Trash2, Search, Building2, User, Phone,
-  Mail, Calendar, List, LayoutGrid, Check, TrendingUp,
-  AlertTriangle, Clock, Zap, CheckCircle2, Loader2,
-  Circle, X, ArrowRight, IndianRupee, FileText,
-  UserCheck, Users, Tag, MessageSquare, Target,
-  ChevronRight, Sparkles, ShieldCheck, Timer, Layers,
-  RefreshCw,
+  Plus, Edit, Trash2, Search, Building2, User, Phone, Mail, Calendar,
+  List, LayoutGrid, Check, TrendingUp, AlertTriangle, Clock, Zap,
+  CheckCircle2, Loader2, Circle, X, ArrowRight, IndianRupee, FileText,
+  UserCheck, Tag, MessageSquare, Target, ChevronRight, ShieldCheck,
+  Timer, Layers, RefreshCw, Receipt, ClipboardCheck, FolderCheck,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-// ─── CSS for ripple + pulse animations ───────────────────────────────────────
+/* ─── styles ──────────────────────────────────────────────────────────────── */
 const INTERACTION_STYLES = `
-  @keyframes ripple {
-    0%   { transform: scale(0); opacity: 0.6; }
-    100% { transform: scale(4); opacity: 0; }
-  }
-  @keyframes stageActivePulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); }
-    50%       { box-shadow: 0 0 0 4px rgba(59,130,246,0); }
-  }
-  @keyframes wonGlow {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
-    50%       { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
-  }
-  @keyframes lostShake {
-    0%, 100% { transform: translateX(0); }
-    20%       { transform: translateX(-2px); }
-    40%       { transform: translateX(2px); }
-    60%       { transform: translateX(-2px); }
-    80%       { transform: translateX(2px); }
-  }
-  .stage-btn-active { animation: stageActivePulse 1.5s ease-in-out 1; }
-  .ripple-container { position: relative; overflow: hidden; }
-  .ripple-container .ripple-effect {
-    position: absolute; border-radius: 50%; transform: scale(0);
-    background: rgba(255,255,255,0.4); animation: ripple 0.5s linear; pointer-events: none;
-  }
-  .won-glow  { animation: wonGlow 1s ease-out 1; }
-  .lost-shake { animation: lostShake 0.4s ease-out 1; }
+  @keyframes ripple { 0%{transform:scale(0);opacity:.6} 100%{transform:scale(4);opacity:0} }
+  @keyframes stageActivePulse { 0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.5)} 50%{box-shadow:0 0 0 4px rgba(59,130,246,0)} }
+  @keyframes wonGlow { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)} 50%{box-shadow:0 0 0 6px rgba(16,185,129,0)} }
+  @keyframes lostShake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-2px)} 40%{transform:translateX(2px)} 60%{transform:translateX(-2px)} 80%{transform:translateX(2px)} }
+  .stage-btn-active{animation:stageActivePulse 1.5s ease-in-out 1}
+  .ripple-container{position:relative;overflow:hidden}
+  .ripple-container .ripple-effect{position:absolute;border-radius:50%;transform:scale(0);background:rgba(255,255,255,.4);animation:ripple .5s linear;pointer-events:none}
+  .won-glow{animation:wonGlow 1s ease-out 1}
+  .lost-shake{animation:lostShake .4s ease-out 1}
 `;
-
-if (typeof document !== 'undefined' && !document.getElementById('leads-interaction-styles')) {
-  const style = document.createElement('style');
-  style.id = 'leads-interaction-styles';
-  style.textContent = INTERACTION_STYLES;
-  document.head.appendChild(style);
+if (typeof document !== 'undefined' && !document.getElementById('leads-styles')) {
+  const s = document.createElement('style'); s.id = 'leads-styles'; s.textContent = INTERACTION_STYLES; document.head.appendChild(s);
 }
 
-const COLORS = {
-  deepBlue:     '#0D3B66',
-  mediumBlue:   '#1F6FB2',
-  emeraldGreen: '#1FAF5A',
-  lightGreen:   '#5CCB5F',
-};
+const COLORS = { deepBlue:'#0D3B66', mediumBlue:'#1F6FB2', emeraldGreen:'#1FAF5A', lightGreen:'#5CCB5F' };
 
-const containerVariants = {
-  hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
-};
-const itemVariants = {
-  hidden:  { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-};
+const containerVariants = { hidden:{opacity:0}, visible:{opacity:1,transition:{staggerChildren:.05}} };
+const itemVariants = { hidden:{opacity:0,y:20}, visible:{opacity:1,y:0,transition:{duration:.3}} };
 
 const PIPELINE_STAGES = [
-  { id: 'new',         label: 'New',         stripe: 'bg-sky-500',     badge: 'bg-sky-50 text-sky-700 border-sky-200',           activeBg: 'bg-sky-500',     activeText: 'text-white', hoverBg: 'hover:bg-sky-50 hover:border-sky-400 hover:text-sky-700'   },
-  { id: 'contacted',   label: 'Contacted',   stripe: 'bg-indigo-500',  badge: 'bg-indigo-50 text-indigo-700 border-indigo-200',   activeBg: 'bg-indigo-500',  activeText: 'text-white', hoverBg: 'hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-700' },
-  { id: 'meeting',     label: 'Meeting',     stripe: 'bg-violet-500',  badge: 'bg-violet-50 text-violet-700 border-violet-200',   activeBg: 'bg-violet-500',  activeText: 'text-white', hoverBg: 'hover:bg-violet-50 hover:border-violet-400 hover:text-violet-700' },
-  { id: 'proposal',    label: 'Proposal',    stripe: 'bg-amber-500',   badge: 'bg-amber-50 text-amber-700 border-amber-200',       activeBg: 'bg-amber-500',   activeText: 'text-white', hoverBg: 'hover:bg-amber-50 hover:border-amber-400 hover:text-amber-700'   },
-  { id: 'negotiation', label: 'Negotiation', stripe: 'bg-orange-500',  badge: 'bg-orange-50 text-orange-700 border-orange-200',   activeBg: 'bg-orange-500',  activeText: 'text-white', hoverBg: 'hover:bg-orange-50 hover:border-orange-400 hover:text-orange-700' },
-  { id: 'on_hold',     label: 'On Hold',     stripe: 'bg-slate-400',   badge: 'bg-slate-50 text-slate-600 border-slate-200',       activeBg: 'bg-slate-400',   activeText: 'text-white', hoverBg: 'hover:bg-slate-100 hover:border-slate-400 hover:text-slate-700'   },
-  { id: 'won',         label: 'Won',         stripe: 'bg-emerald-600', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', activeBg: 'bg-emerald-600', activeText: 'text-white', hoverBg: 'hover:bg-emerald-50 hover:border-emerald-500 hover:text-emerald-700' },
-  { id: 'lost',        label: 'Lost',        stripe: 'bg-red-500',     badge: 'bg-red-50 text-red-600 border-red-200',             activeBg: 'bg-red-500',     activeText: 'text-white', hoverBg: 'hover:bg-red-50 hover:border-red-400 hover:text-red-600'           },
+  { id:'new',         label:'New',         stripe:'bg-sky-500',     badge:'bg-sky-50 text-sky-700 border-sky-200',           activeBg:'bg-sky-500',     hoverBg:'hover:bg-sky-50 hover:border-sky-400 hover:text-sky-700'         },
+  { id:'contacted',   label:'Contacted',   stripe:'bg-indigo-500',  badge:'bg-indigo-50 text-indigo-700 border-indigo-200',   activeBg:'bg-indigo-500',  hoverBg:'hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-700' },
+  { id:'meeting',     label:'Meeting',     stripe:'bg-violet-500',  badge:'bg-violet-50 text-violet-700 border-violet-200',   activeBg:'bg-violet-500',  hoverBg:'hover:bg-violet-50 hover:border-violet-400 hover:text-violet-700' },
+  { id:'proposal',    label:'Proposal',    stripe:'bg-amber-500',   badge:'bg-amber-50 text-amber-700 border-amber-200',       activeBg:'bg-amber-500',   hoverBg:'hover:bg-amber-50 hover:border-amber-400 hover:text-amber-700'   },
+  { id:'negotiation', label:'Negotiation', stripe:'bg-orange-500',  badge:'bg-orange-50 text-orange-700 border-orange-200',   activeBg:'bg-orange-500',  hoverBg:'hover:bg-orange-50 hover:border-orange-400 hover:text-orange-700' },
+  { id:'on_hold',     label:'On Hold',     stripe:'bg-slate-400',   badge:'bg-slate-50 text-slate-600 border-slate-200',       activeBg:'bg-slate-400',   hoverBg:'hover:bg-slate-100 hover:border-slate-400 hover:text-slate-700'   },
+  { id:'won',         label:'Won',         stripe:'bg-emerald-600', badge:'bg-emerald-50 text-emerald-700 border-emerald-200', activeBg:'bg-emerald-600', hoverBg:'hover:bg-emerald-50 hover:border-emerald-500 hover:text-emerald-700' },
+  { id:'lost',        label:'Lost',        stripe:'bg-red-500',     badge:'bg-red-50 text-red-600 border-red-200',             activeBg:'bg-red-500',     hoverBg:'hover:bg-red-50 hover:border-red-400 hover:text-red-600'           },
 ];
-
 const ACTIVE_STAGES = ['new','contacted','meeting','proposal','negotiation','on_hold'];
 const KANBAN_COLS   = ACTIVE_STAGES;
 
 const LEAD_SOURCES = [
-  { label: 'Direct',       value: 'direct'       },
-  { label: 'Website',      value: 'website'      },
-  { label: 'Referral',     value: 'referral'     },
-  { label: 'Social Media', value: 'social_media' },
-  { label: 'Event',        value: 'event'        },
+  { label:'Direct', value:'direct' }, { label:'Website', value:'website' },
+  { label:'Referral', value:'referral' }, { label:'Social Media', value:'social_media' },
+  { label:'Event', value:'event' },
 ];
 
 const LEAD_SERVICES = [
-  { value: 'GST',        label: 'GST',        color: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500'    },
-  { value: 'Income Tax', label: 'Income Tax', color: 'bg-violet-50 text-violet-700 border-violet-200',    dot: 'bg-violet-500'  },
-  { value: 'Accounts',   label: 'Accounts',   color: 'bg-teal-50 text-teal-700 border-teal-200',          dot: 'bg-teal-500'    },
-  { value: 'TDS',        label: 'TDS',        color: 'bg-amber-50 text-amber-700 border-amber-200',       dot: 'bg-amber-500'   },
-  { value: 'ROC',        label: 'ROC',        color: 'bg-indigo-50 text-indigo-700 border-indigo-200',    dot: 'bg-indigo-500'  },
-  { value: 'Trademark',  label: 'Trademark',  color: 'bg-pink-50 text-pink-700 border-pink-200',          dot: 'bg-pink-500'    },
-  { value: 'MSME',       label: 'MSME',       color: 'bg-orange-50 text-orange-700 border-orange-200',    dot: 'bg-orange-500'  },
-  { value: 'FEMA',       label: 'FEMA',       color: 'bg-sky-50 text-sky-700 border-sky-200',             dot: 'bg-sky-500'     },
-  { value: 'DSC',        label: 'DSC',        color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
-  { value: 'Audit',      label: 'Audit',      color: 'bg-cyan-50 text-cyan-700 border-cyan-200',          dot: 'bg-cyan-500'    },
-  { value: 'Payroll',    label: 'Payroll',    color: 'bg-lime-50 text-lime-700 border-lime-200',          dot: 'bg-lime-500'    },
-  { value: 'PF/ESIC',    label: 'PF/ESIC',    color: 'bg-rose-50 text-rose-700 border-rose-200',          dot: 'bg-rose-500'    },
-  { value: 'Other',      label: 'Other',      color: 'bg-slate-50 text-slate-600 border-slate-200',       dot: 'bg-slate-400'   },
+  { value:'GST',        color:'bg-blue-50 text-blue-700 border-blue-200',          dot:'bg-blue-500'    },
+  { value:'Income Tax', color:'bg-violet-50 text-violet-700 border-violet-200',    dot:'bg-violet-500'  },
+  { value:'Accounts',   color:'bg-teal-50 text-teal-700 border-teal-200',          dot:'bg-teal-500'    },
+  { value:'TDS',        color:'bg-amber-50 text-amber-700 border-amber-200',       dot:'bg-amber-500'   },
+  { value:'ROC',        color:'bg-indigo-50 text-indigo-700 border-indigo-200',    dot:'bg-indigo-500'  },
+  { value:'Trademark',  color:'bg-pink-50 text-pink-700 border-pink-200',          dot:'bg-pink-500'    },
+  { value:'MSME',       color:'bg-orange-50 text-orange-700 border-orange-200',    dot:'bg-orange-500'  },
+  { value:'FEMA',       color:'bg-sky-50 text-sky-700 border-sky-200',             dot:'bg-sky-500'     },
+  { value:'DSC',        color:'bg-emerald-50 text-emerald-700 border-emerald-200', dot:'bg-emerald-500' },
+  { value:'Audit',      color:'bg-cyan-50 text-cyan-700 border-cyan-200',          dot:'bg-cyan-500'    },
+  { value:'Payroll',    color:'bg-lime-50 text-lime-700 border-lime-200',          dot:'bg-lime-500'    },
+  { value:'PF/ESIC',    color:'bg-rose-50 text-rose-700 border-rose-200',          dot:'bg-rose-500'    },
+  { value:'Other',      color:'bg-slate-50 text-slate-600 border-slate-200',       dot:'bg-slate-400'   },
 ];
+
+const QUOTATION_STATUS_STYLE = {
+  draft:    'bg-slate-100 text-slate-600',
+  sent:     'bg-blue-50 text-blue-700',
+  accepted: 'bg-emerald-50 text-emerald-700',
+  rejected: 'bg-red-50 text-red-600',
+};
 
 const TASK_CATEGORIES = [
-  { value: 'gst',          label: 'GST'        },
-  { value: 'income_tax',   label: 'Income Tax' },
-  { value: 'accounts',     label: 'Accounts'   },
-  { value: 'tds',          label: 'TDS'        },
-  { value: 'roc',          label: 'ROC'        },
-  { value: 'trademark',    label: 'Trademark'  },
-  { value: 'msme_smadhan', label: 'MSME'       },
-  { value: 'fema',         label: 'FEMA'       },
-  { value: 'dsc',          label: 'DSC'        },
-  { value: 'other',        label: 'Other'      },
+  {value:'gst',label:'GST'}, {value:'income_tax',label:'Income Tax'}, {value:'accounts',label:'Accounts'},
+  {value:'tds',label:'TDS'}, {value:'roc',label:'ROC'}, {value:'trademark',label:'Trademark'},
+  {value:'msme_smadhan',label:'MSME'}, {value:'fema',label:'FEMA'}, {value:'dsc',label:'DSC'}, {value:'other',label:'Other'},
 ];
 
-const serviceStyle = (val) =>
-  LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length - 1];
+/* ─── tiny helpers ──────────────────────────────────────────────────────── */
+const svcStyle  = (val) => LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length-1];
+const stageOf   = (id)  => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
+const isOverdue = (l)   => l.next_follow_up && new Date(l.next_follow_up) < new Date() && !['won','lost'].includes(l.status);
 
-const stageOf   = (id) => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
-const isOverdue = (lead) =>
-  lead.next_follow_up &&
-  new Date(lead.next_follow_up) < new Date() &&
-  !['won','lost'].includes(lead.status);
+const toLocalDT  = (iso) => { if (!iso) return ''; const d=new Date(iso); if(isNaN(d))return ''; return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16); };
+const fromLocalDT = (s) => { if (!s) return null; return new Date(s).toISOString(); };
 
-// ─── FIX 1: Timezone-safe datetime helpers ────────────────────────────────────
-// Converts a UTC ISO string → local datetime-local input value (no offset shift)
-const toLocalDatetimeInput = (isoStr) => {
-  if (!isoStr) return '';
-  const d = new Date(isoStr);
-  if (isNaN(d.getTime())) return '';
-  const offset = d.getTimezoneOffset(); // minutes behind UTC
-  return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 16);
-};
-
-// Converts datetime-local input value → UTC ISO string (respects local timezone)
-const fromLocalDatetimeInput = (localStr) => {
-  if (!localStr) return null;
-  // new Date() on a datetime-local string interprets it as LOCAL time → .toISOString() gives correct UTC
-  return new Date(localStr).toISOString();
-};
-
-// ─── Ripple helper ────────────────────────────────────────────────────────────
 function addRipple(e) {
-  const btn = e.currentTarget;
-  const circle = document.createElement('span');
-  const diameter = Math.max(btn.clientWidth, btn.clientHeight);
-  const radius = diameter / 2;
-  const rect = btn.getBoundingClientRect();
-  circle.style.cssText = `
-    width:${diameter}px; height:${diameter}px;
-    left:${e.clientX - rect.left - radius}px;
-    top:${e.clientY - rect.top - radius}px;
-  `;
+  const btn=e.currentTarget, circle=document.createElement('span'), d=Math.max(btn.clientWidth,btn.clientHeight), r=d/2, rect=btn.getBoundingClientRect();
+  circle.style.cssText=`width:${d}px;height:${d}px;left:${e.clientX-rect.left-r}px;top:${e.clientY-rect.top-r}px;`;
   circle.classList.add('ripple-effect');
-  const existing = btn.querySelector('.ripple-effect');
-  if (existing) existing.remove();
-  btn.appendChild(circle);
-  setTimeout(() => circle.remove(), 600);
+  const ex=btn.querySelector('.ripple-effect'); if(ex)ex.remove();
+  btn.appendChild(circle); setTimeout(()=>circle.remove(),600);
 }
 
-// ─── Stage Quick-Button ───────────────────────────────────────────────────────
-const StageButton = ({ stageId, isActive, disabled, onClick, children }) => {
-  const [clicked, setClicked] = useState(false);
-  const stage = stageOf(stageId);
-
-  const handleClick = (e) => {
-    if (disabled || isActive) return;
-    addRipple(e);
-    setClicked(true);
-    setTimeout(() => setClicked(false), 600);
-    onClick();
-  };
-
+/* ─── shared sub-components ─────────────────────────────────────────────── */
+const ServiceBadge = ({ value, size='sm' }) => {
+  const s = svcStyle(value);
   return (
-    <button
-      disabled={disabled}
-      onClick={handleClick}
-      className={cn(
-        'ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border transition-all duration-200 select-none',
-        isActive
-          ? cn(stage.activeBg, stage.activeText, 'border-transparent shadow-sm scale-[1.04]', 'stage-btn-active')
-          : cn('bg-white text-slate-500 border-slate-200', stage.hoverBg, 'hover:scale-[1.03] hover:shadow-sm active:scale-95'),
-        clicked && !isActive && 'scale-95',
-        disabled && 'opacity-50 cursor-not-allowed',
-      )}
-    >
-      {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/70 mr-1 mb-0.5" />}
-      {children}
-    </button>
-  );
-};
-
-// ─── Progress Bar ─────────────────────────────────────────────────────────────
-const StageProgressBar = ({ currentStatus, stages, canEdit, onStageClick }) => {
-  const currentIdx = stages.indexOf(currentStatus);
-  return (
-    <div className="flex items-center gap-[3px]">
-      {stages.map((sid, i) => {
-        const s = stageOf(sid);
-        const filled   = i <= currentIdx;
-        const isCurrent = i === currentIdx;
-        return (
-          <button
-            key={sid}
-            onClick={() => canEdit && onStageClick(sid)}
-            title={s.label}
-            className={cn(
-              'flex-1 rounded-full transition-all duration-300 ease-out',
-              isCurrent ? 'h-2' : 'h-1.5',
-              filled
-                ? cn(s.stripe, isCurrent && 'ring-2 ring-offset-1 ring-current opacity-90')
-                : 'bg-slate-200',
-              canEdit ? 'cursor-pointer hover:opacity-80 hover:h-2' : 'cursor-default',
-            )}
-          />
-        );
-      })}
-    </div>
-  );
-};
-
-// ─── Strip Card ───────────────────────────────────────────────────────────────
-const DashboardStripCard = ({ stripeColor, isCompleted = false, className = '', children }) => (
-  <div className={cn(
-    'relative rounded-2xl border transition-all duration-300 ease-in-out overflow-hidden group',
-    isCompleted
-      ? 'bg-slate-50 border-slate-200 opacity-80'
-      : 'bg-white/90 backdrop-blur-sm border-slate-200 hover:shadow-md hover:-translate-y-[1px]',
-    className,
-  )}>
-    <div className={cn('absolute left-0 top-0 h-full w-[6px] rounded-l-2xl transition-all duration-200 group-hover:w-[8px]', stripeColor)} />
-    <div className={cn('pl-6 pr-6 transition-all duration-300', isCompleted ? 'py-3' : 'py-5')}>
-      {children}
-    </div>
-  </div>
-);
-
-// ─── Stat Card ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, value, color, onClick, active }) => (
-  <Card
-    onClick={onClick}
-    className={cn(
-      'border border-slate-200 hover:shadow-md transition-all duration-200 cursor-pointer rounded-2xl',
-      'active:scale-95 select-none',
-      active && 'ring-2 ring-blue-300 border-blue-300 shadow-md scale-[1.02]',
-    )}
-  >
-    <CardContent className="p-4 text-center">
-      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
-      <p className={cn('text-3xl font-bold mt-1 transition-all duration-200', color)}>{value}</p>
-    </CardContent>
-  </Card>
-);
-
-// ─── Service Badge ────────────────────────────────────────────────────────────
-const ServiceBadge = ({ value, size = 'sm' }) => {
-  const s = serviceStyle(value);
-  return (
-    <span className={cn(
-      'inline-flex items-center gap-1 rounded-lg border font-semibold',
-      s.color,
-      size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',
-    )}>
-      <span className={cn('rounded-full flex-shrink-0', s.dot, size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2')} />
-      {value}
+    <span className={cn('inline-flex items-center gap-1 rounded-lg border font-semibold', s.color, size==='sm'?'px-2 py-0.5 text-[11px]':'px-2.5 py-1 text-xs')}>
+      <span className={cn('rounded-full flex-shrink-0',s.dot,size==='sm'?'h-1.5 w-1.5':'h-2 w-2')} />{value}
     </span>
   );
 };
 
-// ─── Service Selector ─────────────────────────────────────────────────────────
-const ServiceSelector = ({ selected = [], onChange, availableFromServer = [] }) => {
-  const serverExtras = availableFromServer
-    .filter(s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase()))
-    .map(s => ({ value: s, color: 'bg-slate-50 text-slate-600 border-slate-200', dot: 'bg-slate-400' }));
-  const allServices = [...LEAD_SERVICES, ...serverExtras];
-
-  const toggle = (val) => {
-    onChange(selected.includes(val) ? selected.filter(s => s !== val) : [...selected, val]);
-  };
-
-  return (
-    <div className="space-y-3">
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 p-3 bg-blue-50 rounded-2xl border border-blue-100">
-          <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider w-full mb-0.5">Selected Services</span>
-          {selected.map(val => (
-            <button key={val} type="button" onClick={() => toggle(val)}
-              className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-lg border text-[11px] font-semibold bg-white border-blue-200 text-blue-700 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-colors group active:scale-95">
-              {val}<X className="h-3 w-3 opacity-50 group-hover:opacity-100" />
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        {allServices.map(svc => {
-          const isSelected = selected.includes(svc.value);
-          return (
-            <button key={svc.value} type="button" onClick={() => toggle(svc.value)}
-              className={cn(
-                'inline-flex items-center gap-1.5 h-8 px-3 rounded-2xl text-xs font-semibold border transition-all duration-150 active:scale-95',
-                isSelected
-                  ? cn(svc.color, 'shadow-sm ring-1 ring-offset-1', svc.color.split(' ')[2])
-                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50',
-              )}>
-              {isSelected && <Check className="h-3 w-3 flex-shrink-0" />}
-              {svc.label || svc.value}
-            </button>
-          );
-        })}
-      </div>
-      {selected.length === 0 && (
-        <p className="text-[11px] text-slate-400 italic">No services selected — click any service above to add it.</p>
-      )}
-    </div>
-  );
-};
-
-// ─── Section Label ────────────────────────────────────────────────────────────
-const SectionLabel = ({ icon: Icon, children }) => (
+const SectionLabel = ({ icon:Icon, children }) => (
   <div className="md:col-span-2 flex items-center gap-2 pt-2">
     <Icon className="h-3.5 w-3.5 text-slate-400" />
     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{children}</p>
@@ -346,280 +126,185 @@ const SectionLabel = ({ icon: Icon, children }) => (
   </div>
 );
 
-// ─── Client Conversion Dialog ─────────────────────────────────────────────────
+const StatCard = ({ label, value, color, onClick, active }) => (
+  <Card onClick={onClick} className={cn('border hover:shadow-md transition-all cursor-pointer rounded-2xl active:scale-95 select-none', active && 'ring-2 ring-blue-300 border-blue-300 shadow-md scale-[1.02]')}>
+    <CardContent className="p-4 text-center">
+      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
+      <p className={cn('text-3xl font-bold mt-1', color)}>{value}</p>
+    </CardContent>
+  </Card>
+);
+
+const DashboardStripCard = ({ stripeColor, isCompleted=false, className='', children }) => (
+  <div className={cn('relative rounded-2xl border overflow-hidden group transition-all duration-300', isCompleted?'bg-slate-50 border-slate-200 opacity-80':'bg-white border-slate-200 hover:shadow-md hover:-translate-y-[1px]', className)}>
+    <div className={cn('absolute left-0 top-0 h-full w-[6px] rounded-l-2xl transition-all duration-200 group-hover:w-[8px]', stripeColor)} />
+    <div className={cn('pl-6 pr-6 transition-all', isCompleted?'py-3':'py-5')}>{children}</div>
+  </div>
+);
+
+const StageButton = ({ stageId, isActive, onClick }) => {
+  const stage = stageOf(stageId);
+  const [clicked, setClicked] = useState(false);
+  const handleClick = (e) => { if (isActive) return; addRipple(e); setClicked(true); setTimeout(()=>setClicked(false),600); onClick(); };
+  return (
+    <button onClick={handleClick} className={cn('ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border transition-all duration-200 select-none',
+      isActive ? cn(stage.activeBg,'text-white border-transparent shadow-sm scale-[1.04] stage-btn-active') : cn('bg-white text-slate-500 border-slate-200',stage.hoverBg,'hover:scale-[1.03] hover:shadow-sm active:scale-95'),
+      clicked && !isActive && 'scale-95')}>
+      {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/70 mr-1 mb-0.5" />}{stage.label}
+    </button>
+  );
+};
+
+const StageProgressBar = ({ currentStatus, canEdit, onStageClick }) => {
+  const currentIdx = ACTIVE_STAGES.indexOf(currentStatus);
+  return (
+    <div className="flex items-center gap-[3px]">
+      {ACTIVE_STAGES.map((sid,i) => {
+        const s=stageOf(sid), filled=i<=currentIdx, isCurrent=i===currentIdx;
+        return (
+          <button key={sid} onClick={()=>canEdit&&onStageClick(sid)} title={s.label}
+            className={cn('flex-1 rounded-full transition-all duration-300', isCurrent?'h-2':'h-1.5',
+              filled?cn(s.stripe,isCurrent&&'ring-2 ring-offset-1 ring-current opacity-90'):'bg-slate-200',
+              canEdit?'cursor-pointer hover:opacity-80 hover:h-2':'cursor-default')} />
+        );
+      })}
+    </div>
+  );
+};
+
+/* ─── Quotations panel inside lead card ─────────────────────────────────── */
+function LeadQuotationsPanel({ leadId, canCreateQuotation, onCreateQuotation }) {
+  const [quotations, setQuotations] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/leads/${leadId}/quotations`)
+      .then(r => { if (!cancelled) setQuotations(r.data || []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  if (loading) return <div className="mt-3 pt-3 border-t border-slate-100"><div className="h-6 w-32 bg-slate-100 rounded-lg animate-pulse" /></div>;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1">
+          <Receipt className="h-3 w-3" /> Quotations ({quotations.length})
+        </p>
+        {canCreateQuotation && (
+          <button onClick={onCreateQuotation} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-all active:scale-95">
+            <Plus className="h-3 w-3" /> Create Quotation
+          </button>
+        )}
+      </div>
+      {quotations.length === 0
+        ? <p className="text-[11px] text-slate-400 italic">No quotations linked yet.</p>
+        : <div className="space-y-1.5">
+            {quotations.map(q => (
+              <div key={q.id} className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-mono font-bold text-slate-600">{q.quotation_no}</span>
+                  <span className="text-[10px] text-slate-400 truncate">{q.service}</span>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-[11px] font-bold text-slate-700">₹{(q.total||0).toLocaleString()}</span>
+                  <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full capitalize', QUOTATION_STATUS_STYLE[q.status]||'bg-slate-50 text-slate-500')}>{q.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>}
+    </div>
+  );
+}
+
+/* ─── Client Conversion Dialog ───────────────────────────────────────────── */
 function ClientConversionDialog({ lead, open, onClose, onConvertNow, onConvertLater, converting }) {
   const [hovered, setHovered] = useState(null);
-
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+    <Dialog open={open} onOpenChange={v=>{ if(!v)onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-            <ShieldCheck className="h-5 w-5 text-emerald-500" />
-            Convert to Client?
+          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{color:COLORS.deepBlue}}>
+            <ShieldCheck className="h-5 w-5 text-emerald-500" />Convert to Client?
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-500 leading-relaxed">
-            <strong>{lead?.company_name}</strong> has been marked as <strong className="text-emerald-600">Won</strong>.
-            Would you like to convert this lead into a client right now, or do it later?
+            <strong>{lead?.company_name}</strong> marked as <strong className="text-emerald-600">Won</strong>. Convert to a client now, or later?
           </DialogDescription>
         </DialogHeader>
-
         <div className="space-y-3 py-2">
-          {/* Convert Now */}
-          <button
-            onClick={onConvertNow}
-            disabled={converting}
-            onMouseEnter={() => setHovered('now')}
-            onMouseLeave={() => setHovered(null)}
-            className={cn(
-              'w-full text-left rounded-2xl border-2 p-4 transition-all duration-200 group ripple-container',
-              hovered === 'now'
-                ? 'border-emerald-400 bg-emerald-100 shadow-md scale-[1.01]'
-                : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400',
-              converting && 'opacity-60 cursor-not-allowed',
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <div className={cn(
-                'h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200',
-                hovered === 'now' ? 'bg-emerald-300 scale-110' : 'bg-emerald-100 group-hover:bg-emerald-200',
-              )}>
-                {converting
-                  ? <Loader2 className="h-4 w-4 text-emerald-600 animate-spin" />
-                  : <Building2 className="h-4 w-4 text-emerald-600" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-emerald-800">Convert to Client Now</p>
-                <p className="text-xs text-emerald-600 mt-0.5 leading-relaxed">
-                  Creates a client profile, marks this lead as Won, and triggers an onboarding task automatically.
-                </p>
-              </div>
-              <ChevronRight className={cn(
-                'h-4 w-4 ml-auto flex-shrink-0 mt-0.5 transition-all duration-200',
-                hovered === 'now' ? 'text-emerald-600 translate-x-1' : 'text-emerald-400',
-              )} />
-            </div>
-          </button>
-
-          {/* Convert Later — FIXED: only PATCH status=won, no client created */}
-          <button
-            onClick={onConvertLater}
-            disabled={converting}
-            onMouseEnter={() => setHovered('later')}
-            onMouseLeave={() => setHovered(null)}
-            className={cn(
-              'w-full text-left rounded-2xl border-2 p-4 transition-all duration-200 group ripple-container',
-              hovered === 'later'
-                ? 'border-slate-400 bg-slate-100 shadow-md scale-[1.01]'
-                : 'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300',
-              converting && 'opacity-60 cursor-not-allowed',
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <div className={cn(
-                'h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200',
-                hovered === 'later' ? 'bg-slate-300 scale-110' : 'bg-slate-100 group-hover:bg-slate-200',
-              )}>
-                {converting
-                  ? <Loader2 className="h-4 w-4 text-slate-500 animate-spin" />
-                  : <Timer className="h-4 w-4 text-slate-500" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-700">Mark as Won — Convert Later</p>
-                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  Marks the lead as Won only. You can convert to a client anytime from the closed leads section.
-                </p>
-              </div>
-              <ChevronRight className={cn(
-                'h-4 w-4 ml-auto flex-shrink-0 mt-0.5 transition-all duration-200',
-                hovered === 'later' ? 'text-slate-600 translate-x-1' : 'text-slate-300',
-              )} />
-            </div>
-          </button>
-        </div>
-
-        <DialogFooter className="pt-2">
-          <Button variant="ghost" onClick={onClose} disabled={converting} className="rounded-2xl h-9 text-slate-500 hover:bg-slate-100">
-            Cancel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Convert to Task Dialog ───────────────────────────────────────────────────
-function ConvertToTaskDialog({ lead, open, onClose, onSuccess }) {
-  const { user: currentUser } = useAuth();
-  const [form, setForm] = useState({
-    title: '', description: '', priority: 'high',
-    category: 'other', due_date: '', assigned_to: '',
-  });
-  const [users,   setUsers]   = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (open) api.get('/users').then(r => setUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
-  }, [open]);
-
-  useEffect(() => {
-    if (lead) {
-      setForm(f => ({
-        ...f,
-        title: `Client Onboarding: ${lead.company_name}`,
-        assigned_to: lead.assigned_to || currentUser?.id || '',
-        description: [
-          `Lead converted to client from pipeline.`,
-          `Contact:    ${lead.contact_name  || '—'}`,
-          `Phone:      ${lead.phone         || '—'}`,
-          `Email:      ${lead.email         || '—'}`,
-          `Services:   ${(lead.services||[]).join(', ') || '—'}`,
-          `Value:      ₹${(Number(lead.quotation_amount)||0).toLocaleString()}`,
-          `Source:     ${lead.source?.replace('_',' ') || '—'}`,
-          `Notes:      ${lead.notes         || '—'}`,
-        ].join('\n'),
-      }));
-    }
-  }, [lead, currentUser]);
-
-  const handleConvert = async () => {
-    setLoading(true);
-    try {
-      await api.post(`/leads/${lead.id}/convert`);
-      await api.post('/tasks', {
-        title: form.title, description: form.description,
-        priority: form.priority, category: form.category,
-        status: 'pending',
-        due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
-        assigned_to: form.assigned_to && form.assigned_to !== 'unassigned' ? form.assigned_to : null,
-        is_recurring: false, sub_assignees: [],
-      });
-      toast.success(`"${lead.company_name}" converted to client & task created!`);
-      onSuccess(); onClose();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Conversion failed');
-    } finally { setLoading(false); }
-  };
-
-  const assignedUser = users.find(u => u.id === form.assigned_to);
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-            <Zap className="h-5 w-5 text-emerald-500" /> Convert Lead → Client + Task
-          </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500">
-            Marks <strong>{lead?.company_name}</strong> as <strong>Won</strong>, creates a client profile, and a follow-up task.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 pt-1">
-          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-3">
-            <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-              <Building2 className="h-4 w-4 text-emerald-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800 truncate">{lead?.company_name}</p>
-              <p className="text-xs text-slate-500">
-                ₹{(Number(lead?.quotation_amount)||0).toLocaleString()} · {lead?.contact_name || 'No contact'}
-              </p>
-              {(lead?.services||[]).length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {lead.services.map(s => <ServiceBadge key={s} value={s} />)}
+          {[
+            { key:'now', icon:Building2, title:'Convert to Client Now', desc:'Creates a client profile, marks as Won, triggers onboarding task.', onClick:onConvertNow, cls:'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400', activeCls:'border-emerald-400 bg-emerald-100 shadow-md', iconBg:'bg-emerald-100', iconActive:'bg-emerald-300', iconColor:'text-emerald-600', labelCls:'text-emerald-800', descCls:'text-emerald-600' },
+            { key:'later', icon:Timer, title:'Mark Won — Convert Later', desc:'Marks the lead as Won only. Convert to client anytime.', onClick:onConvertLater, cls:'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300', activeCls:'border-slate-400 bg-slate-100 shadow-md', iconBg:'bg-slate-100', iconActive:'bg-slate-300', iconColor:'text-slate-500', labelCls:'text-slate-700', descCls:'text-slate-500' },
+          ].map(opt => (
+            <button key={opt.key} onClick={opt.onClick} disabled={converting}
+              onMouseEnter={()=>setHovered(opt.key)} onMouseLeave={()=>setHovered(null)}
+              className={cn('w-full text-left rounded-2xl border-2 p-4 transition-all duration-200 ripple-container', hovered===opt.key?opt.activeCls:opt.cls, converting&&'opacity-60 cursor-not-allowed')}>
+              <div className="flex items-start gap-3">
+                <div className={cn('h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all', hovered===opt.key?cn(opt.iconActive,'scale-110'):opt.iconBg)}>
+                  {converting ? <Loader2 className={cn('h-4 w-4 animate-spin',opt.iconColor)} /> : <opt.icon className={cn('h-4 w-4',opt.iconColor)} />}
                 </div>
-              )}
-            </div>
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-600 text-white flex-shrink-0">→ WON</span>
-          </div>
-
-          {assignedUser && (
-            <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
-              <UserCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-              <p className="text-xs text-blue-700">
-                Assigned to <strong>{assignedUser.full_name}</strong>
-                {assignedUser.id === currentUser?.id && <span className="text-blue-500"> (you)</span>}
-              </p>
-            </div>
-          )}
-
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-0.5">Follow-up Task Details</p>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Task Title</Label>
-            <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="h-9 rounded-2xl text-sm" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-400" />Assign Task To</Label>
-            <Select value={form.assigned_to || 'unassigned'} onValueChange={v => setForm(f => ({ ...f, assigned_to: v === 'unassigned' ? '' : v }))}>
-              <SelectTrigger className="h-9 rounded-2xl text-sm"><SelectValue placeholder="Select a team member…" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">— Unassigned —</SelectItem>
-                {users.map(u => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.full_name}{u.id === currentUser?.id && ' (you)'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">Priority</Label>
-              <Select value={form.priority} onValueChange={v => setForm(f => ({ ...f, priority: v }))}>
-                <SelectTrigger className="h-9 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">Category</Label>
-              <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
-                <SelectTrigger className="h-9 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Due Date</Label>
-            <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className="h-9 rounded-2xl text-sm" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Task Description</Label>
-            <Textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={5} className="resize-none text-sm rounded-2xl" />
-          </div>
+                <div><p className={cn('text-sm font-semibold',opt.labelCls)}>{opt.title}</p><p className={cn('text-xs mt-0.5 leading-relaxed',opt.descCls)}>{opt.desc}</p></div>
+                <ChevronRight className={cn('h-4 w-4 ml-auto flex-shrink-0 mt-0.5 transition-all', hovered===opt.key?cn(opt.iconColor,'translate-x-1'):'text-slate-300')} />
+              </div>
+            </button>
+          ))}
         </div>
-
-        <DialogFooter className="gap-2 pt-2">
-          <Button variant="outline" onClick={onClose} className="rounded-2xl h-9">Cancel</Button>
-          <Button onClick={handleConvert} disabled={loading || !form.title.trim()} className="rounded-2xl h-9 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 min-w-[180px]">
-            {loading ? <><Loader2 className="h-4 w-4 animate-spin" />Converting…</> : <><CheckCircle2 className="h-4 w-4" />Convert & Create Task</>}
-          </Button>
+        <DialogFooter className="pt-2">
+          <Button variant="ghost" onClick={onClose} disabled={converting} className="rounded-2xl h-9 text-slate-500">Cancel</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ─── Main Page ─────────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+/* ─── Service selector ───────────────────────────────────────────────────── */
+const ServiceSelector = ({ selected=[], onChange, extra=[] }) => {
+  const extras = extra.filter(s => !LEAD_SERVICES.find(ls=>ls.value.toLowerCase()===s.toLowerCase()))
+    .map(s=>({value:s,color:'bg-slate-50 text-slate-600 border-slate-200',dot:'bg-slate-400'}));
+  const all = [...LEAD_SERVICES, ...extras];
+  const toggle = (val) => onChange(selected.includes(val)?selected.filter(s=>s!==val):[...selected,val]);
+  return (
+    <div className="space-y-3">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 p-3 bg-blue-50 rounded-2xl border border-blue-100">
+          <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider w-full mb-0.5">Selected</span>
+          {selected.map(val=>(
+            <button key={val} type="button" onClick={()=>toggle(val)}
+              className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-lg border text-[11px] font-semibold bg-white border-blue-200 text-blue-700 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-colors group active:scale-95">
+              {val}<X className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {all.map(svc=>{
+          const isSel = selected.includes(svc.value);
+          return (
+            <button key={svc.value} type="button" onClick={()=>toggle(svc.value)}
+              className={cn('inline-flex items-center gap-1.5 h-8 px-3 rounded-2xl text-xs font-semibold border transition-all active:scale-95',
+                isSel?cn(svc.color,'shadow-sm ring-1 ring-offset-1'):'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50')}>
+              {isSel&&<Check className="h-3 w-3 flex-shrink-0" />}{svc.value}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN PAGE
+═══════════════════════════════════════════════════════════════════════════ */
 export default function LeadsPage() {
   const { user } = useAuth();
-
-  const isAdmin       = user?.role === 'admin';
-  const perms         = user?.permissions || {};
-  const canDeleteLead = isAdmin || !!perms.can_manage_users;
-  const canViewAll    = isAdmin || !!perms.can_view_all_leads;
-  const canEditLead   = (lead) =>
-    isAdmin ||
-    (lead?.assigned_to && lead.assigned_to === user?.id) ||
-    (lead?.created_by  && lead.created_by  === user?.id);
+  const isAdmin         = user?.role === 'admin';
+  const perms           = user?.permissions || {};
+  const canDeleteLead   = isAdmin || !!perms.can_manage_users;
+  const canUseQuotations = isAdmin || !!perms.can_create_quotations;
+  const canEditLead = (l) => isAdmin || l?.assigned_to===user?.id || l?.created_by===user?.id;
 
   const [leads,             setLeads]             = useState([]);
   const [availableServices, setAvailableServices] = useState([]);
@@ -632,615 +317,375 @@ export default function LeadsPage() {
   const [viewMode,          setViewMode]          = useState('list');
   const [dialogOpen,        setDialogOpen]        = useState(false);
   const [editingLead,       setEditingLead]       = useState(null);
-  const [convertingLead,    setConvertingLead]    = useState(null);
   const [clientConvLead,    setClientConvLead]    = useState(null);
   const [clientConverting,  setClientConverting]  = useState(false);
   const [errors,            setErrors]            = useState({});
-  const [activeFilters,     setActiveFilters]     = useState([]);
   const [recentlyChanged,   setRecentlyChanged]   = useState({});
+  const [expandedQtn,       setExpandedQtn]       = useState({});
 
-  const emptyForm = {
-    company_name: '', contact_name: null, email: null, phone: null,
-    quotation_amount: null, services: [], source: 'direct', referred_by: null,
-    notes: null, assigned_to: null, status: 'new', next_follow_up: null,
-    date_of_meeting: null, closure_probability: null,
-  };
-  const [formData, setFormData] = useState(emptyForm);
+  const emptyForm = { company_name:'', contact_name:'', email:'', phone:'', quotation_amount:'', services:[], source:'direct',
+    referred_by:'', notes:'', assigned_to:'', status:'new', next_follow_up:'', date_of_meeting:'',
+    closure_probability:'', checklist_sent:false, documents_received:false };
+  const [form, setForm] = useState(emptyForm);
 
-  // ─── FIX 2: fetchLeads returns data so handleSubmit can use it ──────────────
   const fetchLeads = async () => {
-    try {
-      const res = await api.get('/leads/');
-      setLeads(res.data);
-      return res.data;
-    } catch {
-      toast.error('Failed to fetch leads');
-      return [];
-    } finally {
-      setLoading(false);
-    }
+    try { const r = await api.get('/leads/'); setLeads(r.data); } catch { toast.error('Failed to fetch leads'); } finally { setLoading(false); }
   };
 
   useEffect(() => {
     fetchLeads();
-    api.get('/leads/meta/services').then(r => {
-      const raw = r.data;
-      const list = Array.isArray(raw) ? raw : (raw?.services || []);
-      setAvailableServices(list);
-    }).catch(() => {});
-    api.get('/users').then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get('/leads/meta/services').then(r=>{ const raw=r.data; setAvailableServices(Array.isArray(raw)?raw:(raw?.services||[])); }).catch(()=>{});
+    api.get('/users').then(r=>setAllUsers(Array.isArray(r.data)?r.data:[])).catch(()=>{});
   }, []);
 
-  const mergedServices = useMemo(() => {
-    const extras = availableServices.filter(s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase()));
-    return [...LEAD_SERVICES.map(s => s.value), ...extras];
-  }, [availableServices]);
-
   const stats = useMemo(() => ({
-    total:        leads.length,
-    active:       leads.filter(l => ACTIVE_STAGES.includes(l.status)).length,
-    won:          leads.filter(l => l.status === 'won').length,
-    lost:         leads.filter(l => l.status === 'lost').length,
-    negotiation:  leads.filter(l => l.status === 'negotiation').length,
-    overdue:      leads.filter(isOverdue).length,
-    wonValue:     leads.filter(l => l.status === 'won').reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
-    pipeValue:    leads.filter(l => ACTIVE_STAGES.includes(l.status)).reduce((s,l) => s + (Number(l.quotation_amount)||0), 0),
+    total:       leads.length,
+    active:      leads.filter(l=>ACTIVE_STAGES.includes(l.status)).length,
+    won:         leads.filter(l=>l.status==='won').length,
+    lost:        leads.filter(l=>l.status==='lost').length,
+    negotiation: leads.filter(l=>l.status==='negotiation').length,
+    overdue:     leads.filter(isOverdue).length,
+    wonValue:    leads.filter(l=>l.status==='won').reduce((s,l)=>s+(Number(l.quotation_amount)||0),0),
+    pipeValue:   leads.filter(l=>ACTIVE_STAGES.includes(l.status)).reduce((s,l)=>s+(Number(l.quotation_amount)||0),0),
   }), [leads]);
-
-  const serviceTabCounts = useMemo(() => {
-    const counts = { all: leads.length };
-    mergedServices.forEach(svc => { counts[svc] = leads.filter(l => (l.services||[]).includes(svc)).length; });
-    return counts;
-  }, [leads, mergedServices]);
 
   const filteredLeads = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return leads
-      .filter(l => !q || l.company_name?.toLowerCase().includes(q) || l.contact_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.referred_by?.toLowerCase().includes(q))
-      .filter(l => {
-        if (statusFilter === 'all') return true;
-        if (statusFilter === 'active') return ACTIVE_STAGES.includes(l.status);
-        return l.status === statusFilter;
-      })
-      .filter(l => serviceFilter === 'all' || (l.services||[]).includes(serviceFilter));
+      .filter(l => !q || l.company_name?.toLowerCase().includes(q) || l.contact_name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q))
+      .filter(l => statusFilter==='all' || (statusFilter==='active'?ACTIVE_STAGES.includes(l.status):l.status===statusFilter))
+      .filter(l => serviceFilter==='all' || (l.services||[]).includes(serviceFilter));
   }, [leads, searchQuery, statusFilter, serviceFilter]);
 
-  const resetForm = () => { setFormData(emptyForm); setErrors({}); };
-  const handleChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value === '' ? null : value }));
+  const userNameById = id => { const u=allUsers.find(u=>u.id===id); return u?u.full_name:id||'—'; };
 
-  const handleEdit = (lead) => {
+  const resetForm = () => { setForm(emptyForm); setErrors({}); };
+  const handleChange = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const openEdit = (lead) => {
     setEditingLead(lead);
-    setFormData({
-      company_name:        lead.company_name    || '',
-      contact_name:        lead.contact_name    || null,
-      email:               lead.email           || null,
-      phone:               lead.phone           || null,
-      quotation_amount:    lead.quotation_amount || null,
-      services:            Array.isArray(lead.services) ? lead.services : [],
-      source:              lead.source           || 'direct',
-      referred_by:         lead.referred_by      || null,
-      notes:               lead.notes            || null,
-      assigned_to:         lead.assigned_to      || null,
-      status:              lead.status           || 'new',
-      next_follow_up:      lead.next_follow_up   || null,
-      date_of_meeting:     lead.date_of_meeting  || null,
-      closure_probability: lead.closure_probability ?? null,
+    setForm({
+      company_name: lead.company_name||'', contact_name: lead.contact_name||'',
+      email: lead.email||'', phone: lead.phone||'',
+      quotation_amount: lead.quotation_amount??'', services: lead.services||[],
+      source: lead.source||'direct', referred_by: lead.referred_by||'',
+      notes: lead.notes||'', assigned_to: lead.assigned_to||'',
+      status: lead.status||'new', next_follow_up: toLocalDT(lead.next_follow_up),
+      date_of_meeting: toLocalDT(lead.date_of_meeting), closure_probability: lead.closure_probability??'',
+      checklist_sent: lead.checklist_sent||false, documents_received: lead.documents_received||false,
     });
     setDialogOpen(true);
   };
 
   const closeDialog = () => { setDialogOpen(false); setEditingLead(null); resetForm(); };
 
-  // ─── FIX 2: Optimistic insert on create so lead appears immediately ──────────
   const handleSubmit = async () => {
-    if (!formData.company_name?.trim()) { setErrors({ company_name: 'Company name is required' }); return; }
+    if (!form.company_name?.trim()) { setErrors({company_name:'Company name is required'}); return; }
     setSubmitting(true);
     const payload = {
-      company_name:        formData.company_name?.trim() || '',
-      contact_name:        formData.contact_name    || null,
-      email:               formData.email           || null,
-      phone:               formData.phone           || null,
-      quotation_amount:    formData.quotation_amount ? Number(formData.quotation_amount) : null,
-      services:            Array.isArray(formData.services) ? formData.services : [],
-      source:              formData.source          || 'direct',
-      referred_by:         formData.referred_by     || null,
-      notes:               formData.notes           || null,
-      assigned_to:         formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
-      status:              formData.status          || 'new',
-      next_follow_up:      formData.next_follow_up  || null,
-      date_of_meeting:     formData.date_of_meeting || null,
-      closure_probability: formData.closure_probability != null ? Number(formData.closure_probability) : null,
+      company_name:        form.company_name.trim(),
+      contact_name:        form.contact_name||null,
+      email:               form.email||null,
+      phone:               form.phone||null,
+      quotation_amount:    form.quotation_amount!==''?Number(form.quotation_amount):null,
+      services:            form.services,
+      source:              form.source||'direct',
+      referred_by:         form.referred_by||null,
+      notes:               form.notes||null,
+      assigned_to:         form.assigned_to&&form.assigned_to!=='unassigned'?form.assigned_to:null,
+      status:              form.status||'new',
+      next_follow_up:      fromLocalDT(form.next_follow_up),
+      date_of_meeting:     fromLocalDT(form.date_of_meeting),
+      closure_probability: form.closure_probability!==''?Number(form.closure_probability):null,
+      checklist_sent:      form.checklist_sent||false,
+      documents_received:  form.documents_received||false,
     };
     try {
-      if (editingLead) {
-        await api.patch(`/leads/${editingLead.id}`, payload);
-        toast.success('Lead updated!');
-        closeDialog();
-        fetchLeads();
-      } else {
-        // Optimistically prepend the new lead immediately so user sees it right away
-        const res = await api.post('/leads/', payload);
-        const newLead = res.data;
-        setLeads(prev => [newLead, ...prev]);
-        toast.success('Lead created!');
-        closeDialog();
-        // Background refresh to get server-accurate data (audit fields etc.)
-        fetchLeads();
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to save lead');
-    } finally {
-      setSubmitting(false);
-    }
+      if (editingLead) { await api.patch(`/leads/${editingLead.id}`, payload); toast.success('Lead updated!'); }
+      else             { await api.post('/leads/', payload); toast.success('Lead created!'); }
+      closeDialog(); fetchLeads();
+    } catch (err) { toast.error(err?.response?.data?.detail||'Failed to save lead'); }
+    finally { setSubmitting(false); }
   };
 
   const handleDelete = async (lead) => {
     if (!window.confirm(`Delete "${lead.company_name}"? This cannot be undone.`)) return;
-    try {
-      // Optimistic remove
-      setLeads(prev => prev.filter(l => l.id !== lead.id));
-      await api.delete(`/leads/${lead.id}`);
-      toast.success('Lead deleted');
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to delete');
-      fetchLeads(); // revert
-    }
+    try { setLeads(p=>p.filter(l=>l.id!==lead.id)); await api.delete(`/leads/${lead.id}`); toast.success('Lead deleted'); }
+    catch { toast.error('Failed to delete'); fetchLeads(); }
   };
 
   const handleQuickStage = async (lead, newStatus) => {
-    if (newStatus === 'won') { setClientConvLead(lead); return; }
-    if (newStatus === 'lost' && !window.confirm(`Mark "${lead.company_name}" as Lost?`)) return;
+    if (newStatus==='won') { setClientConvLead(lead); return; }
+    if (newStatus==='lost' && !window.confirm(`Mark "${lead.company_name}" as Lost?`)) return;
     try {
-      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus } : l));
-      setRecentlyChanged(prev => ({ ...prev, [lead.id]: newStatus }));
-      setTimeout(() => setRecentlyChanged(prev => { const n = {...prev}; delete n[lead.id]; return n; }), 1500);
-      await api.patch(`/leads/${lead.id}`, { status: newStatus });
-      fetchLeads();
-    } catch (err) {
-      toast.error('Failed to update stage');
-      fetchLeads();
-    }
+      setLeads(p=>p.map(l=>l.id===lead.id?{...l,status:newStatus}:l));
+      setRecentlyChanged(p=>({...p,[lead.id]:newStatus}));
+      setTimeout(()=>setRecentlyChanged(p=>{const n={...p};delete n[lead.id];return n;}),1500);
+      await api.patch(`/leads/${lead.id}`, {status:newStatus}); fetchLeads();
+    } catch { toast.error('Failed to update stage'); fetchLeads(); }
   };
 
-  // ─── FIX: Convert Now — uses /convert endpoint (creates client) ───────────
+  const handleToggle = async (lead, field) => {
+    const newVal = !lead[field];
+    try {
+      setLeads(p=>p.map(l=>l.id===lead.id?{...l,[field]:newVal}:l));
+      await api.patch(`/leads/${lead.id}`, {[field]:newVal});
+      toast.success(field==='checklist_sent'?(newVal?'Checklist marked as sent':'Checklist mark removed'):(newVal?'Documents marked as received':'Docs mark removed'));
+    } catch { toast.error('Failed to update'); fetchLeads(); }
+  };
+
   const handleClientConvertNow = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
-    try {
-      await api.post(`/leads/${clientConvLead.id}/convert`);
-      toast.success(`"${clientConvLead.company_name}" converted to client!`);
-      setClientConvLead(null);
-      fetchLeads();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Conversion failed');
-    } finally {
-      setClientConverting(false);
-    }
+    try { await api.post(`/leads/${clientConvLead.id}/convert`); toast.success(`"${clientConvLead.company_name}" converted to client!`); setClientConvLead(null); fetchLeads(); }
+    catch (err) { toast.error(err?.response?.data?.detail||'Conversion failed'); }
+    finally { setClientConverting(false); }
   };
 
-  // ─── FIX: Convert Later — PATCH status=won with converted_client_id=null ──
-  // Backend guard: blocks PATCH to won ONLY when "converted_client_id" key is ABSENT.
-  // Passing it explicitly as null satisfies the guard without creating a client.
   const handleClientConvertLater = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
-    try {
-      await api.patch(`/leads/${clientConvLead.id}`, {
-        status: 'won',
-        converted_client_id: null,
-      });
-      toast.success(`"${clientConvLead.company_name}" marked as Won. You can convert to a client anytime.`);
-      setClientConvLead(null);
-      fetchLeads();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to mark as won');
-    } finally {
-      setClientConverting(false);
-    }
+    try { await api.patch(`/leads/${clientConvLead.id}`, {status:'won',converted_client_id:null}); toast.success(`"${clientConvLead.company_name}" marked as Won.`); setClientConvLead(null); fetchLeads(); }
+    catch (err) { toast.error(err?.response?.data?.detail||'Failed to mark as won'); }
+    finally { setClientConverting(false); }
   };
 
-  useEffect(() => {
-    const pills = [];
-    if (searchQuery)            pills.push({ key: 'search',  label: `Search: ${searchQuery}` });
-    if (statusFilter !== 'all') {
-      const stageLabel = statusFilter === 'active'
-        ? 'Active Leads'
-        : `Stage: ${stageOf(statusFilter).label}`;
-      pills.push({ key: 'status', label: stageLabel });
-    }
-    if (serviceFilter !== 'all') pills.push({ key: 'service', label: `Service: ${serviceFilter}` });
-    setActiveFilters(pills);
-  }, [searchQuery, statusFilter, serviceFilter]);
-
-  const removeFilter = (key) => {
-    if (key === 'search')  setSearchQuery('');
-    if (key === 'status')  setStatusFilter('all');
-    if (key === 'service') setServiceFilter('all');
+  const handleCreateQuotation = (lead) => {
+    sessionStorage.setItem('createQuotationForLead', JSON.stringify({
+      lead_id: lead.id, client_name: lead.company_name,
+      client_phone: lead.phone||'', client_email: lead.email||'',
+      service: (lead.services||[])[0]||'',
+    }));
+    window.location.href = '/quotations';
   };
 
-  const handleConvertButtonClick = (lead) => setConvertingLead(lead);
-  const userNameById = (id) => { const u = allUsers.find(u => u.id === id); return u ? u.full_name : id || '—'; };
+  if (loading) return <div className="space-y-4 p-6">{[1,2,3].map(i=><Skeleton key={i} className="h-24 w-full rounded-2xl"/>)}</div>;
 
-  if (loading) return (
-    <div className="space-y-4 p-6">
-      {[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-2xl" />)}
-    </div>
-  );
+  const activeLeads = filteredLeads.filter(l=>!['won','lost'].includes(l.status));
+  const closedLeads = filteredLeads.filter(l=>['won','lost'].includes(l.status));
 
   return (
-    <motion.div className="space-y-4 bg-slate-50 p-6 rounded-3xl" variants={containerVariants} initial="hidden" animate="visible">
+    <motion.div className="space-y-4 p-2 md:p-4" variants={containerVariants} initial="hidden" animate="visible">
 
       {/* ── Header ── */}
       <motion.div variants={itemVariants}>
-        <Card className="border border-slate-200 shadow-sm rounded-3xl overflow-hidden">
+        <Card className="rounded-3xl overflow-hidden border border-slate-200 shadow-sm">
           <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-600" />
-          <CardContent className="p-6 flex flex-wrap items-center justify-between gap-3">
+          <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLORS.deepBlue }}>Lead Pipeline</h1>
+              <h1 className="text-2xl font-semibold tracking-tight" style={{color:COLORS.deepBlue}}>Lead Pipeline</h1>
               <p className="text-sm text-slate-500 mt-0.5">
-                {stats.active} active ·&nbsp;
-                <span className="text-emerald-600 font-medium">{stats.won} won</span>
-                {stats.overdue > 0 && <span className="text-red-500 font-medium"> · {stats.overdue} overdue</span>}
+                {stats.active} active ·&nbsp;<span className="text-emerald-600 font-medium">{stats.won} won</span>
+                {stats.overdue>0&&<span className="text-red-500 font-medium"> · {stats.overdue} overdue</span>}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex bg-slate-100 p-1 rounded-2xl shadow-sm">
-                <Button variant="ghost" size="sm"
-                  className={cn('rounded-xl font-medium transition-all duration-200', viewMode === 'list' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700')}
-                  onClick={() => setViewMode('list')}>
-                  <List className="h-4 w-4 mr-1" /> List
-                </Button>
-                <Button variant="ghost" size="sm"
-                  className={cn('rounded-xl font-medium transition-all duration-200', viewMode === 'kanban' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700')}
-                  onClick={() => setViewMode('kanban')}>
-                  <LayoutGrid className="h-4 w-4 mr-1" /> Board
-                </Button>
+                {[{id:'list',icon:List},{id:'kanban',icon:LayoutGrid}].map(v=>(
+                  <Button key={v.id} variant="ghost" size="sm"
+                    className={cn('rounded-xl font-medium transition-all',viewMode===v.id?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700')}
+                    onClick={()=>setViewMode(v.id)}>
+                    <v.icon className="h-4 w-4 mr-1" />{v.id.charAt(0).toUpperCase()+v.id.slice(1)}
+                  </Button>
+                ))}
               </div>
-              <Button size="sm"
-                className="h-9 px-4 text-sm font-medium rounded-2xl shadow-sm hover:shadow-md bg-blue-700 hover:bg-blue-800 text-white active:scale-95 transition-all"
-                onClick={() => { resetForm(); setEditingLead(null); setDialogOpen(true); }}>
-                <Plus className="mr-2 h-5 w-5" /> New Lead
+              <Button size="sm" className="h-9 px-4 text-sm font-medium rounded-2xl shadow-sm hover:shadow-md bg-blue-700 hover:bg-blue-800 text-white active:scale-95 transition-all"
+                onClick={()=>{ resetForm(); setEditingLead(null); setDialogOpen(true); }}>
+                <Plus className="mr-2 h-5 w-5" />New Lead
               </Button>
             </div>
           </CardContent>
         </Card>
       </motion.div>
 
-      {/* ── Stats — FIX 3: 5th card is now Negotiation, not Overdue ── */}
+      {/* ── Stats ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Total"       value={stats.total}       color="text-slate-800"   onClick={() => setStatusFilter('all')}         active={statusFilter === 'all'} />
-        <StatCard label="Active"      value={stats.active}      color="text-blue-600"    onClick={() => setStatusFilter('active')}      active={statusFilter === 'active'} />
-        <StatCard label="Won"         value={stats.won}         color="text-emerald-600" onClick={() => setStatusFilter('won')}         active={statusFilter === 'won'} />
-        <StatCard label="Lost"        value={stats.lost}        color="text-red-600"     onClick={() => setStatusFilter('lost')}        active={statusFilter === 'lost'} />
-        <StatCard label="Negotiation" value={stats.negotiation} color="text-orange-600"  onClick={() => setStatusFilter('negotiation')} active={statusFilter === 'negotiation'} />
+        <StatCard label="Total"       value={stats.total}       color="text-slate-800"   onClick={()=>setStatusFilter('all')}         active={statusFilter==='all'} />
+        <StatCard label="Active"      value={stats.active}      color="text-blue-600"    onClick={()=>setStatusFilter('active')}      active={statusFilter==='active'} />
+        <StatCard label="Won"         value={stats.won}         color="text-emerald-600" onClick={()=>setStatusFilter('won')}         active={statusFilter==='won'} />
+        <StatCard label="Lost"        value={stats.lost}        color="text-red-600"     onClick={()=>setStatusFilter('lost')}        active={statusFilter==='lost'} />
+        <StatCard label="Negotiation" value={stats.negotiation} color="text-orange-600"  onClick={()=>setStatusFilter('negotiation')} active={statusFilter==='negotiation'} />
       </motion.div>
 
       {/* ── Revenue ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
-        <Card className="rounded-2xl border border-emerald-200 bg-emerald-50 hover:shadow-sm transition-shadow">
-          <CardContent className="p-4">
-            <p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Won Revenue</p>
-            <p className="text-2xl font-bold text-emerald-700 mt-1">₹{stats.wonValue.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border border-indigo-200 bg-indigo-50 hover:shadow-sm transition-shadow">
-          <CardContent className="p-4">
-            <p className="text-xs font-medium text-indigo-600 uppercase tracking-wider">Pipeline Value</p>
-            <p className="text-2xl font-bold text-indigo-700 mt-1">₹{stats.pipeValue.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+        <Card className="rounded-2xl border border-emerald-200 bg-emerald-50"><CardContent className="p-4"><p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Won Revenue</p><p className="text-2xl font-bold text-emerald-700 mt-1">₹{stats.wonValue.toLocaleString()}</p></CardContent></Card>
+        <Card className="rounded-2xl border border-indigo-200 bg-indigo-50"><CardContent className="p-4"><p className="text-xs font-medium text-indigo-600 uppercase tracking-wider">Pipeline Value</p><p className="text-2xl font-bold text-indigo-700 mt-1">₹{stats.pipeValue.toLocaleString()}</p></CardContent></Card>
       </motion.div>
-
-      {/* ── Service Tabs ── */}
-      {mergedServices.length > 0 && (
-        <motion.div variants={itemVariants}>
-          <Card className="border border-slate-200 rounded-2xl">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <Tag className="h-3.5 w-3.5 text-slate-400" />
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Filter by Service</p>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => setServiceFilter('all')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 h-7 px-3 rounded-xl text-xs font-semibold border transition-all duration-200 active:scale-95',
-                    serviceFilter === 'all'
-                      ? 'bg-slate-800 text-white border-slate-800 shadow-sm scale-[1.02]'
-                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700 hover:shadow-sm',
-                  )}>
-                  All
-                  <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', serviceFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500')}>
-                    {serviceTabCounts.all}
-                  </span>
-                </button>
-                {mergedServices.filter(svc => serviceTabCounts[svc] > 0).map(svc => {
-                  const s = serviceStyle(svc);
-                  const isActive = serviceFilter === svc;
-                  return (
-                    <button key={svc} onClick={() => setServiceFilter(isActive ? 'all' : svc)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 h-7 px-3 rounded-xl text-xs font-semibold border transition-all duration-200 active:scale-95',
-                        isActive
-                          ? cn(s.color, 'shadow-sm scale-[1.02]')
-                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700 hover:shadow-sm',
-                      )}>
-                      <span className={cn('h-1.5 w-1.5 rounded-full flex-shrink-0', s.dot)} />
-                      {svc}
-                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', isActive ? 'bg-white/60' : 'bg-slate-100 text-slate-500')}>
-                        {serviceTabCounts[svc]}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
 
       {/* ── Filters ── */}
-      <motion.div variants={itemVariants} className="flex items-center justify-between gap-3 flex-wrap w-full">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input placeholder="Search leads, referrals…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-white rounded-2xl" />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40 bg-white rounded-2xl text-sm"><SelectValue placeholder="All Stages" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Stages</SelectItem>
-              <SelectItem value="active">Active Leads</SelectItem>
-              {PIPELINE_STAGES.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input placeholder="Search leads…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="pl-10 bg-white rounded-2xl" />
         </div>
-        <p className="text-xs text-slate-400 ml-auto">
-          {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''}
-          {serviceFilter !== 'all' && <span className="text-blue-500 font-medium"> · {serviceFilter}</span>}
-        </p>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-40 bg-white rounded-2xl text-sm"><SelectValue placeholder="All Stages" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Stages</SelectItem>
+            <SelectItem value="active">Active Leads</SelectItem>
+            {PIPELINE_STAGES.map(s=><SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={serviceFilter} onValueChange={setServiceFilter}>
+          <SelectTrigger className="w-40 bg-white rounded-2xl text-sm"><SelectValue placeholder="All Services" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Services</SelectItem>
+            {LEAD_SERVICES.map(s=><SelectItem key={s.value} value={s.value}>{s.value}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-slate-400 ml-auto">{filteredLeads.length} lead{filteredLeads.length!==1?'s':''}</p>
       </motion.div>
 
-      {activeFilters.length > 0 && (
-        <motion.div variants={itemVariants} className="flex flex-wrap gap-2">
-          {activeFilters.map(pill => (
-            <Badge key={pill.key} variant="secondary"
-              className="pl-3 pr-2 py-1 text-xs flex items-center gap-1 bg-slate-100 hover:bg-slate-200 cursor-pointer rounded-full active:scale-95 transition-all"
-              onClick={() => removeFilter(pill.key)}>
-              {pill.label}<X className="h-3 w-3 ml-1 text-slate-400 hover:text-slate-600" />
-            </Badge>
-          ))}
-        </motion.div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* ── List View ── */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════ LIST VIEW ══════════ */}
       {viewMode === 'list' && (
         <motion.div className="space-y-3" variants={containerVariants}>
           {filteredLeads.length === 0 && (
             <div className="text-center py-20 text-slate-400">
               <Circle className="h-12 w-12 mx-auto mb-4 opacity-20" />
               <p className="text-sm font-medium">No leads found</p>
-              <p className="text-xs mt-1">Try adjusting your filters</p>
+              <p className="text-xs mt-1">Try adjusting your filters or add a new lead</p>
             </div>
           )}
 
-          {/* ── Active leads ── */}
-          {filteredLeads.filter(l => !['won','lost'].includes(l.status)).map((lead) => {
-            const stage   = stageOf(lead.status);
+          {/* Active leads */}
+          {activeLeads.map(lead => {
+            const stage = stageOf(lead.status);
             const overdue = isOverdue(lead);
-            const prob    = lead.closure_probability;
-            const justChanged = !!recentlyChanged[lead.id];
-
+            const qtnOpen = !!expandedQtn[lead.id];
             return (
-              <motion.div key={lead.id} variants={itemVariants}
-                animate={justChanged ? { scale: [1, 1.01, 1] } : {}}
-                transition={{ duration: 0.3 }}>
+              <motion.div key={lead.id} variants={itemVariants}>
                 <DashboardStripCard stripeColor={stage.stripe}>
                   <div className="flex flex-col gap-3">
 
-                    {/* Row 1: Name + badge + actions */}
+                    {/* Row 1 */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-                        <span className="text-base font-semibold text-slate-900 leading-tight">{lead.company_name}</span>
-
-                        <motion.span
-                          key={lead.status}
-                          initial={{ scale: 0.8, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          className={cn('inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold border', stage.badge)}>
-                          <span className={cn('h-1.5 w-1.5 rounded-full', stage.stripe)} />
-                          {stage.label}
+                        <span className="text-base font-semibold text-slate-900">{lead.company_name}</span>
+                        <motion.span key={lead.status} initial={{scale:.8,opacity:0}} animate={{scale:1,opacity:1}}
+                          className={cn('inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold border',stage.badge)}>
+                          <span className={cn('h-1.5 w-1.5 rounded-full',stage.stripe)} />{stage.label}
                         </motion.span>
-
-                        {prob != null && (
-                          <span className={cn(
-                            'hidden sm:inline-flex px-2.5 py-0.5 rounded-xl text-[11px] font-bold',
-                            prob >= 70 ? 'bg-emerald-50 text-emerald-700' : prob >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600',
-                          )}>
-                            <Target className="h-3 w-3 mr-1" />{prob}% close
+                        {lead.closure_probability!=null && (
+                          <span className={cn('hidden sm:inline-flex px-2.5 py-0.5 rounded-xl text-[11px] font-bold',lead.closure_probability>=70?'bg-emerald-50 text-emerald-700':lead.closure_probability>=40?'bg-amber-50 text-amber-700':'bg-red-50 text-red-600')}>
+                            <Target className="h-3 w-3 mr-1" />{lead.closure_probability}% close
                           </span>
                         )}
-
-                        {overdue && (
-                          <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold bg-red-50 text-red-600 border border-red-200">
-                            <AlertTriangle className="h-3 w-3" /> Overdue
-                          </span>
-                        )}
+                        {overdue && <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold bg-red-50 text-red-600 border border-red-200"><AlertTriangle className="h-3 w-3"/>Overdue</span>}
                       </div>
-
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className="hidden md:inline text-sm font-bold text-slate-700">₹{(Number(lead.quotation_amount)||0).toLocaleString()}</span>
-
+                        {/* Quotation toggle */}
+                        {canUseQuotations && (
+                          <button onClick={()=>setExpandedQtn(p=>({...p,[lead.id]:!p[lead.id]}))} title="Linked Quotations"
+                            className={cn('p-1.5 rounded-xl transition-all active:scale-90 hover:shadow-sm',qtnOpen?'bg-purple-100 text-purple-700':'hover:bg-purple-50 text-slate-400 hover:text-purple-600')}>
+                            <Receipt className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         {canEditLead(lead) && (
                           <Button size="sm" variant="outline"
-                            className="h-7 px-3 text-xs font-semibold rounded-xl border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-500 hover:shadow-sm gap-1 active:scale-95 transition-all"
-                            onClick={() => handleConvertButtonClick(lead)}>
-                            <Zap className="h-3.5 w-3.5" /> Convert
+                            className="h-7 px-3 text-xs font-semibold rounded-xl border-emerald-300 text-emerald-700 hover:bg-emerald-50 gap-1 active:scale-95"
+                            onClick={()=>{ sessionStorage.setItem('createQuotationForLead',JSON.stringify({lead_id:lead.id,client_name:lead.company_name,client_phone:lead.phone||'',client_email:lead.email||'',service:(lead.services||[])[0]||''})); setClientConvLead(lead); }}>
+                            <Zap className="h-3.5 w-3.5" />Convert
                           </Button>
                         )}
-
-                        {canEditLead(lead) && (
-                          <button onClick={() => handleEdit(lead)}
-                            className="p-1.5 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all active:scale-90 hover:shadow-sm" title="Edit">
-                            <Edit className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {canDeleteLead && (
-                          <button onClick={() => handleDelete(lead)}
-                            className="p-1.5 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all active:scale-90 hover:shadow-sm" title="Delete">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        {canEditLead(lead) && <button onClick={()=>openEdit(lead)} className="p-1.5 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all active:scale-90"><Edit className="h-3.5 w-3.5"/></button>}
+                        {canDeleteLead && <button onClick={()=>handleDelete(lead)} className="p-1.5 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all active:scale-90"><Trash2 className="h-3.5 w-3.5"/></button>}
                       </div>
                     </div>
 
-                    {/* Row 2: Contact details */}
+                    {/* Row 2: Contact */}
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-                      {lead.contact_name  && <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5" />{lead.contact_name}</span>}
-                      {lead.phone         && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{lead.phone}</span>}
-                      {lead.email         && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{lead.email}</span>}
-                      {lead.source        && <span className="flex items-center gap-1.5 capitalize"><ArrowRight className="h-3.5 w-3.5" />{lead.source.replace('_',' ')}</span>}
-                      {lead.referred_by   && <span className="flex items-center gap-1.5 font-medium text-emerald-600"><User className="h-3.5 w-3.5" />Ref: {lead.referred_by}</span>}
-                      {lead.assigned_to   && <span className="flex items-center gap-1.5 font-medium text-blue-600"><UserCheck className="h-3.5 w-3.5" />{userNameById(lead.assigned_to)}</span>}
-                      {lead.next_follow_up && (
-                        <span className={cn('flex items-center gap-1.5 font-medium', overdue ? 'text-red-500' : 'text-slate-500')}>
-                          <Calendar className="h-3.5 w-3.5" />
-                          Follow-up: {format(new Date(lead.next_follow_up), 'dd MMM yyyy, hh:mm a')}
-                          {overdue && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full text-[10px] font-bold">OVERDUE</span>}
-                        </span>
-                      )}
-                      {lead.date_of_meeting && (
-                        <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Meeting: {format(new Date(lead.date_of_meeting), 'dd MMM yyyy, hh:mm a')}</span>
-                      )}
-                      <span className="md:hidden flex items-center gap-1 font-bold text-slate-700">
-                        <IndianRupee className="h-3.5 w-3.5" />{(Number(lead.quotation_amount)||0).toLocaleString()}
-                      </span>
+                      {lead.contact_name  && <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5"/>{lead.contact_name}</span>}
+                      {lead.phone         && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5"/>{lead.phone}</span>}
+                      {lead.email         && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5"/>{lead.email}</span>}
+                      {lead.assigned_to   && <span className="flex items-center gap-1.5 font-medium text-blue-600"><UserCheck className="h-3.5 w-3.5"/>{userNameById(lead.assigned_to)}</span>}
+                      {lead.referred_by   && <span className="flex items-center gap-1.5 font-medium text-emerald-600"><User className="h-3.5 w-3.5"/>Ref: {lead.referred_by}</span>}
+                      {lead.next_follow_up && <span className={cn('flex items-center gap-1.5 font-medium',overdue?'text-red-500':'text-slate-500')}><Calendar className="h-3.5 w-3.5"/>Follow-up: {format(new Date(lead.next_follow_up),'dd MMM yyyy, hh:mm a')}{overdue&&<span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full text-[10px] font-bold">OVERDUE</span>}</span>}
                     </div>
 
                     {/* Row 3: Services */}
                     {(lead.services||[]).length > 0 && (
                       <div className="flex flex-wrap gap-1.5 items-center">
                         <Tag className="h-3 w-3 text-slate-300 flex-shrink-0" />
-                        {lead.services.map(s => <ServiceBadge key={s} value={s} />)}
+                        {lead.services.map(s=><ServiceBadge key={s} value={s}/>)}
                       </div>
                     )}
 
-                    {/* Row 4: Stage bar + buttons */}
-                    <div className="space-y-2 pt-1 border-t border-slate-100">
-                      <StageProgressBar
-                        currentStatus={lead.status}
-                        stages={ACTIVE_STAGES}
-                        canEdit={canEditLead(lead)}
-                        onStageClick={(sid) => canEditLead(lead) && handleQuickStage(lead, sid)}
-                      />
-
-                      {canEditLead(lead) && (
+                    {/* Row 4: Stage progress + buttons */}
+                    {canEditLead(lead) && (
+                      <div className="space-y-2 pt-1 border-t border-slate-100">
+                        <StageProgressBar currentStatus={lead.status} canEdit={true} onStageClick={sid=>handleQuickStage(lead,sid)} />
                         <div className="flex gap-1 flex-wrap">
-                          {ACTIVE_STAGES.map(sid => (
-                            <StageButton
-                              key={sid}
-                              stageId={sid}
-                              isActive={lead.status === sid}
-                              disabled={false}
-                              onClick={() => handleQuickStage(lead, sid)}
-                            >
-                              {stageOf(sid).label}
-                            </StageButton>
-                          ))}
-
-                          <button
-                            onClick={(e) => { addRipple(e); e.currentTarget.classList.add('won-glow'); handleQuickStage(lead, 'won'); }}
-                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 hover:shadow-md active:scale-95 transition-all duration-200">
-                            Won ✓
-                          </button>
-
-                          <button
-                            onClick={(e) => { addRipple(e); e.currentTarget.classList.add('lost-shake'); handleQuickStage(lead, 'lost'); }}
-                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-red-400 border-slate-200 hover:bg-red-500 hover:text-white hover:border-red-500 hover:shadow-md active:scale-95 transition-all duration-200">
-                            Lost
-                          </button>
+                          {ACTIVE_STAGES.map(sid=><StageButton key={sid} stageId={sid} isActive={lead.status===sid} onClick={()=>handleQuickStage(lead,sid)}/>)}
+                          <button onClick={e=>{addRipple(e);e.currentTarget.classList.add('won-glow');handleQuickStage(lead,'won');}}
+                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:shadow-md active:scale-95 transition-all">Won ✓</button>
+                          <button onClick={e=>{addRipple(e);e.currentTarget.classList.add('lost-shake');handleQuickStage(lead,'lost');}}
+                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white text-red-400 border-slate-200 hover:bg-red-500 hover:text-white hover:shadow-md active:scale-95 transition-all">Lost</button>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* Row 5: Quotations panel */}
+                    {canUseQuotations && qtnOpen && (
+                      <AnimatePresence>
+                        <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}} transition={{duration:.2}}>
+                          <LeadQuotationsPanel leadId={lead.id} canCreateQuotation={canUseQuotations&&canEditLead(lead)} onCreateQuotation={()=>handleCreateQuotation(lead)}/>
+                        </motion.div>
+                      </AnimatePresence>
+                    )}
                   </div>
                 </DashboardStripCard>
               </motion.div>
             );
           })}
 
-          {/* ── Closed leads (Won / Lost) ── */}
-          {filteredLeads.some(l => ['won','lost'].includes(l.status)) && (
+          {/* Closed leads */}
+          {closedLeads.length > 0 && (
             <div className="space-y-2 pt-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Closed</p>
-              {filteredLeads.filter(l => ['won','lost'].includes(l.status)).map(lead => {
+              {closedLeads.map(lead => {
                 const stage = stageOf(lead.status);
                 return (
                   <motion.div key={lead.id} variants={itemVariants}>
                     <DashboardStripCard stripeColor={stage.stripe} isCompleted>
                       <div className="flex flex-col gap-2">
-
-                        {/* Row 1: Name + status + amount + delete */}
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
                             <span className="text-sm font-semibold text-slate-600">{lead.company_name}</span>
-                            <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border', stage.badge)}>{stage.label}</span>
-                            {lead.assigned_to && (
-                              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600">
-                                <UserCheck className="h-3 w-3" />{userNameById(lead.assigned_to)}
-                              </span>
-                            )}
-                            {lead.converted_client_id && (
-                              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
-                                <CheckCircle2 className="h-3 w-3" /> Client Created
-                              </span>
-                            )}
-                            {(lead.services||[]).slice(0,3).map(s => <ServiceBadge key={s} value={s} />)}
+                            <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border',stage.badge)}>{stage.label}</span>
+                            {lead.assigned_to && <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600"><UserCheck className="h-3 w-3"/>{userNameById(lead.assigned_to)}</span>}
+                            {lead.converted_client_id && <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold"><CheckCircle2 className="h-3 w-3"/>Client Created</span>}
+                            {(lead.services||[]).slice(0,3).map(s=><ServiceBadge key={s} value={s}/>)}
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0">
-                            <span className={cn('text-sm font-bold', lead.status === 'won' ? 'text-emerald-600' : 'text-slate-400')}>
-                              ₹{(Number(lead.quotation_amount)||0).toLocaleString()}
-                            </span>
-                            {canDeleteLead && (
-                              <button onClick={() => handleDelete(lead)}
-                                className="p-1.5 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all active:scale-90">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
+                            <span className={cn('text-sm font-bold',lead.status==='won'?'text-emerald-600':'text-slate-400')}>₹{(Number(lead.quotation_amount)||0).toLocaleString()}</span>
+                            {canDeleteLead && <button onClick={()=>handleDelete(lead)} className="p-1.5 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-all active:scale-90"><Trash2 className="h-3.5 w-3.5"/></button>}
                           </div>
                         </div>
 
-                        {/* Row 2: Action buttons for closed leads — FIX: Edit + Reopen + Convert to Client */}
-                        {canEditLead(lead) && (
+                        {/* Won pipeline actions */}
+                        {lead.status==='won' && canEditLead(lead) && (
                           <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
-                            {/* Edit lead */}
-                            <button
-                              onClick={() => handleEdit(lead)}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-400 transition-all active:scale-95"
-                            >
-                              <Edit className="h-3 w-3" /> Edit Lead
+                            <button onClick={()=>openEdit(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
+                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
+                            {!lead.converted_client_id && <button onClick={()=>setClientConvLead(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all active:scale-95"><Building2 className="h-3 w-3"/>Convert to Client</button>}
+                            <button onClick={()=>handleToggle(lead,'checklist_sent')}
+                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',lead.checklist_sent?'bg-teal-500 text-white border-teal-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50')}>
+                              <ClipboardCheck className="h-3 w-3"/>{lead.checklist_sent?'Checklist Sent ✓':'Checklist Sent?'}
                             </button>
-
-                            {/* Reopen — move back to negotiation */}
-                            <button
-                              onClick={() => handleQuickStage(lead, 'negotiation')}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 transition-all active:scale-95"
-                            >
-                              <RefreshCw className="h-3 w-3" /> Reopen
+                            <button onClick={()=>handleToggle(lead,'documents_received')}
+                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',lead.documents_received?'bg-emerald-500 text-white border-emerald-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50')}>
+                              <FolderCheck className="h-3 w-3"/>{lead.documents_received?'Docs Received ✓':'Docs Received?'}
                             </button>
-
-                            {/* Convert to Client — only for won leads not yet converted */}
-                            {lead.status === 'won' && !lead.converted_client_id && (
-                              <button
-                                onClick={() => setClientConvLead(lead)}
-                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-500 transition-all active:scale-95"
-                              >
-                                <Building2 className="h-3 w-3" /> Convert to Client
-                              </button>
-                            )}
                           </div>
                         )}
-
+                        {lead.status==='lost' && canEditLead(lead) && (
+                          <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
+                            <button onClick={()=>openEdit(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
+                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
+                          </div>
+                        )}
                       </div>
                     </DashboardStripCard>
                   </motion.div>
@@ -1251,82 +696,41 @@ export default function LeadsPage() {
         </motion.div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* ── Kanban View ── */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════ KANBAN VIEW ══════════ */}
       {viewMode === 'kanban' && (
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" variants={containerVariants}>
           {KANBAN_COLS.map(sid => {
-            const stage    = stageOf(sid);
-            const colLeads = filteredLeads.filter(l => l.status === sid);
-            const colValue = colLeads.reduce((s,l) => s + (Number(l.quotation_amount)||0), 0);
-
+            const stage = stageOf(sid);
+            const colLeads = filteredLeads.filter(l=>l.status===sid);
             return (
               <motion.div key={sid} variants={itemVariants} className="flex flex-col gap-2">
-                <div className={cn('rounded-2xl border px-3 py-2 flex items-center justify-between transition-all', stage.badge)}>
+                <div className={cn('rounded-2xl border px-3 py-2 flex items-center justify-between',stage.badge)}>
                   <span className="text-xs font-bold">{stage.label}</span>
                   <span className="text-xs font-bold bg-white/80 px-1.5 py-0.5 rounded-full">{colLeads.length}</span>
                 </div>
-                {colValue > 0 && <p className="text-[10px] text-slate-400 text-right pr-1">₹{colValue.toLocaleString()}</p>}
-
                 <div className="space-y-2 min-h-[80px]">
                   <AnimatePresence>
-                    {colLeads.map(lead => {
-                      const overdue = isOverdue(lead);
-                      const prob    = lead.closure_probability;
-                      return (
-                        <motion.div key={lead.id} layout
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all hover:-translate-y-[1px]">
-                          <div className={cn('absolute left-0 top-0 h-full w-[5px]', stage.stripe)} />
-                          <div className="pl-4 pr-3 py-3 space-y-2">
-                            <p className="text-xs font-semibold text-slate-900 leading-tight line-clamp-2 pr-1">{lead.company_name}</p>
-                            {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3 flex-shrink-0" />{lead.contact_name}</p>}
-                            {lead.assigned_to  && <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1"><UserCheck className="h-3 w-3 flex-shrink-0" />{userNameById(lead.assigned_to)}</p>}
-                            {lead.referred_by  && <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1"><User className="h-3 w-3 flex-shrink-0" />Ref: {lead.referred_by}</p>}
-                            {(lead.services||[]).length > 0 && (
-                              <div className="flex flex-wrap gap-1 pt-0.5">
-                                {lead.services.slice(0,2).map(s => <ServiceBadge key={s} value={s} size="xs" />)}
-                                {lead.services.length > 2 && <span className="text-[10px] text-slate-400 font-medium">+{lead.services.length - 2}</span>}
-                              </div>
-                            )}
-                            {lead.quotation_amount && <p className="text-xs font-bold text-slate-700">₹{Number(lead.quotation_amount).toLocaleString()}</p>}
-                            {prob != null && (
-                              <div className="flex items-center gap-1.5">
-                                <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className={cn('h-full rounded-full transition-all duration-500', prob >= 70 ? 'bg-emerald-500' : prob >= 40 ? 'bg-amber-400' : 'bg-red-400')} style={{ width: `${prob}%` }} />
-                                </div>
-                                <span className="text-[10px] text-slate-400 flex-shrink-0">{prob}%</span>
-                              </div>
-                            )}
-                            {overdue && <span className="inline-flex items-center gap-1 text-[10px] text-red-600 font-semibold"><AlertTriangle className="h-3 w-3" />Overdue</span>}
+                    {colLeads.map(lead => (
+                      <motion.div key={lead.id} layout initial={{opacity:0,scale:.95}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:.95}}
+                        className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all">
+                        <div className={cn('absolute left-0 top-0 h-full w-[5px]',stage.stripe)} />
+                        <div className="pl-4 pr-3 py-3 space-y-2">
+                          <p className="text-xs font-semibold text-slate-900 line-clamp-2">{lead.company_name}</p>
+                          {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3"/>{lead.contact_name}</p>}
+                          {lead.assigned_to  && <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1"><UserCheck className="h-3 w-3"/>{userNameById(lead.assigned_to)}</p>}
+                          {(lead.services||[]).length>0 && <div className="flex flex-wrap gap-1">{lead.services.slice(0,2).map(s=><ServiceBadge key={s} value={s} size="xs"/>)}{lead.services.length>2&&<span className="text-[10px] text-slate-400">+{lead.services.length-2}</span>}</div>}
+                          {lead.quotation_amount&&<p className="text-xs font-bold text-slate-700">₹{Number(lead.quotation_amount).toLocaleString()}</p>}
+                          {canEditLead(lead) && (
                             <div className="flex gap-1 pt-1 border-t border-slate-100">
-                              {canEditLead(lead) && (
-                                <button onClick={() => handleEdit(lead)}
-                                  className="flex-1 h-6 text-[11px] font-medium rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95">
-                                  Edit
-                                </button>
-                              )}
-                              {canEditLead(lead) && (
-                                <button onClick={() => handleConvertButtonClick(lead)}
-                                  className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1">
-                                  <Zap className="h-3 w-3" /> Win
-                                </button>
-                              )}
+                              <button onClick={()=>openEdit(lead)} className="flex-1 h-6 text-[11px] font-medium rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all active:scale-95">Edit</button>
+                              <button onClick={()=>setClientConvLead(lead)} className="flex-1 h-6 text-[11px] font-semibold rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"><Zap className="h-3 w-3"/>Win</button>
                             </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
                   </AnimatePresence>
-                  {colLeads.length === 0 && (
-                    <div className="text-center py-8 text-slate-200">
-                      <Circle className="h-7 w-7 mx-auto mb-1 opacity-50" />
-                      <p className="text-[11px]">Empty</p>
-                    </div>
-                  )}
+                  {colLeads.length===0 && <div className="text-center py-8 text-slate-200"><Circle className="h-7 w-7 mx-auto mb-1 opacity-50"/><p className="text-[11px]">Empty</p></div>}
                 </div>
               </motion.div>
             );
@@ -1335,171 +739,88 @@ export default function LeadsPage() {
       )}
 
       {/* ── Lead Form Dialog ── */}
-      <Dialog open={dialogOpen} onOpenChange={open => { if (!open) closeDialog(); }}>
+      <Dialog open={dialogOpen} onOpenChange={v=>{if(!v)closeDialog();}}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>
-              {editingLead ? 'Edit Lead' : 'Create New Lead'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingLead ? 'Update lead details below.' : 'Fill in the details to add a new lead to your pipeline.'}
-            </DialogDescription>
+            <DialogTitle className="text-2xl font-semibold" style={{color:COLORS.deepBlue}}>{editingLead?'Edit Lead':'New Lead'}</DialogTitle>
+            <DialogDescription>{editingLead?'Update lead details.':'Fill in the details to add a new lead.'}</DialogDescription>
           </DialogHeader>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             <SectionLabel icon={Building2}>Company Info</SectionLabel>
-
             <div className="md:col-span-2 space-y-1.5">
               <Label>Company Name <span className="text-red-500">*</span></Label>
-              <Input value={formData.company_name || ''} onChange={e => handleChange('company_name', e.target.value)} placeholder="e.g. Sharma & Associates" className={cn('h-10 rounded-2xl', errors.company_name && 'border-red-400')} />
-              {errors.company_name && <p className="text-xs text-red-500">{errors.company_name}</p>}
+              <Input value={form.company_name} onChange={e=>handleChange('company_name',e.target.value)} placeholder="e.g. Sharma & Associates" className={cn('h-10 rounded-2xl',errors.company_name&&'border-red-400')}/>
+              {errors.company_name&&<p className="text-xs text-red-500">{errors.company_name}</p>}
             </div>
+            <div className="space-y-1.5"><Label>Contact Person</Label><Input value={form.contact_name} onChange={e=>handleChange('contact_name',e.target.value)} placeholder="Full name" className="h-10 rounded-2xl"/></div>
+            <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={form.email} onChange={e=>handleChange('email',e.target.value)} placeholder="contact@company.com" className="h-10 rounded-2xl"/></div>
+            <div className="space-y-1.5"><Label>Phone</Label><Input value={form.phone} onChange={e=>handleChange('phone',e.target.value)} placeholder="+91 98765 43210" className="h-10 rounded-2xl"/></div>
+            <div className="space-y-1.5"><Label>Quotation Amount (₹)</Label><Input type="number" value={form.quotation_amount} onChange={e=>handleChange('quotation_amount',e.target.value)} placeholder="0" className="h-10 rounded-2xl"/></div>
 
-            <div className="space-y-1.5">
-              <Label>Contact Person</Label>
-              <Input value={formData.contact_name || ''} onChange={e => handleChange('contact_name', e.target.value)} placeholder="Full name" className="h-10 rounded-2xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Email</Label>
-              <Input type="email" value={formData.email || ''} onChange={e => handleChange('email', e.target.value)} placeholder="contact@company.com" className="h-10 rounded-2xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Phone</Label>
-              <Input value={formData.phone || ''} onChange={e => handleChange('phone', e.target.value)} placeholder="+91 98765 43210" className="h-10 rounded-2xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Quotation Amount (₹)</Label>
-              <Input type="number" value={formData.quotation_amount ?? ''} onChange={e => handleChange('quotation_amount', e.target.value)} placeholder="0" className="h-10 rounded-2xl" />
-            </div>
-
-            <SectionLabel icon={Tag}>Services Required</SectionLabel>
-            <div className="md:col-span-2 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-500">Select all services this lead is interested in</p>
-                {formData.services.length > 0 && (
-                  <button type="button" onClick={() => setFormData(p => ({ ...p, services: [] }))} className="text-[11px] text-red-400 hover:text-red-600 font-medium transition-colors">Clear all</button>
-                )}
-              </div>
-              <ServiceSelector selected={formData.services} onChange={val => setFormData(p => ({ ...p, services: val }))} availableFromServer={availableServices} />
-            </div>
+            <SectionLabel icon={Tag}>Services</SectionLabel>
+            <div className="md:col-span-2"><ServiceSelector selected={form.services} onChange={v=>handleChange('services',v)} extra={availableServices}/></div>
 
             <SectionLabel icon={ArrowRight}>Source & Assignment</SectionLabel>
             <div className="space-y-1.5">
               <Label>Lead Source</Label>
-              <Select value={formData.source || 'direct'} onValueChange={v => handleChange('source', v)}>
-                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{LEAD_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+              <Select value={form.source||'direct'} onValueChange={v=>handleChange('source',v)}>
+                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue/></SelectTrigger>
+                <SelectContent>{LEAD_SOURCES.map(s=><SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5"><Label>Referred By</Label><Input value={form.referred_by} onChange={e=>handleChange('referred_by',e.target.value)} placeholder="Name of referrer" className="h-10 rounded-2xl"/></div>
             <div className="space-y-1.5">
-              <Label>Referred By</Label>
-              <Input value={formData.referred_by || ''} onChange={e => handleChange('referred_by', e.target.value)} placeholder="Name of referrer" className="h-10 rounded-2xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5 text-slate-400" />Assign To</Label>
-              <Select value={formData.assigned_to || 'unassigned'} onValueChange={v => handleChange('assigned_to', v === 'unassigned' ? null : v)}>
-                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue placeholder="Select team member…" /></SelectTrigger>
+              <Label className="flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5 text-slate-400"/>Assign To</Label>
+              <Select value={form.assigned_to||'unassigned'} onValueChange={v=>handleChange('assigned_to',v==='unassigned'?'':v)}>
+                <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue placeholder="Select…"/></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">— Unassigned —</SelectItem>
-                  {allUsers.map(u => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.full_name}{u.id === user?.id && ' (you)'}
-                    </SelectItem>
-                  ))}
+                  {allUsers.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}{u.id===user?.id?' (you)':''}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-
             {editingLead && (
               <div className="space-y-1.5">
                 <Label>Pipeline Stage</Label>
-                <Select value={formData.status} onValueChange={v => handleChange('status', v)}>
-                  <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>{PIPELINE_STAGES.filter(s => s.id !== 'won').map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}</SelectContent>
+                <Select value={form.status} onValueChange={v=>handleChange('status',v)}>
+                  <SelectTrigger className="h-10 rounded-2xl text-sm"><SelectValue/></SelectTrigger>
+                  <SelectContent>{PIPELINE_STAGES.filter(s=>s.id!=='won').map(s=><SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}</SelectContent>
                 </Select>
-                <p className="text-[10px] text-slate-400">To mark as Won, use the Convert button.</p>
+                <p className="text-[10px] text-slate-400">Use Convert button to mark as Won.</p>
               </div>
             )}
 
-            {/* ── FIX 1: Timezone-safe datetime inputs ── */}
-            <SectionLabel icon={Calendar}>Dates & Follow-up</SectionLabel>
+            <SectionLabel icon={Calendar}>Dates</SectionLabel>
             <div className="space-y-1.5">
               <Label>Next Follow-up</Label>
-              <Input
-                type="datetime-local"
-                value={toLocalDatetimeInput(formData.next_follow_up)}
-                onChange={e => handleChange('next_follow_up', fromLocalDatetimeInput(e.target.value))}
-                className="h-10 rounded-2xl text-sm"
-              />
-              {formData.next_follow_up && (
-                <p className="text-[10px] text-slate-400">
-                  {format(new Date(formData.next_follow_up), 'dd MMM yyyy, hh:mm a')}
-                </p>
-              )}
+              <Input type="datetime-local" value={form.next_follow_up} onChange={e=>handleChange('next_follow_up',e.target.value)} className="h-10 rounded-2xl text-sm"/>
             </div>
             <div className="space-y-1.5">
               <Label>Date of Meeting</Label>
-              <Input
-                type="datetime-local"
-                value={toLocalDatetimeInput(formData.date_of_meeting)}
-                onChange={e => handleChange('date_of_meeting', fromLocalDatetimeInput(e.target.value))}
-                className="h-10 rounded-2xl text-sm"
-              />
-              {formData.date_of_meeting && (
-                <p className="text-[10px] text-slate-400">
-                  {format(new Date(formData.date_of_meeting), 'dd MMM yyyy, hh:mm a')}
-                </p>
-              )}
+              <Input type="datetime-local" value={form.date_of_meeting} onChange={e=>handleChange('date_of_meeting',e.target.value)} className="h-10 rounded-2xl text-sm"/>
             </div>
-
-            {editingLead && (
-              <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5">
-                  <Target className="h-3.5 w-3.5 text-slate-400" />
-                  Closure Probability (%)
-                  <span className="text-[10px] text-slate-400 font-normal ml-1">— auto-calculated, or override</span>
-                </Label>
-                <Input type="number" min="0" max="100" value={formData.closure_probability ?? ''} onChange={e => handleChange('closure_probability', e.target.value)} placeholder="0–100" className="h-10 rounded-2xl" />
-              </div>
-            )}
 
             <SectionLabel icon={MessageSquare}>Notes</SectionLabel>
             <div className="md:col-span-2 space-y-1.5">
               <Label>Notes</Label>
-              <Textarea value={formData.notes || ''} onChange={e => handleChange('notes', e.target.value)} placeholder="Notes, requirements, context… keywords like 'interested', 'proceed', 'agree' boost closure probability." rows={3} className="resize-none rounded-2xl text-sm" />
-              <p className="text-[10px] text-slate-400">Positive keywords raise · Negative keywords lower closure probability.</p>
+              <Textarea value={form.notes} onChange={e=>handleChange('notes',e.target.value)} placeholder="Notes, requirements, context…" rows={3} className="resize-none rounded-2xl text-sm"/>
+              <p className="text-[10px] text-slate-400">Keywords like "interested", "proceed" raise · "no", "decline" lower closure probability.</p>
             </div>
           </div>
-
           <DialogFooter className="pt-4 border-t border-slate-200 gap-2">
             <Button variant="outline" onClick={closeDialog} className="rounded-2xl">Cancel</Button>
-            <Button onClick={handleSubmit} disabled={submitting} className="rounded-2xl bg-blue-700 hover:bg-blue-800 text-white min-w-[130px] active:scale-95 transition-all">
-              {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : editingLead ? 'Update Lead' : 'Create Lead'}
+            <Button onClick={handleSubmit} disabled={submitting} className="rounded-2xl bg-blue-700 hover:bg-blue-800 text-white min-w-[130px] active:scale-95">
+              {submitting?<><Loader2 className="h-4 w-4 animate-spin mr-2"/>Saving…</>:editingLead?'Update Lead':'Create Lead'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── Convert to Task Dialog ── */}
-      {convertingLead && (
-        <ConvertToTaskDialog
-          lead={convertingLead}
-          open={!!convertingLead}
-          onClose={() => setConvertingLead(null)}
-          onSuccess={() => { setConvertingLead(null); fetchLeads(); }}
-        />
-      )}
-
-      {/* ── Client Conversion Dialog ── */}
+      {/* Client Conversion Dialog */}
       {clientConvLead && (
-        <ClientConversionDialog
-          lead={clientConvLead}
-          open={!!clientConvLead}
-          onClose={() => { if (!clientConverting) setClientConvLead(null); }}
-          onConvertNow={handleClientConvertNow}
-          onConvertLater={handleClientConvertLater}
-          converting={clientConverting}
-        />
+        <ClientConversionDialog lead={clientConvLead} open={!!clientConvLead}
+          onClose={()=>{ if(!clientConverting)setClientConvLead(null); }}
+          onConvertNow={handleClientConvertNow} onConvertLater={handleClientConvertLater} converting={clientConverting}/>
       )}
 
     </motion.div>
