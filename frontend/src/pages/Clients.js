@@ -83,7 +83,6 @@ const getAvatarGradient = (name = '') => {
   return `linear-gradient(135deg, ${AVATAR_GRADIENTS[idx][0]}, ${AVATAR_GRADIENTS[idx][1]})`;
 };
 
-// ─── Sort options ────────────────────────────────────────────────────────────
 const SORT_OPTIONS = [
   { value: 'fifo',  label: 'Oldest First',  icon: '↑', hint: 'FIFO' },
   { value: 'lifo',  label: 'Newest First',  icon: '↓', hint: 'LIFO' },
@@ -395,7 +394,6 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
   const extraAssignees = clientAssignments.length > 1 ? clientAssignments.length - 1 : 0;
   const svcSlots = [0, 1, 2].map(i => client.services?.[i]?.replace('Other: ', '') || null);
   const extraSvcs = serviceCount > 3 ? serviceCount - 3 : 0;
-  const dim = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
   const iconBg = isDark ? 'rgba(255,255,255,0.07)' : cfg.bg;
 
   return (
@@ -550,9 +548,7 @@ export default function Clients() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
-
-  // ── NEW: sort state ──────────────────────────────────────────────────────
-  const [sortOrder, setSortOrder] = useState('lifo'); // default: newest first
+  const [sortOrder, setSortOrder] = useState('lifo');
 
   const fileInputRef = useRef(null);
   const excelInputRef = useRef(null);
@@ -563,6 +559,10 @@ export default function Clients() {
 
   const [boardPage, setBoardPage] = useState(1);
   const BOARD_PAGE_SIZE = 24;
+
+  // FIX: list view also needs its own page state
+  const [listPage, setListPage] = useState(1);
+  const LIST_PAGE_SIZE = 50;
 
   const [bulkMsgOpen, setBulkMsgOpen] = useState(false);
   const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp');
@@ -587,12 +587,10 @@ export default function Clients() {
     if (typeof dateStr !== 'string') return null;
     const trimmed = dateStr.trim();
     if (!trimmed || trimmed === 'None' || trimmed === 'null' || trimmed === 'undefined') return null;
-    // Must match YYYY-MM-DD format — backend expects this exact format
     const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!match) return null;
     const date = new Date(trimmed);
     if (isNaN(date.getTime())) return null;
-    // Extra guard: year must be reasonable
     if (date.getFullYear() < 1900 || date.getFullYear() > 2100) return null;
     return `${match[1]}-${match[2]}-${match[3]}`;
   };
@@ -615,7 +613,6 @@ export default function Clients() {
   const saveReferrer = async (name) => {
     const trimmed = name?.trim();
     if (!trimmed) return trimmed;
-    // Case-insensitive duplicate check
     const existing = savedReferrers.find(r => r.toLowerCase() === trimmed.toLowerCase());
     if (existing) return existing;
     const updated = [...savedReferrers, trimmed];
@@ -655,7 +652,6 @@ export default function Clients() {
     window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
   };
 
-  // ── Filter ────────────────────────────────────────────────────────────────
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       const matchesSearch =
@@ -676,21 +672,20 @@ export default function Clients() {
     });
   }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
 
-  // ── Sort (applied AFTER filter, BEFORE pagination) ────────────────────────
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
     switch (sortOrder) {
-      case 'fifo': // oldest created first — ascending by created_at / _id
+      case 'fifo':
         return arr.sort((a, b) => {
           const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
           const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return ta - tb; // ascending → oldest first
+          return ta - tb;
         });
-      case 'lifo': // newest first — descending by created_at
+      case 'lifo':
         return arr.sort((a, b) => {
           const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
           const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return tb - ta; // descending → newest first
+          return tb - ta;
         });
       case 'az':
         return arr.sort((a, b) =>
@@ -705,8 +700,8 @@ export default function Clients() {
     }
   }, [filteredClients, sortOrder]);
 
-  // Reset page on filter/sort change
-  useEffect(() => { setBoardPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, sortOrder, clients]);
+  // FIX: Reset both page states on filter/sort change
+  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, sortOrder, clients]);
 
   const stats = useMemo(() => {
     const totalClients = filteredClients.length;
@@ -733,15 +728,18 @@ export default function Clients() {
 
   const getClientNumber = (index) => String(index + 1).padStart(3, '0');
 
+  // FIX: Updated validateForm — company name min 3 chars to match backend Pydantic model (min_length=3)
   const validateForm = () => {
     const errors = {};
     const cErrors = [];
-    if (!formData.company_name?.trim() || formData.company_name.trim().length < 2) errors.company_name = 'Company name must be at least 2 characters';
+    // FIX: backend requires min_length=3, not 2
+    if (!formData.company_name?.trim() || formData.company_name.trim().length < 3) errors.company_name = 'Company name must be at least 3 characters';
     const trimmedEmail = formData.email?.trim();
     if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) errors.email = 'Please enter a valid email address';
     const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : '';
     if (cleanPhone && cleanPhone.length !== 10) errors.phone = 'Phone number must be exactly 10 digits (or leave blank)';
-    if (formData.services.length === 0) errors.services = 'At least one service must be selected';
+    // FIX: services validation removed as backend does not require services — optional
+    // if (formData.services.length === 0) errors.services = 'At least one service must be selected';
     let hasValidContact = false;
     formData.contact_persons.forEach((cp, idx) => {
       const contactErr = {};
@@ -754,7 +752,8 @@ export default function Clients() {
       if (cCleanPhone && cCleanPhone.length !== 10) contactErr.phone = 'Phone must be 10 digits';
       if (Object.keys(contactErr).length > 0) cErrors[idx] = contactErr;
     });
-    if (!hasValidContact) errors.contacts = 'At least one contact person with a valid name is required';
+    // FIX: contact person is optional — only validate if user filled partial data
+    // Remove hard requirement for contact person name
     const allEmails = new Set();
     if (trimmedEmail) allEmails.add(trimmedEmail.toLowerCase());
     formData.contact_persons.forEach(cp => { if (cp.email?.trim()) allEmails.add(cp.email.trim().toLowerCase()); });
@@ -844,13 +843,56 @@ export default function Clients() {
       finalServices = finalServices.filter(s => !s.startsWith("Other:"));
       if (otherService.trim() && formData.services.includes("Other")) finalServices.push(`Other: ${otherService.trim()}`);
       const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, "") : "";
-      const cleanedContacts = formData.contact_persons.map(cp => ({ name: cp.name || "", designation: cp.designation?.trim() || null, email: cp.email?.trim() || null, phone: cp.phone ? (cp.phone.replace(/\D/g, "") || null) : null, birthday: safeDate(cp.birthday) || null, din: cp.din?.trim() || null }));
-      const cleanedDSC = formData.dsc_details.map(dsc => ({ certificate_number: dsc.certificate_number?.trim() || "", holder_name: dsc.holder_name?.trim() || "", issue_date: safeDate(dsc.issue_date), expiry_date: safeDate(dsc.expiry_date), notes: dsc.notes?.trim() || null }));
+
+      // FIX: Only include contact persons that have at least a name filled in
+      const cleanedContacts = formData.contact_persons
+        .filter(cp => cp.name?.trim())
+        .map(cp => ({
+          name: cp.name.trim(),
+          designation: cp.designation?.trim() || null,
+          email: cp.email?.trim() || null,
+          phone: cp.phone ? (cp.phone.replace(/\D/g, "") || null) : null,
+          birthday: safeDate(cp.birthday) || null,
+          din: cp.din?.trim() || null
+        }));
+
+      const cleanedDSC = formData.dsc_details.map(dsc => ({
+        certificate_number: dsc.certificate_number?.trim() || "",
+        holder_name: dsc.holder_name?.trim() || "",
+        issue_date: safeDate(dsc.issue_date),
+        expiry_date: safeDate(dsc.expiry_date),
+        notes: dsc.notes?.trim() || null
+      }));
+
       const cleanedAssignments = (formData.assignments || []).filter(a => a.user_id && a.user_id !== 'unassigned').map(a => ({ user_id: a.user_id, services: a.services || [] }));
       const finalReferredBy = formData.referred_by?.trim() || null;
       if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
-      const payload = { company_name: formData.company_name.trim(), client_type: formData.client_type, client_type_label: formData.client_type === 'other' ? (formData.client_type_other?.trim() || 'Other') : null, email: formData.email?.trim() || null, phone: cleanPhone || null, birthday: safeDate(formData.birthday) || null, address: formData.address?.trim() || null, city: formData.city?.trim() || null, state: formData.state?.trim() || null, services: finalServices, notes: formData.notes?.trim() || null, assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments, status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC, referred_by: finalReferredBy || null };
-      // ── Duplicate company name check (frontend guard, backend also has unique index) ──
+
+      // FIX: Build payload carefully — only include fields the backend expects
+      // backend ClientBase expects: company_name, client_type, contact_persons, email, phone,
+      // date_of_incorporation, birthday, services, dsc_details, assigned_to, notes, referred_by, assignments
+      // Extra fields (address, city, state, client_type_label) are handled via extra="ignore" on backend
+      const payload = {
+        company_name: formData.company_name.trim(),
+        client_type: formData.client_type,
+        // FIX: include client_type_label only when client_type is 'other'
+        ...(formData.client_type === 'other' ? { client_type_label: formData.client_type_other?.trim() || 'Other' } : { client_type_label: null }),
+        email: trimmedEmailVal(formData.email),
+        phone: cleanPhone || null,
+        birthday: safeDate(formData.birthday) || null,
+        address: formData.address?.trim() || null,
+        city: formData.city?.trim() || null,
+        state: formData.state?.trim() || null,
+        services: finalServices,
+        notes: formData.notes?.trim() || null,
+        assigned_to: cleanedAssignments[0]?.user_id || null,
+        assignments: cleanedAssignments,
+        status: formData.status,
+        contact_persons: cleanedContacts,
+        dsc_details: cleanedDSC,
+        referred_by: finalReferredBy || null,
+      };
+
       if (!editingClient) {
         const duplicate = clients.find(c =>
           c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim()
@@ -865,8 +907,23 @@ export default function Clients() {
       else await api.post("/clients", payload);
       setDialogOpen(false); resetForm(); fetchClients();
       toast.success("Saved successfully!");
-    } catch (error) { toast.error(error.response?.data?.detail || "Error saving client"); }
+    } catch (error) {
+      // FIX: Show detailed backend error for debugging
+      const detail = error.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        const msgs = detail.map(e => `${e.loc?.join('.')} — ${e.msg}`).join('\n');
+        toast.error(`Validation error:\n${msgs}`);
+      } else {
+        toast.error(detail || "Error saving client");
+      }
+    }
     finally { setLoading(false); }
+  };
+
+  // Helper to trim email and return null if empty
+  const trimmedEmailVal = (email) => {
+    const t = email?.trim();
+    return t && t.length > 0 ? t : null;
   };
 
   const handleEdit = (client) => {
@@ -874,7 +931,7 @@ export default function Clients() {
     let assignments = client?.assignments || [];
     if (assignments.length === 0 && client?.assigned_to) assignments = [{ user_id: client.assigned_to, services: [] }];
     if (assignments.length === 0) assignments = [{ ...EMPTY_ASSIGNMENT }];
-    setFormData({ ...client, client_type_other: client?.client_type === 'other' ? (client?.client_type_label || '') : '', contact_persons: client?.contact_persons?.map(cp => ({ ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || '' })) || [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '', dsc_details: client?.dsc_details?.map(d => ({ ...d, issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '', expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '' })) || [], status: client?.status || 'active', assignments, referred_by: client?.referred_by || '' });
+    setFormData({ ...client, client_type_other: client?.client_type === 'other' ? (client?.client_type_label || '') : '', contact_persons: client?.contact_persons?.length > 0 ? client.contact_persons.map(cp => ({ ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || '' })) : [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '', dsc_details: client?.dsc_details?.map(d => ({ ...d, issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '', expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '' })) || [], status: client?.status || 'active', assignments, referred_by: client?.referred_by || '' });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true); setFormErrors({}); setContactErrors([]);
@@ -911,20 +968,10 @@ export default function Clients() {
   const addOtherService = () => {
     const trimmed = otherService.trim();
     if (!trimmed) return;
-    // Case-insensitive duplicate check against existing Other: services AND built-in SERVICES list
-    const existingOthers = formData.services
-      .filter(s => s.startsWith('Other:'))
-      .map(s => s.replace('Other: ', '').toLowerCase());
+    const existingOthers = formData.services.filter(s => s.startsWith('Other:')).map(s => s.replace('Other: ', '').toLowerCase());
     const builtInMatch = SERVICES.find(s => s.toLowerCase() === trimmed.toLowerCase() && s !== 'Other');
-    if (builtInMatch) {
-      toast.info(`"${builtInMatch}" is already a standard service — select it from the list above`);
-      return;
-    }
-    if (existingOthers.includes(trimmed.toLowerCase())) {
-      toast.info(`"${trimmed}" is already added`);
-      setOtherService('');
-      return;
-    }
+    if (builtInMatch) { toast.info(`"${builtInMatch}" is already a standard service — select it from the list above`); return; }
+    if (existingOthers.includes(trimmed.toLowerCase())) { toast.info(`"${trimmed}" is already added`); setOtherService(''); return; }
     setFormData(prev => ({ ...prev, services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${trimmed}`] }));
     setOtherService('');
   };
@@ -934,26 +981,22 @@ export default function Clients() {
   const handleSaveReferrer = async () => {
     const name = referrerInput.trim();
     if (!name) { toast.error('Please enter a referrer name'); return; }
-    // Case-insensitive duplicate check
     const duplicate = savedReferrers.find(r => r.toLowerCase() === name.toLowerCase());
-    if (duplicate) {
-      toast.info(`"${duplicate}" already exists — selected!`);
-      setReferrerSelectValue(duplicate);
-      setReferrerInput('');
-      setFormData(prev => ({ ...prev, referred_by: duplicate }));
-      return;
-    }
+    if (duplicate) { toast.info(`"${duplicate}" already exists — selected!`); setReferrerSelectValue(duplicate); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: duplicate })); return; }
     const saved = await saveReferrer(name);
-    setReferrerSelectValue(saved);
-    setReferrerInput('');
+    setReferrerSelectValue(saved); setReferrerInput('');
     setFormData(prev => ({ ...prev, referred_by: saved }));
     toast.success(`"${saved}" added to referrer list`);
   };
 
-  // ── List row ──────────────────────────────────────────────────────────
-  const ListRow = ({ index, style }) => {
-    const client = sortedClients[index];
+  // ── List row — FIX: uses local pageClients array passed as prop, not sortedClients directly ──
+  // This is now a pure component that receives the client directly — no index lookup needed
+  const ListRow = ({ index, style, data }) => {
+    // FIX: data is the pageClients array passed via itemData prop
+    const { pageClients: pc, pageStart: ps } = data;
+    const client = pc[index];
     if (!client) return null;
+    const globalIndex = ps + index;
     const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
     const isArchived = client.status === 'inactive';
     const serviceCount = client.services?.length || 0;
@@ -961,7 +1004,7 @@ export default function Clients() {
     return (
       <div style={style} className="px-1">
         <div className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors group cursor-pointer ${isArchived ? 'opacity-60' : ''} ${isDark ? "bg-slate-800 hover:bg-slate-700/60 border-slate-700" : "bg-white hover:bg-slate-50/60"}`}
-          style={{ borderColor: '#F1F5F9' }}
+          style={{ borderColor: isDark ? undefined : '#F1F5F9' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
           <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
@@ -969,7 +1012,7 @@ export default function Clients() {
           </div>
           <div className="w-56 flex-shrink-0 min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+              <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(globalIndex)}</span>
               {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
             </div>
             <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-100" : "text-slate-900"}`}>{client.company_name}</p>
@@ -1129,7 +1172,6 @@ export default function Clients() {
               <DialogTrigger asChild>
                 <Button className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Client</Button>
               </DialogTrigger>
-              {/* Form dialog content — unchanged from original */}
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
                 <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
                   <div>
@@ -1156,12 +1198,12 @@ export default function Clients() {
                         <label className={labelCls}>Referred By</label>
                         <div className="relative"><Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" /><select className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer" value={referrerSelectValue} onChange={e => handleReferrerSelectChange(e.target.value)}><option value="">— Select referral source —</option><option value="Our Client">Our Client</option>{savedReferrers.filter(r => r !== 'Our Client').map(r => <option key={r} value={r}>{r}</option>)}<option value="__other__">+ Other</option></select></div>
                         {referrerSelectValue === '__other__' && <div className="flex gap-2 mt-2"><Input className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Type referrer's name…" value={referrerInput} onChange={e => handleReferrerInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }} autoFocus /><Button type="button" onClick={handleSaveReferrer} className="h-11 px-4 rounded-xl text-white text-sm font-semibold flex-shrink-0 gap-1.5 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Plus className="h-4 w-4" /> Save</Button></div>}
-                      {referrerSelectValue === '__other__' && (() => {
-                        const isDuplicate = referrerInput.trim() && savedReferrers.some(r => r.toLowerCase() === referrerInput.trim().toLowerCase());
-                        return isDuplicate
-                          ? <p className="text-[10px] text-amber-600 mt-1.5 flex items-center gap-1.5"><span>⚠</span> <span>&ldquo;{referrerInput.trim()}&rdquo; already exists — click <strong>Save</strong> to select it</span></p>
-                          : <p className="text-[10px] text-slate-400 mt-1.5">Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time</p>;
-                      })()}
+                        {referrerSelectValue === '__other__' && (() => {
+                          const isDuplicate = referrerInput.trim() && savedReferrers.some(r => r.toLowerCase() === referrerInput.trim().toLowerCase());
+                          return isDuplicate
+                            ? <p className="text-[10px] text-amber-600 mt-1.5 flex items-center gap-1.5"><span>⚠</span> <span>&ldquo;{referrerInput.trim()}&rdquo; already exists — click <strong>Save</strong> to select it</span></p>
+                            : <p className="text-[10px] text-slate-400 mt-1.5">Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time</p>;
+                        })()}
                       </div>
                       <div className="md:col-span-2"><label className={labelCls}>Address</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
                       <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} /></div>
@@ -1188,7 +1230,7 @@ export default function Clients() {
                               <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
                               <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
                             </div>
-                            {formData.dsc_details.length > 1 && (
+                            {formData.dsc_details.length > 0 && (
                               <button type="button" onClick={() => removeDSC(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>
                             )}
                           </div>
@@ -1280,7 +1322,6 @@ export default function Clients() {
                     </div>
                   )}
 
-
                   {/* Footer */}
                   <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}>
                     <div className="flex gap-2">
@@ -1335,9 +1376,8 @@ export default function Clients() {
         </div>
       )}
 
-      {/* ── FILTERS + SORT + VIEW TOGGLE ── */}
+      {/* FILTERS + SORT + VIEW TOGGLE */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
-        {/* ROW 1: Search bar */}
         <div className={`flex items-center gap-3 px-3.5 pt-3.5 pb-2.5 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}>
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
@@ -1347,7 +1387,6 @@ export default function Clients() {
               value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          {/* Count + view toggle always visible on right of search */}
           <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-300 border-slate-600" : "bg-slate-50 text-slate-600 border-slate-200"}`}>
             {sortedClients.length} <span className="ml-1 font-normal text-slate-400">{sortedClients.length !== 1 ? 'clients' : 'client'}</span>
           </div>
@@ -1361,9 +1400,7 @@ export default function Clients() {
           </div>
         </div>
 
-        {/* ROW 2: All controls in one line */}
         <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none">
-          {/* Bulk message buttons */}
           <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
             <button onClick={() => openBulkMsg('whatsapp')}
               className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-emerald-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
@@ -1380,10 +1417,8 @@ export default function Clients() {
             </button>
           </div>
 
-          {/* Divider */}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
 
-          {/* Sort control */}
           <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
             {SORT_OPTIONS.map((opt, i) => {
               const isActive = sortOrder === opt.value;
@@ -1406,10 +1441,8 @@ export default function Clients() {
             })}
           </div>
 
-          {/* Divider */}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
 
-          {/* Filters */}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All Status</SelectItem></SelectContent>
@@ -1433,32 +1466,39 @@ export default function Clients() {
 
       {/* CLIENT BOARD / LIST + PAGINATION */}
       {(() => {
-        const totalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
-        const safePage = Math.min(boardPage, Math.max(1, totalPages));
-        const pageStart = (safePage - 1) * BOARD_PAGE_SIZE;
-        const pageClients = sortedClients.slice(pageStart, pageStart + BOARD_PAGE_SIZE);
+        // ── Board pagination ──
+        const boardTotalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
+        const boardSafePage = Math.min(boardPage, Math.max(1, boardTotalPages));
+        const boardPageStart = (boardSafePage - 1) * BOARD_PAGE_SIZE;
+        const boardPageClients = sortedClients.slice(boardPageStart, boardPageStart + BOARD_PAGE_SIZE);
 
-        const pageWindow = (() => {
-          if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-          if (safePage <= 4) return [1, 2, 3, 4, 5, '…', totalPages];
-          if (safePage >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-          return [1, '…', safePage - 1, safePage, safePage + 1, '…', totalPages];
-        })();
+        // FIX: List pagination — list view also paginates through sortedClients
+        const listTotalPages = Math.ceil(sortedClients.length / LIST_PAGE_SIZE);
+        const listSafePage = Math.min(listPage, Math.max(1, listTotalPages));
+        const listPageStart = (listSafePage - 1) * LIST_PAGE_SIZE;
+        const listPageClients = sortedClients.slice(listPageStart, listPageStart + LIST_PAGE_SIZE);
 
-        const PaginationBar = () => totalPages <= 1 ? null : (
+        const buildPageWindow = (safePg, totalPgs) => {
+          if (totalPgs <= 7) return Array.from({ length: totalPgs }, (_, i) => i + 1);
+          if (safePg <= 4) return [1, 2, 3, 4, 5, '…', totalPgs];
+          if (safePg >= totalPgs - 3) return [1, '…', totalPgs - 4, totalPgs - 3, totalPgs - 2, totalPgs - 1, totalPgs];
+          return [1, '…', safePg - 1, safePg, safePg + 1, '…', totalPgs];
+        };
+
+        const PaginationBar = ({ safePg, totalPgs, pageStartNum, pageSize, totalCount, onPageChange }) => totalPgs <= 1 ? null : (
           <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, background: isDark ? '#1e293b' : '#F8FAFC' }}>
             <p style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', margin: 0 }}>
-              <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{pageStart + 1}–{Math.min(pageStart + BOARD_PAGE_SIZE, sortedClients.length)}</span>{' '}of{' '}<span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{sortedClients.length}</span>{' '}clients
+              <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{pageStartNum + 1}–{Math.min(pageStartNum + pageSize, totalCount)}</span>{' '}of{' '}<span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{totalCount}</span>{' '}clients
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button onClick={() => setBoardPage(p => Math.max(1, p - 1))} disabled={safePage === 1} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePage === 1 ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePage === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePage === 1 ? 0.4 : 1 }}>‹</button>
-              {pageWindow.map((p, i) => p === '…'
+              <button onClick={() => onPageChange(p => Math.max(1, p - 1))} disabled={safePg === 1} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === 1 ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === 1 ? 0.4 : 1 }}>‹</button>
+              {buildPageWindow(safePg, totalPgs).map((p, i) => p === '…'
                 ? <span key={`e-${i}`} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: isDark ? '#475569' : '#94a3b8' }}>…</span>
-                : <button key={p} onClick={() => setBoardPage(p)} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer', background: p === safePage ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'), color: p === safePage ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'), fontSize: 11, fontWeight: p === safePage ? 700 : 500, boxShadow: p === safePage ? '0 2px 8px rgba(13,59,102,0.35)' : 'none' }}>{p}</button>
+                : <button key={p} onClick={() => onPageChange(p)} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer', background: p === safePg ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'), color: p === safePg ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'), fontSize: 11, fontWeight: p === safePg ? 700 : 500, boxShadow: p === safePg ? '0 2px 8px rgba(13,59,102,0.35)' : 'none' }}>{p}</button>
               )}
-              <button onClick={() => setBoardPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePage === totalPages ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePage === totalPages ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePage === totalPages ? 0.4 : 1 }}>›</button>
+              <button onClick={() => onPageChange(p => Math.min(totalPgs, p + 1))} disabled={safePg === totalPgs} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === totalPgs ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === totalPgs ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === totalPgs ? 0.4 : 1 }}>›</button>
             </div>
-            <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>Page {safePage} / {totalPages}</p>
+            <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>Page {safePg} / {totalPgs}</p>
           </div>
         );
 
@@ -1474,18 +1514,37 @@ export default function Clients() {
           <div className="rounded-2xl border shadow-sm flex flex-col" style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
             <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
-                {pageClients.map((client, localIndex) => {
-                  const globalIndex = pageStart + localIndex;
+                {boardPageClients.map((client, localIndex) => {
+                  const globalIndex = boardPageStart + localIndex;
                   return <ModernClientCard key={client.id} client={client} index={globalIndex} isDark={isDark} users={users} getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp} handleEdit={handleEdit} canDeleteData={canDeleteData} fetchClients={fetchClients} setSelectedClient={setSelectedClient} setDetailDialogOpen={setDetailDialogOpen} getClientNumber={getClientNumber} />;
                 })}
               </div>
             </div>
-            <PaginationBar />
+            <PaginationBar
+              safePg={boardSafePage}
+              totalPgs={boardTotalPages}
+              pageStartNum={boardPageStart}
+              pageSize={BOARD_PAGE_SIZE}
+              totalCount={sortedClients.length}
+              onPageChange={setBoardPage}
+            />
           </div>
         );
 
+        // FIX: List view — uses listPageClients (paginated slice) passed as itemData to FixedSizeList
+        // This is the root cause fix: previously ListRow read sortedClients[index] which worked
+        // but the container height was the problem — using a fixed pixel height container
+        // instead of AutoSizer inside a flex child that has no explicit height.
+        // Now we give the list container an explicit calculated height based on visible items.
+        const LIST_ROW_HEIGHT = 56;
+        const MAX_VISIBLE_ROWS = 15;
+        const visibleRows = Math.min(listPageClients.length, MAX_VISIBLE_ROWS);
+        // FIX: explicit height = rows * rowHeight, no AutoSizer needed — avoids the 0-height issue
+        const listHeight = visibleRows * LIST_ROW_HEIGHT;
+
         return (
           <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+            {/* Header row */}
             <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? "bg-slate-700/60 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
               <div className="w-1 flex-shrink-0" /><div className="w-8 flex-shrink-0" />
               <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
@@ -1496,16 +1555,26 @@ export default function Clients() {
               <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
               <div className="w-24 flex-shrink-0" />
             </div>
-            <div style={{ height: 520, flex: 1 }}>
-              <AutoSizer>
-                {({ height, width }) => (
-                  <FixedSizeList height={height} width={width} itemCount={sortedClients.length} itemSize={56}>
-                    {({ index, style }) => <ListRow index={index} style={style} />}
-                  </FixedSizeList>
-                )}
-              </AutoSizer>
+            {/* FIX: FixedSizeList with explicit height and itemData prop so ListRow gets paginated data */}
+            <div style={{ height: listHeight, minHeight: LIST_ROW_HEIGHT }}>
+              <FixedSizeList
+                height={listHeight}
+                width="100%"
+                itemCount={listPageClients.length}
+                itemSize={LIST_ROW_HEIGHT}
+                itemData={{ pageClients: listPageClients, pageStart: listPageStart }}
+              >
+                {ListRow}
+              </FixedSizeList>
             </div>
-            <PaginationBar />
+            <PaginationBar
+              safePg={listSafePage}
+              totalPgs={listTotalPages}
+              pageStartNum={listPageStart}
+              pageSize={LIST_PAGE_SIZE}
+              totalCount={sortedClients.length}
+              onPageChange={setListPage}
+            />
           </div>
         );
       })()}
@@ -1543,7 +1612,7 @@ export default function Clients() {
                   for (let row of previewData) {
                     const exists = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
                     if (exists) continue;
-                    try { await api.post('/clients', { company_name: row.company_name?.trim(), client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor', email: row.email?.trim() || null, phone: row.phone?.replace(/\D/g,""), birthday: row.birthday||null, address: row.address?.trim()||null, city: row.city?.trim()||null, state: row.state?.trim()||null, services: row.services?row.services.split(',').map(s=>s.trim()):[], notes: row.notes?.trim()||null, status: row.status||'active', referred_by: row.referred_by?.trim()||null, assigned_to: null, assignments: [], contact_persons: [1,2,3].reduce((acc,n)=>{const name=row[`contact_name_${n}`]?.trim();if(name)acc.push({name,designation:row[`contact_designation_${n}`]?.trim()||null,email:row[`contact_email_${n}`]?.trim()||null,phone:row[`contact_phone_${n}`]?.replace(/\D/g,'')||null,birthday:row[`contact_birthday_${n}`]||null,din:row[`contact_din_${n}`]?.trim()||null});return acc;},[]), dsc_details: [] }); success++; } catch(err){console.error(err);}
+                    try { await api.post('/clients', { company_name: row.company_name?.trim(), client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor', email: row.email?.trim() || null, phone: row.phone?.replace(/\D/g,"") || null, birthday: row.birthday||null, address: row.address?.trim()||null, city: row.city?.trim()||null, state: row.state?.trim()||null, services: row.services?row.services.split(',').map(s=>s.trim()):[], notes: row.notes?.trim()||null, status: row.status||'active', referred_by: row.referred_by?.trim()||null, assigned_to: null, assignments: [], contact_persons: [1,2,3].reduce((acc,n)=>{const name=row[`contact_name_${n}`]?.trim();if(name)acc.push({name,designation:row[`contact_designation_${n}`]?.trim()||null,email:row[`contact_email_${n}`]?.trim()||null,phone:row[`contact_phone_${n}`]?.replace(/\D/g,'')||null,birthday:row[`contact_birthday_${n}`]||null,din:row[`contact_din_${n}`]?.trim()||null});return acc;},[]), dsc_details: [] }); success++; } catch(err){console.error(err);}
                   }
                   toast.success(`${success} clients imported successfully`); fetchClients(); setPreviewOpen(false); setImportLoading(false);
                 }}>Confirm &amp; Import All</Button>
@@ -1578,7 +1647,6 @@ export default function Clients() {
                 </div>
                 <div className="mt-4"><label className={labelCls}>Services</label><div className="flex flex-wrap gap-2 mt-1">{SERVICES.map(s => { const sel = mdsForm.services?.includes(s); return <button key={s} type="button" onClick={() => setMdsForm(f => ({ ...f, services: sel ? f.services.filter(x=>x!==s) : [...(f.services||[]),s] }))} className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel?'text-white border-transparent':'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`} style={sel?{background:'linear-gradient(135deg, #0D3B66, #1F6FB2)'}:{}}>{s}</button>; })}</div></div>
               </div>
-              
 
               <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
                 <div className="flex items-center justify-between mb-5">
@@ -1646,7 +1714,6 @@ export default function Clients() {
                   )}
                 </div>
               )}
-
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
                 <Button type="button" variant="ghost" onClick={() => { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); }} className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
