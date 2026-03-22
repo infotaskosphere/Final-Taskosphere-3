@@ -2187,14 +2187,23 @@ async def export_task_log_pdf(
 
 # Dsc Routes
 @api_router.post("/dsc", response_model=DSC)
-async def create_dsc(dsc_data: DSCCreate, current_user: User = Depends(get_current_user)):
-    dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
-    doc = dsc.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["issue_date"] = doc["issue_date"].isoformat()
-    doc["expiry_date"] = doc["expiry_date"].isoformat()
-    await db.dsc_register.insert_one(doc)
-    return dsc
+async def create_dsc(
+    dsc_data: DSCCreate,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
+        doc = dsc.model_dump()
+        # Convert datetime objects to ISO strings for MongoDB storage
+        doc["created_at"] = doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else doc["created_at"]
+        doc["issue_date"] = doc["issue_date"].isoformat() if isinstance(doc["issue_date"], datetime) else doc["issue_date"]
+        doc["expiry_date"] = doc["expiry_date"].isoformat() if isinstance(doc["expiry_date"], datetime) else doc["expiry_date"]
+        await db.dsc_register.insert_one(doc)
+        doc.pop("_id", None)
+        return dsc
+    except Exception as e:
+        logger.error(f"DSC create error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save DSC: {str(e)}")
 
 @api_router.get("/dsc")
 async def get_dsc_list(
