@@ -37,7 +37,6 @@ const COLORS = {
   lightGreen:  '#5CCB5F',
 };
 
-// ── Single source of truth for sidebar widths ─────────────────────────────────
 const SIDEBAR_EXPANDED  = 260;
 const SIDEBAR_COLLAPSED = 72;
 
@@ -57,21 +56,27 @@ const NAV_GROUPS = [
     id: 'records',
     dividerLabel: 'Records',
     items: [
-      { path: '/dsc',        icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'        },
-      { path: '/documents',  icon: FileText, label: 'Document Register', permission: 'can_view_documents'      },
-      { path: '/clients',    icon: Users,    label: 'Clients',           permission: 'can_view_all_clients'    },
-      { path: '/leads',      icon: Target,   label: 'Lead Management',   permission: 'can_view_all_leads'      },
-      { path: '/quotations', icon: Receipt,  label: 'Quotations',        permission: 'can_create_quotations'   },
+      { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'     },
+      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'   },
+      { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients' },
+    ],
+  },
+  {
+    id: 'proposals',
+    dividerLabel: 'Client Proposals',
+    items: [
+      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
+      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
     ],
   },
   {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity', permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3,  label: 'Reports'                                              },
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
-      { path: '/users',          icon: Users,      label: 'Users',          permission: 'can_view_user_page'    },
+      { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
+      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
+      { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
     ],
   },
   {
@@ -229,12 +234,37 @@ const DashboardLayout = ({ children }) => {
     );
   };
 
-  const NavDivider = ({ label }) => (
+  const NavDivider = ({ label, isProposals }) => (
     <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
-        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
-          {label}
-        </p>
+        isProposals ? (
+          /* ── Client Proposals — styled pill divider ── */
+          <div className="flex items-center gap-2 px-1 mb-1">
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}14, ${COLORS.mediumBlue}10)` }}
+            >
+              <Receipt
+                className="h-3 w-3 flex-shrink-0"
+                style={{ color: COLORS.mediumBlue }}
+              />
+              <p
+                className="text-[10px] font-bold uppercase tracking-widest"
+                style={{ color: COLORS.deepBlue }}
+              >
+                {label}
+              </p>
+            </div>
+            <div
+              className="flex-1 h-px"
+              style={{ background: `linear-gradient(to right, ${COLORS.mediumBlue}30, transparent)` }}
+            />
+          </div>
+        ) : (
+          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
+            {label}
+          </p>
+        )
       ) : (
         <div className="border-t border-slate-100 dark:border-slate-700/60 mx-1" />
       )}
@@ -308,7 +338,12 @@ const DashboardLayout = ({ children }) => {
         <nav className="flex-1 px-3 py-3 overflow-y-auto scrollbar-none space-y-0.5">
           {NAV_GROUPS.map((group, gi) => (
             <React.Fragment key={group.id}>
-              {gi > 0 && <NavDivider label={group.dividerLabel} />}
+              {gi > 0 && (
+                <NavDivider
+                  label={group.dividerLabel}
+                  isProposals={group.id === 'proposals'}
+                />
+              )}
               {group.items.map(item => (
                 <NavItem key={item.path} item={item} />
               ))}
