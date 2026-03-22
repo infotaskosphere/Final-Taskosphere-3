@@ -1,43 +1,30 @@
 import Papa from 'papaparse/papaparse.js';
 import { useDark } from '@/hooks/useDark';
-import { Loader2, ArrowUpDown, ArrowUp, ArrowDown, SortAsc, SortDesc } from 'lucide-react';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  Plus, Edit, Trash2, Mail, Cake, X, UserPlus,
+  Plus, Edit, Trash2, Mail, Cake, X,
   FileText, Calendar, Search, Users,
   Briefcase, BarChart3, Archive, MessageCircle, Trash,
-  CheckCircle2, AlertCircle, Building2, ChevronDown, ChevronUp,
+  CheckCircle2, Building2, ChevronDown, ChevronUp,
   LayoutGrid, List, Phone, MapPin, User, FileCheck, Share2,
-  Send, Copy, ExternalLink, CheckSquare, Square, MinusSquare,
-  Sparkles, TrendingUp, Shield, ChevronRight, Star, Zap,
+  Copy, ExternalLink, CheckSquare, Square, MinusSquare,
+  Shield, Download,
 } from 'lucide-react';
-import { format, startOfDay } from 'date-fns';
+import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
-import AutoSizer from 'react-virtualized-auto-sizer';
-import { FixedSizeGrid as Grid, FixedSizeList } from 'react-window';
+import { FixedSizeList } from 'react-window';
 
-const handleCsvUpload = (e) => {
-  const file = e.target.files[0];
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (results) => { console.log(results.data); }
-  });
-};
-
+// ─── Constants ────────────────────────────────────────────────────────────────
 const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
@@ -54,23 +41,13 @@ const SERVICES = [
 ];
 
 const TYPE_CONFIG = {
-  pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', accent: 'from-blue-600 to-blue-800',     strip: '#2563EB' },
-  llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', accent: 'from-violet-600 to-violet-800',  strip: '#7C3AED' },
-  partnership: { label: 'Partnership', bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: '#D97706', accent: 'from-amber-500 to-amber-700',    strip: '#D97706' },
-  huf:         { label: 'HUF',         bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', accent: 'from-teal-600 to-teal-800',      strip: '#0D9488' },
-  trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', accent: 'from-rose-600 to-rose-800',      strip: '#E11D48' },
-  proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', accent: 'from-slate-500 to-slate-700',    strip: '#64748B' },
-  other:       { label: 'Other',       bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', accent: 'from-sky-600 to-sky-800',        strip: '#0284C7' },
-};
-
-const TYPE_BADGE = {
-  pvt_ltd:     'bg-blue-50 text-blue-700 border-blue-200',
-  llp:         'bg-violet-50 text-violet-700 border-violet-200',
-  partnership: 'bg-amber-50 text-amber-700 border-amber-200',
-  huf:         'bg-teal-50 text-teal-700 border-teal-200',
-  trust:       'bg-rose-50 text-rose-700 border-rose-200',
-  proprietor:  'bg-slate-50 text-slate-600 border-slate-200',
-  other:       'bg-sky-50 text-sky-700 border-sky-200',
+  pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', strip: '#2563EB' },
+  llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', strip: '#7C3AED' },
+  partnership: { label: 'Partnership', bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: '#D97706', strip: '#D97706' },
+  huf:         { label: 'HUF',         bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', strip: '#0D9488' },
+  trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', strip: '#E11D48' },
+  proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', strip: '#64748B' },
+  other:       { label: 'Other',       bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', strip: '#0284C7' },
 };
 
 const AVATAR_GRADIENTS = [
@@ -78,59 +55,181 @@ const AVATAR_GRADIENTS = [
   ['#4c1d95', '#7c3aed'], ['#1e3a5f', '#2563eb'], ['#831843', '#db2777'],
   ['#134e4a', '#0d9488'], ['#1e1b4b', '#4f46e5'],
 ];
+
+const SORT_OPTIONS = [
+  { value: 'fifo', label: 'Oldest First', icon: '↑', hint: 'FIFO' },
+  { value: 'lifo', label: 'Newest First', icon: '↓', hint: 'LIFO' },
+  { value: 'az',   label: 'A → Z',        icon: 'A', hint: 'A–Z'  },
+  { value: 'za',   label: 'Z → A',        icon: 'Z', hint: 'Z–A'  },
+];
+
+const EMPTY_ASSIGNMENT = { user_id: '', services: [] };
+const BOARD_PAGE_SIZE = 24;
+const LIST_PAGE_SIZE  = 50;
+const LIST_ROW_HEIGHT = 56;
+const MAX_VISIBLE_ROWS = 15;
+const SEARCH_DEBOUNCE_MS = 250;
+const UNDO_DELAY_MS = 4000;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 const getAvatarGradient = (name = '') => {
   const idx = (name.charCodeAt(0) || 0) % AVATAR_GRADIENTS.length;
   return `linear-gradient(135deg, ${AVATAR_GRADIENTS[idx][0]}, ${AVATAR_GRADIENTS[idx][1]})`;
 };
 
-const SORT_OPTIONS = [
-  { value: 'fifo',  label: 'Oldest First',  icon: '↑', hint: 'FIFO' },
-  { value: 'lifo',  label: 'Newest First',  icon: '↓', hint: 'LIFO' },
-  { value: 'az',    label: 'A → Z',         icon: 'A', hint: 'A–Z'  },
-  { value: 'za',    label: 'Z → A',         icon: 'Z', hint: 'Z–A'  },
-];
+const safeDate = (dateStr) => {
+  if (!dateStr) return null;
+  if (typeof dateStr !== 'string') return null;
+  const trimmed = dateStr.trim();
+  if (!trimmed || ['None','null','undefined'].includes(trimmed)) return null;
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return null;
+  if (d.getFullYear() < 1900 || d.getFullYear() > 2100) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
 
+const trimmedEmail = (v) => { const t = v?.trim(); return t && t.length > 0 ? t : null; };
+
+// ─── useDebounce hook ─────────────────────────────────────────────────────────
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+// ─── useLocalStorage hook ─────────────────────────────────────────────────────
+function useLocalStorage(key, defaultValue) {
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored !== null ? JSON.parse(stored) : defaultValue;
+    } catch { return defaultValue; }
+  });
+  const setStored = useCallback((v) => {
+    setValue(v);
+    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
+  }, [key]);
+  return [value, setStored];
+}
+
+// ─── copyToClipboard helper ───────────────────────────────────────────────────
+const copyToClipboard = async (text, label = 'Copied') => {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(`${label} copied to clipboard`);
+  } catch {
+    toast.error('Could not copy — please copy manually');
+  }
+};
+
+// ─── DSC days-remaining helper ────────────────────────────────────────────────
+const getDscDaysLeft = (expiryDate) => {
+  if (!expiryDate) return null;
+  try {
+    return differenceInDays(new Date(expiryDate), new Date());
+  } catch { return null; }
+};
+
+const DscBadge = ({ daysLeft }) => {
+  if (daysLeft === null) return null;
+  const color = daysLeft < 0 ? { bg: '#FEF2F2', text: '#DC2626', border: '#FECACA', label: 'Expired' }
+    : daysLeft <= 30  ? { bg: '#FFF7ED', text: '#EA580C', border: '#FED7AA', label: `${daysLeft}d left` }
+    : daysLeft <= 90  ? { bg: '#FEFCE8', text: '#CA8A04', border: '#FDE68A', label: `${daysLeft}d left` }
+    : null;
+  if (!color) return null;
+  return (
+    <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 20, background: color.bg, color: color.text, border: `1px solid ${color.border}`, whiteSpace: 'nowrap' }}>
+      DSC {color.label}
+    </span>
+  );
+};
+
+// ─── Skeleton card ────────────────────────────────────────────────────────────
+const SkeletonCard = ({ isDark }) => (
+  <div style={{ borderRadius: 16, background: isDark ? '#1e293b' : '#ffffff', border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`, padding: '14px 14px 12px 18px', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, borderRadius: '16px 0 0 16px', background: isDark ? '#334155' : '#e2e8f0' }} />
+    <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+      <div style={{ width: 40, height: 40, borderRadius: 10, background: isDark ? '#334155' : '#e2e8f0' }} className="animate-pulse" />
+      <div style={{ flex: 1 }}>
+        <div style={{ height: 10, borderRadius: 6, background: isDark ? '#334155' : '#e2e8f0', width: '60%', marginBottom: 6 }} className="animate-pulse" />
+        <div style={{ height: 12, borderRadius: 6, background: isDark ? '#334155' : '#e2e8f0', width: '80%' }} className="animate-pulse" />
+      </div>
+    </div>
+    {[70, 90, 60, 75].map((w, i) => (
+      <div key={i} style={{ height: 10, borderRadius: 6, background: isDark ? '#334155' : '#e2e8f0', width: `${w}%`, marginBottom: 8 }} className="animate-pulse" />
+    ))}
+  </div>
+);
+
+// ─── SectionHeading ───────────────────────────────────────────────────────────
 const SectionHeading = ({ icon, title, subtitle, isDark }) => (
   <div className="flex items-center gap-3 mb-6">
-    <div
-      className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-sm"
-      style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
-    >
+    <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
       {icon}
     </div>
     <div>
-      <h3 className={`text-base font-semibold leading-tight ${isDark ? "text-slate-100" : "text-slate-800"}`}>{title}</h3>
+      <h3 className={`text-base font-semibold leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
       {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
     </div>
   </div>
 );
 
+// ─── TypePill ─────────────────────────────────────────────────────────────────
 const TypePill = ({ type, customLabel }) => {
   const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.proprietor;
-  const displayLabel = type === 'other' && customLabel ? customLabel : cfg.label;
+  const label = type === 'other' && customLabel ? customLabel : cfg.label;
   return (
-    <span
-      className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-wide whitespace-nowrap flex-shrink-0"
-      style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}
-    >
+    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-wide whitespace-nowrap flex-shrink-0"
+      style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
-      {displayLabel}
+      {label}
     </span>
   );
 };
 
-const EMPTY_ASSIGNMENT = { user_id: '', services: [] };
+// ─── ActiveFilterChips ────────────────────────────────────────────────────────
+const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assignedToFilter, users, onClear, onClearAll }) => {
+  const chips = [];
+  if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter === 'active' ? 'Active' : 'Archived', onRemove: () => onClear('status') });
+  if (clientTypeFilter !== 'all') { const t = CLIENT_TYPES.find(x => x.value === clientTypeFilter); chips.push({ key: 'type', label: t?.label || clientTypeFilter, onRemove: () => onClear('clientType') }); }
+  if (serviceFilter !== 'all') chips.push({ key: 'service', label: serviceFilter, onRemove: () => onClear('service') });
+  if (assignedToFilter !== 'all') { const u = users.find(x => x.id === assignedToFilter); chips.push({ key: 'assigned', label: u?.full_name || u?.name || 'Staff', onRemove: () => onClear('assigned') }); }
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex items-center gap-2 px-3.5 py-2 flex-wrap">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Filters:</span>
+      {chips.map(chip => (
+        <span key={chip.key} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border"
+          style={{ background: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE' }}>
+          {chip.label}
+          <button onClick={chip.onRemove} className="ml-0.5 hover:opacity-70 transition-opacity">
+            <X style={{ width: 10, height: 10 }} />
+          </button>
+        </span>
+      ))}
+      {chips.length > 1 && (
+        <button onClick={onClearAll} className="text-[11px] font-semibold text-slate-400 hover:text-red-500 transition-colors px-1">
+          Clear all
+        </button>
+      )}
+    </div>
+  );
+};
 
 // ═══════════════════════════════════════════════════════════
 // BULK MESSAGE MODAL
 // ═══════════════════════════════════════════════════════════
-const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
+const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isDark }) => {
   const [message, setMessage] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [clientSearch, setClientSearch] = useState('');
   const [copied, setCopied] = useState(false);
   const [exportDone, setExportDone] = useState(false);
-  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -149,23 +248,27 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
     );
   }, [filteredClients, clientSearch]);
 
-  const selectedClients = useMemo(() =>
-    filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
+  const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
 
-  const toggleClient = (id) => {
+  const toggleClient = useCallback((id) => {
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
-  };
-  const toggleAll = () => {
+  }, []);
+
+  const toggleAll = useCallback(() => {
     if (selectedIds.size === filteredClients.length) setSelectedIds(new Set());
     else setSelectedIds(new Set(filteredClients.map(c => c.id)));
-  };
+  }, [selectedIds.size, filteredClients]);
 
   const allSelected = selectedIds.size === filteredClients.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < filteredClients.length;
   const phoneCount = selectedClients.filter(c => c.phone).length;
   const emailCount = selectedClients.filter(c => c.email).length;
+  const isWhatsApp = mode === 'whatsapp';
+  const accentColor = isWhatsApp ? '#25D366' : '#1F6FB2';
+  const accentGrad  = isWhatsApp ? 'linear-gradient(135deg, #128C7E, #25D366)' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)';
+  const relevantCount = isWhatsApp ? phoneCount : emailCount;
 
-  const handleExportBroadcast = () => {
+  const handleExportBroadcast = useCallback(() => {
     if (selectedClients.length === 0) { toast.error('Select at least one client first'); return; }
     const withPhone = selectedClients.filter(c => c.phone);
     if (withPhone.length === 0) { toast.error('No selected clients have a phone number'); return; }
@@ -174,12 +277,12 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
       ...withPhone.map(c => {
         const phone = c.phone.replace(/\D/g, '');
         const wa = phone.length === 10 ? `91${phone}` : phone;
-        const personalised = message.trim() ? message.trim().replace(/\{name\}/gi, c.company_name) : '';
-        return [c.company_name, c.phone, wa, personalised];
+        const msg = message.trim() ? message.trim().replace(/\{name\}/gi, c.company_name) : '';
+        return [c.company_name, c.phone, wa, msg];
       }),
     ];
-    const csvContent = rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const csv = rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.download = `whatsapp_broadcast_${format(new Date(), 'dd-MMM-yyyy')}.csv`;
@@ -187,11 +290,11 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
     const phoneList = withPhone.map(c => { const p = c.phone.replace(/\D/g, ''); return p.length === 10 ? `91${p}` : p; }).join('\n');
     navigator.clipboard.writeText(phoneList).catch(() => {});
     setExportDone(true);
-    toast.success(`📥 CSV downloaded + ${withPhone.length} numbers copied to clipboard!`, { description: 'Open WhatsApp Business → New Broadcast → paste numbers' });
+    toast.success(`CSV downloaded + ${withPhone.length} numbers copied!`, { description: 'Open WhatsApp Business → New Broadcast → paste numbers' });
     setTimeout(() => setExportDone(false), 3000);
-  };
+  }, [selectedClients, message]);
 
-  const handleWhatsApp = async () => {
+  const handleWhatsApp = useCallback(async () => {
     if (!message.trim()) { toast.error('Please write a message first'); return; }
     if (selectedClients.length === 0) { toast.error('Please select at least one client'); return; }
     try {
@@ -199,30 +302,23 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
       setCopied(true);
       toast.success('Message copied! Opening WhatsApp Web…');
       setTimeout(() => { window.open('https://web.whatsapp.com', '_blank'); setCopied(false); }, 800);
-    } catch { toast.error('Could not copy to clipboard. Please copy manually.'); }
-  };
+    } catch { toast.error('Could not copy to clipboard.'); }
+  }, [message, selectedClients]);
 
-  const handleEmail = () => {
+  const handleEmail = useCallback(() => {
     if (!message.trim()) { toast.error('Please write a message first'); return; }
     if (selectedClients.length === 0) { toast.error('Please select at least one client'); return; }
-    const bccEmails = selectedClients.map(c => c.email).filter(Boolean).join(',');
-    if (!bccEmails) { toast.error('No email addresses found for selected clients'); return; }
+    const bcc = selectedClients.map(c => c.email).filter(Boolean).join(',');
+    if (!bcc) { toast.error('No email addresses found for selected clients'); return; }
     const lines = message.trim().split('\n');
-    const mailto = `mailto:?bcc=${encodeURIComponent(bccEmails)}&subject=${encodeURIComponent(lines[0].substring(0, 80))}&body=${encodeURIComponent(message.trim())}`;
-    window.location.href = mailto;
+    window.location.href = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(lines[0].substring(0, 80))}&body=${encodeURIComponent(message.trim())}`;
     toast.success(`Opening mail client with ${emailCount} recipients in BCC`);
-  };
-
-  const isWhatsApp = mode === 'whatsapp';
-  const accentColor = isWhatsApp ? '#25D366' : '#1F6FB2';
-  const accentGrad = isWhatsApp ? 'linear-gradient(135deg, #128C7E, #25D366)' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)';
-  const relevantCount = isWhatsApp ? phoneCount : emailCount;
+  }, [message, selectedClients, emailCount]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
         <DialogTitle className="sr-only">{isWhatsApp ? 'Bulk WhatsApp' : 'Bulk Email'}</DialogTitle>
-        <DialogDescription className="sr-only">Draft and send bulk messages to selected clients</DialogDescription>
         <div className="flex-shrink-0 px-7 py-5 border-b border-slate-100"
           style={{ background: isWhatsApp ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #eff6ff, #dbeafe)' }}>
           <div className="flex items-center gap-3">
@@ -230,12 +326,8 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
               {isWhatsApp ? <MessageCircle className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
             </div>
             <div>
-              <h2 className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                {isWhatsApp ? 'Bulk WhatsApp Message' : 'Bulk Email'}
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {isWhatsApp ? 'Draft → Export for Broadcast (free) or Copy & send one-by-one via WhatsApp Web' : 'Draft your message → opens in your default mail client with all recipients in BCC'}
-              </p>
+              <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{isWhatsApp ? 'Bulk WhatsApp Message' : 'Bulk Email'}</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{isWhatsApp ? 'Draft → Export for Broadcast or Copy & send via WhatsApp Web' : 'Draft → opens in your mail client with all recipients in BCC'}</p>
             </div>
             <div className="ml-auto flex-shrink-0">
               <span className="text-xs font-bold px-3 py-1.5 rounded-full border"
@@ -246,8 +338,8 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
           </div>
         </div>
         <div className="flex flex-1 overflow-hidden">
-          <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark ? "border-slate-700 bg-slate-800/60" : "border-slate-100 bg-slate-50/40"}`}>
-            <div className={`flex items-center gap-2 px-4 py-3 border-b flex-shrink-0 ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-100 bg-white"}`}>
+          <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'}`}>
+            <div className={`flex items-center gap-2 px-4 py-3 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
               <button onClick={toggleAll} className="flex items-center gap-2 flex-1 text-left">
                 <span className="flex-shrink-0" style={{ color: accentColor }}>
                   {allSelected ? <CheckSquare className="h-4 w-4" /> : someSelected ? <MinusSquare className="h-4 w-4" /> : <Square className="h-4 w-4 text-slate-300" />}
@@ -259,7 +351,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
             <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                <input className={`w-full pl-8 pr-3 h-8 text-xs rounded-lg focus:outline-none focus:border-blue-300 transition-colors ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}
+                <input className="w-full pl-8 pr-3 h-8 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 bg-white"
                   placeholder="Filter clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
               </div>
             </div>
@@ -277,7 +369,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
                       {client.company_name?.charAt(0).toUpperCase() || '?'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-semibold truncate ${isDark ? "text-slate-100" : "text-slate-800"}`}>{client.company_name}</p>
+                      <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{client.company_name}</p>
                       <p className="text-[10px] text-slate-400 truncate">{isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}</p>
                     </div>
                     {!hasContact && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded flex-shrink-0">{isWhatsApp ? 'No phone' : 'No email'}</span>}
@@ -296,12 +388,12 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">{isWhatsApp ? 'WhatsApp Message' : 'Email Message'}</label>
                 <textarea
-                  className={`w-full min-h-[180px] border rounded-xl text-sm p-4 resize-none outline-none transition-all leading-relaxed ${isDark ? "bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-400 focus:bg-slate-700" : "bg-slate-50 border-slate-200 focus:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-100"}`}
-                  placeholder={isWhatsApp ? "Dear {name},\n\nThis is a reminder about your upcoming GST filing due date…\n\nRegards,\nManthan Desai & Associates" : "Subject: Important Update\n\nDear Client,\n\nWe wanted to update you regarding…\n\nRegards,\nManthan Desai & Associates"}
+                  className={`w-full min-h-[180px] border rounded-xl text-sm p-4 resize-none outline-none transition-all leading-relaxed ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-400' : 'bg-slate-50 border-slate-200 focus:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-100'}`}
+                  placeholder={isWhatsApp ? "Dear {name},\n\nGST filing reminder…\n\nRegards,\nManthan Desai & Associates" : "Subject: Important Update\n\nDear Client,\n\nWe wanted to update you regarding…\n\nRegards,\nManthan Desai & Associates"}
                   value={message} onChange={e => setMessage(e.target.value)} />
                 <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-[10px] text-slate-400">{isWhatsApp ? 'Use {name} → auto-replaced with company name in the export' : 'First line becomes the email subject'}</p>
-                  <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{message.length} chars</span>
+                  <p className="text-[10px] text-slate-400">{isWhatsApp ? 'Use {name} → replaced with company name in export' : 'First line becomes the email subject'}</p>
+                  <span className="text-[10px] text-slate-400">{message.length} chars</span>
                 </div>
               </div>
               {isWhatsApp && (
@@ -310,13 +402,13 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-sm font-bold shadow-sm" style={{ background: 'linear-gradient(135deg, #128C7E, #25D366)' }}>📤</div>
                     <div className="flex-1">
                       <p className="text-sm font-bold text-emerald-900">Export for WhatsApp Broadcast</p>
-                      <p className="text-xs text-emerald-700 mt-0.5 leading-relaxed">Downloads a <strong>CSV</strong> with all phone numbers + your message (with {'{name}'} replaced). Also <strong>copies numbers to clipboard</strong> in WhatsApp format (91XXXXXXXXXX).</p>
+                      <p className="text-xs text-emerald-700 mt-0.5 leading-relaxed">Downloads a <strong>CSV</strong> with all phone numbers + your message. Also <strong>copies numbers to clipboard</strong> in WhatsApp format (91XXXXXXXXXX).</p>
                     </div>
                   </div>
-                  <button onClick={handleExportBroadcast} disabled={selectedClients.filter(c => c.phone).length === 0}
+                  <button onClick={handleExportBroadcast} disabled={phoneCount === 0}
                     className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-white text-sm font-bold shadow-sm transition-all hover:opacity-90 disabled:opacity-40"
                     style={{ background: exportDone ? 'linear-gradient(135deg, #059669, #10b981)' : 'linear-gradient(135deg, #128C7E, #25D366)' }}>
-                    {exportDone ? <><CheckCircle2 className="h-4 w-4" /> Exported!</> : <><FileText className="h-4 w-4" /> Export &amp; Copy Numbers ({selectedClients.filter(c => c.phone).length} clients)</>}
+                    {exportDone ? <><CheckCircle2 className="h-4 w-4" /> Exported!</> : <><FileText className="h-4 w-4" /> Export &amp; Copy Numbers ({phoneCount} clients)</>}
                   </button>
                 </div>
               )}
@@ -325,17 +417,15 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
                   <p className="text-xs font-bold mb-2" style={{ color: isWhatsApp ? '#166534' : '#1e40af' }}>{isWhatsApp ? '📱 Selected clients' : '📧 Ready to email'}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {selectedClients.slice(0, 8).map(c => (
-                      <span key={c.id} className={`text-[10px] font-semibold px-2 py-1 rounded-lg border ${isDark ? "bg-slate-700" : "bg-white"}`}
+                      <span key={c.id} className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white"
                         style={isWhatsApp ? { borderColor: '#86efac', color: '#166534' } : { borderColor: '#93c5fd', color: '#1e40af' }}>{c.company_name}</span>
                     ))}
-                    {selectedClients.length > 8 && (
-                      <span className={`text-[10px] font-semibold px-2 py-1 rounded-lg border ${isDark ? "bg-slate-700 border-slate-600 text-slate-400" : "bg-white border-slate-200 text-slate-500"}`}>+{selectedClients.length - 8} more</span>
-                    )}
+                    {selectedClients.length > 8 && <span className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white border-slate-200 text-slate-500">+{selectedClients.length - 8} more</span>}
                   </div>
                 </div>
               )}
             </div>
-            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-100 bg-white"}`}>
+            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
               <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
               <div className="flex items-center gap-2">
                 {selectedClients.length === 0 && <span className="text-xs text-amber-600 font-medium">← Select at least one client</span>}
@@ -359,38 +449,44 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients, isDark }) => {
       </DialogContent>
     </Dialog>
   );
-};
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MODERN CLIENT CARD
+// CLIENT CARD — lifted outside Clients() so it never re-creates on render
 // ═══════════════════════════════════════════════════════════════════════════
-const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, fetchClients, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
+const ModernClientCard = React.memo(({ client, index, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canDeleteData, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber }) => {
   const cfg = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
   const avatarGrad = getAvatarGradient(client.company_name);
   const isArchived = client.status === 'inactive';
   const primaryContact = client.contact_persons?.find(cp => cp.name?.trim());
   const clientAssignments = getClientAssignments(client);
   const serviceCount = client.services?.length || 0;
-
   const today = new Date();
-  const expiringDSC = client.dsc_details?.find(d => {
-    if (!d.expiry_date) return false;
-    const exp = new Date(d.expiry_date);
-    const diff = (exp - today) / (1000 * 60 * 60 * 24);
-    return diff >= 0 && diff <= 60;
-  });
 
-  const hasBirthdayToday = client.contact_persons?.some(cp => {
-    if (!cp?.birthday) return false;
-    const bday = new Date(cp.birthday);
-    return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
-  });
+  const worstDsc = useMemo(() => {
+    if (!client.dsc_details?.length) return null;
+    return client.dsc_details.reduce((worst, d) => {
+      const days = getDscDaysLeft(d.expiry_date);
+      if (days === null) return worst;
+      if (worst === null || days < worst) return days;
+      return worst;
+    }, null);
+  }, [client.dsc_details]);
 
-  const firstAssignee = (() => {
+  const hasBirthdayToday = useMemo(() =>
+    client.contact_persons?.some(cp => {
+      if (!cp?.birthday) return false;
+      const bday = new Date(cp.birthday);
+      return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
+    }) ?? false
+  , [client.contact_persons]);
+
+  const firstAssignee = useMemo(() => {
     const a = clientAssignments[0];
     if (!a) return null;
     return users.find(x => x.id === a.user_id) || null;
-  })();
+  }, [clientAssignments, users]);
+
   const extraAssignees = clientAssignments.length > 1 ? clientAssignments.length - 1 : 0;
   const svcSlots = [0, 1, 2].map(i => client.services?.[i]?.replace('Other: ', '') || null);
   const extraSvcs = serviceCount > 3 ? serviceCount - 3 : 0;
@@ -399,40 +495,26 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
   return (
     <div
       className={`group relative flex flex-col overflow-hidden cursor-pointer select-none ${isArchived ? 'opacity-55' : ''}`}
-      style={{
-        borderRadius: 16,
-        background: isDark ? '#1e293b' : '#ffffff',
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
-        boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.transform = 'translateY(-3px)';
-        e.currentTarget.style.boxShadow = isDark
-          ? '0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.1)'
-          : `0 12px 32px rgba(0,0,0,0.1), 0 0 0 1px ${cfg.border}`;
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)';
-      }}
+      style={{ borderRadius: 16, background: isDark ? '#1e293b' : '#ffffff', border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`, boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)', transition: 'transform 0.15s ease, box-shadow 0.15s ease' }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = isDark ? '0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.1)' : `0 12px 32px rgba(0,0,0,0.1), 0 0 0 1px ${cfg.border}`; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)'; }}
       onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
     >
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, borderRadius: '16px 0 0 16px', background: `linear-gradient(180deg, ${cfg.strip} 0%, ${cfg.strip}55 100%)` }} />
       <div style={{ padding: '14px 14px 12px 18px', background: isDark ? `linear-gradient(135deg, ${cfg.strip}18 0%, transparent 60%)` : `linear-gradient(135deg, ${cfg.strip}0f 0%, transparent 60%)`, borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}` }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 900, boxShadow: `0 4px 12px ${cfg.strip}55`, flexShrink: 0 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 900, boxShadow: `0 4px 12px ${cfg.strip}55` }}>
               {client.company_name?.charAt(0).toUpperCase() || '?'}
             </div>
             {hasBirthdayToday && <div style={{ position: 'absolute', top: -4, right: -4, width: 16, height: 16, background: '#ec4899', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, border: '2px solid #fff' }}>🎂</div>}
             {isArchived && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 14, height: 14, background: '#f59e0b', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Archive style={{ width: 8, height: 8, color: '#fff' }} /></div>}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#475569' : '#cbd5e1', flexShrink: 0 }}>#{getClientNumber(index)}</span>
               <TypePill type={client.client_type} customLabel={client.client_type_label} />
-              {expiringDSC && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 20, background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', flexShrink: 0 }}>DSC⚠</span>}
+              <DscBadge daysLeft={worstDsc} />
             </div>
             <h3 style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.35, color: isDark ? '#f1f5f9' : '#0f172a', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', minHeight: '2.7em', margin: 0 }}>
               {client.company_name}
@@ -450,15 +532,26 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
             <p style={{ fontSize: 10, color: isDark ? '#64748b' : '#94a3b8', margin: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{primaryContact?.designation || '\u00a0'}</p>
           </div>
         </div>
+        {/* Phone & email row — click to copy */}
         <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Phone style={{ width: 10, height: 10, color: cfg.strip }} /></div>
-            <span style={{ fontSize: 10, fontWeight: 500, color: client.phone ? (isDark ? '#cbd5e1' : '#334155') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{client.phone || '—'}</span>
+            <span
+              title={client.phone ? 'Click to copy' : ''}
+              onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
+              style={{ fontSize: 10, fontWeight: 500, color: client.phone ? (isDark ? '#cbd5e1' : '#334155') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', cursor: client.phone ? 'copy' : 'default' }}>
+              {client.phone || '—'}
+            </span>
           </div>
           <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 18, height: 18, borderRadius: 5, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Mail style={{ width: 10, height: 10, color: cfg.strip }} /></div>
-            <span style={{ fontSize: 10, color: client.email ? (isDark ? '#94a3b8' : '#475569') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{client.email || '—'}</span>
+            <span
+              title={client.email ? 'Click to copy' : ''}
+              onClick={client.email ? e => { e.stopPropagation(); copyToClipboard(client.email, 'Email'); } : undefined}
+              style={{ fontSize: 10, color: client.email ? (isDark ? '#94a3b8' : '#475569') : (isDark ? '#334155' : '#e2e8f0'), overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', cursor: client.email ? 'copy' : 'default' }}>
+              {client.email || '—'}
+            </span>
           </div>
         </div>
         <div style={{ height: 24, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -469,7 +562,7 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
                 {svc || '·'}
               </span>
             ))}
-            {extraSvcs > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 20, background: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9', color: isDark ? '#64748b' : '#64748b', flexShrink: 0 }}>+{extraSvcs}</span>}
+            {extraSvcs > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 20, background: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9', color: '#64748b', flexShrink: 0 }}>+{extraSvcs}</span>}
             {serviceCount === 0 && <span style={{ fontSize: 10, color: isDark ? '#334155' : '#e2e8f0', fontStyle: 'italic' }}>No services</span>}
           </div>
         </div>
@@ -493,20 +586,20 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
       </div>
       <div style={{ height: 38, display: 'flex', alignItems: 'stretch', flexShrink: 0, borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` }}>
         <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, color: '#16a34a', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em', transition: 'background 0.12s' }}
+          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, color: '#16a34a', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
           onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(34,197,94,0.1)' : '#f0fdf4'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
           <MessageCircle style={{ width: 12, height: 12 }} />Chat
         </button>
         <button onClick={e => { e.stopPropagation(); handleEdit(client); }}
-          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: canDeleteData ? `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` : 'none', color: '#2563eb', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em', transition: 'background 0.12s' }}
+          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', borderRight: canDeleteData ? `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` : 'none', color: '#2563eb', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
           onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
           <Edit style={{ width: 12, height: 12 }} />Edit
         </button>
         {canDeleteData && (
-          <button onClick={e => { e.stopPropagation(); if (confirm('Delete this client permanently?')) { api.delete(`/clients/${client.id}`).then(() => fetchClients()); } }}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 10, fontWeight: 700, letterSpacing: '0.02em', transition: 'background 0.12s' }}
+          <button onClick={e => { e.stopPropagation(); onDelete(client); }}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 10, fontWeight: 700, transition: 'background 0.12s' }}
             onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <Trash2 style={{ width: 12, height: 12 }} />Del
@@ -515,7 +608,182 @@ const ModernClientCard = ({ client, index, isDark, users, getClientAssignments, 
       </div>
     </div>
   );
-};
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT DETAIL POPUP — lifted outside so it never re-creates on render
+// ═══════════════════════════════════════════════════════════════════════════
+const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit }) => {
+  if (!selectedClient) return null;
+  const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
+  const avatarGrad = getAvatarGradient(selectedClient.company_name);
+  const clientAssignments = getClientAssignments(selectedClient);
+
+  return (
+    <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+      <DialogContent className={`max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <DialogTitle className="sr-only">Client Details</DialogTitle>
+        <DialogDescription className="sr-only">View complete client information</DialogDescription>
+        <div className="sticky top-0 z-10 pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-md" style={{ background: avatarGrad }}>{selectedClient.company_name?.charAt(0).toUpperCase() || '?'}</div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <h2 className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.company_name}</h2>
+                <TypePill type={selectedClient.client_type} customLabel={selectedClient.client_type_label} />
+                {selectedClient.status === 'inactive' && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>}
+              </div>
+              {selectedClient.birthday && <p className="text-sm text-slate-500"><Calendar className="inline h-3.5 w-3.5 mr-1" />Incorporated: {format(new Date(selectedClient.birthday), 'MMM d, yyyy')}</p>}
+              {selectedClient.referred_by && <p className="text-sm text-slate-500 mt-1"><Share2 className="inline h-3.5 w-3.5 mr-1" />Referred by: <span className="font-medium text-slate-700">{selectedClient.referred_by}</span></p>}
+              {selectedClient.created_at && <p className="text-xs text-slate-400 mt-1"><Calendar className="inline h-3 w-3 mr-1" />Added: {format(new Date(selectedClient.created_at), 'MMM d, yyyy')}</p>}
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-8 space-y-6">
+            {/* Contact info */}
+            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+              <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Mail className="h-4 w-4" /> Contact Information</h3>
+              <div className="space-y-3">
+                {selectedClient.email && (
+                  <div className="flex items-center gap-3">
+                    <Mail className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                    <a href={`mailto:${selectedClient.email}`} className="text-blue-600 hover:underline text-sm flex-1">{selectedClient.email}</a>
+                    <button onClick={() => copyToClipboard(selectedClient.email, 'Email')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+                {selectedClient.phone && (
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
+                    <a href={`tel:${selectedClient.phone}`} className="text-slate-700 font-medium text-sm flex-1">{selectedClient.phone}</a>
+                    <button onClick={() => copyToClipboard(selectedClient.phone, 'Phone')} className="text-slate-300 hover:text-slate-600 transition-colors"><Copy className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+                {selectedClient.address && (
+                  <div className="flex items-start gap-3"><MapPin className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" /><div className="text-slate-700 text-sm"><p>{selectedClient.address}</p>{(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}</div></div>
+                )}
+              </div>
+            </div>
+            {/* Services */}
+            {selectedClient.services?.length > 0 && (
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><BarChart3 className="h-4 w-4" /> Services</h3>
+                <div className="flex flex-wrap gap-2">{selectedClient.services.map((svc, i) => <span key={i} className="text-xs font-semibold px-3 py-2 rounded-xl border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '')}</span>)}</div>
+              </div>
+            )}
+            {/* Contact persons */}
+            {selectedClient.contact_persons?.length > 0 && (
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Users className="h-4 w-4" /> Contact Persons ({selectedClient.contact_persons.length})</h3>
+                <div className="space-y-3">{selectedClient.contact_persons.map((cp, i) => cp.name && (
+                  <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                    <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{cp.name}</p>
+                    {cp.designation && <p className="text-xs text-slate-500 mt-1">{cp.designation}</p>}
+                    <div className="flex flex-col gap-1.5 mt-2 text-xs">
+                      {cp.email && <div className="flex items-center gap-2"><a href={`mailto:${cp.email}`} className="text-blue-600 hover:underline flex-1">{cp.email}</a><button onClick={() => copyToClipboard(cp.email, 'Email')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button></div>}
+                      {cp.phone && <div className="flex items-center gap-2"><a href={`tel:${cp.phone}`} className="text-slate-700 flex-1">{cp.phone}</a><button onClick={() => copyToClipboard(cp.phone, 'Phone')} className="text-slate-300 hover:text-slate-500"><Copy className="h-3 w-3" /></button></div>}
+                      {cp.birthday && <p className="text-slate-500">Birthday: {format(new Date(cp.birthday), 'MMM d, yyyy')}</p>}
+                      {cp.din && <p className="text-slate-500">DIN: {cp.din}</p>}
+                    </div>
+                  </div>
+                ))}</div>
+              </div>
+            )}
+            {/* DSC details with countdown */}
+            {selectedClient.dsc_details?.length > 0 && (
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Shield className="h-4 w-4" /> DSC Details ({selectedClient.dsc_details.length})</h3>
+                <div className="space-y-3">{selectedClient.dsc_details.map((dsc, i) => dsc.certificate_number && (
+                  <div key={i} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className={`font-semibold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{dsc.certificate_number}</p>
+                      <DscBadge daysLeft={getDscDaysLeft(dsc.expiry_date)} />
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p>
+                    <div className="flex gap-4 mt-2 text-xs text-slate-600">
+                      {dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}
+                      {dsc.expiry_date && <p>Expires: {format(new Date(dsc.expiry_date), 'MMM d, yyyy')}</p>}
+                    </div>
+                    {dsc.notes && <p className="text-xs text-slate-500 mt-2 italic">{dsc.notes}</p>}
+                  </div>
+                ))}</div>
+              </div>
+            )}
+            {/* Assignments & notes */}
+            {(clientAssignments.length > 0 || selectedClient.notes) && (
+              <div className="grid grid-cols-2 gap-4">
+                {clientAssignments.length > 0 && (
+                  <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                    <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3 flex items-center gap-2`}><Briefcase className="h-3.5 w-3.5" /> Staff Assignments</h3>
+                    <div className="flex flex-col gap-2">
+                      {clientAssignments.map((a, i) => {
+                        const u = users.find(x => x.id === a.user_id);
+                        if (!u) return null;
+                        return (
+                          <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-white border-slate-100'}`}>
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>{(u.full_name || u.name || '?').charAt(0).toUpperCase()}</div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{u.full_name || u.name}</p>
+                              {a.services?.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 mt-1">{a.services.map((svc, si) => <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc}</span>)}</div>
+                              ) : <p className="text-xs text-slate-400 mt-0.5">All services</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {selectedClient.notes && (
+                  <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                    <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-3`}>Notes</h3>
+                    <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+          <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
+          <div className="flex gap-2">
+            <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}><MessageCircle className="h-4 w-4" /> WhatsApp</Button>
+            <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Edit className="h-4 w-4" /> Edit</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAGINATION BAR — reusable
+// ═══════════════════════════════════════════════════════════════════════════
+const PaginationBar = React.memo(({ safePg, totalPgs, pageStart, pageSize, totalCount, onPageChange, isDark }) => {
+  if (totalPgs <= 1) return null;
+  const pageWindow = (() => {
+    if (totalPgs <= 7) return Array.from({ length: totalPgs }, (_, i) => i + 1);
+    if (safePg <= 4) return [1, 2, 3, 4, 5, '…', totalPgs];
+    if (safePg >= totalPgs - 3) return [1, '…', totalPgs - 4, totalPgs - 3, totalPgs - 2, totalPgs - 1, totalPgs];
+    return [1, '…', safePg - 1, safePg, safePg + 1, '…', totalPgs];
+  })();
+  return (
+    <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, background: isDark ? '#1e293b' : '#F8FAFC' }}>
+      <p style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', margin: 0 }}>
+        <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{pageStart + 1}–{Math.min(pageStart + pageSize, totalCount)}</span> of <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{totalCount}</span> clients
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={() => onPageChange(p => Math.max(1, p - 1))} disabled={safePg === 1} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === 1 ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === 1 ? 0.4 : 1 }}>‹</button>
+        {pageWindow.map((p, i) => p === '…'
+          ? <span key={`e-${i}`} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: isDark ? '#475569' : '#94a3b8' }}>…</span>
+          : <button key={p} onClick={() => onPageChange(p)} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer', background: p === safePg ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'), color: p === safePg ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'), fontSize: 11, fontWeight: p === safePg ? 700 : 500, boxShadow: p === safePg ? '0 2px 8px rgba(13,59,102,0.35)' : 'none' }}>{p}</button>
+        )}
+        <button onClick={() => onPageChange(p => Math.min(totalPgs, p + 1))} disabled={safePg === totalPgs} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === totalPgs ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === totalPgs ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === totalPgs ? 0.4 : 1 }}>›</button>
+      </div>
+      <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>Page {safePg} / {totalPgs}</p>
+    </div>
+  );
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -524,103 +792,122 @@ export default function Clients() {
   const { user, hasPermission } = useAuth();
   const isDark = useDark();
   const canViewAllClients = hasPermission("can_view_all_clients");
-  const canDeleteData = hasPermission("can_delete_data");
-  const canAssignClients = hasPermission("can_assign_clients");
-  const [clients, setClients] = useState([]);
+  const canDeleteData     = hasPermission("can_delete_data");
+  const canAssignClients  = hasPermission("can_assign_clients");
   const navigate = useNavigate();
   const location = useLocation();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
+
+  // ── Data state ──────────────────────────────────────────────────────────
+  const [clients, setClients] = useState([]);
+  const [clientsLoading, setClientsLoading] = useState(true);
+  const [users, setUsers]     = useState([]);
+  const [savedReferrers, setSavedReferrers] = useState([]);
+
+  // ── UI state ────────────────────────────────────────────────────────────
+  const [loading, setLoading]           = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [dialogOpen, setDialogOpen]     = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
-  const [importLoading, setImportLoading] = useState(false);
-  const [previewData, setPreviewData] = useState([]);
-  const [previewHeaders, setPreviewHeaders] = useState([]);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [mdsPreviewOpen, setMdsPreviewOpen] = useState(false);
+  const [selectedClient, setSelectedClient]   = useState(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [bulkMsgOpen, setBulkMsgOpen]   = useState(false);
+  const [bulkMsgMode, setBulkMsgMode]   = useState('whatsapp');
+  const [referrerInput, setReferrerInput]       = useState('');
+  const [referrerSelectValue, setReferrerSelectValue] = useState('');
+  const [mdsPreviewOpen, setMdsPreviewOpen]     = useState(false);
   const [mdsPreviewLoading, setMdsPreviewLoading] = useState(false);
-  const [mdsData, setMdsData] = useState(null);
-  const [mdsForm, setMdsForm] = useState(null);
+  const [mdsData, setMdsData]       = useState(null);
+  const [mdsForm, setMdsForm]       = useState(null);
   const [mdsRawInfoOpen, setMdsRawInfoOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [serviceFilter, setServiceFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [previewData, setPreviewData]     = useState([]);
+  const [previewHeaders, setPreviewHeaders] = useState([]);
+  const [previewOpen, setPreviewOpen]     = useState(false);
+
+  // ── Persisted preferences ──────────────────────────────────────────────
+  const [viewMode, setViewMode] = useLocalStorage('clients_viewMode', 'board');
+  const [sortOrder, setSortOrder] = useLocalStorage('clients_sortOrder', 'lifo');
+
+  // ── Filter state ────────────────────────────────────────────────────────
+  const [searchInput, setSearchInput]         = useState('');
+  const [serviceFilter, setServiceFilter]     = useState('all');
+  const [statusFilter, setStatusFilter]       = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('lifo');
 
-  const fileInputRef = useRef(null);
-  const excelInputRef = useRef(null);
+  // Debounced search — avoids re-filtering on every keystroke
+  const searchTerm = useDebounce(searchInput, SEARCH_DEBOUNCE_MS);
 
-  const [viewMode, setViewMode] = useState('board');
-  const [selectedClient, setSelectedClient] = useState(null);
-  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-
+  // ── Pagination ──────────────────────────────────────────────────────────
   const [boardPage, setBoardPage] = useState(1);
-  const BOARD_PAGE_SIZE = 24;
+  const [listPage, setListPage]   = useState(1);
 
-  // FIX: list view also needs its own page state
-  const [listPage, setListPage] = useState(1);
-  const LIST_PAGE_SIZE = 50;
-
-  const [bulkMsgOpen, setBulkMsgOpen] = useState(false);
-  const [bulkMsgMode, setBulkMsgMode] = useState('whatsapp');
-
-  const [savedReferrers, setSavedReferrers] = useState([]);
-  const [referrerInput, setReferrerInput] = useState('');
-  const [referrerSelectValue, setReferrerSelectValue] = useState('');
-
-  const openBulkMsg = (mode) => { setBulkMsgMode(mode); setBulkMsgOpen(true); };
-
+  // ── Form state ──────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({
     company_name: '', client_type: 'proprietor', client_type_other: '',
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
     email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [],
     dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
   });
-  const [formErrors, setFormErrors] = useState({});
+  const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
 
-  const safeDate = (dateStr) => {
-    if (!dateStr) return null;
-    if (typeof dateStr !== 'string') return null;
-    const trimmed = dateStr.trim();
-    if (!trimmed || trimmed === 'None' || trimmed === 'null' || trimmed === 'undefined') return null;
-    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) return null;
-    const date = new Date(trimmed);
-    if (isNaN(date.getTime())) return null;
-    if (date.getFullYear() < 1900 || date.getFullYear() > 2100) return null;
-    return `${match[1]}-${match[2]}-${match[3]}`;
-  };
+  // ── Refs ────────────────────────────────────────────────────────────────
+  const fileInputRef  = useRef(null);
+  const excelInputRef = useRef(null);
+  const searchRef     = useRef(null);
+  // pending delete undo ref
+  const pendingDeleteRef = useRef(null);
 
-  const fetchReferrers = async () => {
+  // ── Style helpers ────────────────────────────────────────────────────────
+  const fieldCls = (hasError) => `h-11 rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
+  const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
+  const mdsFieldCls = "h-10 rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3 border";
+
+  // ── Keyboard shortcuts ──────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      // Ctrl/Cmd + K → focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      // N → open new client (only when no dialog/input is focused)
+      if (e.key === 'n' && !dialogOpen && !detailDialogOpen && !bulkMsgOpen && document.activeElement.tagName === 'BODY') {
+        setDialogOpen(true);
+      }
+      // Escape → clear search if focused
+      if (e.key === 'Escape' && document.activeElement === searchRef.current) {
+        setSearchInput('');
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [dialogOpen, detailDialogOpen, bulkMsgOpen]);
+
+  // ── Data fetching ────────────────────────────────────────────────────────
+  const fetchClients = useCallback(async () => {
+    setClientsLoading(true);
+    try { const r = await api.get('/clients'); setClients(r.data || []); }
+    catch { toast.error('Failed to fetch clients'); }
+    finally { setClientsLoading(false); }
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    try { const r = await api.get('/users'); setUsers(r.data); }
+    catch (e) { console.error('Failed to fetch users:', e); }
+  }, []);
+
+  const fetchReferrers = useCallback(async () => {
     try {
-      const response = await api.get('/referrers');
-      const raw = response.data || [];
-      const names = raw.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
-      setSavedReferrers(names);
+      const r = await api.get('/referrers');
+      setSavedReferrers((r.data || []).map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean));
     } catch {
-      try {
-        const stored = JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]');
-        const names = stored.map(r => (typeof r === 'string' ? r : r.name)).filter(Boolean);
-        setSavedReferrers(names);
-      } catch { setSavedReferrers([]); }
+      try { setSavedReferrers(JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]').map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean)); }
+      catch { setSavedReferrers([]); }
     }
-  };
-
-  const saveReferrer = async (name) => {
-    const trimmed = name?.trim();
-    if (!trimmed) return trimmed;
-    const existing = savedReferrers.find(r => r.toLowerCase() === trimmed.toLowerCase());
-    if (existing) return existing;
-    const updated = [...savedReferrers, trimmed];
-    setSavedReferrers(updated);
-    try { await api.post('/referrers', { name: trimmed }); }
-    catch { localStorage.setItem('taskosphere_referrers', JSON.stringify(updated)); }
-    return trimmed;
-  };
+  }, []);
 
   useEffect(() => {
     fetchClients(); fetchUsers(); fetchReferrers();
@@ -628,182 +915,332 @@ export default function Clients() {
     if (params.get("openAddClient") === "true") setDialogOpen(true);
   }, [location]);
 
+  // ── Referrer sync ────────────────────────────────────────────────────────
   useEffect(() => {
     const val = formData.referred_by;
-    if (!val || val === '') { setReferrerSelectValue(''); setReferrerInput(''); }
+    if (!val) { setReferrerSelectValue(''); setReferrerInput(''); }
     else if (val === 'Our Client') { setReferrerSelectValue('Our Client'); setReferrerInput(''); }
     else if (savedReferrers.includes(val)) { setReferrerSelectValue(val); setReferrerInput(''); }
     else { setReferrerSelectValue('__other__'); setReferrerInput(val); }
   }, [formData.referred_by, savedReferrers]);
 
-  const fetchClients = async () => {
-    try { const response = await api.get('/clients'); setClients(response.data || []); }
-    catch (error) { toast.error('Failed to fetch clients'); }
-  };
+  const saveReferrer = useCallback(async (name) => {
+    const t = name?.trim();
+    if (!t) return t;
+    const existing = savedReferrers.find(r => r.toLowerCase() === t.toLowerCase());
+    if (existing) return existing;
+    const updated = [...savedReferrers, t];
+    setSavedReferrers(updated);
+    try { await api.post('/referrers', { name: t }); }
+    catch { localStorage.setItem('taskosphere_referrers', JSON.stringify(updated)); }
+    return t;
+  }, [savedReferrers]);
 
-  const fetchUsers = async () => {
-    try { const response = await api.get('/users'); setUsers(response.data); }
-    catch (error) { console.error('Failed to fetch users:', error); }
-  };
-
-  const openWhatsApp = (phone, name = "") => {
-    const cleanPhone = phone?.replace(/\D/g, '') || '';
-    const message = encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`);
-    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
-  };
-
-  const filteredClients = useMemo(() => {
-    return clients.filter(c => {
-      const matchesSearch =
-        (c?.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c?.phone || '').includes(searchTerm);
-      const matchesService = serviceFilter === 'all' || (c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()));
-      const matchesStatus = statusFilter === 'all' || (c?.status || 'active') === statusFilter;
-      const matchesClientType = clientTypeFilter === 'all' || (c?.client_type || 'proprietor') === clientTypeFilter;
-      let matchesAssigned = true;
-      if (assignedToFilter !== 'all') {
-        const assignments = c?.assignments || [];
-        const legacyAssignedTo = c?.assigned_to;
-        if (assignments.length > 0) matchesAssigned = assignments.some(a => a.user_id === assignedToFilter);
-        else matchesAssigned = legacyAssignedTo === assignedToFilter;
-      }
-      return matchesSearch && matchesService && matchesStatus && matchesAssigned && matchesClientType;
-    });
-  }, [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
+  // ── Filter & sort ────────────────────────────────────────────────────────
+  const filteredClients = useMemo(() => clients.filter(c => {
+    const q = searchTerm.toLowerCase();
+    if (q && !(c?.company_name || '').toLowerCase().includes(q) && !(c?.email || '').toLowerCase().includes(q) && !(c?.phone || '').includes(searchTerm)) return false;
+    if (serviceFilter !== 'all' && !(c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()))) return false;
+    if (statusFilter !== 'all' && (c?.status || 'active') !== statusFilter) return false;
+    if (clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
+    if (assignedToFilter !== 'all') {
+      const assignments = c?.assignments || [];
+      const legacy = c?.assigned_to;
+      const matched = assignments.length > 0 ? assignments.some(a => a.user_id === assignedToFilter) : legacy === assignedToFilter;
+      if (!matched) return false;
+    }
+    return true;
+  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter]);
 
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
-    switch (sortOrder) {
-      case 'fifo':
-        return arr.sort((a, b) => {
-          const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return ta - tb;
-        });
-      case 'lifo':
-        return arr.sort((a, b) => {
-          const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return tb - ta;
-        });
-      case 'az':
-        return arr.sort((a, b) =>
-          (a.company_name || '').toLowerCase().localeCompare((b.company_name || '').toLowerCase())
-        );
-      case 'za':
-        return arr.sort((a, b) =>
-          (b.company_name || '').toLowerCase().localeCompare((a.company_name || '').toLowerCase())
-        );
-      default:
-        return arr;
-    }
+    if (sortOrder === 'az') return arr.sort((a, b) => (a.company_name || '').toLowerCase().localeCompare((b.company_name || '').toLowerCase()));
+    if (sortOrder === 'za') return arr.sort((a, b) => (b.company_name || '').toLowerCase().localeCompare((a.company_name || '').toLowerCase()));
+    return arr.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return sortOrder === 'fifo' ? ta - tb : tb - ta;
+    });
   }, [filteredClients, sortOrder]);
 
-  // FIX: Reset both page states on filter/sort change
   useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, sortOrder, clients]);
 
+  // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const totalClients = filteredClients.length;
+    const totalClients  = filteredClients.length;
     const activeClients = filteredClients.filter(c => (c?.status || 'active') === 'active').length;
     const serviceCounts = {};
-    filteredClients.forEach(c => {
-      if (c?.services) {
-        c.services.forEach(s => { const name = s?.startsWith('Other:') ? 'Other' : s; serviceCounts[name] = (serviceCounts[name] || 0) + 1; });
-      }
-    });
+    filteredClients.forEach(c => { (c?.services || []).forEach(s => { const n = s?.startsWith('Other:') ? 'Other' : s; serviceCounts[n] = (serviceCounts[n] || 0) + 1; }); });
     return { totalClients, activeClients, serviceCounts };
   }, [filteredClients]);
 
-  const todayReminders = useMemo(() => {
-    const today = startOfDay(new Date());
-    return clients.filter(c => {
-      return c?.contact_persons?.some(cp => {
-        if (!cp?.birthday) return false;
-        const bday = new Date(cp.birthday);
-        return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
-      }) ?? false;
+  // ── DSC alert — clients with DSC expiring within 30 days ─────────────────
+  const dscAlerts = useMemo(() => {
+    const alerts = [];
+    clients.forEach(c => {
+      (c.dsc_details || []).forEach(d => {
+        const days = getDscDaysLeft(d.expiry_date);
+        if (days !== null && days >= 0 && days <= 30) {
+          alerts.push({ client: c, dsc: d, days });
+        }
+      });
     });
+    return alerts.sort((a, b) => a.days - b.days);
   }, [clients]);
 
-  const getClientNumber = (index) => String(index + 1).padStart(3, '0');
+  // ── Birthday reminders ────────────────────────────────────────────────────
+  const todayReminders = useMemo(() => {
+    const today = startOfDay(new Date());
+    return clients.filter(c => c?.contact_persons?.some(cp => {
+      if (!cp?.birthday) return false;
+      const bday = new Date(cp.birthday);
+      return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate();
+    }) ?? false);
+  }, [clients]);
 
-  // FIX: Updated validateForm — company name min 3 chars to match backend Pydantic model (min_length=3)
-  const validateForm = () => {
+  // ── Helpers ─────────────────────────────────────────────────────────────
+  const getClientNumber = useCallback((index) => String(index + 1).padStart(3, '0'), []);
+
+  const getClientAssignments = useCallback((client) => {
+    if (client?.assignments?.length > 0) return client.assignments;
+    if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }];
+    return [];
+  }, []);
+
+  const openWhatsApp = useCallback((phone, name = "") => {
+    const cleanPhone = phone?.replace(/\D/g, '') || '';
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`)}`, '_blank');
+  }, []);
+
+  // ── Export filtered list ──────────────────────────────────────────────────
+  const handleExportList = useCallback(() => {
+    if (sortedClients.length === 0) { toast.error('No clients to export'); return; }
+    const rows = [
+      ['#', 'Company', 'Type', 'Email', 'Phone', 'City', 'State', 'Services', 'Status', 'Referred By', 'Added'],
+      ...sortedClients.map((c, i) => [
+        i + 1, c.company_name, c.client_type, c.email || '', c.phone || '',
+        c.city || '', c.state || '',
+        (c.services || []).join(', '),
+        c.status || 'active', c.referred_by || '',
+        c.created_at ? format(new Date(c.created_at), 'dd-MMM-yyyy') : '',
+      ]),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
+    XLSX.writeFile(wb, `clients_export_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
+    toast.success(`Exported ${sortedClients.length} clients to Excel`);
+  }, [sortedClients]);
+
+  // ── Delete with undo ────────────────────────────────────────────────────
+  const handleDelete = useCallback((client) => {
+    // Optimistic remove
+    setClients(prev => prev.filter(c => c.id !== client.id));
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      try { await api.delete(`/clients/${client.id}`); }
+      catch { toast.error('Delete failed — restoring client'); setClients(prev => [client, ...prev]); }
+    }, UNDO_DELAY_MS);
+
+    pendingDeleteRef.current = { cancel: () => { cancelled = true; clearTimeout(timer); setClients(prev => { if (prev.find(c => c.id === client.id)) return prev; return [client, ...prev]; }); } };
+
+    toast(`"${client.company_name}" deleted`, {
+      duration: UNDO_DELAY_MS,
+      action: { label: 'Undo', onClick: () => { pendingDeleteRef.current?.cancel(); toast.success('Delete cancelled'); } },
+    });
+  }, []);
+
+  // ── Validate form ────────────────────────────────────────────────────────
+  const validateForm = useCallback(() => {
     const errors = {};
     const cErrors = [];
-    // FIX: backend requires min_length=3, not 2
     if (!formData.company_name?.trim() || formData.company_name.trim().length < 3) errors.company_name = 'Company name must be at least 3 characters';
-    const trimmedEmail = formData.email?.trim();
-    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) errors.email = 'Please enter a valid email address';
+    const em = formData.email?.trim();
+    if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) errors.email = 'Please enter a valid email address';
     const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : '';
     if (cleanPhone && cleanPhone.length !== 10) errors.phone = 'Phone number must be exactly 10 digits (or leave blank)';
-    // FIX: services validation removed as backend does not require services — optional
-    // if (formData.services.length === 0) errors.services = 'At least one service must be selected';
-    let hasValidContact = false;
     formData.contact_persons.forEach((cp, idx) => {
       const contactErr = {};
-      const trimmedName = cp.name?.trim();
-      if (!trimmedName) {
-        if (cp.email?.trim() || cp.phone?.trim() || cp.designation?.trim() || cp.birthday || cp.din?.trim()) contactErr.name = 'Contact name is required';
-      } else { hasValidContact = true; }
+      const n = cp.name?.trim();
+      if (!n && (cp.email?.trim() || cp.phone?.trim() || cp.designation?.trim() || cp.birthday || cp.din?.trim())) contactErr.name = 'Contact name is required';
       if (cp.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cp.email.trim())) contactErr.email = 'Invalid email format';
-      const cCleanPhone = cp.phone ? cp.phone.replace(/\D/g, '') : '';
-      if (cCleanPhone && cCleanPhone.length !== 10) contactErr.phone = 'Phone must be 10 digits';
+      const cPhone = cp.phone ? cp.phone.replace(/\D/g, '') : '';
+      if (cPhone && cPhone.length !== 10) contactErr.phone = 'Phone must be 10 digits';
       if (Object.keys(contactErr).length > 0) cErrors[idx] = contactErr;
     });
-    // FIX: contact person is optional — only validate if user filled partial data
-    // Remove hard requirement for contact person name
+    // Duplicate email check
     const allEmails = new Set();
-    if (trimmedEmail) allEmails.add(trimmedEmail.toLowerCase());
+    if (em) allEmails.add(em.toLowerCase());
     formData.contact_persons.forEach(cp => { if (cp.email?.trim()) allEmails.add(cp.email.trim().toLowerCase()); });
-    if (allEmails.size !== (trimmedEmail ? 1 : 0) + formData.contact_persons.filter(cp => cp.email?.trim()).length) errors.email = (errors.email || '') + ' (duplicate email detected)';
+    if (allEmails.size !== (em ? 1 : 0) + formData.contact_persons.filter(cp => cp.email?.trim()).length) errors.email = (errors.email || '') + ' (duplicate email detected)';
     setFormErrors(errors); setContactErrors(cErrors);
-    return Object.keys(errors).length === 0 && cErrors.length === 0;
-  };
+    return { valid: Object.keys(errors).length === 0 && cErrors.length === 0, errors, cErrors };
+  }, [formData]);
 
-  const downloadTemplate = () => {
-    const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1','contact_name_2','contact_designation_2','contact_email_2','contact_phone_2','contact_birthday_2','contact_din_2','contact_name_3','contact_designation_3','contact_email_3','contact_phone_3','contact_birthday_3','contact_din_3'];
-    const sampleRow = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST,ROC','Sample client notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234','Priya Shah','CFO','priya@example.com','9876500002','1990-03-22','','','','','','',''];
-    const csvContent = headers.join(',') + '\n' + sampleRow.join(',') + '\n';
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+  // ── Submit ────────────────────────────────────────────────────────────────
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    const { valid } = validateForm();
+    if (!valid) {
+      toast.error('Please fix the highlighted errors before saving');
+      // Scroll to first error
+      setTimeout(() => { document.querySelector('[data-field-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 50);
+      return;
+    }
+    setLoading(true);
+    try {
+      let finalServices = formData.services.filter(s => !s.startsWith('Other:'));
+      if (otherService.trim() && formData.services.includes('Other')) finalServices.push(`Other: ${otherService.trim()}`);
+      const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : '';
+      const cleanedContacts = formData.contact_persons.filter(cp => cp.name?.trim()).map(cp => ({
+        name: cp.name.trim(), designation: cp.designation?.trim() || null,
+        email: cp.email?.trim() || null, phone: cp.phone ? (cp.phone.replace(/\D/g, '') || null) : null,
+        birthday: safeDate(cp.birthday) || null, din: cp.din?.trim() || null,
+      }));
+      const cleanedDSC = formData.dsc_details.map(dsc => ({
+        certificate_number: dsc.certificate_number?.trim() || '', holder_name: dsc.holder_name?.trim() || '',
+        issue_date: safeDate(dsc.issue_date), expiry_date: safeDate(dsc.expiry_date), notes: dsc.notes?.trim() || null,
+      }));
+      const cleanedAssignments = (formData.assignments || []).filter(a => a.user_id && a.user_id !== 'unassigned').map(a => ({ user_id: a.user_id, services: a.services || [] }));
+      const finalReferredBy = formData.referred_by?.trim() || null;
+      if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
+      const payload = {
+        company_name: formData.company_name.trim(), client_type: formData.client_type,
+        ...(formData.client_type === 'other' ? { client_type_label: formData.client_type_other?.trim() || 'Other' } : { client_type_label: null }),
+        email: trimmedEmail(formData.email), phone: cleanPhone || null,
+        birthday: safeDate(formData.birthday) || null, address: formData.address?.trim() || null,
+        city: formData.city?.trim() || null, state: formData.state?.trim() || null,
+        services: finalServices, notes: formData.notes?.trim() || null,
+        assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments,
+        status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
+        referred_by: finalReferredBy || null,
+      };
+      if (!editingClient) {
+        const dup = clients.find(c => c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim());
+        if (dup) { toast.error(`"${payload.company_name}" already exists`); setLoading(false); return; }
+      }
+      if (editingClient) await api.put(`/clients/${editingClient.id}`, payload);
+      else await api.post('/clients', payload);
+      setDialogOpen(false); resetForm(); fetchClients();
+      toast.success(editingClient ? 'Client updated!' : 'Client created!');
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      if (Array.isArray(detail)) toast.error(detail.map(e => `${e.loc?.slice(-1)[0]}: ${e.msg}`).join(' | '));
+      else toast.error(detail || 'Error saving client');
+    }
+    finally { setLoading(false); }
+  }, [formData, otherService, editingClient, clients, savedReferrers, validateForm, saveReferrer, fetchClients]);
+
+  // ── Edit ──────────────────────────────────────────────────────────────────
+  const handleEdit = useCallback((client) => {
+    setEditingClient(client);
+    let assignments = client?.assignments || [];
+    if (assignments.length === 0 && client?.assigned_to) assignments = [{ user_id: client.assigned_to, services: [] }];
+    if (assignments.length === 0) assignments = [{ ...EMPTY_ASSIGNMENT }];
+    setFormData({
+      ...client,
+      client_type_other: client?.client_type === 'other' ? (client?.client_type_label || '') : '',
+      contact_persons: client?.contact_persons?.length > 0
+        ? client.contact_persons.map(cp => ({ ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || '' }))
+        : [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
+      birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
+      dsc_details: (client?.dsc_details || []).map(d => ({ ...d, issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '', expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '' })),
+      status: client?.status || 'active', assignments, referred_by: client?.referred_by || '',
+    });
+    const other = client?.services?.find(s => s.startsWith('Other: '));
+    setOtherService(other ? other.replace('Other: ', '') : '');
+    setDialogOpen(true); setFormErrors({}); setContactErrors([]);
+  }, []);
+
+  const resetForm = useCallback(() => {
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '' });
+    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
+  }, []);
+
+  useEffect(() => { if (!dialogOpen) { setFormErrors({}); setContactErrors([]); } }, [dialogOpen]);
+
+  // ── Contact/DSC/Assignment helpers ────────────────────────────────────────
+  const updateContact = useCallback((idx, field, val) => {
+    setFormData(p => ({ ...p, contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: val } : c) }));
+    setContactErrors(prev => { const n = [...prev]; if (n[idx]) { delete n[idx][field]; if (!Object.keys(n[idx]).length) n[idx] = undefined; } return n; });
+  }, []);
+  const addContact    = useCallback(() => setFormData(p => ({ ...p, contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }] })), []);
+  const removeContact = useCallback((idx) => setFormData(p => ({ ...p, contact_persons: p.contact_persons.filter((_, i) => i !== idx) })), []);
+  const updateDSC     = useCallback((idx, field, val) => setFormData(p => ({ ...p, dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d) })), []);
+  const addDSC        = useCallback(() => setFormData(p => ({ ...p, dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }] })), []);
+  const removeDSC     = useCallback((idx) => setFormData(p => ({ ...p, dsc_details: p.dsc_details.filter((_, i) => i !== idx) })), []);
+  const addAssignment    = useCallback(() => setFormData(p => ({ ...p, assignments: [...(p.assignments || []), { ...EMPTY_ASSIGNMENT }] })), []);
+  const removeAssignment = useCallback((idx) => setFormData(p => ({ ...p, assignments: (p.assignments || []).filter((_, i) => i !== idx) })), []);
+  const updateAssignmentUser = useCallback((idx, userId) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => i === idx ? { ...a, user_id: userId } : a) })), []);
+  const toggleAssignmentService = useCallback((idx, svc) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => { if (i !== idx) return a; const services = a.services.includes(svc) ? a.services.filter(s => s !== svc) : [...a.services, svc]; return { ...a, services }; }) })), []);
+  const toggleService = useCallback((s) => { setFormData(p => ({ ...p, services: p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s] })); setFormErrors(prev => ({ ...prev, services: undefined })); }, []);
+  const addOtherService = useCallback(() => {
+    const t = otherService.trim(); if (!t) return;
+    const existing = formData.services.filter(s => s.startsWith('Other:')).map(s => s.replace('Other: ', '').toLowerCase());
+    const builtin = SERVICES.find(s => s.toLowerCase() === t.toLowerCase() && s !== 'Other');
+    if (builtin) { toast.info(`"${builtin}" is already a standard service`); return; }
+    if (existing.includes(t.toLowerCase())) { toast.info(`"${t}" already added`); setOtherService(''); return; }
+    setFormData(prev => ({ ...prev, services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${t}`] }));
+    setOtherService('');
+  }, [otherService, formData.services]);
+
+  // ── Referrer handlers ─────────────────────────────────────────────────────
+  const handleReferrerSelectChange = useCallback((val) => {
+    setReferrerSelectValue(val);
+    if (val === '__other__') { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: '' })); }
+    else { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: val === '' ? '' : val })); }
+  }, []);
+  const handleReferrerInputChange = useCallback((val) => { setReferrerInput(val); setFormData(prev => ({ ...prev, referred_by: val })); }, []);
+  const handleSaveReferrer = useCallback(async () => {
+    const name = referrerInput.trim();
+    if (!name) { toast.error('Please enter a referrer name'); return; }
+    const dup = savedReferrers.find(r => r.toLowerCase() === name.toLowerCase());
+    if (dup) { toast.info(`"${dup}" already exists — selected!`); setReferrerSelectValue(dup); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: dup })); return; }
+    const saved = await saveReferrer(name);
+    setReferrerSelectValue(saved); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: saved }));
+    toast.success(`"${saved}" added to referrer list`);
+  }, [referrerInput, savedReferrers, saveReferrer]);
+
+  // ── CSV / Excel imports ───────────────────────────────────────────────────
+  const downloadTemplate = useCallback(() => {
+    const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1'];
+    const sample  = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST,ROC','Sample notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234'];
+    const csv = headers.join(',') + '\n' + sample.join(',') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.download = 'client_import_template.csv';
     document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
-  };
+  }, []);
 
-  const handleImportCSV = async (event) => {
+  const handleImportCSV = useCallback(async (event) => {
     const file = event.target.files[0]; if (!file) return;
     setImportLoading(true);
-    const formDataUpload = new FormData();
-    formDataUpload.append('file', file);
+    const fd = new FormData(); fd.append('file', file);
     try {
-      const response = await api.post('/clients/import', formDataUpload, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(response.data.message || `${response.data.clients_created || 0} clients imported!`);
+      const r = await api.post('/clients/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success(r.data.message || `${r.data.clients_created || 0} clients imported!`);
       fetchClients();
-    } catch (error) { toast.error(error.response?.data?.detail || 'Import failed'); }
+    } catch (e) { toast.error(e.response?.data?.detail || 'Import failed'); }
     finally { setImportLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
-  };
+  }, [fetchClients]);
 
-  const handleImportExcel = async (event) => {
+  const handleImportExcel = useCallback(async (event) => {
     const file = event.target.files[0]; if (!file) return;
     if (excelInputRef.current) excelInputRef.current.value = '';
     setMdsPreviewLoading(true); setMdsPreviewOpen(true); setMdsData(null); setMdsForm(null);
-    const formPayload = new FormData();
-    formPayload.append('file', file);
+    const fd = new FormData(); fd.append('file', file);
     try {
-      const response = await api.post('/clients/parse-mds-excel', formPayload, { headers: { 'Content-Type': 'multipart/form-data' } });
-      const data = response.data;
+      const r = await api.post('/clients/parse-mds-excel', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const data = r.data;
       let address = (data.address || data.registered_address || '').trim();
-      let city = (data.city || '').trim();
-      let state = (data.state || '').trim();
+      let city = (data.city || '').trim(), state = (data.state || '').trim();
       if (address && (!city || !state)) {
-        const addressParts = address.split(',').map(p => p.trim()).filter(p => p);
-        if (addressParts.length > 0) {
-          if (!state && addressParts.length >= 2) state = addressParts[addressParts.length - 2] || '';
-          if (!city && addressParts.length >= 3) city = addressParts[addressParts.length - 3] || '';
-        }
+        const parts = address.split(',').map(p => p.trim()).filter(p => p);
+        if (!state && parts.length >= 2) state = parts[parts.length - 2] || '';
+        if (!city  && parts.length >= 3) city  = parts[parts.length - 3] || '';
       }
       setMdsData(data);
       const contacts = (data.contact_persons || []).map(cp => ({ name: cp.name || '', designation: cp.designation || '', email: cp.email || '', phone: cp.phone || '', birthday: cp.birthday || '', din: cp.din || '' }));
@@ -811,17 +1248,16 @@ export default function Clients() {
       setMdsForm({ company_name: (data.company_name || '').trim(), client_type: data.client_type || 'proprietor', email: (data.email || '').trim(), phone: (data.phone || '').trim(), birthday: data.birthday || '', address, city, state, services: data.services || [], notes: '', status: data.status_value || 'active', contact_persons: contacts, referred_by: (data.referred_by || '').trim() });
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to parse Excel file'); setMdsPreviewOpen(false); }
     finally { setMdsPreviewLoading(false); }
-  };
+  }, []);
 
-  const handleMdsConfirm = async (saveDirectly = false) => {
+  const handleMdsConfirm = useCallback(async (saveDirectly = false) => {
     if (!mdsForm) return;
     if (saveDirectly) {
       setImportLoading(true);
       try {
         const contacts = mdsForm.contact_persons.filter(cp => cp.name?.trim()).map(cp => ({ name: cp.name.trim(), designation: cp.designation?.trim() || null, email: cp.email?.trim() || null, phone: cp.phone?.replace(/\D/g, '') || null, birthday: safeDate(cp.birthday), din: cp.din?.trim() || null }));
-        const payload = { company_name: mdsForm.company_name?.trim() || '', client_type: mdsForm.client_type || 'proprietor', email: mdsForm.email?.trim() || null, phone: mdsForm.phone?.replace(/\D/g, '') || null, birthday: safeDate(mdsForm.birthday) || null, address: mdsForm.address?.trim() || null, city: mdsForm.city?.trim() || null, state: mdsForm.state?.trim() || null, services: mdsForm.services || [], notes: mdsForm.notes?.trim() || null, status: mdsForm.status || 'active', contact_persons: contacts, dsc_details: [], assignments: [], assigned_to: null, referred_by: mdsForm.referred_by?.trim() || null };
-        await api.post('/clients', payload);
-        toast.success(`Client "${mdsForm.company_name}" saved successfully!`);
+        await api.post('/clients', { company_name: mdsForm.company_name?.trim() || '', client_type: mdsForm.client_type || 'proprietor', email: mdsForm.email?.trim() || null, phone: mdsForm.phone?.replace(/\D/g, '') || null, birthday: safeDate(mdsForm.birthday) || null, address: mdsForm.address?.trim() || null, city: mdsForm.city?.trim() || null, state: mdsForm.state?.trim() || null, services: mdsForm.services || [], notes: mdsForm.notes?.trim() || null, status: mdsForm.status || 'active', contact_persons: contacts, dsc_details: [], assignments: [], assigned_to: null, referred_by: mdsForm.referred_by?.trim() || null });
+        toast.success(`Client "${mdsForm.company_name}" saved!`);
         fetchClients(); setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null);
       } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save client'); }
       finally { setImportLoading(false); }
@@ -831,168 +1267,19 @@ export default function Clients() {
       setMdsPreviewOpen(false); setDialogOpen(true);
       toast.info('Form pre-filled from Excel — review and save when ready.');
     }
-  };
+  }, [mdsForm, fetchClients]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const isValid = validateForm();
-    if (!isValid) { toast.error('Please fix the highlighted errors before saving'); return; }
-    setLoading(true);
-    try {
-      let finalServices = [...formData.services];
-      finalServices = finalServices.filter(s => !s.startsWith("Other:"));
-      if (otherService.trim() && formData.services.includes("Other")) finalServices.push(`Other: ${otherService.trim()}`);
-      const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, "") : "";
+  // ── Filter clear helpers ────────────────────────────────────────────────
+  const clearFilter = useCallback((which) => {
+    if (which === 'status')     setStatusFilter('all');
+    if (which === 'clientType') setClientTypeFilter('all');
+    if (which === 'service')    setServiceFilter('all');
+    if (which === 'assigned')   setAssignedToFilter('all');
+  }, []);
+  const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setSearchInput(''); }, []);
 
-      // FIX: Only include contact persons that have at least a name filled in
-      const cleanedContacts = formData.contact_persons
-        .filter(cp => cp.name?.trim())
-        .map(cp => ({
-          name: cp.name.trim(),
-          designation: cp.designation?.trim() || null,
-          email: cp.email?.trim() || null,
-          phone: cp.phone ? (cp.phone.replace(/\D/g, "") || null) : null,
-          birthday: safeDate(cp.birthday) || null,
-          din: cp.din?.trim() || null
-        }));
-
-      const cleanedDSC = formData.dsc_details.map(dsc => ({
-        certificate_number: dsc.certificate_number?.trim() || "",
-        holder_name: dsc.holder_name?.trim() || "",
-        issue_date: safeDate(dsc.issue_date),
-        expiry_date: safeDate(dsc.expiry_date),
-        notes: dsc.notes?.trim() || null
-      }));
-
-      const cleanedAssignments = (formData.assignments || []).filter(a => a.user_id && a.user_id !== 'unassigned').map(a => ({ user_id: a.user_id, services: a.services || [] }));
-      const finalReferredBy = formData.referred_by?.trim() || null;
-      if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
-
-      // FIX: Build payload carefully — only include fields the backend expects
-      // backend ClientBase expects: company_name, client_type, contact_persons, email, phone,
-      // date_of_incorporation, birthday, services, dsc_details, assigned_to, notes, referred_by, assignments
-      // Extra fields (address, city, state, client_type_label) are handled via extra="ignore" on backend
-      const payload = {
-        company_name: formData.company_name.trim(),
-        client_type: formData.client_type,
-        // FIX: include client_type_label only when client_type is 'other'
-        ...(formData.client_type === 'other' ? { client_type_label: formData.client_type_other?.trim() || 'Other' } : { client_type_label: null }),
-        email: trimmedEmailVal(formData.email),
-        phone: cleanPhone || null,
-        birthday: safeDate(formData.birthday) || null,
-        address: formData.address?.trim() || null,
-        city: formData.city?.trim() || null,
-        state: formData.state?.trim() || null,
-        services: finalServices,
-        notes: formData.notes?.trim() || null,
-        assigned_to: cleanedAssignments[0]?.user_id || null,
-        assignments: cleanedAssignments,
-        status: formData.status,
-        contact_persons: cleanedContacts,
-        dsc_details: cleanedDSC,
-        referred_by: finalReferredBy || null,
-      };
-
-      if (!editingClient) {
-        const duplicate = clients.find(c =>
-          c.company_name?.toLowerCase().trim() === payload.company_name?.toLowerCase().trim()
-        );
-        if (duplicate) {
-          toast.error(`"${payload.company_name}" already exists in your client list`);
-          setLoading(false);
-          return;
-        }
-      }
-      if (editingClient) await api.put(`/clients/${editingClient.id}`, payload);
-      else await api.post("/clients", payload);
-      setDialogOpen(false); resetForm(); fetchClients();
-      toast.success("Saved successfully!");
-    } catch (error) {
-      // FIX: Show detailed backend error for debugging
-      const detail = error.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        const msgs = detail.map(e => `${e.loc?.join('.')} — ${e.msg}`).join('\n');
-        toast.error(`Validation error:\n${msgs}`);
-      } else {
-        toast.error(detail || "Error saving client");
-      }
-    }
-    finally { setLoading(false); }
-  };
-
-  // Helper to trim email and return null if empty
-  const trimmedEmailVal = (email) => {
-    const t = email?.trim();
-    return t && t.length > 0 ? t : null;
-  };
-
-  const handleEdit = (client) => {
-    setEditingClient(client);
-    let assignments = client?.assignments || [];
-    if (assignments.length === 0 && client?.assigned_to) assignments = [{ user_id: client.assigned_to, services: [] }];
-    if (assignments.length === 0) assignments = [{ ...EMPTY_ASSIGNMENT }];
-    setFormData({ ...client, client_type_other: client?.client_type === 'other' ? (client?.client_type_label || '') : '', contact_persons: client?.contact_persons?.length > 0 ? client.contact_persons.map(cp => ({ ...cp, birthday: cp?.birthday ? format(new Date(cp.birthday), 'yyyy-MM-dd') : '', din: cp?.din || '' })) : [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '', dsc_details: client?.dsc_details?.map(d => ({ ...d, issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '', expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '' })) || [], status: client?.status || 'active', assignments, referred_by: client?.referred_by || '' });
-    const other = client?.services?.find(s => s.startsWith('Other: '));
-    setOtherService(other ? other.replace('Other: ', '') : '');
-    setDialogOpen(true); setFormErrors({}); setContactErrors([]);
-  };
-
-  const resetForm = () => {
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '' });
-    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]);
-    setReferrerInput(''); setReferrerSelectValue('');
-  };
-
-  useEffect(() => { if (!dialogOpen) { setFormErrors({}); setContactErrors([]); } }, [dialogOpen]);
-
-  const updateContact = (idx, field, val) => {
-    setFormData(p => ({ ...p, contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: val } : c) }));
-    if (contactErrors[idx] && contactErrors[idx][field]) {
-      const newCerr = [...contactErrors];
-      if (newCerr[idx]) delete newCerr[idx][field];
-      if (Object.keys(newCerr[idx] || {}).length === 0) newCerr[idx] = undefined;
-      setContactErrors(newCerr);
-    }
-  };
-
-  const addContact = () => setFormData(p => ({ ...p, contact_persons: [...p.contact_persons, { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }] }));
-  const removeContact = (idx) => setFormData(p => ({ ...p, contact_persons: p.contact_persons.filter((_, i) => i !== idx) }));
-  const updateDSC = (idx, field, val) => setFormData(p => ({ ...p, dsc_details: p.dsc_details.map((d, i) => i === idx ? { ...d, [field]: val } : d) }));
-  const addDSC = () => setFormData(p => ({ ...p, dsc_details: [...p.dsc_details, { certificate_number: '', holder_name: '', issue_date: '', expiry_date: '', notes: '' }] }));
-  const removeDSC = (idx) => setFormData(p => ({ ...p, dsc_details: p.dsc_details.filter((_, i) => i !== idx) }));
-  const addAssignment = () => setFormData(p => ({ ...p, assignments: [...(p.assignments || []), { ...EMPTY_ASSIGNMENT }] }));
-  const removeAssignment = (idx) => setFormData(p => ({ ...p, assignments: (p.assignments || []).filter((_, i) => i !== idx) }));
-  const updateAssignmentUser = (idx, userId) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => i === idx ? { ...a, user_id: userId } : a) }));
-  const toggleAssignmentService = (idx, svc) => setFormData(p => ({ ...p, assignments: (p.assignments || []).map((a, i) => { if (i !== idx) return a; const services = a.services.includes(svc) ? a.services.filter(s => s !== svc) : [...a.services, svc]; return { ...a, services }; }) }));
-  const toggleService = (s) => { setFormData(p => { const services = p.services.includes(s) ? p.services.filter(x => x !== s) : [...p.services, s]; return { ...p, services }; }); if (formErrors.services) setFormErrors(prev => ({ ...prev, services: undefined })); };
-  const addOtherService = () => {
-    const trimmed = otherService.trim();
-    if (!trimmed) return;
-    const existingOthers = formData.services.filter(s => s.startsWith('Other:')).map(s => s.replace('Other: ', '').toLowerCase());
-    const builtInMatch = SERVICES.find(s => s.toLowerCase() === trimmed.toLowerCase() && s !== 'Other');
-    if (builtInMatch) { toast.info(`"${builtInMatch}" is already a standard service — select it from the list above`); return; }
-    if (existingOthers.includes(trimmed.toLowerCase())) { toast.info(`"${trimmed}" is already added`); setOtherService(''); return; }
-    setFormData(prev => ({ ...prev, services: [...prev.services.filter(s => !s.startsWith('Other:')), `Other: ${trimmed}`] }));
-    setOtherService('');
-  };
-  const getClientAssignments = (client) => { if (client?.assignments && client.assignments.length > 0) return client.assignments; if (client?.assigned_to) return [{ user_id: client.assigned_to, services: [] }]; return []; };
-  const handleReferrerSelectChange = (val) => { setReferrerSelectValue(val); if (val === '__other__') { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: '' })); } else { setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: val === '' ? '' : val })); } };
-  const handleReferrerInputChange = (val) => { setReferrerInput(val); setFormData(prev => ({ ...prev, referred_by: val })); };
-  const handleSaveReferrer = async () => {
-    const name = referrerInput.trim();
-    if (!name) { toast.error('Please enter a referrer name'); return; }
-    const duplicate = savedReferrers.find(r => r.toLowerCase() === name.toLowerCase());
-    if (duplicate) { toast.info(`"${duplicate}" already exists — selected!`); setReferrerSelectValue(duplicate); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: duplicate })); return; }
-    const saved = await saveReferrer(name);
-    setReferrerSelectValue(saved); setReferrerInput('');
-    setFormData(prev => ({ ...prev, referred_by: saved }));
-    toast.success(`"${saved}" added to referrer list`);
-  };
-
-  // ── List row — FIX: uses local pageClients array passed as prop, not sortedClients directly ──
-  // This is now a pure component that receives the client directly — no index lookup needed
-  const ListRow = ({ index, style, data }) => {
-    // FIX: data is the pageClients array passed via itemData prop
+  // ── List row — using itemData pattern so it doesn't recreate per-render ──
+  const ListRow = useCallback(({ index, style, data }) => {
     const { pageClients: pc, pageStart: ps } = data;
     const client = pc[index];
     if (!client) return null;
@@ -1003,8 +1290,8 @@ export default function Clients() {
     const clientAssignments = getClientAssignments(client);
     return (
       <div style={style} className="px-1">
-        <div className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors group cursor-pointer ${isArchived ? 'opacity-60' : ''} ${isDark ? "bg-slate-800 hover:bg-slate-700/60 border-slate-700" : "bg-white hover:bg-slate-50/60"}`}
-          style={{ borderColor: isDark ? undefined : '#F1F5F9' }}
+        <div className={`flex items-center gap-4 px-5 border-b transition-colors group cursor-pointer ${isArchived ? 'opacity-60' : ''} ${isDark ? 'bg-slate-800 hover:bg-slate-700/60 border-slate-700' : 'bg-white hover:bg-slate-50/60 border-slate-100'}`}
+          style={{ height: LIST_ROW_HEIGHT }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
           <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.strip }} />
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
@@ -1015,142 +1302,56 @@ export default function Clients() {
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(globalIndex)}</span>
               {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
             </div>
-            <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-100" : "text-slate-900"}`}>{client.company_name}</p>
+            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{client.company_name}</p>
           </div>
           <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
-          <div className="w-36 flex-shrink-0"><p className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{client.phone || '—'}</p></div>
-          <div className="flex-1 min-w-0"><p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{client.email || '—'}</p></div>
+          <div className="w-36 flex-shrink-0">
+            <p
+              className={`text-xs font-medium cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+              onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
+              title={client.phone ? 'Click to copy' : ''}>
+              {client.phone || '—'}
+            </p>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p
+              className={`text-xs truncate cursor-copy ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+              onClick={client.email ? e => { e.stopPropagation(); copyToClipboard(client.email, 'Email'); } : undefined}
+              title={client.email ? 'Click to copy' : ''}>
+              {client.email || '—'}
+            </p>
+          </div>
           <div className="flex items-center gap-1 w-44 flex-shrink-0">
             {client.services?.slice(0, 2).map((svc, i) => <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-md border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '').substring(0, 10)}</span>)}
             {serviceCount > 2 && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">+{serviceCount - 2}</span>}
           </div>
           <div className="w-32 flex-shrink-0 flex flex-col gap-0.5">
             {clientAssignments.slice(0, 2).map((a, i) => { const u = users.find(x => x.id === a.user_id); return u ? <span key={i} className="text-[10px] text-slate-500 truncate">{u.full_name || u.name}{a.services?.length > 0 && <span className="text-slate-400"> · {a.services[0]}{a.services.length > 1 ? `+${a.services.length - 1}` : ''}</span>}</span> : null; })}
-            {clientAssignments.length > 2 && <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>+{clientAssignments.length - 2} more</span>}
+            {clientAssignments.length > 2 && <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>+{clientAssignments.length - 2} more</span>}
           </div>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"><MessageCircle className="h-3.5 w-3.5" /></button>
-            <button onClick={(e) => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>
-            {canDeleteData && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete this client permanently?")) { api.delete(`/clients/${client.id}`).then(() => fetchClients()); } }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
+            <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"><MessageCircle className="h-3.5 w-3.5" /></button>
+            <button onClick={e => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>
+            {canDeleteData && <button onClick={e => { e.stopPropagation(); handleDelete(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
           </div>
         </div>
       </div>
     );
-  };
+  }, [isDark, users, getClientAssignments, getClientNumber, openWhatsApp, handleEdit, canDeleteData, handleDelete]);
 
-  // ── Client Detail Popup ───────────────────────────────────────────────
-  const ClientDetailPopup = () => {
-    if (!selectedClient) return null;
-    const cfg = TYPE_CONFIG[selectedClient.client_type] || TYPE_CONFIG.proprietor;
-    const avatarGrad = getAvatarGradient(selectedClient.company_name);
-    const clientAssignments = getClientAssignments(selectedClient);
-    return (
-      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-        <DialogContent className={`max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}>
-          <DialogTitle className="sr-only">Client Details</DialogTitle>
-          <DialogDescription className="sr-only">View complete client information</DialogDescription>
-          <div className="sticky top-0 z-10 bg-gradient-to-r pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
-            <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-md" style={{ background: avatarGrad }}>{selectedClient.company_name?.charAt(0).toUpperCase() || '?'}</div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h2 className={`text-2xl font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{selectedClient.company_name}</h2>
-                  <TypePill type={selectedClient.client_type} customLabel={selectedClient.client_type_label} />
-                  {selectedClient.status === 'inactive' && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>}
-                </div>
-                {selectedClient.birthday && <p className="text-sm text-slate-500"><Calendar className="inline h-3.5 w-3.5 mr-1" />Incorporated: {format(new Date(selectedClient.birthday), 'MMM d, yyyy')}</p>}
-                {selectedClient.referred_by && <p className="text-sm text-slate-500 mt-1"><Share2 className="inline h-3.5 w-3.5 mr-1" />Referred by: <span className="font-medium text-slate-700">{selectedClient.referred_by}</span></p>}
-                {selectedClient.created_at && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    <Calendar className="inline h-3 w-3 mr-1" />
-                    Added: {format(new Date(selectedClient.created_at), 'MMM d, yyyy')}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-8 space-y-6">
-              <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-4 flex items-center gap-2`}><Mail className="h-4 w-4" /> Contact Information</h3>
-                <div className="space-y-3">
-                  {selectedClient.email && <div className="flex items-center gap-3"><Mail className="h-4 w-4 text-blue-500 flex-shrink-0" /><a href={`mailto:${selectedClient.email}`} className="text-blue-600 hover:underline text-sm">{selectedClient.email}</a></div>}
-                  {selectedClient.phone && <div className="flex items-center gap-3"><Phone className="h-4 w-4 text-green-500 flex-shrink-0" /><a href={`tel:${selectedClient.phone}`} className="text-slate-700 font-medium text-sm">{selectedClient.phone}</a></div>}
-                  {selectedClient.address && <div className="flex items-start gap-3"><MapPin className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" /><div className="text-slate-700 text-sm"><p>{selectedClient.address}</p>{(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}</div></div>}
-                </div>
-              </div>
-              {selectedClient.services && selectedClient.services.length > 0 && (
-                <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-4 flex items-center gap-2`}><BarChart3 className="h-4 w-4" /> Services</h3>
-                  <div className="flex flex-wrap gap-2">{selectedClient.services.map((svc, i) => <span key={i} className="text-xs font-semibold px-3 py-2 rounded-xl border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '')}</span>)}</div>
-                </div>
-              )}
-              {selectedClient.contact_persons && selectedClient.contact_persons.length > 0 && (
-                <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-4 flex items-center gap-2`}><Users className="h-4 w-4" /> Contact Persons ({selectedClient.contact_persons.length})</h3>
-                  <div className="space-y-3">{selectedClient.contact_persons.map((cp, i) => cp.name && (<div key={i} className={`border rounded-xl p-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-white border-slate-200"}`}><p className={`font-semibold text-sm ${isDark ? "text-slate-100" : "text-slate-900"}`}>{cp.name}</p>{cp.designation && <p className="text-xs text-slate-500 mt-1">{cp.designation}</p>}<div className="flex flex-col gap-1.5 mt-2 text-xs">{cp.email && <a href={`mailto:${cp.email}`} className="text-blue-600 hover:underline">{cp.email}</a>}{cp.phone && <a href={`tel:${cp.phone}`} className="text-slate-700">{cp.phone}</a>}{cp.birthday && <p className="text-slate-500">Birthday: {format(new Date(cp.birthday), 'MMM d, yyyy')}</p>}{cp.din && <p className="text-slate-500">DIN: {cp.din}</p>}</div></div>))}</div>
-                </div>
-              )}
-              {selectedClient.dsc_details && selectedClient.dsc_details.length > 0 && (
-                <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-4 flex items-center gap-2`}><FileCheck className="h-4 w-4" /> DSC Details ({selectedClient.dsc_details.length})</h3>
-                  <div className="space-y-3">{selectedClient.dsc_details.map((dsc, i) => dsc.certificate_number && (<div key={i} className={`border rounded-xl p-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-white border-slate-200"}`}><p className={`font-semibold text-sm ${isDark ? "text-slate-100" : "text-slate-900"}`}>{dsc.certificate_number}</p><p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p><div className="flex gap-4 mt-2 text-xs text-slate-600">{dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}{dsc.expiry_date && <p>Expires: {format(new Date(dsc.expiry_date), 'MMM d, yyyy')}</p>}</div>{dsc.notes && <p className="text-xs text-slate-500 mt-2 italic">{dsc.notes}</p>}</div>))}</div>
-                </div>
-              )}
-              {(clientAssignments.length > 0 || selectedClient.notes) && (
-                <div className="grid grid-cols-2 gap-4">
-                  {clientAssignments.length > 0 && (
-                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-3 flex items-center gap-2`}><Briefcase className="h-3.5 w-3.5" /> Staff Assignments</h3>
-                      <div className="flex flex-col gap-2">
-                        {clientAssignments.map((a, i) => {
-                          const u = users.find(x => x.id === a.user_id);
-                          if (!u) return null;
-                          return (
-                            <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark ? "bg-slate-700/60 border-slate-600" : "bg-white border-slate-100"}`}>
-                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>
-                                {(u.full_name || u.name || '?').charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{u.full_name || u.name}</p>
-                                {a.services && a.services.length > 0 ? (
-                                  <div className="flex flex-wrap gap-1 mt-1">
-                                    {a.services.map((svc, si) => <span key={si} className="text-[10px] font-semibold px-2 py-0.5 rounded-full border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc}</span>)}
-                                  </div>
-                                ) : <p className="text-xs text-slate-400 mt-0.5">All services</p>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                  {selectedClient.notes && (
-                    <div className={`border rounded-2xl p-5 col-span-2 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                      <h3 className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-600"} mb-3`}>Notes</h3>
-                      <p className="text-sm text-slate-700 leading-relaxed">{selectedClient.notes}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
-            <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
-            <div className="flex gap-2">
-              <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: '#25D366' }}><MessageCircle className="h-4 w-4" /> WhatsApp</Button>
-              <Button onClick={() => { setDetailDialogOpen(false); handleEdit(selectedClient); }} className="h-10 px-4 text-sm rounded-xl text-white gap-2" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Edit className="h-4 w-4" /> Edit</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  };
+  // ── Pagination derived values ──────────────────────────────────────────────
+  const boardTotalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
+  const boardSafePage   = Math.min(boardPage, Math.max(1, boardTotalPages));
+  const boardPageStart  = (boardSafePage - 1) * BOARD_PAGE_SIZE;
+  const boardPageClients = sortedClients.slice(boardPageStart, boardPageStart + BOARD_PAGE_SIZE);
 
-  const fieldCls = (hasError) => `h-11 rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
-  const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
-  const mdsFieldCls = "h-10 rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3";
+  const listTotalPages  = Math.ceil(sortedClients.length / LIST_PAGE_SIZE);
+  const listSafePage    = Math.min(listPage, Math.max(1, listTotalPages));
+  const listPageStart   = (listSafePage - 1) * LIST_PAGE_SIZE;
+  const listPageClients = sortedClients.slice(listPageStart, listPageStart + LIST_PAGE_SIZE);
+  const listHeight      = Math.min(listPageClients.length, MAX_VISIBLE_ROWS) * LIST_ROW_HEIGHT;
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: isDark ? '#0f172a' : '#F4F6FA' }}>
 
@@ -1162,7 +1363,7 @@ export default function Clients() {
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/15 backdrop-blur-sm border border-white/20 flex-shrink-0"><Users className="h-6 w-6 text-white" /></div>
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight">Clients</h1>
-              <p className="text-sm text-blue-200 mt-0.5">Central hub for all client relationships</p>
+              <p className="text-sm text-blue-200 mt-0.5">Central hub for all client relationships · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> search · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1173,157 +1374,184 @@ export default function Clients() {
                 <Button className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Client</Button>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
-                <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+                <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                   <div>
-                    <DialogTitle className={`text-xl font-bold tracking-tight ${isDark ? "text-slate-100" : "text-slate-900"}`}>{editingClient ? 'Edit Client Profile' : 'New Client Profile'}</DialogTitle>
+                    <DialogTitle className={`text-xl font-bold tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{editingClient ? 'Edit Client Profile' : 'New Client Profile'}</DialogTitle>
                     <DialogDescription className="text-sm text-slate-400 mt-0.5">Complete client information and preferences</DialogDescription>
                   </div>
                   <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
-                    <Switch checked={formData.status === 'active'} onCheckedChange={c => setFormData({ ...formData, status: c ? 'active' : 'inactive' })} />
+                    <Switch checked={formData.status === 'active'} onCheckedChange={c => setFormData(p => ({ ...p, status: c ? 'active' : 'inactive' }))} />
                     <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>{formData.status === 'active' ? 'Active' : 'Archived'}</span>
                   </div>
                 </div>
                 <form onSubmit={handleSubmit} className="p-8 space-y-7">
                   {/* Basic Details */}
-                  <div className={`border rounded-2xl p-6 ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50/60 border-slate-100"}`}>
+                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                     <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" isDark={isDark} />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div><label className={labelCls}>Company Name <span className="text-red-400">*</span></label><Input className={fieldCls(formErrors.company_name)} value={formData.company_name} onChange={e => { setFormData({ ...formData, company_name: e.target.value }); if (formErrors.company_name) setFormErrors(prev => ({ ...prev, company_name: undefined })); }} required />{formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}</div>
-                      <div><label className={labelCls}>Client Type <span className="text-red-400">*</span></label><Select value={formData.client_type} onValueChange={v => setFormData({ ...formData, client_type: v, client_type_other: '' })}><SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}><SelectValue /></SelectTrigger><SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>{formData.client_type === 'other' && <div className="mt-2"><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Specify client type…" value={formData.client_type_other} onChange={e => setFormData({ ...formData, client_type_other: e.target.value })} autoFocus /></div>}</div>
-                      <div><label className={labelCls}>Email Address</label><Input className={fieldCls(formErrors.email)} type="email" value={formData.email} onChange={e => { setFormData({ ...formData, email: e.target.value }); if (formErrors.email) setFormErrors(prev => ({ ...prev, email: undefined })); }} />{formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}</div>
-                      <div><label className={labelCls}>Phone Number <span className="text-slate-400 font-normal">(optional)</span></label><Input className={fieldCls(formErrors.phone)} value={formData.phone} onChange={e => { setFormData({ ...formData, phone: e.target.value }); if (formErrors.phone) setFormErrors(prev => ({ ...prev, phone: undefined })); }} />{formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}</div>
-                      <div><label className={labelCls}>Date of Incorporation</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} type="date" value={formData.birthday} onChange={e => setFormData({ ...formData, birthday: e.target.value })} /></div>
+                      <div>
+                        <label className={labelCls}>Company Name <span className="text-red-400">*</span></label>
+                        <Input data-field-error={formErrors.company_name ? true : undefined} className={fieldCls(formErrors.company_name)} value={formData.company_name} onChange={e => { setFormData(p => ({ ...p, company_name: e.target.value })); if (formErrors.company_name) setFormErrors(prev => ({ ...prev, company_name: undefined })); }} required />
+                        {formErrors.company_name && <p className="text-red-500 text-xs mt-1">{formErrors.company_name}</p>}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
+                        <Select value={formData.client_type} onValueChange={v => setFormData(p => ({ ...p, client_type: v, client_type_other: '' }))}>
+                          <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                        </Select>
+                        {formData.client_type === 'other' && <Input className={`mt-2 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Specify client type…" value={formData.client_type_other} onChange={e => setFormData(p => ({ ...p, client_type_other: e.target.value }))} autoFocus />}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Email Address</label>
+                        <Input data-field-error={formErrors.email ? true : undefined} className={fieldCls(formErrors.email)} type="email" value={formData.email} onChange={e => { setFormData(p => ({ ...p, email: e.target.value })); if (formErrors.email) setFormErrors(prev => ({ ...prev, email: undefined })); }} />
+                        {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Phone Number <span className="text-slate-400 font-normal">(optional)</span></label>
+                        <Input data-field-error={formErrors.phone ? true : undefined} className={fieldCls(formErrors.phone)} value={formData.phone} onChange={e => { setFormData(p => ({ ...p, phone: e.target.value })); if (formErrors.phone) setFormErrors(prev => ({ ...prev, phone: undefined })); }} />
+                        {formErrors.phone && <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Date of Incorporation</label>
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} type="date" value={formData.birthday} onChange={e => setFormData(p => ({ ...p, birthday: e.target.value }))} />
+                      </div>
                       <div>
                         <label className={labelCls}>Referred By</label>
-                        <div className="relative"><Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" /><select className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer" value={referrerSelectValue} onChange={e => handleReferrerSelectChange(e.target.value)}><option value="">— Select referral source —</option><option value="Our Client">Our Client</option>{savedReferrers.filter(r => r !== 'Our Client').map(r => <option key={r} value={r}>{r}</option>)}<option value="__other__">+ Other</option></select></div>
-                        {referrerSelectValue === '__other__' && <div className="flex gap-2 mt-2"><Input className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Type referrer's name…" value={referrerInput} onChange={e => handleReferrerInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }} autoFocus /><Button type="button" onClick={handleSaveReferrer} className="h-11 px-4 rounded-xl text-white text-sm font-semibold flex-shrink-0 gap-1.5 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Plus className="h-4 w-4" /> Save</Button></div>}
+                        <div className="relative"><Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+                          <select className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer" value={referrerSelectValue} onChange={e => handleReferrerSelectChange(e.target.value)}>
+                            <option value="">— Select referral source —</option>
+                            <option value="Our Client">Our Client</option>
+                            {savedReferrers.filter(r => r !== 'Our Client').map(r => <option key={r} value={r}>{r}</option>)}
+                            <option value="__other__">+ Other</option>
+                          </select>
+                        </div>
+                        {referrerSelectValue === '__other__' && (
+                          <div className="flex gap-2 mt-2">
+                            <Input className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Type referrer's name…" value={referrerInput} onChange={e => handleReferrerInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }} autoFocus />
+                            <Button type="button" onClick={handleSaveReferrer} className="h-11 px-4 rounded-xl text-white text-sm font-semibold gap-1.5" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Plus className="h-4 w-4" /> Save</Button>
+                          </div>
+                        )}
                         {referrerSelectValue === '__other__' && (() => {
-                          const isDuplicate = referrerInput.trim() && savedReferrers.some(r => r.toLowerCase() === referrerInput.trim().toLowerCase());
-                          return isDuplicate
-                            ? <p className="text-[10px] text-amber-600 mt-1.5 flex items-center gap-1.5"><span>⚠</span> <span>&ldquo;{referrerInput.trim()}&rdquo; already exists — click <strong>Save</strong> to select it</span></p>
-                            : <p className="text-[10px] text-slate-400 mt-1.5">Press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-200 rounded text-[9px] font-mono">Enter</kbd> or click Save — name will appear in dropdown next time</p>;
+                          const isDup = referrerInput.trim() && savedReferrers.some(r => r.toLowerCase() === referrerInput.trim().toLowerCase());
+                          return isDup
+                            ? <p className="text-[10px] text-amber-600 mt-1.5">⚠ "{referrerInput.trim()}" already exists — click Save to select it</p>
+                            : <p className="text-[10px] text-slate-400 mt-1.5">Press Enter or click Save — name will appear in dropdown next time</p>;
                         })()}
                       </div>
-                      <div className="md:col-span-2"><label className={labelCls}>Address</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
-                      <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} /></div>
-                      <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} value={formData.state} onChange={e => setFormData({ ...formData, state: e.target.value })} /></div>
+                      <div className="md:col-span-2"><label className={labelCls}>Address</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Street address (optional)" value={formData.address} onChange={e => setFormData(p => ({ ...p, address: e.target.value }))} /></div>
+                      <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} /></div>
+                      <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} /></div>
                     </div>
                   </div>
                   {/* Contact Persons */}
-                  <div className={`border rounded-2xl p-6 ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50/60 border-slate-100"}`}>
-                    <div className="flex items-center justify-between mb-5"><SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with (birthdays tracked here)" isDark={isDark} /><Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add Person</Button></div>
+                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
+                    <div className="flex items-center justify-between mb-5">
+                      <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with (birthdays tracked here)" isDark={isDark} />
+                      <Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add Person</Button>
+                    </div>
                     {formErrors.contacts && <p className="text-red-500 text-xs mb-4 flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.contacts}</p>}
-                    <div className="space-y-4">{formData.contact_persons.map((cp, idx) => (<div key={idx} className={`border rounded-xl p-5 relative ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-slate-200"}`}><div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-sm font-semibold text-slate-700">Contact Person</span></div>{formData.contact_persons.length > 1 && <button type="button" onClick={() => removeContact(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>}</div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className={labelCls}>Full Name</label><Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)} className={fieldCls(contactErrors[idx]?.name)} />{contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}</div><div><label className={labelCls}>Designation</label><Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)} className={fieldCls(false)} /></div><div><label className={labelCls}>Email</label><Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)} className={fieldCls(contactErrors[idx]?.email)} />{contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}</div><div><label className={labelCls}>Phone</label><Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} className={fieldCls(contactErrors[idx]?.phone)} />{contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}</div><div><label className={labelCls}>Date of Birth (birthday reminders)</label><Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={fieldCls(false)} /></div><div><label className={labelCls}>DIN (Director ID)</label><Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)} className={fieldCls(false)} /></div></div></div>))}</div>
+                    <div className="space-y-4">{formData.contact_persons.map((cp, idx) => (
+                      <div key={idx} className={`border rounded-xl p-5 relative ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-sm font-semibold text-slate-700">Contact Person</span></div>
+                          {formData.contact_persons.length > 1 && <button type="button" onClick={() => removeContact(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div><label className={labelCls}>Full Name</label><Input data-field-error={contactErrors[idx]?.name ? true : undefined} value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)} className={fieldCls(contactErrors[idx]?.name)} />{contactErrors[idx]?.name && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].name}</p>}</div>
+                          <div><label className={labelCls}>Designation</label><Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)} className={fieldCls(false)} /></div>
+                          <div><label className={labelCls}>Email</label><Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)} className={fieldCls(contactErrors[idx]?.email)} />{contactErrors[idx]?.email && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].email}</p>}</div>
+                          <div><label className={labelCls}>Phone</label><Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} className={fieldCls(contactErrors[idx]?.phone)} />{contactErrors[idx]?.phone && <p className="text-red-500 text-xs mt-1">{contactErrors[idx].phone}</p>}</div>
+                          <div><label className={labelCls}>Date of Birth</label><Input type="date" value={cp.birthday || ''} onChange={e => updateContact(idx, 'birthday', e.target.value)} className={fieldCls(false)} /></div>
+                          <div><label className={labelCls}>DIN (Director ID)</label><Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)} className={fieldCls(false)} /></div>
+                        </div>
+                      </div>
+                    ))}</div>
                   </div>
                   {/* DSC Details */}
-                  <div className={`border rounded-2xl p-6 ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50/60 border-slate-100"}`}>
+                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                     <div className="flex items-center justify-between mb-5">
-                      <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" isDark={isDark} />
+                      <SectionHeading icon={<Shield className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" isDark={isDark} />
                       <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add DSC</Button>
                     </div>
-                    <div className="space-y-4">
-                      {formData.dsc_details.map((dsc, idx) => (
-                        <div key={idx} className={`border rounded-xl p-5 relative ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-slate-200"}`}>
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                              <span className="text-sm font-semibold text-slate-700">DSC Certificate</span>
-                            </div>
-                            {formData.dsc_details.length > 0 && (
-                              <button type="button" onClick={() => removeDSC(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label className={labelCls}>Certificate Number</label><Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} /></div>
-                            <div><label className={labelCls}>Holder Name</label><Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} /></div>
-                            <div><label className={labelCls}>Issue Date</label><Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} /></div>
-                            <div><label className={labelCls}>Expiry Date</label><Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} /></div>
-                            <div className="md:col-span-2">
-                              <label className={labelCls}>Notes</label>
-                              <Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)} className={`min-h-[80px] rounded-xl text-sm resize-y ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} />
-                            </div>
-                          </div>
+                    <div className="space-y-4">{formData.dsc_details.map((dsc, idx) => (
+                      <div key={idx} className={`border rounded-xl p-5 relative ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-sm font-semibold text-slate-700">DSC Certificate</span></div>
+                          <button type="button" onClick={() => removeDSC(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>
                         </div>
-                      ))}
-                    </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div><label className={labelCls}>Certificate Number</label><Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} /></div>
+                          <div><label className={labelCls}>Holder Name</label><Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} /></div>
+                          <div><label className={labelCls}>Issue Date</label><Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} /></div>
+                          <div><label className={labelCls}>Expiry Date</label><Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} /></div>
+                          <div className="md:col-span-2"><label className={labelCls}>Notes</label><Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)} className={`min-h-[80px] rounded-xl text-sm resize-y ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} /></div>
+                        </div>
+                      </div>
+                    ))}</div>
                   </div>
-
                   {/* Services */}
-                  <div className={`border rounded-2xl p-6 ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50/60 border-slate-100"}`}>
+                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                     <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" isDark={isDark} />
-                    {formErrors.services && <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-red-400 rounded-full inline-block" />{formErrors.services}</p>}
-                    <div className="flex flex-wrap gap-2">{SERVICES.map(s => { const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))); return <button key={s} type="button" onClick={() => toggleService(s)} className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`} style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>{s}</button>; })}</div>
-                    {formData.services.includes('Other') && <div className="flex gap-3 items-end max-w-sm mt-4"><div className="flex-1"><label className={labelCls}>Specify Other Service</label><Input placeholder="e.g. IEC Registration" value={otherService} onChange={e => setOtherService(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOtherService(); } }} className="h-10 rounded-xl text-sm border-slate-200" /></div><Button type="button" size="sm" onClick={addOtherService} className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>Add</Button></div>}
+                    <div className="flex flex-wrap gap-2">{SERVICES.map(s => { const isSel = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:'))); return <button key={s} type="button" onClick={() => toggleService(s)} className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSel ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`} style={isSel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>{s}</button>; })}</div>
+                    {formData.services.includes('Other') && (
+                      <div className="flex gap-3 items-end max-w-sm mt-4">
+                        <div className="flex-1"><label className={labelCls}>Specify Other Service</label><Input placeholder="e.g. IEC Registration" value={otherService} onChange={e => setOtherService(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOtherService(); } }} className="h-10 rounded-xl text-sm border-slate-200" /></div>
+                        <Button type="button" size="sm" onClick={addOtherService} className="h-10 px-5 rounded-xl text-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>Add</Button>
+                      </div>
+                    )}
                   </div>
                   {/* Notes */}
-                  <div><label className={labelCls}>Internal Notes</label><Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`} placeholder="Internal remarks…" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} /></div>
+                  <div><label className={labelCls}>Internal Notes</label><Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Internal remarks…" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} /></div>
                   {/* Staff Assignments */}
                   {canAssignClients && (
-                    <div className={`border rounded-2xl p-6 ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50/60 border-slate-100"}`}>
+                    <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                       <div className="flex items-center justify-between mb-5">
                         <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" isDark={isDark} />
                         <Button type="button" size="sm" onClick={addAssignment} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add Staff</Button>
                       </div>
-                      <div className="space-y-4">
-                        {(formData.assignments || []).map((assignment, idx) => (
-                          <div key={idx} className={`border rounded-xl p-5 ${isDark ? "bg-slate-700 border-slate-600" : "bg-white border-slate-200"}`}>
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                                <span className="text-sm font-semibold text-slate-700">Assignment</span>
-                              </div>
-                              {(formData.assignments || []).length > 1 && (
-                                <button type="button" onClick={() => removeAssignment(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>
-                              )}
-                            </div>
-                            <div className="mb-4">
-                              <label className={labelCls}>Staff Member</label>
-                              <Select value={assignment.user_id || 'unassigned'} onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
-                                <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}><SelectValue placeholder="Select team member" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="unassigned">— Unassigned —</SelectItem>
-                                  {users.filter(u => {
-                                    const otherAssignedIds = (formData.assignments || []).filter((_, i) => i !== idx).map(a => a.user_id).filter(Boolean);
-                                    if (otherAssignedIds.includes(u.id)) return false;
-                                    const SERVICE_TO_DEPT = { GST: 'GST', 'Income Tax': 'IT', Accounting: 'ACC', TDS: 'TDS', ROC: 'ROC', Trademark: 'TM', Audit: 'ACC', Compliance: 'ROC', 'Company Registration': 'ROC', 'Tax Planning': 'IT', Payroll: 'ACC' };
-                                    const clientDepts = [...new Set((formData.services || []).map(s => SERVICE_TO_DEPT[s]).filter(Boolean))];
-                                    if (clientDepts.length === 0) return true;
-                                    return (u.departments || []).some(d => clientDepts.includes(d));
-                                  }).map(u => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.name || u.email}
-                                      {u.departments?.length > 0 && <span className="text-xs text-slate-400 ml-1">· {u.departments.join(', ')}</span>}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
-                              <div className="flex flex-wrap gap-2 mt-1">
-                                {formData.services.filter(s => !s.startsWith('Other:') || s).map(svc => {
-                                  const displaySvc = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc;
-                                  const isSelected = assignment.services.includes(svc);
-                                  return (
-                                    <button key={svc} type="button" onClick={() => toggleAssignmentService(idx, svc)}
-                                      className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
-                                      style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
-                                      {displaySvc}
-                                    </button>
-                                  );
-                                })}
-                                {formData.services.length === 0 && <p className="text-xs text-slate-400 italic">Select services above first to assign specific ones here</p>}
-                              </div>
+                      <div className="space-y-4">{(formData.assignments || []).map((assignment, idx) => (
+                        <div key={idx} className={`border rounded-xl p-5 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-sm font-semibold text-slate-700">Assignment</span></div>
+                            {(formData.assignments || []).length > 1 && <button type="button" onClick={() => removeAssignment(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>}
+                          </div>
+                          <div className="mb-4">
+                            <label className={labelCls}>Staff Member</label>
+                            <Select value={assignment.user_id || 'unassigned'} onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}>
+                              <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}><SelectValue placeholder="Select team member" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">— Unassigned —</SelectItem>
+                                {users.filter(u => {
+                                  const otherIds = (formData.assignments || []).filter((_, i) => i !== idx).map(a => a.user_id).filter(Boolean);
+                                  if (otherIds.includes(u.id)) return false;
+                                  const S2D = { GST: 'GST', 'Income Tax': 'IT', Accounting: 'ACC', TDS: 'TDS', ROC: 'ROC', Trademark: 'TM', Audit: 'ACC', Compliance: 'ROC', 'Company Registration': 'ROC', 'Tax Planning': 'IT', Payroll: 'ACC' };
+                                  const depts = [...new Set((formData.services || []).map(s => S2D[s]).filter(Boolean))];
+                                  if (depts.length === 0) return true;
+                                  return (u.departments || []).some(d => depts.includes(d));
+                                }).map(u => (
+                                  <SelectItem key={u.id} value={u.id}>
+                                    {u.full_name || u.name || u.email}
+                                    {u.departments?.length > 0 && <span className="text-xs text-slate-400 ml-1">· {u.departments.join(', ')}</span>}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className={labelCls}>Services for this staff member <span className="text-slate-300 font-normal">(optional — leave blank for all)</span></label>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {formData.services.map(svc => { const d = svc.startsWith('Other:') ? svc.replace('Other: ', '') : svc; const isSel = assignment.services.includes(svc); return <button key={svc} type="button" onClick={() => toggleAssignmentService(idx, svc)} className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSel ? 'text-white border-transparent shadow-sm' : isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`} style={isSel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>{d}</button>; })}
+                              {formData.services.length === 0 && <p className="text-xs text-slate-400 italic">Select services above first</p>}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}</div>
                     </div>
                   )}
-
                   {/* Footer */}
-                  <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+                  <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                     <div className="flex gap-2">
                       <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="h-9 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
                       <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
@@ -1341,16 +1569,38 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* TODAY'S BIRTHDAYS */}
+      {/* DSC EXPIRY ALERT BANNER */}
+      {dscAlerts.length > 0 && (
+        <div className="flex items-start gap-5 border border-orange-200 rounded-2xl p-5 shadow-sm" style={{ background: 'linear-gradient(135deg, #fff7ed, #fffbeb)' }}>
+          <div className="w-11 h-11 rounded-xl shadow-sm text-orange-500 flex items-center justify-center flex-shrink-0 bg-white"><Shield className="h-5 w-5" /></div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-orange-900 mb-1">⚠ DSC Expiring Soon ({dscAlerts.length} certificate{dscAlerts.length !== 1 ? 's' : ''})</p>
+            <div className="flex flex-wrap gap-2">
+              {dscAlerts.slice(0, 8).map((alert, i) => (
+                <span key={i} className="text-xs font-medium px-3 py-1 border border-orange-200 rounded-full shadow-sm bg-white text-orange-700">
+                  {alert.client.company_name} · {alert.dsc.holder_name} · <strong>{alert.days}d</strong>
+                </span>
+              ))}
+              {dscAlerts.length > 8 && <span className="text-xs font-medium px-3 py-1 border border-orange-200 rounded-full bg-white text-orange-500">+{dscAlerts.length - 8} more</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BIRTHDAY REMINDERS */}
       {canViewAllClients && todayReminders.length > 0 && (
         <div className="flex items-center gap-5 border border-pink-200 rounded-2xl p-5 shadow-sm" style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
-          <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0 ${isDark ? "bg-slate-700" : "bg-white"}`}><Cake className="h-5 w-5" /></div>
+          <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-white'}`}><Cake className="h-5 w-5" /></div>
           <div className="flex-1">
-            <p className="text-sm font-semibold text-pink-900 mb-1">🎂 Contact Birthday Reminders Today</p>
+            <p className="text-sm font-semibold text-pink-900 mb-1">🎂 Birthday Reminders Today</p>
             <div className="flex flex-wrap gap-2">
               {todayReminders.map(c => {
-                const birthdayContacts = c.contact_persons?.filter(cp => { if (!cp?.birthday) return false; const bday = new Date(cp.birthday); const today = new Date(); return bday.getMonth() === today.getMonth() && bday.getDate() === today.getDate(); }) || [];
-                return birthdayContacts.map((cp, i) => <span key={`${c.id}-${i}`} className={`text-xs font-medium px-3 py-1 border border-pink-200 rounded-full shadow-sm ${isDark ? "bg-slate-700 text-pink-400" : "bg-white text-pink-700"}`}>{cp.name} <span className="text-pink-400 font-normal">· {c.company_name}</span></span>);
+                const contacts = c.contact_persons?.filter(cp => { if (!cp?.birthday) return false; const b = new Date(cp.birthday); const t = new Date(); return b.getMonth() === t.getMonth() && b.getDate() === t.getDate(); }) || [];
+                return contacts.map((cp, i) => (
+                  <span key={`${c.id}-${i}`} className={`text-xs font-medium px-3 py-1 border border-pink-200 rounded-full shadow-sm ${isDark ? 'bg-slate-700 text-pink-400' : 'bg-white text-pink-700'}`}>
+                    {cp.name} <span className="text-pink-400 font-normal">· {c.company_name}</span>
+                  </span>
+                ));
               })}
             </div>
           </div>
@@ -1361,351 +1611,275 @@ export default function Clients() {
       {canViewAllClients && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Total Clients', value: stats.totalClients, icon: <Users className="h-5 w-5" />, iconBg: 'rgba(13,59,102,0.1)', iconColor: '#0D3B66', bar: '#1F6FB2' },
-            { label: 'Active', value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)', iconColor: '#1FAF5A', bar: '#059669' },
-            { label: 'Archived', value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', bar: '#D97706' },
-            { label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', bar: '#7c3aed', isText: true },
+            { label: 'Total Clients',  value: stats.totalClients,  icon: <Users className="h-5 w-5" />,    iconBg: 'rgba(13,59,102,0.1)',   iconColor: '#0D3B66', bar: '#1F6FB2' },
+            { label: 'Active',         value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)',   iconColor: '#1FAF5A', bar: '#059669' },
+            { label: 'Archived',       value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', bar: '#D97706' },
+            { label: 'Top Service',    value: Object.entries(stats.serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', bar: '#7c3aed', isText: true },
           ].map((s, i) => (
-            <div key={i} className={`rounded-2xl border p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`} style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <div key={i} className={`rounded-2xl border p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
               <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: s.bar }} />
-              <div className="flex items-start justify-between mb-3 pl-2"><div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div></div>
+              <div className="flex items-start justify-between mb-3 pl-2"><div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div></div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 pl-2">{s.label}</p>
-              <p className={`font-bold pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'} ${isDark ? "text-slate-100" : "text-slate-900"}`}>{s.value}</p>
+              <p className={`font-bold pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'} ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{s.value}</p>
             </div>
           ))}
         </div>
       )}
 
       {/* FILTERS + SORT + VIEW TOGGLE */}
-      <div className={`rounded-2xl border shadow-sm ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
-        <div className={`flex items-center gap-3 px-3.5 pt-3.5 pb-2.5 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+      <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+        {/* Row 1: search */}
+        <div className={`flex items-center gap-3 px-3.5 pt-3.5 pb-2.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
             <Input
-              placeholder="Search by company, email or phone…"
-              className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? "bg-slate-700 text-slate-100 placeholder:text-slate-400" : "bg-slate-50"}`}
-              value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              ref={searchRef}
+              placeholder="Search by company, email or phone… (Ctrl+K)"
+              className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? 'bg-slate-700 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50'}`}
+              value={searchInput} onChange={e => setSearchInput(e.target.value)}
             />
+            {searchInput && (
+              <button onClick={() => setSearchInput('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-300 border-slate-600" : "bg-slate-50 text-slate-600 border-slate-200"}`}>
+          <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
             {sortedClients.length} <span className="ml-1 font-normal text-slate-400">{sortedClients.length !== 1 ? 'clients' : 'client'}</span>
           </div>
-          <div className={`flex items-center border rounded-xl p-0.5 gap-0.5 flex-shrink-0 ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-200"}`}>
-            <button onClick={() => setViewMode('board')}
-              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
-              title="Board view"><LayoutGrid className="h-4 w-4" /></button>
-            <button onClick={() => setViewMode('list')}
-              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
-              title="List view"><List className="h-4 w-4" /></button>
+          {/* Export button */}
+          <button onClick={handleExportList} title="Export filtered list to Excel"
+            className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-colors flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <Download className="h-4 w-4" />
+          </button>
+          <div className={`flex items-center border rounded-xl p-0.5 gap-0.5 flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+            <button onClick={() => setViewMode('board')} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="Board view"><LayoutGrid className="h-4 w-4" /></button>
+            <button onClick={() => setViewMode('list')}  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list'  ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="List view"><List className="h-4 w-4" /></button>
           </div>
         </div>
-
+        {/* Row 2: controls */}
         <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none">
-          <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
-            <button onClick={() => openBulkMsg('whatsapp')}
-              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-emerald-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
-              <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" />
-              <span>WhatsApp</span>
-              <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
+          {/* Bulk message */}
+          <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+            <button onClick={() => { setBulkMsgMode('whatsapp'); setBulkMsgOpen(true); }} className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-emerald-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
+              <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" /><span>WhatsApp</span>
+              <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{filteredClients.length}</span>
             </button>
-            <div className={`w-px h-5 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
-            <button onClick={() => openBulkMsg('email')}
-              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-blue-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-blue-50'}`}>
-              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
-              <span>Email</span>
-              <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">{filteredClients.length}</span>
+            <div className={`w-px h-5 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+            <button onClick={() => { setBulkMsgMode('email'); setBulkMsgOpen(true); }} className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-blue-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-blue-50'}`}>
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" /><span>Email</span>
+              <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{filteredClients.length}</span>
             </button>
           </div>
-
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
-
-          <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? "border-slate-600 bg-slate-700" : "border-slate-200 bg-slate-50"}`}>
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+          {/* Sort */}
+          <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
             {SORT_OPTIONS.map((opt, i) => {
               const isActive = sortOrder === opt.value;
               return (
-                <button
-                  key={opt.value}
-                  onClick={() => setSortOrder(opt.value)}
-                  title={opt.label}
+                <button key={opt.value} onClick={() => setSortOrder(opt.value)} title={opt.label}
                   className="h-9 px-2.5 flex items-center gap-1 text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
-                  style={{
-                    background: isActive ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : 'transparent',
-                    color: isActive ? '#ffffff' : isDark ? '#94a3b8' : '#64748b',
-                    borderRight: i < SORT_OPTIONS.length - 1 ? `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` : 'none',
-                  }}
-                >
-                  <span style={{ fontSize: 11, fontWeight: 900, lineHeight: 1 }}>{opt.icon}</span>
+                  style={{ background: isActive ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : 'transparent', color: isActive ? '#ffffff' : isDark ? '#94a3b8' : '#64748b', borderRight: i < SORT_OPTIONS.length - 1 ? `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` : 'none' }}>
+                  <span style={{ fontSize: 11, fontWeight: 900 }}>{opt.icon}</span>
                   <span style={{ fontSize: 10 }}>{opt.hint}</span>
                 </button>
               );
             })}
           </div>
-
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
-
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+          {/* Filters */}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All Status</SelectItem></SelectContent>
           </Select>
           <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
-            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Types" /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Types" /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Types</SelectItem>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Services</SelectItem>{SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
           </Select>
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? "bg-slate-700 text-slate-100" : "bg-slate-50"}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
+              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
               <SelectContent><SelectItem value="all">All Staff</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
             </Select>
           )}
         </div>
+        {/* Row 3: active filter chips */}
+        <ActiveFilterChips
+          statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
+          serviceFilter={serviceFilter} assignedToFilter={assignedToFilter}
+          users={users} onClear={clearFilter} onClearAll={clearAllFilters}
+        />
       </div>
 
-      {/* CLIENT BOARD / LIST + PAGINATION */}
-      {(() => {
-        // ── Board pagination ──
-        const boardTotalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
-        const boardSafePage = Math.min(boardPage, Math.max(1, boardTotalPages));
-        const boardPageStart = (boardSafePage - 1) * BOARD_PAGE_SIZE;
-        const boardPageClients = sortedClients.slice(boardPageStart, boardPageStart + BOARD_PAGE_SIZE);
-
-        // FIX: List pagination — list view also paginates through sortedClients
-        const listTotalPages = Math.ceil(sortedClients.length / LIST_PAGE_SIZE);
-        const listSafePage = Math.min(listPage, Math.max(1, listTotalPages));
-        const listPageStart = (listSafePage - 1) * LIST_PAGE_SIZE;
-        const listPageClients = sortedClients.slice(listPageStart, listPageStart + LIST_PAGE_SIZE);
-
-        const buildPageWindow = (safePg, totalPgs) => {
-          if (totalPgs <= 7) return Array.from({ length: totalPgs }, (_, i) => i + 1);
-          if (safePg <= 4) return [1, 2, 3, 4, 5, '…', totalPgs];
-          if (safePg >= totalPgs - 3) return [1, '…', totalPgs - 4, totalPgs - 3, totalPgs - 2, totalPgs - 1, totalPgs];
-          return [1, '…', safePg - 1, safePg, safePg + 1, '…', totalPgs];
-        };
-
-        const PaginationBar = ({ safePg, totalPgs, pageStartNum, pageSize, totalCount, onPageChange }) => totalPgs <= 1 ? null : (
-          <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, background: isDark ? '#1e293b' : '#F8FAFC' }}>
-            <p style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', margin: 0 }}>
-              <span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{pageStartNum + 1}–{Math.min(pageStartNum + pageSize, totalCount)}</span>{' '}of{' '}<span style={{ fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>{totalCount}</span>{' '}clients
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button onClick={() => onPageChange(p => Math.max(1, p - 1))} disabled={safePg === 1} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === 1 ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === 1 ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === 1 ? 0.4 : 1 }}>‹</button>
-              {buildPageWindow(safePg, totalPgs).map((p, i) => p === '…'
-                ? <span key={`e-${i}`} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: isDark ? '#475569' : '#94a3b8' }}>…</span>
-                : <button key={p} onClick={() => onPageChange(p)} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer', background: p === safePg ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'), color: p === safePg ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'), fontSize: 11, fontWeight: p === safePg ? 700 : 500, boxShadow: p === safePg ? '0 2px 8px rgba(13,59,102,0.35)' : 'none' }}>{p}</button>
-              )}
-              <button onClick={() => onPageChange(p => Math.min(totalPgs, p + 1))} disabled={safePg === totalPgs} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: safePg === totalPgs ? 'not-allowed' : 'pointer', background: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9', color: safePg === totalPgs ? (isDark ? '#334155' : '#cbd5e1') : (isDark ? '#94a3b8' : '#64748b'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, opacity: safePg === totalPgs ? 0.4 : 1 }}>›</button>
+      {/* BOARD / LIST */}
+      {clientsLoading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10 }}>
+          {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} isDark={isDark} />)}
+        </div>
+      ) : sortedClients.length === 0 ? (
+        <div className="rounded-2xl border flex flex-col items-center justify-center shadow-sm" style={{ minHeight: 320, background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+          <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}><Users className="h-7 w-7 opacity-30" /></div>
+          <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
+          <p className="mt-1 text-sm text-slate-400">Try changing your search or filters</p>
+          {(searchInput || statusFilter !== 'all' || clientTypeFilter !== 'all' || serviceFilter !== 'all' || assignedToFilter !== 'all') && (
+            <button onClick={clearAllFilters} className="mt-3 text-sm font-semibold text-blue-600 hover:underline">Clear all filters</button>
+          )}
+        </div>
+      ) : viewMode === 'board' ? (
+        <div className="rounded-2xl border shadow-sm flex flex-col" style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+          <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
+              {boardPageClients.map((client, localIndex) => (
+                <ModernClientCard
+                  key={client.id} client={client} index={boardPageStart + localIndex}
+                  isDark={isDark} users={users} getClientAssignments={getClientAssignments}
+                  openWhatsApp={openWhatsApp} handleEdit={handleEdit}
+                  canDeleteData={canDeleteData} onDelete={handleDelete}
+                  setSelectedClient={setSelectedClient} setDetailDialogOpen={setDetailDialogOpen}
+                  getClientNumber={getClientNumber}
+                />
+              ))}
             </div>
-            <p style={{ fontSize: 11, color: isDark ? '#475569' : '#cbd5e1', margin: 0 }}>Page {safePg} / {totalPgs}</p>
           </div>
-        );
-
-        if (sortedClients.length === 0) return (
-          <div className="rounded-2xl border flex flex-col items-center justify-center shadow-sm" style={{ minHeight: 320, background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
-            <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-100"}`}><Users className="h-7 w-7 opacity-30" /></div>
-            <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
-            <p className="mt-1 text-sm text-slate-400">Try changing your search term or filters</p>
+          <PaginationBar safePg={boardSafePage} totalPgs={boardTotalPages} pageStart={boardPageStart} pageSize={BOARD_PAGE_SIZE} totalCount={sortedClients.length} onPageChange={setBoardPage} isDark={isDark} />
+        </div>
+      ) : (
+        <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+          <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
+            <div className="w-1 flex-shrink-0" /><div className="w-8 flex-shrink-0" />
+            <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
+            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
+            <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
+            <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+            <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
+            <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
+            <div className="w-24 flex-shrink-0" />
           </div>
-        );
-
-        if (viewMode === 'board') return (
-          <div className="rounded-2xl border shadow-sm flex flex-col" style={{ background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10, padding: '10px 10px 4px 10px' }}>
-                {boardPageClients.map((client, localIndex) => {
-                  const globalIndex = boardPageStart + localIndex;
-                  return <ModernClientCard key={client.id} client={client} index={globalIndex} isDark={isDark} users={users} getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp} handleEdit={handleEdit} canDeleteData={canDeleteData} fetchClients={fetchClients} setSelectedClient={setSelectedClient} setDetailDialogOpen={setDetailDialogOpen} getClientNumber={getClientNumber} />;
-                })}
-              </div>
-            </div>
-            <PaginationBar
-              safePg={boardSafePage}
-              totalPgs={boardTotalPages}
-              pageStartNum={boardPageStart}
-              pageSize={BOARD_PAGE_SIZE}
-              totalCount={sortedClients.length}
-              onPageChange={setBoardPage}
-            />
+          <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
+            <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart }}>
+              {ListRow}
+            </FixedSizeList>
           </div>
-        );
+          <PaginationBar safePg={listSafePage} totalPgs={listTotalPages} pageStart={listPageStart} pageSize={LIST_PAGE_SIZE} totalCount={sortedClients.length} onPageChange={setListPage} isDark={isDark} />
+        </div>
+      )}
 
-        // FIX: List view — uses listPageClients (paginated slice) passed as itemData to FixedSizeList
-        // This is the root cause fix: previously ListRow read sortedClients[index] which worked
-        // but the container height was the problem — using a fixed pixel height container
-        // instead of AutoSizer inside a flex child that has no explicit height.
-        // Now we give the list container an explicit calculated height based on visible items.
-        const LIST_ROW_HEIGHT = 56;
-        const MAX_VISIBLE_ROWS = 15;
-        const visibleRows = Math.min(listPageClients.length, MAX_VISIBLE_ROWS);
-        // FIX: explicit height = rows * rowHeight, no AutoSizer needed — avoids the 0-height issue
-        const listHeight = visibleRows * LIST_ROW_HEIGHT;
+      {/* DETAIL POPUP */}
+      <ClientDetailPopup
+        selectedClient={selectedClient} detailDialogOpen={detailDialogOpen}
+        setDetailDialogOpen={setDetailDialogOpen} isDark={isDark} users={users}
+        getClientAssignments={getClientAssignments} openWhatsApp={openWhatsApp} handleEdit={handleEdit}
+      />
 
-        return (
-          <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
-            {/* Header row */}
-            <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? "bg-slate-700/60 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
-              <div className="w-1 flex-shrink-0" /><div className="w-8 flex-shrink-0" />
-              <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
-              <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
-              <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
-              <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
-              <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
-              <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
-              <div className="w-24 flex-shrink-0" />
-            </div>
-            {/* FIX: FixedSizeList with explicit height and itemData prop so ListRow gets paginated data */}
-            <div style={{ height: listHeight, minHeight: LIST_ROW_HEIGHT }}>
-              <FixedSizeList
-                height={listHeight}
-                width="100%"
-                itemCount={listPageClients.length}
-                itemSize={LIST_ROW_HEIGHT}
-                itemData={{ pageClients: listPageClients, pageStart: listPageStart }}
-              >
-                {ListRow}
-              </FixedSizeList>
-            </div>
-            <PaginationBar
-              safePg={listSafePage}
-              totalPgs={listTotalPages}
-              pageStartNum={listPageStart}
-              pageSize={LIST_PAGE_SIZE}
-              totalCount={sortedClients.length}
-              onPageChange={setListPage}
-            />
-          </div>
-        );
-      })()}
-
-      <ClientDetailPopup />
+      {/* BULK MSG */}
       <BulkMessageModal open={bulkMsgOpen} onClose={() => setBulkMsgOpen(false)} mode={bulkMsgMode} filteredClients={sortedClients} isDark={isDark} />
 
-      <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
+      {/* HIDDEN FILE INPUTS */}
+      <input type="file" ref={fileInputRef}  accept=".csv"       onChange={handleImportCSV}   className="hidden" />
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
-      {/* Generic Excel Preview Dialog */}
+      {/* CSV PREVIEW DIALOG */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
-          <DialogHeader className="pb-4 border-b border-slate-100">
-            <DialogTitle className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>Review Excel Import</DialogTitle>
-            <DialogDescription className="text-sm text-slate-400">Preview and confirm data before bulk import</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto mt-4 rounded-xl border border-slate-100">
+          <DialogTitle className={`text-lg font-bold px-6 pt-5 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Review Excel Import</DialogTitle>
+          <DialogDescription className="text-sm text-slate-400 px-6">Preview and confirm data before bulk import</DialogDescription>
+          <div className="flex-1 overflow-auto mx-6 mt-4 rounded-xl border border-slate-100">
             <table className="min-w-full text-xs">
-              <thead className={`sticky top-0 border-b ${isDark ? "bg-slate-700 border-slate-600" : "bg-slate-50 border-slate-100"}`}>
+              <thead className={`sticky top-0 border-b ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
                 <tr>{previewHeaders.map(h => <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">{h}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {previewData.map((row, rowIndex) => (<tr key={rowIndex} className={`transition-colors ${isDark ? "hover:bg-slate-700/30" : "hover:bg-slate-50"}`}>{previewHeaders.map(header => (<td key={header} className="p-2"><Input value={row[header] || ''} onChange={e => { const updated = [...previewData]; updated[rowIndex][header] = e.target.value; setPreviewData(updated); }} className="h-8 text-xs rounded-lg border-slate-200" /></td>))}</tr>))}
+                {previewData.map((row, ri) => (<tr key={ri} className={isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}>{previewHeaders.map(h => (<td key={h} className="p-2"><Input value={row[h] || ''} onChange={e => { const u = [...previewData]; u[ri][h] = e.target.value; setPreviewData(u); }} className="h-8 text-xs rounded-lg border-slate-200" /></td>))}</tr>))}
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-            <span className="text-xs text-slate-400">{previewData.length} rows ready to import</span>
+          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
+            <span className="text-xs text-slate-400">{previewData.length} rows ready</span>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm rounded-xl border-slate-200">Cancel</Button>
               <Button className="h-9 px-5 text-sm rounded-xl text-white font-semibold" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
                 onClick={async () => {
                   setImportLoading(true); let success = 0;
-                  for (let row of previewData) {
-                    const exists = clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim());
-                    if (exists) continue;
-                    try { await api.post('/clients', { company_name: row.company_name?.trim(), client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor', email: row.email?.trim() || null, phone: row.phone?.replace(/\D/g,"") || null, birthday: row.birthday||null, address: row.address?.trim()||null, city: row.city?.trim()||null, state: row.state?.trim()||null, services: row.services?row.services.split(',').map(s=>s.trim()):[], notes: row.notes?.trim()||null, status: row.status||'active', referred_by: row.referred_by?.trim()||null, assigned_to: null, assignments: [], contact_persons: [1,2,3].reduce((acc,n)=>{const name=row[`contact_name_${n}`]?.trim();if(name)acc.push({name,designation:row[`contact_designation_${n}`]?.trim()||null,email:row[`contact_email_${n}`]?.trim()||null,phone:row[`contact_phone_${n}`]?.replace(/\D/g,'')||null,birthday:row[`contact_birthday_${n}`]||null,din:row[`contact_din_${n}`]?.trim()||null});return acc;},[]), dsc_details: [] }); success++; } catch(err){console.error(err);}
+                  for (const row of previewData) {
+                    if (clients.find(c => c.company_name?.toLowerCase().trim() === row.company_name?.toLowerCase().trim())) continue;
+                    try {
+                      await api.post('/clients', { company_name: row.company_name?.trim(), client_type: ['proprietor','pvt_ltd','llp','partnership','huf','trust','other'].includes(row.client_type) ? row.client_type : 'proprietor', email: row.email?.trim() || null, phone: row.phone?.replace(/\D/g, '') || null, birthday: row.birthday || null, address: row.address?.trim() || null, city: row.city?.trim() || null, state: row.state?.trim() || null, services: row.services ? row.services.split(',').map(s => s.trim()) : [], notes: row.notes?.trim() || null, status: row.status || 'active', referred_by: row.referred_by?.trim() || null, assigned_to: null, assignments: [], contact_persons: [1,2,3].reduce((acc,n) => { const name = row[`contact_name_${n}`]?.trim(); if (name) acc.push({ name, designation: row[`contact_designation_${n}`]?.trim() || null, email: row[`contact_email_${n}`]?.trim() || null, phone: row[`contact_phone_${n}`]?.replace(/\D/g,'') || null, birthday: row[`contact_birthday_${n}`] || null, din: row[`contact_din_${n}`]?.trim() || null }); return acc; }, []), dsc_details: [] });
+                      success++;
+                    } catch(err) { console.error(err); }
                   }
-                  toast.success(`${success} clients imported successfully`); fetchClients(); setPreviewOpen(false); setImportLoading(false);
+                  toast.success(`${success} clients imported`); fetchClients(); setPreviewOpen(false); setImportLoading(false);
                 }}>Confirm &amp; Import All</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* MDS Excel Preview Dialog */}
+      {/* MDS PREVIEW DIALOG */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
-          <div className={`sticky top-0 z-10 border-b px-7 py-5 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+          <div className={`sticky top-0 z-10 border-b px-7 py-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Building2 className="h-5 w-5" /></div>
-              <div><DialogTitle className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>MCA / MDS Data Preview</DialogTitle><DialogDescription className="text-xs text-slate-400 mt-0.5">Review and edit the parsed data before saving{mdsData?.sheets_parsed && <span className="ml-2 text-blue-500 font-medium">· {mdsData.sheets_parsed.length} sheet{mdsData.sheets_parsed.length!==1?'s':''} parsed</span>}</DialogDescription></div>
+              <div>
+                <DialogTitle className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>MCA / MDS Data Preview</DialogTitle>
+                <DialogDescription className="text-xs text-slate-400 mt-0.5">Review and edit the parsed data before saving{mdsData?.sheets_parsed && <span className="ml-2 text-blue-500 font-medium">· {mdsData.sheets_parsed.length} sheet{mdsData.sheets_parsed.length !== 1 ? 's' : ''} parsed</span>}</DialogDescription>
+              </div>
             </div>
           </div>
           {mdsPreviewLoading && <div className="flex flex-col items-center justify-center py-20 gap-4"><div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" /><p className="text-sm text-slate-500 font-medium">Parsing Excel sheets…</p></div>}
           {!mdsPreviewLoading && mdsForm && (
             <div className="p-7 space-y-6">
-              <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
-                <div className="flex items-center gap-2 mb-5"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Briefcase className="h-3.5 w-3.5" /></div><h4 className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>Company Details</h4></div>
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
+                <div className="flex items-center gap-2 mb-5"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Briefcase className="h-3.5 w-3.5" /></div><h4 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Company Details</h4></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2"><label className={labelCls}>Company Name</label><input className={mdsFieldCls} value={mdsForm.company_name} onChange={e => setMdsForm(f => ({ ...f, company_name: e.target.value }))} /></div>
                   <div><label className={labelCls}>Client Type</label><select className={`${mdsFieldCls} appearance-none`} value={mdsForm.client_type} onChange={e => setMdsForm(f => ({ ...f, client_type: e.target.value }))}>{CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
                   <div><label className={labelCls}>Date of Incorporation</label><input type="date" className={mdsFieldCls} value={mdsForm.birthday} onChange={e => setMdsForm(f => ({ ...f, birthday: e.target.value }))} /></div>
                   <div><label className={labelCls}>Email</label><input type="email" className={mdsFieldCls} value={mdsForm.email} onChange={e => setMdsForm(f => ({ ...f, email: e.target.value }))} /></div>
                   <div><label className={labelCls}>Phone</label><input className={mdsFieldCls} value={mdsForm.phone} onChange={e => setMdsForm(f => ({ ...f, phone: e.target.value }))} /></div>
-                  <div className="md:col-span-2"><label className={labelCls}>Address</label><input className={mdsFieldCls} value={mdsForm.address||''} onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))} /></div>
-                  <div><label className={labelCls}>City</label><input className={mdsFieldCls} value={mdsForm.city||''} onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))} /></div>
-                  <div><label className={labelCls}>State</label><input className={mdsFieldCls} value={mdsForm.state||''} onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} /></div>
+                  <div className="md:col-span-2"><label className={labelCls}>Address</label><input className={mdsFieldCls} value={mdsForm.address || ''} onChange={e => setMdsForm(f => ({ ...f, address: e.target.value }))} /></div>
+                  <div><label className={labelCls}>City</label><input className={mdsFieldCls} value={mdsForm.city || ''} onChange={e => setMdsForm(f => ({ ...f, city: e.target.value }))} /></div>
+                  <div><label className={labelCls}>State</label><input className={mdsFieldCls} value={mdsForm.state || ''} onChange={e => setMdsForm(f => ({ ...f, state: e.target.value }))} /></div>
                 </div>
-                <div className="mt-4"><label className={labelCls}>Services</label><div className="flex flex-wrap gap-2 mt-1">{SERVICES.map(s => { const sel = mdsForm.services?.includes(s); return <button key={s} type="button" onClick={() => setMdsForm(f => ({ ...f, services: sel ? f.services.filter(x=>x!==s) : [...(f.services||[]),s] }))} className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel?'text-white border-transparent':'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`} style={sel?{background:'linear-gradient(135deg, #0D3B66, #1F6FB2)'}:{}}>{s}</button>; })}</div></div>
+                <div className="mt-4"><label className={labelCls}>Services</label><div className="flex flex-wrap gap-2 mt-1">{SERVICES.map(s => { const sel = mdsForm.services?.includes(s); return <button key={s} type="button" onClick={() => setMdsForm(f => ({ ...f, services: sel ? f.services.filter(x => x !== s) : [...(f.services || []), s] }))} className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${sel ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`} style={sel ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>{s}</button>; })}</div></div>
               </div>
-
-              <div className={`border rounded-2xl p-5 ${isDark ? "bg-slate-700/40 border-slate-600" : "bg-slate-50/60 border-slate-100"}`}>
+              <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
                 <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Users className="h-3.5 w-3.5" /></div>
-                    <h4 className="text-sm font-semibold text-slate-800">
-                      Directors / Contact Persons
-                      <span className="ml-2 text-[10px] font-normal text-slate-400">({mdsForm.contact_persons.filter(c => c.name?.trim()).length} parsed)</span>
-                    </h4>
-                  </div>
-                  <button type="button"
-                    onClick={() => setMdsForm(f => ({ ...f, contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }] }))}
-                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors">
-                    <Plus className="h-3 w-3" /> Add
-                  </button>
+                  <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><Users className="h-3.5 w-3.5" /></div><h4 className="text-sm font-semibold text-slate-800">Directors / Contact Persons <span className="text-[10px] font-normal text-slate-400">({mdsForm.contact_persons.filter(c => c.name?.trim()).length} parsed)</span></h4></div>
+                  <button type="button" onClick={() => setMdsForm(f => ({ ...f, contact_persons: [...f.contact_persons, { name: '', designation: '', email: '', phone: '', birthday: '', din: '' }] }))} className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"><Plus className="h-3 w-3" /> Add</button>
                 </div>
-                <div className="space-y-3">
-                  {mdsForm.contact_persons.map((cp, idx) => (
-                    <div key={idx} className={`border rounded-xl p-4 ${isDark ? "bg-slate-700 border-slate-600" : "bg-white border-slate-200"}`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
-                          <span className="text-xs font-semibold text-slate-600">{cp.name || `Contact ${idx + 1}`}</span>
-                        </div>
-                        <button type="button"
-                          onClick={() => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.filter((_, i) => i !== idx) }))}
-                          className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                          <Trash className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        <div><label className={labelCls}>Name</label><input className={mdsFieldCls} value={cp.name} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, name: e.target.value } : c) }))} /></div>
-                        <div><label className={labelCls}>Designation</label><input className={mdsFieldCls} value={cp.designation} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, designation: e.target.value } : c) }))} /></div>
-                        <div><label className={labelCls}>DIN / PAN</label><input className={mdsFieldCls} value={cp.din || ''} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, din: e.target.value } : c) }))} /></div>
-                        <div><label className={labelCls}>Email</label><input type="email" className={mdsFieldCls} value={cp.email || ''} placeholder="Optional" onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, email: e.target.value } : c) }))} /></div>
-                        <div><label className={labelCls}>Phone</label><input className={mdsFieldCls} value={cp.phone || ''} placeholder="Optional" onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, phone: e.target.value } : c) }))} /></div>
-                        <div><label className={labelCls}>Birthday</label><input type="date" className={mdsFieldCls} value={cp.birthday || ''} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, birthday: e.target.value } : c) }))} /></div>
-                      </div>
+                <div className="space-y-3">{mdsForm.contact_persons.map((cp, idx) => (
+                  <div key={idx} className={`border rounded-xl p-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2"><div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-xs font-semibold text-slate-600">{cp.name || `Contact ${idx + 1}`}</span></div>
+                      <button type="button" onClick={() => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.filter((_, i) => i !== idx) }))} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3 w-3" /></button>
                     </div>
-                  ))}
-                </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div><label className={labelCls}>Name</label><input className={mdsFieldCls} value={cp.name} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, name: e.target.value } : c) }))} /></div>
+                      <div><label className={labelCls}>Designation</label><input className={mdsFieldCls} value={cp.designation} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, designation: e.target.value } : c) }))} /></div>
+                      <div><label className={labelCls}>DIN / PAN</label><input className={mdsFieldCls} value={cp.din || ''} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, din: e.target.value } : c) }))} /></div>
+                      <div><label className={labelCls}>Email</label><input type="email" className={mdsFieldCls} value={cp.email || ''} placeholder="Optional" onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, email: e.target.value } : c) }))} /></div>
+                      <div><label className={labelCls}>Phone</label><input className={mdsFieldCls} value={cp.phone || ''} placeholder="Optional" onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, phone: e.target.value } : c) }))} /></div>
+                      <div><label className={labelCls}>Birthday</label><input type="date" className={mdsFieldCls} value={cp.birthday || ''} onChange={e => setMdsForm(f => ({ ...f, contact_persons: f.contact_persons.map((c, i) => i === idx ? { ...c, birthday: e.target.value } : c) }))} /></div>
+                    </div>
+                  </div>
+                ))}</div>
               </div>
-
-              <div><label className={labelCls}>Notes</label><textarea className={`w-full min-h-[90px] border focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} value={mdsForm.notes} onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))} /></div>
+              <div><label className={labelCls}>Notes</label><textarea className={`w-full min-h-[90px] border focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={mdsForm.notes} onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))} /></div>
               {mdsData?.raw_company_info && Object.keys(mdsData.raw_company_info).length > 0 && (
                 <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                  <button type="button" onClick={() => setMdsRawInfoOpen(o => !o)}
-                    className={`w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left ${isDark ? "bg-slate-700 hover:bg-slate-600" : "bg-slate-50 hover:bg-slate-100"}`}>
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-slate-400" />
-                      <span className="text-xs font-semibold text-slate-600">Raw Excel Data</span>
-                      <span className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>({Object.keys(mdsData.raw_company_info).length} fields extracted)</span>
-                    </div>
+                  <button type="button" onClick={() => setMdsRawInfoOpen(o => !o)} className={`w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                    <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-slate-400" /><span className="text-xs font-semibold text-slate-600">Raw Excel Data</span><span className="text-[10px] text-slate-400">({Object.keys(mdsData.raw_company_info).length} fields)</span></div>
                     {mdsRawInfoOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
                   </button>
                   {mdsRawInfoOpen && (
-                    <div className={`p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto ${isDark ? "bg-slate-800" : "bg-white"}`}>
+                    <div className={`p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
                       {Object.entries(mdsData.raw_company_info).map(([key, val]) => (
-                        <div key={key} className={`flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg ${isDark ? "hover:bg-slate-700" : "hover:bg-slate-50"}`}>
+                        <div key={key} className={`flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}`}>
                           <span className="text-slate-400 font-medium min-w-[120px] flex-shrink-0">{key}</span>
                           <span className="text-slate-700 font-medium break-all">{String(val)}</span>
                         </div>
@@ -1714,12 +1888,11 @@ export default function Clients() {
                   )}
                 </div>
               )}
-
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
                 <Button type="button" variant="ghost" onClick={() => { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); }} className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" onClick={() => handleMdsConfirm(false)} className="h-10 px-5 text-sm rounded-xl border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 gap-2"><Edit className="h-4 w-4" /> Open in Full Form</Button>
-                  <Button type="button" disabled={importLoading} onClick={() => handleMdsConfirm(true)} className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: importLoading?'#94a3b8':'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><CheckCircle2 className="h-4 w-4" />{importLoading?'Saving…':'Save Client'}</Button>
+                  <Button type="button" disabled={importLoading} onClick={() => handleMdsConfirm(true)} className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2" style={{ background: importLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}><CheckCircle2 className="h-4 w-4" />{importLoading ? 'Saving…' : 'Save Client'}</Button>
                 </div>
               </div>
             </div>
