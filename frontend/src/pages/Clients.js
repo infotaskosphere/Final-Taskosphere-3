@@ -1,4 +1,5 @@
 import Papa from 'papaparse/papaparse.js';
+import { useDark } from '@/hooks/useDark';
 import { Loader2 } from 'lucide-react';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -92,7 +93,7 @@ const SectionHeading = ({ icon, title, subtitle }) => (
       {icon}
     </div>
     <div>
-      <h3 className="text-base font-semibold text-slate-800 leading-tight">{title}</h3>
+      <h3 className={`text-base font-semibold leading-tight ${isDark?"text-slate-100":"text-slate-800"}`}>{title}</h3>
       {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
     </div>
   </div>
@@ -260,7 +261,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               {isWhatsApp ? <MessageCircle className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">
+              <h2 className={`text-lg font-bold ${isDark?"text-slate-100":"text-slate-900"}`}>
                 {isWhatsApp ? 'Bulk WhatsApp Message' : 'Bulk Email'}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -281,8 +282,8 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="w-72 flex-shrink-0 border-r border-slate-100 flex flex-col bg-slate-50/40">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-white flex-shrink-0">
+          <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark?"border-slate-700 bg-slate-800/60":"border-slate-100 bg-slate-50/40"}`}>
+            <div className={`flex items-center gap-2 px-4 py-3 border-b flex-shrink-0 ${isDark?"border-slate-700 bg-slate-800":"border-slate-100 bg-white"}`}>
               <button onClick={toggleAll} className="flex items-center gap-2 flex-1 text-left">
                 <span className="flex-shrink-0" style={{ color: accentColor }}>
                   {allSelected
@@ -304,7 +305,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <input
-                  className="w-full pl-8 pr-3 h-8 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-300 transition-colors"
+                  className={`w-full pl-8 pr-3 h-8 text-xs rounded-lg focus:outline-none focus:border-blue-300 transition-colors ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
                   placeholder="Filter clients…"
                   value={clientSearch}
                   onChange={e => setClientSearch(e.target.value)}
@@ -320,7 +321,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                   <div
                     key={client.id}
                     onClick={() => toggleClient(client.id)}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-slate-50 transition-all ${isSelected ? 'bg-white' : 'hover:bg-white/60'} ${!hasContact ? 'opacity-40' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b transition-all ${isDark?'border-slate-700':' border-slate-50'} ${isSelected ? (isDark?'bg-slate-700':'bg-white') : (isDark?'hover:bg-slate-700/60':'hover:bg-white/60')} ${!hasContact ? 'opacity-40' : ''}`}
                   >
                     <span className="flex-shrink-0" style={{ color: isSelected ? accentColor : '#cbd5e1' }}>
                       {isSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
@@ -330,7 +331,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                       {client.company_name?.charAt(0).toUpperCase() || '?'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-slate-800 truncate">{client.company_name}</p>
+                      <p className={`text-xs font-semibold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{client.company_name}</p>
                       <p className="text-[10px] text-slate-400 truncate">
                         {isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}
                       </p>
@@ -359,7 +360,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                   {isWhatsApp ? 'WhatsApp Message' : 'Email Message'}
                 </label>
                 <textarea
-                  className="w-full min-h-[180px] bg-slate-50 border border-slate-200 focus:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-4 resize-none outline-none transition-all leading-relaxed"
+                  className={`w-full min-h-[180px] border rounded-xl text-sm p-4 resize-none outline-none transition-all leading-relaxed ${isDark?"bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-400 focus:bg-slate-700":"bg-slate-50 border-slate-200 focus:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-100"}`}
                   placeholder={isWhatsApp
                     ? "Dear {name},\n\nThis is a reminder about your upcoming GST filing due date…\n\nRegards,\nManthan Desai & Associates"
                     : "Subject: Important Update\n\nDear Client,\n\nWe wanted to update you regarding…\n\nRegards,\nManthan Desai & Associates"}
@@ -370,7 +371,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                   <p className="text-[10px] text-slate-400">
                     {isWhatsApp ? 'Use {name} → auto-replaced with company name in the export' : 'First line becomes the email subject'}
                   </p>
-                  <span className="text-[10px] text-slate-400">{message.length} chars</span>
+                  <span className={`text-[10px] ${isDark?"text-slate-500":"text-slate-400"}`}>{message.length} chars</span>
                 </div>
               </div>
 
@@ -450,13 +451,13 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {selectedClients.slice(0, 8).map(c => (
-                      <span key={c.id} className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white"
+                      <span key={c.id} className={`text-[10px] font-semibold px-2 py-1 rounded-lg border ${isDark?"bg-slate-700":"bg-white"}`}
                         style={isWhatsApp ? { borderColor: '#86efac', color: '#166534' } : { borderColor: '#93c5fd', color: '#1e40af' }}>
                         {c.company_name}
                       </span>
                     ))}
                     {selectedClients.length > 8 && (
-                      <span className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white border-slate-200 text-slate-500">
+                      <span className={`text-[10px] font-semibold px-2 py-1 rounded-lg border ${isDark?"bg-slate-700 border-slate-600 text-slate-400":"bg-white border-slate-200 text-slate-500"}`}>
                         +{selectedClients.length - 8} more
                       </span>
                     )}
@@ -475,7 +476,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               )}
 
               {!isWhatsApp && (
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+                <div className={`border rounded-xl p-4 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50 border-slate-100"}`}>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">How it works</p>
                   <ol className="text-xs text-slate-500 space-y-1 list-decimal list-inside">
                     <li>Write your message above (first line = subject)</li>
@@ -487,7 +488,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
               )}
             </div>
 
-            <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-white">
+            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark?"border-slate-700 bg-slate-800":"border-slate-100 bg-white"}`}>
               <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500">
                 Cancel
               </Button>
@@ -527,6 +528,7 @@ const BulkMessageModal = ({ open, onClose, mode, filteredClients }) => {
 
 export default function Clients() {
   const { user, hasPermission } = useAuth();
+  const isDark = useDark();
   const canViewAllClients = hasPermission("can_view_all_clients");
   const canDeleteData = hasPermission("can_delete_data");
   const canAssignClients = hasPermission("can_assign_clients");
@@ -1231,7 +1233,7 @@ export default function Clients() {
     return (
       <div style={style} className="p-2 box-border">
         <div
-          className={`h-full w-full bg-white rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:shadow-lg ${isArchived ? 'opacity-60' : ''}`}
+          className={`h-full w-full rounded-2xl overflow-hidden flex flex-col group cursor-pointer transition-all duration-200 hover:shadow-lg ${isArchived ? 'opacity-60' : ''} ${isDark?"bg-slate-800":"bg-white"}`}
           style={{
             border: `1.5px solid ${cfg.border}`,
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
@@ -1251,11 +1253,11 @@ export default function Clients() {
                 {client.company_name?.charAt(0).toUpperCase() || '?'}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-xs leading-tight text-slate-900 break-words">
+                <h3 className={`font-bold text-xs leading-tight break-words ${isDark?"text-slate-100":"text-slate-900"}`}>
                   {client.company_name}
                 </h3>
                 <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                  <span className="text-[8px] font-mono text-slate-300">#{getClientNumber(index)}</span>
+                  <span className={`text-[8px] font-mono ${isDark?"text-slate-500":"text-slate-300"}`}>#{getClientNumber(index)}</span>
                   <TypePill type={client.client_type} customLabel={client.client_type_label} />
                   {isArchived && (
                     <Badge variant="outline" className="text-[7px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0">
@@ -1282,16 +1284,16 @@ export default function Clients() {
             <div className="flex items-start gap-1.5">
               <User className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Director</p>
+                <p className={`text-[8px] uppercase tracking-wide font-semibold leading-tight ${isDark?"text-slate-500":"text-slate-400"}`}>Director</p>
                 {primaryContact?.name ? (
-                  <p className="text-[10px] text-slate-700 font-semibold break-words leading-tight">
+                  <p className={`text-[10px] font-semibold break-words leading-tight ${isDark?"text-slate-200":"text-slate-700"}`}>
                     {primaryContact.name}
                     {primaryContact.designation && (
                       <span className="text-slate-500 font-normal block text-[8px]">{primaryContact.designation}</span>
                     )}
                   </p>
                 ) : (
-                  <p className="text-[10px] text-slate-400 italic">Not specified</p>
+                  <p className={`text-[10px] italic ${isDark?"text-slate-600":"text-slate-400"}`}>Not specified</p>
                 )}
               </div>
             </div>
@@ -1300,11 +1302,11 @@ export default function Clients() {
             <div className="flex items-start gap-1.5">
               <Phone className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Mobile</p>
+                <p className={`text-[8px] uppercase tracking-wide font-semibold leading-tight ${isDark?"text-slate-500":"text-slate-400"}`}>Mobile</p>
                 {client.phone ? (
-                  <p className="text-[10px] text-slate-700 font-medium break-words leading-tight">{client.phone}</p>
+                  <p className={`text-[10px] font-medium break-words leading-tight ${isDark?"text-slate-200":"text-slate-700"}`}>{client.phone}</p>
                 ) : (
-                  <p className="text-[10px] text-slate-400 italic">Not provided</p>
+                  <p className={`text-[10px] italic ${isDark?"text-slate-600":"text-slate-400"}`}>Not provided</p>
                 )}
               </div>
             </div>
@@ -1317,7 +1319,7 @@ export default function Clients() {
                 {client.email ? (
                   <p className="text-[10px] text-slate-700 break-words leading-tight">{client.email}</p>
                 ) : (
-                  <p className="text-[10px] text-slate-400 italic">Not provided</p>
+                  <p className={`text-[10px] italic ${isDark?"text-slate-600":"text-slate-400"}`}>Not provided</p>
                 )}
               </div>
             </div>
@@ -1374,7 +1376,7 @@ export default function Clients() {
                 <Share2 className="h-3 w-3 text-slate-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[8px] text-slate-400 uppercase tracking-wide font-semibold leading-tight">Referred By</p>
-                  <p className="text-[10px] text-slate-700 font-medium break-words leading-tight">{client.referred_by}</p>
+                  <p className={`text-[10px] font-medium break-words leading-tight ${isDark?"text-slate-200":"text-slate-700"}`}>{client.referred_by}</p>
                 </div>
               </div>
             )}
@@ -1440,7 +1442,7 @@ export default function Clients() {
     return (
       <div style={style} className="px-1">
         <div
-          className={`flex items-center gap-4 px-5 py-3.5 bg-white border-b transition-colors hover:bg-slate-50/60 group cursor-pointer ${isArchived ? 'opacity-60' : ''}`}
+          className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors group cursor-pointer ${isArchived ? 'opacity-60' : ''} ${isDark?"bg-slate-800 hover:bg-slate-700/60 border-slate-700":"bg-white hover:bg-slate-50/60"}`}
           style={{ borderColor: '#F1F5F9' }}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
         >
@@ -1454,11 +1456,11 @@ export default function Clients() {
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(index)}</span>
               {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
             </div>
-            <p className="text-sm font-semibold text-slate-900 truncate">{client.company_name}</p>
+            <p className={`text-sm font-semibold truncate ${isDark?"text-slate-100":"text-slate-900"}`}>{client.company_name}</p>
           </div>
           <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
-          <div className="w-36 flex-shrink-0"><p className="text-xs text-slate-600 font-medium">{client.phone || '—'}</p></div>
-          <div className="flex-1 min-w-0"><p className="text-xs text-slate-500 truncate">{client.email || '—'}</p></div>
+          <div className="w-36 flex-shrink-0"><p className={`text-xs font-medium ${isDark?"text-slate-300":"text-slate-600"}`}>{client.phone || '—'}</p></div>
+          <div className="flex-1 min-w-0"><p className={`text-xs truncate ${isDark?"text-slate-400":"text-slate-500"}`}>{client.email || '—'}</p></div>
           <div className="flex items-center gap-1 w-44 flex-shrink-0">
             {client.services?.slice(0, 2).map((svc, i) => (
               <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-md border"
@@ -1480,7 +1482,7 @@ export default function Clients() {
                 </span>
               ) : null;
             })}
-            {clientAssignments.length > 2 && <span className="text-[10px] text-slate-400">+{clientAssignments.length - 2} more</span>}
+            {clientAssignments.length > 2 && <span className={`text-[10px] ${isDark?"text-slate-500":"text-slate-400"}`}>+{clientAssignments.length - 2} more</span>}
           </div>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <button onClick={(e) => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
@@ -1515,7 +1517,7 @@ export default function Clients() {
 
     return (
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+        <DialogContent className={`max-w-2xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`}>
           <DialogTitle className="sr-only">Client Details</DialogTitle>
           <DialogDescription className="sr-only">View complete client information</DialogDescription>
           <div className="sticky top-0 z-10 bg-gradient-to-r pt-6 px-8 pb-6 border-b border-slate-100" style={{ background: `linear-gradient(135deg, ${cfg.bg}, white)` }}>
@@ -1525,7 +1527,7 @@ export default function Clients() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <h2 className="text-2xl font-bold text-slate-900">{selectedClient.company_name}</h2>
+                  <h2 className={`text-2xl font-bold ${isDark?"text-slate-100":"text-slate-900"}`}>{selectedClient.company_name}</h2>
                   <TypePill type={selectedClient.client_type} customLabel={selectedClient.client_type_label} />
                   {selectedClient.status === 'inactive' && (
                     <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>
@@ -1548,8 +1550,8 @@ export default function Clients() {
           </div>
           <div className="flex-1 overflow-y-auto">
             <div className="p-8 space-y-6">
-              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
+              <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark?"text-slate-400":"text-slate-600"} mb-4 flex items-center gap-2`}>
                   <Mail className="h-4 w-4" /> Contact Information
                 </h3>
                 <div className="space-y-3">
@@ -1579,8 +1581,8 @@ export default function Clients() {
                 </div>
               </div>
               {selectedClient.services && selectedClient.services.length > 0 && (
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
+                <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark?"text-slate-400":"text-slate-600"} mb-4 flex items-center gap-2`}>
                     <BarChart3 className="h-4 w-4" /> Services
                   </h3>
                   <div className="flex flex-wrap gap-2">
@@ -1594,15 +1596,15 @@ export default function Clients() {
                 </div>
               )}
               {selectedClient.contact_persons && selectedClient.contact_persons.length > 0 && (
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
+                <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark?"text-slate-400":"text-slate-600"} mb-4 flex items-center gap-2`}>
                     <Users className="h-4 w-4" /> Contact Persons ({selectedClient.contact_persons.length})
                   </h3>
                   <div className="space-y-3">
                     {selectedClient.contact_persons.map((cp, i) => (
                       cp.name && (
-                        <div key={i} className="bg-white border border-slate-200 rounded-xl p-4">
-                          <p className="font-semibold text-slate-900 text-sm">{cp.name}</p>
+                        <div key={i} className={`border rounded-xl p-4 ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-200"}`}>
+                          <p className={`font-semibold text-sm ${isDark?"text-slate-100":"text-slate-900"}`}>{cp.name}</p>
                           {cp.designation && <p className="text-xs text-slate-500 mt-1">{cp.designation}</p>}
                           <div className="flex flex-col gap-1.5 mt-2 text-xs">
                             {cp.email && <a href={`mailto:${cp.email}`} className="text-blue-600 hover:underline">{cp.email}</a>}
@@ -1617,15 +1619,15 @@ export default function Clients() {
                 </div>
               )}
               {selectedClient.dsc_details && selectedClient.dsc_details.length > 0 && (
-                <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-slate-600 mb-4 flex items-center gap-2">
+                <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
+                  <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark?"text-slate-400":"text-slate-600"} mb-4 flex items-center gap-2`}>
                     <FileCheck className="h-4 w-4" /> DSC Details ({selectedClient.dsc_details.length})
                   </h3>
                   <div className="space-y-3">
                     {selectedClient.dsc_details.map((dsc, i) => (
                       dsc.certificate_number && (
-                        <div key={i} className="bg-white border border-slate-200 rounded-xl p-4">
-                          <p className="font-semibold text-slate-900 text-sm">{dsc.certificate_number}</p>
+                        <div key={i} className={`border rounded-xl p-4 ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-200"}`}>
+                          <p className={`font-semibold text-sm ${isDark?"text-slate-100":"text-slate-900"}`}>{dsc.certificate_number}</p>
                           <p className="text-xs text-slate-500 mt-1">Holder: {dsc.holder_name}</p>
                           <div className="flex gap-4 mt-2 text-xs text-slate-600">
                             {dsc.issue_date && <p>Issued: {format(new Date(dsc.issue_date), 'MMM d, yyyy')}</p>}
@@ -1650,13 +1652,13 @@ export default function Clients() {
                           const u = users.find(x => x.id === a.user_id);
                           if (!u) return null;
                           return (
-                            <div key={i} className="flex items-start gap-3 bg-white border border-slate-100 rounded-xl px-4 py-2.5">
+                            <div key={i} className={`flex items-start gap-3 border rounded-xl px-4 py-2.5 ${isDark?"bg-slate-700/60 border-slate-600":"bg-white border-slate-100"}`}>
                               <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                                 style={{ background: getAvatarGradient(u.full_name || u.name || '') }}>
                                 {(u.full_name || u.name || '?').charAt(0).toUpperCase()}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-slate-900">{u.full_name || u.name}</p>
+                                <p className={`text-sm font-semibold ${isDark?"text-slate-100":"text-slate-900"}`}>{u.full_name || u.name}</p>
                                 {a.services && a.services.length > 0 ? (
                                   <div className="flex flex-wrap gap-1 mt-1">
                                     {a.services.map((svc, si) => (
@@ -1686,7 +1688,7 @@ export default function Clients() {
               )}
             </div>
           </div>
-          <div className="sticky bottom-0 flex items-center justify-between gap-2 p-6 bg-white border-t border-slate-100">
+          <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
             <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
             <div className="flex gap-2">
               <Button onClick={() => { setDetailDialogOpen(false); openWhatsApp(selectedClient.phone, selectedClient.company_name); }}
@@ -1706,12 +1708,12 @@ export default function Clients() {
   };
 
   const fieldCls = (hasError) =>
-    `h-11 bg-white rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
+    `h-11 rounded-xl text-sm transition-colors ${hasError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-50'}`;
   const labelCls = "text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block";
-  const mdsFieldCls = "h-10 bg-white rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3";
+  const mdsFieldCls = "h-10 rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-colors w-full px-3";
 
   return (
-    <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: '#F4F6FA' }}>
+    <div className={`min-h-screen p-5 md:p-7 space-y-5`} style={{ background: isDark ? '#0f172a' : '#F4F6FA' }}>
 
       {/* ── PAGE HEADER ── */}
       <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm"
@@ -1749,9 +1751,9 @@ export default function Clients() {
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-0">
-                <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between">
+                <div className={`sticky top-0 z-10 border-b px-8 py-5 flex items-center justify-between ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
                   <div>
-                    <DialogTitle className="text-xl font-bold text-slate-900 tracking-tight">
+                    <DialogTitle className={`text-xl font-bold tracking-tight ${isDark?"text-slate-100":"text-slate-900"}`}>
                       {editingClient ? 'Edit Client Profile' : 'New Client Profile'}
                     </DialogTitle>
                     <DialogDescription className="text-sm text-slate-400 mt-0.5">
@@ -1771,7 +1773,7 @@ export default function Clients() {
                 </div>
                 <form onSubmit={handleSubmit} className="p-8 space-y-7">
                   {/* Basic Details */}
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className={`border rounded-2xl p-6 ${isDark?"bg-slate-800/60 border-slate-700":"bg-slate-50/60 border-slate-100"}`}>
                     <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Basic Details" subtitle="Company identity and primary contact" />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -1783,12 +1785,12 @@ export default function Clients() {
                       <div>
                         <label className={labelCls}>Client Type <span className="text-red-400">*</span></label>
                         <Select value={formData.client_type} onValueChange={v => setFormData({...formData, client_type: v, client_type_other: ''})}>
-                          <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}><SelectValue /></SelectTrigger>
                           <SelectContent>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                         </Select>
                         {formData.client_type === 'other' && (
                           <div className="mt-2">
-                            <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                            <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
                               placeholder="Specify client type (e.g. Section 8 Company, AOP…)"
                               value={formData.client_type_other}
                               onChange={e => setFormData({...formData, client_type_other: e.target.value})} autoFocus />
@@ -1810,7 +1812,7 @@ export default function Clients() {
                       </div>
                       <div>
                         <label className={labelCls}>Incorporation / Birthday</label>
-                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" type="date"
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} type="date"
                           value={formData.birthday} onChange={e => setFormData({...formData, birthday: e.target.value})} />
                       </div>
 
@@ -1842,7 +1844,7 @@ export default function Clients() {
                         {referrerSelectValue === '__other__' && (
                           <div className="flex gap-2 mt-2">
                             <Input
-                              className="flex-1 h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm"
+                              className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
                               placeholder="Type referrer's name…"
                               value={referrerInput}
                               onChange={e => handleReferrerInputChange(e.target.value)}
@@ -1878,24 +1880,24 @@ export default function Clients() {
 
                       <div className="md:col-span-2">
                         <label className={labelCls}>Address</label>
-                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" placeholder="Street address (optional)"
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} placeholder="Street address (optional)"
                           value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
                       </div>
                       <div>
                         <label className={labelCls}>City</label>
-                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" placeholder="City (optional)"
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} placeholder="City (optional)"
                           value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
                       </div>
                       <div>
                         <label className={labelCls}>State</label>
-                        <Input className="h-11 bg-white border-slate-200 focus:border-blue-400 rounded-xl text-sm" placeholder="State (optional)"
+                        <Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} placeholder="State (optional)"
                           value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
                       </div>
                     </div>
                   </div>
 
                   {/* Contact Persons */}
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className={`border rounded-2xl p-6 ${isDark?"bg-slate-800/60 border-slate-700":"bg-slate-50/60 border-slate-100"}`}>
                     <div className="flex items-center justify-between mb-5">
                       <SectionHeading icon={<Users className="h-4 w-4" />} title="Contact Persons" subtitle="Key people you work with" />
                       <Button type="button" size="sm" onClick={addContact} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
@@ -1909,7 +1911,7 @@ export default function Clients() {
                     )}
                     <div className="space-y-4">
                       {formData.contact_persons.map((cp, idx) => (
-                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
+                        <div key={idx} className={`border rounded-xl p-5 relative ${isDark?"bg-slate-800 border-slate-600":"bg-white border-slate-200"}`}>
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                               <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
@@ -1957,7 +1959,7 @@ export default function Clients() {
                   </div>
 
                   {/* DSC Details */}
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className={`border rounded-2xl p-6 ${isDark?"bg-slate-800/60 border-slate-700":"bg-slate-50/60 border-slate-100"}`}>
                     <div className="flex items-center justify-between mb-5">
                       <SectionHeading icon={<FileText className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" />
                       <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
@@ -1966,7 +1968,7 @@ export default function Clients() {
                     </div>
                     <div className="space-y-4">
                       {formData.dsc_details.map((dsc, idx) => (
-                        <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 relative">
+                        <div key={idx} className={`border rounded-xl p-5 relative ${isDark?"bg-slate-800 border-slate-600":"bg-white border-slate-200"}`}>
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                               <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
@@ -1999,7 +2001,7 @@ export default function Clients() {
                             <div className="md:col-span-2">
                               <label className={labelCls}>Notes</label>
                               <Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)}
-                                className="min-h-[80px] bg-white border-slate-200 rounded-xl text-sm resize-y" />
+                                className={`min-h-[80px] rounded-xl text-sm resize-y ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`} />
                             </div>
                           </div>
                         </div>
@@ -2008,7 +2010,7 @@ export default function Clients() {
                   </div>
 
                   {/* Services */}
-                  <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                  <div className={`border rounded-2xl p-6 ${isDark?"bg-slate-800/60 border-slate-700":"bg-slate-50/60 border-slate-100"}`}>
                     <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" />
                     {formErrors.services && (
                       <p className="text-red-500 text-xs mb-3 flex items-center gap-1.5">
@@ -2020,7 +2022,7 @@ export default function Clients() {
                         const isSelected = formData.services.includes(s) || (s === 'Other' && formData.services.some(x => x.startsWith('Other:')));
                         return (
                           <button key={s} type="button" onClick={() => toggleService(s)}
-                            className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
+                            className={`px-4 py-1.5 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500':'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
                             style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
                             {s}
                           </button>
@@ -2045,14 +2047,14 @@ export default function Clients() {
                   {/* Notes */}
                   <div>
                     <label className={labelCls}>Internal Notes</label>
-                    <Textarea className="min-h-[110px] bg-white border-slate-200 rounded-xl text-sm resize-y focus:border-blue-400"
+                    <Textarea className={`min-h-[110px] rounded-xl text-sm resize-y focus:border-blue-400 ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
                       placeholder="Internal remarks, preferences, or special instructions…"
                       value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
                   </div>
 
                   {/* Staff Assignments */}
                   {canAssignClients && (
-                    <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-6">
+                    <div className={`border rounded-2xl p-6 ${isDark?"bg-slate-800/60 border-slate-700":"bg-slate-50/60 border-slate-100"}`}>
                       <div className="flex items-center justify-between mb-5">
                         <SectionHeading icon={<Briefcase className="h-4 w-4" />} title="Staff Assignments" subtitle="Assign staff members with specific services" />
                         <Button type="button" size="sm" onClick={addAssignment} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2">
@@ -2061,7 +2063,7 @@ export default function Clients() {
                       </div>
                       <div className="space-y-4">
                         {(formData.assignments || []).map((assignment, idx) => (
-                          <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5">
+                          <div key={idx} className={`border rounded-xl p-5 ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-200"}`}>
                             <div className="flex items-center justify-between mb-4">
                               <div className="flex items-center gap-2">
                                 <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
@@ -2080,7 +2082,7 @@ export default function Clients() {
                                 value={assignment.user_id || 'unassigned'}
                                 onValueChange={v => updateAssignmentUser(idx, v === 'unassigned' ? '' : v)}
                               >
-                                <SelectTrigger className="h-11 bg-white border-slate-200 rounded-xl text-sm">
+                                <SelectTrigger className={`h-11 rounded-xl text-sm ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}>
                                   <SelectValue placeholder="Select team member" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -2142,7 +2144,7 @@ export default function Clients() {
                                   const isSelected = assignment.services.includes(svc);
                                   return (
                                     <button key={svc} type="button" onClick={() => toggleAssignmentService(idx, svc)}
-                                      className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                                      className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSelected ? 'text-white border-transparent shadow-sm' : isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500':'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
                                       style={isSelected ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', borderColor: 'transparent' } : {}}>
                                       {displaySvc}
                                     </button>
@@ -2160,7 +2162,7 @@ export default function Clients() {
                   )}
 
                   {/* Footer */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t border-slate-100">
+                  <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 pt-5 border-t ${isDark?"border-slate-700":"border-slate-100"}`}>
                     <div className="flex gap-2">
                       <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="h-9 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
                       <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
@@ -2186,16 +2188,16 @@ export default function Clients() {
 
       {/* ── Today's Celebrations ── */}
       {canViewAllClients && todayReminders.length > 0 && (
-        <div className="flex items-center gap-5 bg-white border border-pink-100 rounded-2xl p-5 shadow-sm"
+        <div className={`flex items-center gap-5 border border-pink-200 rounded-2xl p-5 shadow-sm ${isDark?"bg-slate-800":"bg-white"}`}
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
-          <div className="w-11 h-11 bg-white rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0">
+          <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-cent ${isDark?"bg-slate-700":"bg-white"}`er flex-shrink-0">
             <Cake className="h-5 w-5" />
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-pink-900 mb-2">🎉 Today's Celebrations</p>
             <div className="flex flex-wrap gap-2">
               {todayReminders.map(c => (
-                <span key={c.id} className="text-xs font-medium px-3 py-1 bg-white text-pink-700 border border-pink-200 rounded-full shadow-sm">
+                <span key={c.id} className={`text-xs font-medium px-3 py-1 border border-pink-200 rounded-full shadow-sm ${isDark?"bg-slate-700 text-pink-400":"bg-white text-pink-700"}`}>
                   {c.company_name}
                 </span>
               ))}
@@ -2213,7 +2215,7 @@ export default function Clients() {
             { label: 'Archived', value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', bar: '#D97706' },
             { label: 'Top Service', value: Object.entries(stats.serviceCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', bar: '#7c3aed', isText: true },
           ].map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden"
+            <div key={i} className={`rounded-2xl border p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}
               style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
               <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: s.bar }} />
               <div className="flex items-start justify-between mb-3 pl-2">
@@ -2221,18 +2223,18 @@ export default function Clients() {
                   style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div>
               </div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 pl-2">{s.label}</p>
-              <p className={`font-bold text-slate-900 pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'}`}>{s.value}</p>
+              <p className={`font-bold pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'} ${isDark?"text-slate-100":"text-slate-900"}`}>{s.value}</p>
             </div>
           ))}
         </div>
       )}
 
       {/* ── Filters + View Toggle ── */}
-      <div className="flex flex-col sm:flex-row gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm">
+      <div className={`flex flex-col sm:flex-row gap-3 p-3.5 rounded-2xl border shadow-sm ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input placeholder="Search by company, email or phone…"
-            className="pl-11 h-10 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm"
+            className={`pl-11 h-10 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark?"bg-slate-700 text-slate-100 placeholder:text-slate-400":"bg-slate-50"}`}
             value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
         <div className="flex gap-2 flex-shrink-0 flex-wrap items-center">
@@ -2265,7 +2267,7 @@ export default function Clients() {
           )}
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-10 w-[120px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-10 w-[120px] border-none rounded-xl text-sm ${isDark?"bg-slate-700 text-slate-100":"bg-slate-50"}`}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Archived</SelectItem>
@@ -2273,14 +2275,14 @@ export default function Clients() {
             </SelectContent>
           </Select>
           <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
-            <SelectTrigger className="h-10 w-[130px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Types" /></SelectTrigger>
+            <SelectTrigger className={`h-10 w-[130px] border-none rounded-xl text-sm ${isDark?"bg-slate-700 text-slate-100":"bg-slate-50"}`}><SelectValue placeholder="All Types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
               {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className="h-10 w-[150px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-10 w-[150px] border-none rounded-xl text-sm ${isDark?"bg-slate-700 text-slate-100":"bg-slate-50"}`}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Services</SelectItem>
               {SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -2288,7 +2290,7 @@ export default function Clients() {
           </Select>
           {canAssignClients && users.length > 0 && (
             <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-              <SelectTrigger className="h-10 w-[160px] bg-slate-50 border-none rounded-xl text-sm"><SelectValue placeholder="All Staff" /></SelectTrigger>
+              <SelectTrigger className={`h-10 w-[160px] border-none rounded-xl text-sm ${isDark?"bg-slate-700 text-slate-100":"bg-slate-50"}`}><SelectValue placeholder="All Staff" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Staff</SelectItem>
                 {users.map(u => (
@@ -2297,25 +2299,25 @@ export default function Clients() {
               </SelectContent>
             </Select>
           )}
-          <div className="h-10 px-4 flex items-center bg-slate-50 rounded-xl text-xs font-semibold text-slate-500 border border-slate-100 whitespace-nowrap">
+          <div className={`h-10 px-4 flex items-center rounded-xl text-xs font-semibold border whitespace-nowrap ${isDark?"bg-slate-700 text-slate-400 border-slate-600":"bg-slate-50 text-slate-500 border-slate-100"}`}>
             {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
           </div>
-          <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl p-1 gap-0.5">
+          <div className={`flex items-center border rounded-xl p-1 gap-0.5 ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
             <button onClick={() => setViewMode('board')}
-              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
               title="Board view"><LayoutGrid className="h-4 w-4" /></button>
             <button onClick={() => setViewMode('list')}
-              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list' ? (isDark?'bg-slate-600 shadow-sm text-slate-100':'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`}
               title="List view"><List className="h-4 w-4" /></button>
           </div>
         </div>
       </div>
 
       {/* ── Client Grid / List ── */}
-      <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: 'white' }}>
+      <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm" style={{ height: '70vh', minHeight: '480px', background: isDark ? '#1e293b' : 'white' }}>
         {filteredClients.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
-            <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center mb-4">
+            <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
               <Users className="h-7 w-7 opacity-30" />
             </div>
             <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
@@ -2348,7 +2350,7 @@ export default function Clients() {
           </AutoSizer>
         ) : (
           <div className="h-full flex flex-col">
-            <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
+            <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark?"bg-slate-700/60 border-slate-600":"bg-slate-50 border-slate-100"}`}>
               <div className="w-1 flex-shrink-0" />
               <div className="w-8 flex-shrink-0" />
               <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
@@ -2390,12 +2392,12 @@ export default function Clients() {
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl">
           <DialogHeader className="pb-4 border-b border-slate-100">
-            <DialogTitle className="text-lg font-bold text-slate-900">Review Excel Import</DialogTitle>
+            <DialogTitle className={`text-lg font-bold ${isDark?"text-slate-100":"text-slate-900"}`}>Review Excel Import</DialogTitle>
             <DialogDescription className="text-sm text-slate-400">Preview and confirm data before bulk import</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-auto mt-4 rounded-xl border border-slate-100">
             <table className="min-w-full text-xs">
-              <thead className="bg-slate-50 sticky top-0 border-b border-slate-100">
+              <thead className={`sticky top-0 border-b ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
                 <tr>
                   {previewHeaders.map(h => (
                     <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">{h}</th>
@@ -2404,7 +2406,7 @@ export default function Clients() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {previewData.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="hover:bg-slate-50 transition-colors">
+                  <tr key={rowIndex} className={`transition-colors ${isDark?"hover:bg-slate-700/30":"hover:bg-slate-50"}`}>
                     {previewHeaders.map(header => (
                       <td key={header} className="p-2">
                         <Input value={row[header] || ''} onChange={e => {
@@ -2477,14 +2479,14 @@ export default function Clients() {
       {/* MDS Excel Smart Preview Dialog */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
-          <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-7 py-5">
+          <div className={`sticky top-0 z-10 border-b px-7 py-5 ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-100"}`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0"
                 style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
                 <Building2 className="h-5 w-5" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-bold text-slate-900">MCA / MDS Data Preview</DialogTitle>
+                <DialogTitle className={`text-lg font-bold ${isDark?"text-slate-100":"text-slate-900"}`}>MCA / MDS Data Preview</DialogTitle>
                 <DialogDescription className="text-xs text-slate-400 mt-0.5">
                   Review and edit the parsed data before saving
                   {mdsData?.sheets_parsed && (
@@ -2507,13 +2509,13 @@ export default function Clients() {
 
           {!mdsPreviewLoading && mdsForm && (
             <div className="p-7 space-y-6">
-              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
+              <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
                 <div className="flex items-center gap-2 mb-5">
                   <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
                     style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
                     <Briefcase className="h-3.5 w-3.5" />
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-800">Company Details</h4>
+                  <h4 className={`text-sm font-semibold ${isDark?"text-slate-200":"text-slate-800"}`}>Company Details</h4>
                   <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full border"
                     style={mdsForm.status === 'active'
                       ? { background: '#f0fdf4', color: '#166534', borderColor: '#bbf7d0' }
@@ -2590,7 +2592,7 @@ export default function Clients() {
                 </div>
               </div>
 
-              <div className="bg-slate-50/60 border border-slate-100 rounded-2xl p-5">
+              <div className={`border rounded-2xl p-5 ${isDark?"bg-slate-700/40 border-slate-600":"bg-slate-50/60 border-slate-100"}`}>
                 <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs"
@@ -2614,7 +2616,7 @@ export default function Clients() {
                 </div>
                 <div className="space-y-3">
                   {mdsForm.contact_persons.map((cp, idx) => (
-                    <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div key={idx} className={`border rounded-xl p-4 ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-200"}`}>
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                           <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
@@ -2666,7 +2668,7 @@ export default function Clients() {
               <div>
                 <label className={labelCls}>Notes</label>
                 <textarea
-                  className="w-full min-h-[90px] bg-white border border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors"
+                  className={`w-full min-h-[90px] border focus:border-blue-400 focus:ring-1 f ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`ocus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors"
                   value={mdsForm.notes}
                   onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))}
                 />
@@ -2675,18 +2677,18 @@ export default function Clients() {
               {mdsData?.raw_company_info && Object.keys(mdsData.raw_company_info).length > 0 && (
                 <div className="border border-slate-100 rounded-2xl overflow-hidden">
                   <button type="button" onClick={() => setMdsRawInfoOpen(o => !o)}
-                    className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                    className={`w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left ${isDark?"bg-slate-700 hover:bg-slate-600":"bg-slate-50 hover:bg-slate-100"}`}>
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-slate-400" />
                       <span className="text-xs font-semibold text-slate-600">Raw Excel Data</span>
-                      <span className="text-[10px] text-slate-400">({Object.keys(mdsData.raw_company_info).length} fields extracted)</span>
+                      <span className={`text-[10px] ${isDark?"text-slate-500":"text-slate-400"}`}>({Object.keys(mdsData.raw_company_info).length} fields extracted)</span>
                     </div>
                     {mdsRawInfoOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
                   </button>
                   {mdsRawInfoOpen && (
-                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto bg-white">
+                    <div className={`p-4 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-y-auto ${isDark?"bg-slate-800":"bg-white"}`}>
                       {Object.entries(mdsData.raw_company_info).map(([key, val]) => (
-                        <div key={key} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg hover:bg-slate-50">
+                        <div key={key} className={`flex items-start gap-2 text-xs py-1.5 px-2 rounded-lg ${isDark?"hover:bg-slate-700":"hover:bg-slate-50"}`}>
                           <span className="text-slate-400 font-medium min-w-[120px] flex-shrink-0">{key}</span>
                           <span className="text-slate-700 font-medium break-all">{String(val)}</span>
                         </div>
