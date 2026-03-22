@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -153,7 +154,7 @@ const StatusBadge = ({ status, isActive }) => {
 
 const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   <motion.div variants={itemVariants} layout
-    className="relative bg-white rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all">
+    className={`relative rounded-2xl border-2 border-amber-200 p-5 shadow-sm hover:shadow-lg transition-all ${isDark?"bg-slate-800":"bg-white"}`}>
     <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-amber-400 to-orange-400" />
     <div className="flex items-start gap-4 mb-4 pt-1">
       <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-100 flex-shrink-0 shadow">
@@ -165,7 +166,7 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
             </div>}
       </div>
       <div className="flex-1 min-w-0">
-        <h3 className="text-base font-semibold text-slate-900 truncate">{userData.full_name}</h3>
+        <h3 className={`text-base font-semibold truncate ${isDark?"text-slate-100":"text-slate-900"}`}>{userData.full_name}</h3>
         <p className="text-xs text-slate-500 truncate mt-0.5">{userData.email}</p>
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
           <Badge className="bg-slate-100 text-slate-600 text-[10px] font-semibold capitalize">{userData.role}</Badge>
@@ -203,11 +204,11 @@ const ModuleAccessBadges = ({ userData }) => {
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
-        hasLeads ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+        hasLeads ? 'bg-blue-50 text-blue-700 border-blue-200' : (isDark?'bg-slate-700 text-slate-400 border-slate-600':'bg-slate-50 text-slate-400 border-slate-200')}`}>
         <Target className="h-2.5 w-2.5" />Leads {hasLeads ? '\u2713' : '\u2717'}
       </span>
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
-        hasQuotations ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+        hasQuotations ? 'bg-purple-50 text-purple-700 border-purple-200' : (isDark?'bg-slate-700 text-slate-400 border-slate-600':'bg-slate-50 text-slate-400 border-slate-200')}`}>
         <Receipt className="h-2.5 w-2.5" />Quotations {hasQuotations ? '\u2713' : '\u2717'}
       </span>
     </div>
@@ -226,7 +227,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
 
   return (
     <motion.div variants={itemVariants} layout
-      className={`group relative bg-white rounded-2xl border p-4 sm:p-5 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 ${
+      className={`group relative rounded-2xl border p-4 sm:p-5 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 ${isDark?'bg-slate-800 border-slate-700':'bg-white'} ${
         isPending ? 'border-amber-300' : 'border-slate-200 hover:border-blue-200'}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
@@ -262,7 +263,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
               </div>}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-base sm:text-lg font-semibold text-slate-900 truncate">{userData.full_name}</h3>
+          <h3 className={`text-base sm:text-lg font-semibold truncate ${isDark?"text-slate-100":"text-slate-900"}`}>{userData.full_name}</h3>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <Badge className={`${roleStyle.bg} ${roleStyle.text} font-medium text-[10px] sm:text-xs capitalize flex items-center gap-1`}>
               {roleStyle.icon}{userData.role}
@@ -305,7 +306,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
 
 // ── Permission toggle row ─────────────────────────────────────────────────────
 const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) => (
-  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+  <div className={`flex items-center justify-between p-3 rounded-xl transition-colors ${isDark?"bg-slate-700 hover:bg-slate-600":"bg-slate-50 hover:bg-slate-100"}`}>
     <div className="pr-4">
       <p className="text-sm font-bold text-slate-700">{label}</p>
       <p className="text-[10px] text-slate-500">{desc}</p>
@@ -328,7 +329,7 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
       className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 select-none ${
         isEnabled
           ? 'shadow-sm'
-          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+          : (isDark?'border-slate-600 bg-slate-700 hover:border-slate-500 hover:bg-slate-600':'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50')
       }`}
       style={isEnabled ? {
         borderColor: '#a5b4fc',
@@ -341,7 +342,7 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
         <Icon className="h-5 w-5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-bold ${isEnabled ? 'text-slate-800' : 'text-slate-500'}`}>{title}</p>
+        <p className={`text-sm font-bold ${isEnabled ? (isDark?'text-slate-100':'text-slate-800') : 'text-slate-500'}`}>{title}</p>
         <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
       </div>
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm transition-all ${
@@ -357,6 +358,7 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
 // \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 export default function Users() {
   const { user, refreshUser } = useAuth();
+  const isDark = useDark();
   const isAdmin              = user?.role === 'admin';
   const perms                = user?.permissions || {};
   const canViewUserPage      = isAdmin || !!perms.can_view_user_page;
@@ -599,10 +601,10 @@ export default function Users() {
 
   if (!canViewUserPage) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className={`flex items-center justify-center h-screen ${isDark?"bg-[#0f172a]":"bg-slate-50"}`}>
         <Card className="p-8 text-center max-w-md shadow-lg border-red-100">
           <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-800">Access Restricted</h2>
+          <h2 className={`text-2xl font-bold ${isDark?"text-slate-100":"text-slate-800"}`}>Access Restricted</h2>
           <p className="text-slate-500 mt-2">You need the <b>View User Directory</b> permission.</p>
         </Card>
       </div>
@@ -654,13 +656,13 @@ export default function Users() {
   ];
 
   return (
-    <motion.div className="space-y-6 p-4 md:p-8" initial="hidden" animate="visible" variants={containerVariants}>
+    <motion.div className={`space-y-6 p-4 md:p-8 min-h-screen rounded-2xl ${isDark?"bg-[#0f172a]":""}`} initial="hidden" animate="visible" variants={containerVariants}>
 
       {/* \u2500\u2500 Header \u2500\u2500 */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: COLORS.deepBlue }}>User Directory</h1>
-          <p className="text-slate-500 font-medium">
+          <h1 className="text-3xl font-bold" style={{ color: isDark?"#93c5fd":COLORS.deepBlue }}>User Directory</h1>
+          <p className={`font-medium ${isDark?"text-slate-400":"text-slate-500"}`}>
             Team administration and access control
             {pendingUsers.length > 0 && isAdmin && (
               <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold border border-amber-200">
@@ -708,7 +710,7 @@ export default function Users() {
                     : <UserIcon className="h-14 w-14 text-slate-300" />}
                 </div>
                 <label htmlFor="profile-upload"
-                  className="absolute -bottom-2 -right-2 bg-white rounded-xl p-2.5 shadow-xl border border-slate-100 cursor-pointer hover:bg-slate-50">
+                  className={`absolute -bottom-2 -right-2 rounded-xl p-2.5 shadow-xl border c ${isDark?"bg-slate-700 border-slate-600":"bg-white border-slate-100"}`ursor-pointer hover:bg-slate-50">
                   <Camera className="h-5 w-5 text-blue-600" />
                   <input id="profile-upload" type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
                 </label>
@@ -763,7 +765,7 @@ export default function Users() {
                   <div key={f.name} className="space-y-2">
                     <Label className="text-xs font-bold text-slate-600">{f.label}</Label>
                     <Input type="time" name={f.name} value={formData[f.name]}
-                      onChange={handleInput} className="rounded-lg bg-white" />
+                      onChange={handleInput} className={`rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white"}`} />
                   </div>
                 ))}
               </div>
@@ -841,7 +843,7 @@ export default function Users() {
                     return (
                       <button key={dept.value} type="button" onClick={() => toggleDept(dept.value)}
                         className={`py-2 px-1 rounded-xl text-xs font-bold transition-all border-2 ${
-                          active ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-100 hover:border-slate-300'}`}
+                          active ? 'text-white border-transparent' : (isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500':'bg-white text-slate-600 border-slate-100 hover:border-slate-300'}`}
                         style={{ background: active ? dept.color : 'transparent' }}>
                         {dept.label}
                       </button>
@@ -891,7 +893,7 @@ export default function Users() {
             className="pl-12 h-12 rounded-2xl border-slate-200 shadow-sm" />
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab}
-          className="bg-white p-1 rounded-2xl border shadow-sm self-start">
+          className={`p-1 rounded-2xl border shadow-sm self-start ${isDark?"bg-slate-800 border-slate-700":"bg-white"}`}>
           <TabsList className="bg-transparent h-10 flex flex-wrap gap-0.5">
             {['all', 'admin', 'manager', 'staff'].map(t => (
               <TabsTrigger key={t} value={t} className="rounded-xl font-bold px-4 capitalize">
@@ -944,7 +946,7 @@ export default function Users() {
           {filteredUsers.length === 0
             ? <div className="col-span-full py-24 text-center">
                 <UsersIcon className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-slate-400">No members found</h3>
+                <h3 className={`text-xl font-bold ${isDark?"text-slate-500":"text-slate-400"}`}>No members found</h3>
               </div>
             : filteredUsers.map(u => (
                 <UserCard key={u.id} userData={u}
@@ -961,7 +963,7 @@ export default function Users() {
       {/* \u2500\u2500 PERMISSIONS DIALOG \u2500\u2500 */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
-          <div className="sticky top-0 z-10 p-6 bg-white border-b flex items-center justify-between">
+          <div className={`sticky top-0 z-10 p-6 border-b flex items-center justify-between ${isDark?"bg-slate-800 border-slate-700":"bg-white border-b"}`}>
             <div className="flex items-center gap-4">
               <div className="p-3 bg-emerald-50 rounded-2xl">
                 <Shield className="h-7 w-7 text-emerald-600" />
@@ -1107,7 +1109,7 @@ export default function Users() {
                               className={`cursor-pointer px-3 py-1.5 rounded-lg border-2 transition-all ${
                                 sel
                                   ? 'bg-emerald-500 border-emerald-600 text-white scale-105 shadow-md'
-                                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                  : (isDark?'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-500':'bg-white border-slate-200 text-slate-600 hover:border-slate-300')
                               }`}>
                               {u.full_name}
                             </Badge>
@@ -1133,7 +1135,7 @@ export default function Users() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input placeholder="Filter company list\u2026" value={clientSearch}
-                      onChange={e => setClientSearch(e.target.value)} className="pl-10 h-10 rounded-xl" />
+                      onChange={e => setClientSearch(e.target.value)} className={`pl-10 h-10 rounded-xl ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"border-slate-200"}`} />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-2">
                     {clients
@@ -1152,7 +1154,7 @@ export default function Users() {
                             className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
                               assigned
                                 ? 'bg-emerald-50 border-emerald-400'
-                                : 'bg-white border-slate-100 hover:border-slate-200'}`}>
+                                : (isDark?'bg-slate-700/60 border-slate-600 hover:border-slate-500':'bg-white border-slate-100 hover:border-slate-200')}`}>
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
                               assigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
                               {assigned ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
