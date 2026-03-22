@@ -55,23 +55,18 @@ export default function DSCRegister() {
   }, []);
 
   const fetchDSC = async () => {
-    setLoading(true); // Good practice since you have a loading state
+    setLoading(true);
     try {
       const response = await api.get('/dsc');
-    
-    // LOG THIS to see exactly what the backend is sending
       console.log("API Response:", response.data);
-
-    // If your backend nests the array inside a 'data' or 'dscs' property:
-      const actualData = Array.isArray(response.data) 
-        ? response.data 
+      const actualData = Array.isArray(response.data)
+        ? response.data
         : (response.data.data || response.data.dscs || []);
-
       setDscList(actualData);
     } catch (error) {
       console.error('Fetch error:', error);
       toast.error('Failed to fetch DSC');
-      setDscList([]); // Reset to empty array so filter doesn't crash
+      setDscList([]);
     } finally {
       setLoading(false);
     }
@@ -146,27 +141,19 @@ export default function DSCRegister() {
         ...movementData,
         movement_type: newType,
       });
-    
       toast.success(`DSC marked as ${newType}!`);
       setMovementData({ movement_type: 'IN', person_name: '', notes: '' });
 
-      // --- SAFETY CHECK STARTS HERE ---
       const response = await api.get('/dsc');
-    
-    // Use the same robust check as fetchDSC
-      const actualData = Array.isArray(response.data) 
-        ? response.data 
+      const actualData = Array.isArray(response.data)
+        ? response.data
         : (response.data.data || response.data.dscs || []);
-
       setDscList(actualData);
 
-      // Find the specific DSC in the checked 'actualData' array
       const updatedDSC = actualData.find(d => d.id === editingDSC.id);
       if (updatedDSC) {
         setEditingDSC(updatedDSC);
       }
-    // --- SAFETY CHECK ENDS HERE ---
-
     } catch (error) {
       console.error('Movement error:', error);
       toast.error('Failed to record movement');
@@ -189,8 +176,11 @@ export default function DSCRegister() {
       setEditingMovement(null);
 
       const response = await api.get('/dsc');
-      setDscList(response.data);
-      const updatedDSC = response.data.find(d => d.id === editingDSC.id);
+      const actualData = Array.isArray(response.data)
+        ? response.data
+        : (response.data.data || response.data.dscs || []);
+      setDscList(actualData);
+      const updatedDSC = actualData.find(d => d.id === editingDSC.id);
       if (updatedDSC) {
         setEditingDSC(updatedDSC);
       }
@@ -268,8 +258,7 @@ export default function DSCRegister() {
 
   const filterBySearch = (dsc) => {
     if (!searchQuery.trim()) return true;
-    if (!dsc) return false; // Added this safety check
-
+    if (!dsc) return false;
     const query = searchQuery.toLowerCase();
     return (
       dsc.holder_name?.toLowerCase().includes(query) ||
@@ -303,11 +292,11 @@ export default function DSCRegister() {
   const totalPagesExpired = Math.ceil(expiredDSC.length / rowsPerPage);
 
   return (
-    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark?"bg-[#0f172a]":""}`} data-testid="dsc-page">
+    <div className={`space-y-6 min-h-screen p-1 rounded-2xl ${isDark ? "bg-[#0f172a]" : ""}`} data-testid="dsc-page">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className={`text-3xl font-bold font-outfit ${isDark?"text-slate-100":"text-slate-900"}`}>DSC Register</h1>
-          <p className={`mt-1 ${isDark?"text-slate-400":"text-slate-600"}`}>Manage digital signature certificates with IN/OUT tracking</p>
+          <h1 className={`text-3xl font-bold font-outfit ${isDark ? "text-slate-100" : "text-slate-900"}`}>DSC Register</h1>
+          <p className={`mt-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>Manage digital signature certificates with IN/OUT tracking</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
@@ -488,7 +477,7 @@ export default function DSCRegister() {
                   </Card>
 
                   <Card className="p-4">
-                    <h4 className={`font-medium mb-3 ${isDark?"text-slate-100":"text-slate-900"}`}>
+                    <h4 className={`font-medium mb-3 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
                       {getDSCInOutStatus(editingDSC) === 'IN' ? 'Mark as OUT' : 'Mark as IN'}
                     </h4>
                     <form onSubmit={(e) => {
@@ -632,7 +621,7 @@ export default function DSCRegister() {
                                   )}
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
-                                  <div className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
+                                  <div className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                                     {format(new Date(movement.timestamp), 'MMM dd, yyyy hh:mm a')}
                                   </div>
                                   {movement.id && (
@@ -789,9 +778,10 @@ export default function DSCRegister() {
           </DialogContent>
         </Dialog>
       </div>
+
       <div className="flex flex-col sm:flex-row gap-4 max-w-xl">
         <Select value={rowsPerPage.toString()} onValueChange={(value) => setRowsPerPage(Number(value))}>
-          <SelectTrigger className={`w-[180px] focus:border-indigo-500 ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}>
+          <SelectTrigger className={`w-[180px] focus:border-indigo-500 ${isDark ? "bg-slate-800 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}>
             <SelectValue placeholder="Rows per page" />
           </SelectTrigger>
           <SelectContent>
@@ -808,11 +798,12 @@ export default function DSCRegister() {
             placeholder="Search by holder name, certificate number, or company..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className={`pl-10 focus:border-indigo-500 ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white border-slate-200"}`}
+            className={`pl-10 focus:border-indigo-500 ${isDark ? "bg-slate-800 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}
             data-testid="dsc-search-input"
           />
         </div>
       </div>
+
       <Tabs defaultValue="in" className="w-full">
         <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="in" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
@@ -831,6 +822,7 @@ export default function DSCRegister() {
             EXPIRED ({expiredDSC.length})
           </TabsTrigger>
         </TabsList>
+
         <TabsContent value="in" className="mt-6">
           <Card className="border border-emerald-200 bg-emerald-50/30">
             <CardHeader className="bg-emerald-50 border-b border-emerald-200">
@@ -846,26 +838,28 @@ export default function DSCRegister() {
                 </div>
               ) : (
                 <>
-                  <DSCTable 
-                    dscList={paginatedInDSC} 
-                    onEdit={handleEdit} 
-                    onDelete={handleDelete} 
-                    onMovement={openMovementDialog} 
-                    onViewLog={openLogDialog} 
-                    getDSCStatus={getDSCStatus} 
-                    type="IN" 
+                  <DSCTable
+                    dscList={paginatedInDSC}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onMovement={openMovementDialog}
+                    onViewLog={openLogDialog}
+                    getDSCStatus={getDSCStatus}
+                    type="IN"
                     globalIndexStart={(currentPageIn - 1) * rowsPerPage}
+                    isDark={isDark}
                   />
-                  <Pagination 
-                    currentPage={currentPageIn} 
-                    totalPages={totalPagesIn} 
-                    onPageChange={setCurrentPageIn} 
+                  <Pagination
+                    currentPage={currentPageIn}
+                    totalPages={totalPagesIn}
+                    onPageChange={setCurrentPageIn}
                   />
                 </>
               )}
             </CardContent>
           </Card>
         </TabsContent>
+
         <TabsContent value="out" className="mt-6">
           <Card className="border border-red-200 bg-red-50/30">
             <CardHeader className="bg-red-50 border-b border-red-200">
@@ -881,26 +875,28 @@ export default function DSCRegister() {
                 </div>
               ) : (
                 <>
-                  <DSCTable 
-                    dscList={paginatedOutDSC} 
-                    onEdit={handleEdit} 
-                    onDelete={handleDelete} 
-                    onMovement={openMovementDialog} 
-                    onViewLog={openLogDialog} 
-                    getDSCStatus={getDSCStatus} 
-                    type="OUT" 
+                  <DSCTable
+                    dscList={paginatedOutDSC}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onMovement={openMovementDialog}
+                    onViewLog={openLogDialog}
+                    getDSCStatus={getDSCStatus}
+                    type="OUT"
                     globalIndexStart={(currentPageOut - 1) * rowsPerPage}
+                    isDark={isDark}
                   />
-                  <Pagination 
-                    currentPage={currentPageOut} 
-                    totalPages={totalPagesOut} 
-                    onPageChange={setCurrentPageOut} 
+                  <Pagination
+                    currentPage={currentPageOut}
+                    totalPages={totalPagesOut}
+                    onPageChange={setCurrentPageOut}
                   />
                 </>
               )}
             </CardContent>
           </Card>
         </TabsContent>
+
         <TabsContent value="expired" className="mt-6">
           <Card className="border border-amber-300 bg-amber-50/40">
             <CardHeader className="bg-amber-100 border-b border-amber-300">
@@ -925,11 +921,12 @@ export default function DSCRegister() {
                     getDSCStatus={getDSCStatus}
                     type="EXPIRED"
                     globalIndexStart={(currentPageExpired - 1) * rowsPerPage}
+                    isDark={isDark}
                   />
-                  <Pagination 
-                    currentPage={currentPageExpired} 
-                    totalPages={totalPagesExpired} 
-                    onPageChange={setCurrentPageExpired} 
+                  <Pagination
+                    currentPage={currentPageExpired}
+                    totalPages={totalPagesExpired}
+                    onPageChange={setCurrentPageExpired}
                   />
                 </>
               )}
@@ -937,6 +934,8 @@ export default function DSCRegister() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Movement Dialog */}
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -991,6 +990,8 @@ export default function DSCRegister() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Log Dialog */}
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -1019,7 +1020,7 @@ export default function DSCRegister() {
                       <p className="text-sm text-slate-600">
                         {movement.movement_type === 'IN' ? 'Delivered by' : 'Taken by'}: {movement.person_name}
                       </p>
-                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         Recorded by: {movement.recorded_by}
                       </p>
                       {movement.notes && (
@@ -1027,10 +1028,10 @@ export default function DSCRegister() {
                       )}
                     </div>
                     <div className="text-right">
-                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'MMM dd, yyyy')}
                       </p>
-                      <p className={`text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         {format(new Date(movement.timestamp), 'hh:mm a')}
                       </p>
                     </div>
@@ -1046,6 +1047,7 @@ export default function DSCRegister() {
           </div>
         </DialogContent>
       </Dialog>
+
       {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color !== 'bg-emerald-500').length > 0 && (
         <Card className="border-2 border-orange-200 bg-orange-50">
           <CardContent className="p-4">
@@ -1055,7 +1057,7 @@ export default function DSCRegister() {
                 <h3 className="font-semibold text-orange-900">Attention Required</h3>
                 <p className="text-sm text-orange-700 mt-1">
                   {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-red-500').length} certificate(s) expired or expiring within 7 days.
-                  {dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
+                  {' '}{dscList.filter(dsc => getDSCStatus(dsc.expiry_date).color === 'bg-yellow-500').length} certificate(s) expiring within 30 days.
                 </p>
               </div>
             </div>
@@ -1097,12 +1099,12 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
   );
 }
 
-// DSC Table Component
-function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart }) {
+// DSC Table Component — receives isDark as a prop (fixes "isDark is not defined" error)
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark }) {
   return (
     <div className="w-full overflow-hidden">
       <table className="w-full table-auto border-collapse">
-        <thead className={`border-b ${isDark?"bg-slate-800 border-slate-700":"bg-slate-50 border-slate-200"}`}>
+        <thead className={`border-b ${isDark ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
           <tr>
             <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-12">
               S.No
@@ -1127,19 +1129,19 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
             </th>
           </tr>
         </thead>
-        <tbody className={`divide-y ${isDark?"divide-slate-700 bg-slate-800":"divide-slate-100 bg-white"}`}>
+        <tbody className={`divide-y ${isDark ? "divide-slate-700 bg-slate-800" : "divide-slate-100 bg-white"}`}>
           {dscList.map((dsc, index) => {
             const status = getDSCStatus(dsc.expiry_date);
             return (
               <tr
                 key={dsc.id}
-                className={`transition-colors ${isDark?"hover:bg-slate-700/30":"hover:bg-slate-50"}`}
+                className={`transition-colors ${isDark ? "hover:bg-slate-700/30" : "hover:bg-slate-50"}`}
                 data-testid={`dsc-row-${dsc.id}`}
               >
                 <td className="px-4 py-3 text-sm text-slate-500">
                   {globalIndexStart + index + 1}
                 </td>
-                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark?"text-slate-100":"text-slate-900"}`}>
+                <td className={`px-4 py-3 text-sm font-medium break-words leading-tight ${isDark ? "text-slate-100" : "text-slate-900"}`}>
                   {dsc.holder_name}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600 truncate">
