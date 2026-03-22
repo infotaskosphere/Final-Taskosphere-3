@@ -407,10 +407,25 @@ def _darken(color: tuple, factor: float = 0.6) -> tuple:
 
 
 def _safe_pdf_output(pdf) -> bytes:
-    result = pdf.output()
-    if isinstance(result, (bytes, bytearray)):
-        return bytes(result)
-    return result.encode("latin1")
+    """
+    Return raw PDF bytes compatible with ALL fpdf/fpdf2 versions.
+    fpdf2 >= 2.x  → output() returns bytearray  → cast to bytes directly.
+    fpdf2 old / fpdf1 → output(dest='S') returns a latin-1 string.
+    We never call encode('latin-1') on a bytearray — that was corrupting the file.
+    """
+    # Modern fpdf2: output() with no args returns bytearray
+    try:
+        result = pdf.output()
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        # Fallback: old fpdf returns a string from output(dest='S')
+        return result.encode("latin-1")
+    except TypeError:
+        # Some old builds require dest kwarg
+        result = pdf.output(dest="S")
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        return result.encode("latin-1")
 
 
 def _embed_logo(pdf, logo_b64: str, x: float, y: float, h: float) -> None:
@@ -740,8 +755,7 @@ def _build_quotation_pdf(q: dict, company: dict) -> BytesIO:
         pdf.set_text_color(*MUTED)
         _mcell(pdf, W, 4, _safe_str(f"Note: {q['notes']}"))
 
-    out = BytesIO()
-    out.write(_safe_pdf_output(pdf))
+    out = BytesIO(_safe_pdf_output(pdf))
     out.seek(0)
     return out
 
@@ -884,8 +898,7 @@ def _build_checklist_pdf(q: dict, company: dict) -> BytesIO:
     pdf.set_x(16)
     _cell(pdf, 0, 5, "Client Signature: _________________________       Date: ______________", nl=True)
 
-    out = BytesIO()
-    out.write(_safe_pdf_output(pdf))
+    out = BytesIO(_safe_pdf_output(pdf))
     out.seek(0)
     return out
 
@@ -1182,13 +1195,15 @@ async def export_quotation_pdf(
         logger.error(f"Quotation PDF build failed for {quotation_id}: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
+    pdf_bytes = pdf_buf.read()
     filename = f"quotation_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
-        pdf_buf,
+        iter([pdf_bytes]),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type":        "application/pdf",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+            "Cache-Control": "no-cache",
         },
     )
 
@@ -1217,13 +1232,15 @@ async def export_checklist_pdf(
         logger.error(f"Checklist PDF build failed for {quotation_id}: {e}", exc_info=True)
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
+    pdf_bytes = pdf_buf.read()
     filename = f"checklist_{q.get('quotation_no', quotation_id).replace('/', '-')}.pdf"
     return StreamingResponse(
-        pdf_buf,
+        iter([pdf_bytes]),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type":        "application/pdf",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+            "Cache-Control": "no-cache",
         },
     )
 
