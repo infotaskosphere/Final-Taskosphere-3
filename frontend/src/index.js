@@ -1,8 +1,9 @@
+import 'react-app-polyfill/stable';
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@/index.css";
-import App from "@/App";
-import { AuthProvider } from "@/contexts/AuthContext";
+import "./index.css";
+import App from "./App";
+import { AuthProvider } from "./contexts/AuthContext";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 
