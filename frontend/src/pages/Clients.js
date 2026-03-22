@@ -2190,7 +2190,7 @@ export default function Clients() {
       {canViewAllClients && todayReminders.length > 0 && (
         <div className={`flex items-center gap-5 border border-pink-200 rounded-2xl p-5 shadow-sm ${isDark?"bg-slate-800":"bg-white"}`}
           style={{ background: 'linear-gradient(135deg, #fff0f6, #fff5f0)' }}>
-          <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-cent ${isDark?"bg-slate-700":"bg-white"}`er flex-shrink-0">
+          <div className={`w-11 h-11 rounded-xl shadow-sm text-pink-500 flex items-center justify-center flex-shrink-0 ${isDark ? "bg-slate-700" : "bg-white"}`}>
             <Cake className="h-5 w-5" />
           </div>
           <div className="flex-1">
@@ -2668,7 +2668,7 @@ export default function Clients() {
               <div>
                 <label className={labelCls}>Notes</label>
                 <textarea
-                  className={`w-full min-h-[90px] border focus:border-blue-400 focus:ring-1 f ${isDark?"bg-slate-700 border-slate-600 text-slate-100":"bg-white border-slate-200"}`ocus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors"
+                  className={`w-full min-h-[90px] border focus:border-blue-400 focus:ring-1 focus:ring-blue-100 rounded-xl text-sm p-3 resize-y outline-none transition-colors ${isDark ? "bg-slate-700 border-slate-600 text-slate-100" : "bg-white border-slate-200"}`}
                   value={mdsForm.notes}
                   onChange={e => setMdsForm(f => ({ ...f, notes: e.target.value }))}
                 />
