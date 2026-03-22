@@ -205,7 +205,7 @@ function LeadQuotationsPanel({ leadId, canCreateQuotation, onCreateQuotation }) 
         ? <p className="text-[11px] text-slate-400 italic">No quotations linked yet.</p>
         : <div className="space-y-1.5">
             {quotations.map(q => (
-              <div key={q.id} className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border ${isDark?"bg-slate-700 border-slate-600":"bg-slate-50 border-slate-100"}`}>
+              <div key={q.id} className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-[11px] font-mono font-bold text-slate-600">{q.quotation_no}</span>
                   <span className="text-[10px] text-slate-400 truncate">{q.service}</span>
@@ -274,7 +274,7 @@ const ServiceSelector = ({ selected=[], onChange, extra=[] }) => {
           <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider w-full mb-0.5">Selected</span>
           {selected.map(val=>(
             <button key={val} type="button" onClick={()=>toggle(val)}
-              className={`inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-lg border text-[11px] font-semibold ${isDark?"bg-slate-700 border-blue-800 text-blue-300 hover:bg-red-900/30 hover:border-red-800 hover:text-red-400":"bg-white border-blue-200 text-blue-700 hover:bg-red-50 hover:border-red-200 hover:text-red-600"} transition-colors group active:scale-95`}>
+              className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-lg border text-[11px] font-semibold bg-white dark:bg-slate-700 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-200 hover:text-red-600 transition-colors group active:scale-95">
               {val}<X className="h-3 w-3 opacity-50 group-hover:opacity-100" />
             </button>
           ))}
@@ -286,7 +286,7 @@ const ServiceSelector = ({ selected=[], onChange, extra=[] }) => {
           return (
             <button key={svc.value} type="button" onClick={()=>toggle(svc.value)}
               className={cn('inline-flex items-center gap-1.5 h-8 px-3 rounded-2xl text-xs font-semibold border transition-all active:scale-95',
-                isSel?cn(svc.color,'shadow-sm ring-1 ring-offset-1'):(isDark?'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500':'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50')}>
+                isSel?cn(svc.color,'shadow-sm ring-1 ring-offset-1'):'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50')}>
               {isSel&&<Check className="h-3 w-3 flex-shrink-0" />}{svc.value}
             </button>
           );
@@ -471,21 +471,21 @@ export default function LeadsPage() {
 
       {/* ── Header ── */}
       <motion.div variants={itemVariants}>
-        <Card className={`rounded-3xl overflow-hidden border shadow-sm ${isDark?"border-slate-700 bg-slate-800":"border-slate-200"}`}>
+        <Card className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 dark:bg-slate-800 shadow-sm">
           <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-600" />
           <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight" style={{color:isDark?"#93c5fd":COLORS.deepBlue}}>Lead Pipeline</h1>
-              <p className={`text-sm mt-0.5 ${isDark?"text-slate-400":"text-slate-500"}`}>
+              <h1 className="text-2xl font-semibold tracking-tight dark:text-blue-300" style={{color:COLORS.deepBlue}}>Lead Pipeline</h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                 {stats.active} active ·&nbsp;<span className="text-emerald-600 font-medium">{stats.won} won</span>
                 {stats.overdue>0&&<span className="text-red-500 font-medium"> · {stats.overdue} overdue</span>}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className={`flex p-1 rounded-2xl shadow-sm ${isDark?"bg-slate-700":"bg-slate-100"}`}>
+              <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-2xl shadow-sm">
                 {[{id:'list',icon:List},{id:'kanban',icon:LayoutGrid}].map(v=>(
                   <Button key={v.id} variant="ghost" size="sm"
-                    className={cn('rounded-xl font-medium transition-all',viewMode===v.id?(isDark?'bg-slate-600 shadow text-slate-100':'bg-white shadow text-slate-800'):'text-slate-500 hover:text-slate-700')}
+                    className={cn('rounded-xl font-medium transition-all',viewMode===v.id?'bg-white dark:bg-slate-600 shadow text-slate-800 dark:text-slate-100':'text-slate-500 hover:text-slate-700')}
                     onClick={()=>setViewMode(v.id)}>
                     <v.icon className="h-4 w-4 mr-1" />{v.id.charAt(0).toUpperCase()+v.id.slice(1)}
                   </Button>
@@ -511,18 +511,18 @@ export default function LeadsPage() {
 
       {/* ── Revenue ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
-        <Card className={`rounded-2xl border ${isDark?"border-emerald-800 bg-emerald-900/20":"border-emerald-200 bg-emerald-50"}`}><CardContent className="p-4"><p className={`text-xs font-medium uppercase tracking-wider ${isDark?"text-emerald-400":"text-emerald-600"}`}>Won Revenue</p><p className={`text-2xl font-bold mt-1 ${isDark?"text-emerald-400":"text-emerald-700"}`}>₹{stats.wonValue.toLocaleString()}</p></CardContent></Card>
-        <Card className={`rounded-2xl border ${isDark?"border-indigo-800 bg-indigo-900/20":"border-indigo-200 bg-indigo-50"}`}><CardContent className="p-4"><p className={`text-xs font-medium uppercase tracking-wider ${isDark?"text-indigo-400":"text-indigo-600"}`}>Pipeline Value</p><p className={`text-2xl font-bold mt-1 ${isDark?"text-indigo-400":"text-indigo-700"}`}>₹{stats.pipeValue.toLocaleString()}</p></CardContent></Card>
+        <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20"><CardContent className="p-4"><p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Won Revenue</p><p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 mt-1">₹{stats.wonValue.toLocaleString()}</p></CardContent></Card>
+        <Card className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20"><CardContent className="p-4"><p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Pipeline Value</p><p className="text-2xl font-bold text-indigo-700 dark:text-indigo-400 mt-1">₹{stats.pipeValue.toLocaleString()}</p></CardContent></Card>
       </motion.div>
 
       {/* ── Filters ── */}
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search leads…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className={`pl-10 rounded-2xl ${isDark?"bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500":"bg-white"}`} />
+          <Input placeholder="Search leads…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="pl-10 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl" />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className={`w-40 rounded-2xl text-sm ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white"}`}><SelectValue placeholder="All Stages" /></SelectTrigger>
+          <SelectTrigger className="w-40 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl text-sm"><SelectValue placeholder="All Stages" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Stages</SelectItem>
             <SelectItem value="active">Active Leads</SelectItem>
@@ -530,13 +530,13 @@ export default function LeadsPage() {
           </SelectContent>
         </Select>
         <Select value={serviceFilter} onValueChange={setServiceFilter}>
-          <SelectTrigger className={`w-40 rounded-2xl text-sm ${isDark?"bg-slate-800 border-slate-600 text-slate-100":"bg-white"}`}><SelectValue placeholder="All Services" /></SelectTrigger>
+          <SelectTrigger className="w-40 bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 rounded-2xl text-sm"><SelectValue placeholder="All Services" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Services</SelectItem>
             {LEAD_SERVICES.map(s=><SelectItem key={s.value} value={s.value}>{s.value}</SelectItem>)}
           </SelectContent>
         </Select>
-        <p className={`text-xs ml-auto ${isDark?"text-slate-500":"text-slate-400"}`}>{filteredLeads.length} lead{filteredLeads.length!==1?'s':''}</p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 ml-auto">{filteredLeads.length} lead{filteredLeads.length!==1?'s':''}</p>
       </motion.div>
 
       {/* ══════════ LIST VIEW ══════════ */}
@@ -563,7 +563,7 @@ export default function LeadsPage() {
                     {/* Row 1 */}
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-                        <span className={`text-base font-semibold ${isDark?"text-slate-100":"text-slate-900"}`}>{lead.company_name}</span>
+                        <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{lead.company_name}</span>
                         <motion.span key={lead.status} initial={{scale:.8,opacity:0}} animate={{scale:1,opacity:1}}
                           className={cn('inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold border',stage.badge)}>
                           <span className={cn('h-1.5 w-1.5 rounded-full',stage.stripe)} />{stage.label}
@@ -591,13 +591,13 @@ export default function LeadsPage() {
                             <Zap className="h-3.5 w-3.5" />Convert
                           </Button>
                         )}
-                        {canEditLead(lead) && <button onClick={()=>openEdit(lead)} className={`p-1.5 rounded-xl text-slate-400 hover:text-blue-600 transition-all active:scale-90 ${isDark?"hover:bg-blue-900/30":"hover:bg-blue-50"}`}><Edit className="h-3.5 w-3.5"/></button>}
-                        {canDeleteLead && <button onClick={()=>handleDelete(lead)} className={`p-1.5 rounded-xl text-slate-400 hover:text-red-600 transition-all active:scale-90 ${isDark?"hover:bg-red-900/30":"hover:bg-red-50"}`}><Trash2 className="h-3.5 w-3.5"/></button>}
+                        {canEditLead(lead) && <button onClick={()=>openEdit(lead)} className="p-1.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-400 hover:text-blue-600 transition-all active:scale-90"><Edit className="h-3.5 w-3.5"/></button>}
+                        {canDeleteLead && <button onClick={()=>handleDelete(lead)} className="p-1.5 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-600 transition-all active:scale-90"><Trash2 className="h-3.5 w-3.5"/></button>}
                       </div>
                     </div>
 
                     {/* Row 2: Contact */}
-                    <div className={`flex flex-wrap items-center gap-4 text-xs ${isDark?"text-slate-400":"text-slate-500"}`}>
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
                       {lead.contact_name  && <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5"/>{lead.contact_name}</span>}
                       {lead.phone         && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5"/>{lead.phone}</span>}
                       {lead.email         && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5"/>{lead.email}</span>}
@@ -616,14 +616,14 @@ export default function LeadsPage() {
 
                     {/* Row 4: Stage progress + buttons */}
                     {canEditLead(lead) && (
-                      <div className={`space-y-2 pt-1 border-t ${isDark?"border-slate-700":"border-slate-100"}`}>
+                      <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-700">
                         <StageProgressBar currentStatus={lead.status} canEdit={true} onStageClick={sid=>handleQuickStage(lead,sid)} />
                         <div className="flex gap-1 flex-wrap">
                           {ACTIVE_STAGES.map(sid=><StageButton key={sid} stageId={sid} isActive={lead.status===sid} onClick={()=>handleQuickStage(lead,sid)}/>)}
                           <button onClick={e=>{addRipple(e);e.currentTarget.classList.add('won-glow');handleQuickStage(lead,'won');}}
-                            className={`ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:shadow-md active:scale-95 transition-all ${isDark?"bg-slate-700":"bg-white"}`}>Won ✓</button>
+                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white dark:bg-slate-700 text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:shadow-md active:scale-95 transition-all">Won ✓</button>
                           <button onClick={e=>{addRipple(e);e.currentTarget.classList.add('lost-shake');handleQuickStage(lead,'lost');}}
-                            className={`ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border text-red-400 border-slate-200 hover:bg-red-500 hover:text-white hover:shadow-md active:scale-95 transition-all ${isDark?"bg-slate-700":"bg-white"}`}>Lost</button>
+                            className="ripple-container h-6 px-2.5 text-[11px] font-semibold rounded-xl border bg-white dark:bg-slate-700 text-red-400 border-slate-200 hover:bg-red-500 hover:text-white hover:shadow-md active:scale-95 transition-all">Lost</button>
                         </div>
                       </div>
                     )}
@@ -645,7 +645,7 @@ export default function LeadsPage() {
           {/* Closed leads */}
           {closedLeads.length > 0 && (
             <div className="space-y-2 pt-2">
-              <p className={`text-[10px] font-bold uppercase tracking-widest px-1 ${isDark?"text-slate-500":"text-slate-400"}`}>Closed</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 px-1">Closed</p>
               {closedLeads.map(lead => {
                 const stage = stageOf(lead.status);
                 return (
@@ -669,23 +669,23 @@ export default function LeadsPage() {
                         {/* Won pipeline actions */}
                         {lead.status==='won' && canEditLead(lead) && (
                           <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
-                            <button onClick={()=>openEdit(lead)} className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-blue-400 hover:bg-blue-900/30":"bg-white border-slate-200 text-blue-600 hover:bg-blue-50"}`der border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
-                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-blue-400 hover:bg-blue-900/30":"bg-white border-slate-200 text-blue-600 hover:bg-blue-50"}`der border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
-                            {!lead.converted_client_id && <button onClick={()=>setClientConvLead(lead)} className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-blue-400 hover:bg-blue-900/30":"bg-white border-slate-200 text-blue-600 hover:bg-blue-50"}`der border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all active:scale-95"><Building2 className="h-3 w-3"/>Convert to Client</button>}
+                            <button onClick={()=>openEdit(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
+                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
+                            {!lead.converted_client_id && <button onClick={()=>setClientConvLead(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all active:scale-95"><Building2 className="h-3 w-3"/>Convert to Client</button>}
                             <button onClick={()=>handleToggle(lead,'checklist_sent')}
-                              className={cn(`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?'bg-slate-700 border-slate-600':'bg-white border-slate-200'} border transition-all active:scale-95',lead.checklist_sent?'bg-teal-500 text-white border-teal-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50')}>
+                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',lead.checklist_sent?'bg-teal-500 text-white border-teal-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50')}>
                               <ClipboardCheck className="h-3 w-3"/>{lead.checklist_sent?'Checklist Sent ✓':'Checklist Sent?'}
                             </button>
                             <button onClick={()=>handleToggle(lead,'documents_received')}
-                              className={cn(`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?'bg-slate-700 border-slate-600':'bg-white border-slate-200'} border transition-all active:scale-95',lead.documents_received?'bg-emerald-500 text-white border-emerald-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50')}>
+                              className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all active:scale-95',lead.documents_received?'bg-emerald-500 text-white border-emerald-600 shadow-sm':'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50')}>
                               <FolderCheck className="h-3 w-3"/>{lead.documents_received?'Docs Received ✓':'Docs Received?'}
                             </button>
                           </div>
                         )}
                         {lead.status==='lost' && canEditLead(lead) && (
                           <div className="flex flex-wrap gap-2 pt-1.5 border-t border-slate-100">
-                            <button onClick={()=>openEdit(lead)} className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-blue-400 hover:bg-blue-900/30":"bg-white border-slate-200 text-blue-600 hover:bg-blue-50"}`der border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
-                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg ${isDark?"bg-slate-700 border-slate-600 text-blue-400 hover:bg-blue-900/30":"bg-white border-slate-200 text-blue-600 hover:bg-blue-50"}`der border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
+                            <button onClick={()=>openEdit(lead)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-all active:scale-95"><Edit className="h-3 w-3"/>Edit Lead</button>
+                            <button onClick={()=>handleQuickStage(lead,'negotiation')} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all active:scale-95"><RefreshCw className="h-3 w-3"/>Reopen</button>
                           </div>
                         )}
                       </div>
@@ -714,10 +714,10 @@ export default function LeadsPage() {
                   <AnimatePresence>
                     {colLeads.map(lead => (
                       <motion.div key={lead.id} layout initial={{opacity:0,scale:.95}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:.95}}
-                        className={`relative rounded-2xl border overflow-hidden hover:shadow-md tra ${isDark?"bg-slate-800 border-slate-700":"bg-white border-slate-200"}`nsition-all">
+                        className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all">
                         <div className={cn('absolute left-0 top-0 h-full w-[5px]',stage.stripe)} />
                         <div className="pl-4 pr-3 py-3 space-y-2">
-                          <p className={`text-xs font-semibold line-clamp-2 ${isDark?"text-slate-100":"text-slate-900"}`}>{lead.company_name}</p>
+                          <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">{lead.company_name}</p>
                           {lead.contact_name && <p className="text-[11px] text-slate-500 flex items-center gap-1"><User className="h-3 w-3"/>{lead.contact_name}</p>}
                           {lead.assigned_to  && <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1"><UserCheck className="h-3 w-3"/>{userNameById(lead.assigned_to)}</p>}
                           {(lead.services||[]).length>0 && <div className="flex flex-wrap gap-1">{lead.services.slice(0,2).map(s=><ServiceBadge key={s} value={s} size="xs"/>)}{lead.services.length>2&&<span className="text-[10px] text-slate-400">+{lead.services.length-2}</span>}</div>}
