@@ -10,6 +10,7 @@ import {
   ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
   Phone, Mail, Globe, CreditCard, User, Tag, Info,
   IndianRupee, Percent, Hash, Calendar, Link, ExternalLink,
+  Send, MessageCircle, Settings,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,11 +41,6 @@ const UNIT_OPTIONS = ['service', 'month', 'hour', 'year', 'session', 'document',
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
 
-/**
- * FIX: Extract a human-readable error message from an axios blob response.
- * When responseType is 'blob', axios can't read the error body as text automatically.
- * We convert the blob back to text to get the actual server error message.
- */
 const extractBlobError = async (error) => {
   try {
     if (error?.response?.data instanceof Blob) {
@@ -67,6 +63,161 @@ const extractBlobError = async (error) => {
   }
 };
 
+/* ─── WhatsApp share helper ──────────────────────────────────────────────── */
+const openWhatsApp = (phone, message) => {
+  // Strip non-digits, add India country code if needed
+  let cleaned = (phone || '').replace(/\D/g, '');
+  if (cleaned.length === 10) cleaned = '91' + cleaned;
+  const url = `https://web.whatsapp.com/send?phone=${cleaned}&text=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
+};
+
+/* ─── EmailModal ─────────────────────────────────────────────────────────── */
+function EmailModal({ open, onClose, quotation, company, pdfType = 'quotation' }) {
+  const [toEmail,  setToEmail]  = useState('');
+  const [subject,  setSubject]  = useState('');
+  const [body,     setBody]     = useState('');
+  const [sending,  setSending]  = useState(false);
+
+  useEffect(() => {
+    if (!open || !quotation) return;
+    setToEmail(quotation.client_email || '');
+    setSubject(`Quotation ${quotation.quotation_no} from ${company?.name || ''}`);
+    setBody(
+      `Dear ${quotation.client_name || 'Sir/Madam'},\n\n` +
+      `Please find attached our ${pdfType === 'checklist' ? 'document checklist' : 'quotation'} ` +
+      `${quotation.quotation_no} for ${quotation.service}.\n\n` +
+      (pdfType === 'quotation' ? `Total Amount: Rs. ${(quotation.total || 0).toLocaleString()}\nValidity: ${quotation.validity_days || 30} days\n\n` : '') +
+      `Regards,\n${company?.name || ''}`
+    );
+  }, [open, quotation, company, pdfType]);
+
+  const handleSend = async () => {
+    if (!toEmail.trim()) { toast.error('Enter recipient email'); return; }
+    setSending(true);
+    try {
+      await api.post(`/quotations/${quotation.id}/send-email`, {
+        to_email: toEmail,
+        subject,
+        body,
+        pdf_type: pdfType,
+      });
+      toast.success(`Email sent to ${toEmail}`);
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to send email');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <Mail className="h-5 w-5" />
+            Send {pdfType === 'checklist' ? 'Checklist' : 'Quotation'} via Email
+          </DialogTitle>
+          <DialogDescription>
+            PDF will be generated and attached automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!company?.smtp_host && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+            <Settings className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <span>SMTP not configured in company profile. Add SMTP settings to enable email sending.</span>
+          </div>
+        )}
+
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">To Email *</Label>
+            <Input value={toEmail} onChange={e => setToEmail(e.target.value)} placeholder="client@company.com" className="h-9 rounded-xl text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Subject</Label>
+            <Input value={subject} onChange={e => setSubject(e.target.value)} className="h-9 rounded-xl text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Message</Label>
+            <Textarea value={body} onChange={e => setBody(e.target.value)} rows={6} className="resize-none rounded-xl text-sm" />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleSend} disabled={sending || !company?.smtp_host} className="rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
+            {sending ? <><Loader2 className="h-4 w-4 animate-spin" />Sending…</> : <><Send className="h-4 w-4" />Send Email</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ─── WhatsAppModal ──────────────────────────────────────────────────────── */
+function WhatsAppModal({ open, onClose, quotation, company, pdfType = 'quotation' }) {
+  const [phone,   setPhone]   = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!open || !quotation) return;
+    setPhone(quotation.client_phone || '');
+    const base = pdfType === 'checklist'
+      ? `Hi ${quotation.client_name || ''},\n\nPlease find the document checklist for *${quotation.service}* (Ref: ${quotation.quotation_no}).\n\nKindly arrange the required documents at your earliest.\n\nRegards,\n${company?.name || ''}`
+      : `Hi ${quotation.client_name || ''},\n\nPlease find our quotation *${quotation.quotation_no}* for *${quotation.service}*.\n\n💰 *Total: Rs. ${(quotation.total || 0).toLocaleString()}*\n📅 Valid for ${quotation.validity_days || 30} days\n\nLooking forward to working with you.\n\nRegards,\n${company?.name || ''}`;
+    setMessage(base);
+  }, [open, quotation, company, pdfType]);
+
+  const handleOpen = () => {
+    if (!phone.trim()) { toast.error('Enter WhatsApp number'); return; }
+    openWhatsApp(phone, message);
+    toast.success('WhatsApp Web opened — please attach the PDF manually after downloading it.');
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: '#25D366' }}>
+            <MessageCircle className="h-5 w-5" />
+            Send via WhatsApp
+          </DialogTitle>
+          <DialogDescription>
+            Opens WhatsApp Web with pre-filled message. Download PDF first then attach it in the chat.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="p-3 rounded-xl bg-green-50 border border-green-200 text-xs text-green-800">
+          <strong>How it works:</strong> Click "Open WhatsApp Web" — the message will be pre-filled. Download the PDF separately and attach it in the WhatsApp chat.
+        </div>
+
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">WhatsApp Number *</Label>
+            <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" className="h-9 rounded-xl text-sm" />
+            <p className="text-[10px] text-slate-400">10-digit mobile or with +91 country code</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Message</Label>
+            <Textarea value={message} onChange={e => setMessage(e.target.value)} rows={7} className="resize-none rounded-xl text-sm" />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleOpen} className="rounded-xl gap-2 bg-[#25D366] hover:bg-[#20bc5a] text-white">
+            <MessageCircle className="h-4 w-4" />Open WhatsApp Web
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── CompanyManager ─────────────────────────────────────────────────────── */
 function CompanyManager({ onClose, onSaved, editingCompany }) {
   const { user } = useAuth();
@@ -74,10 +225,12 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
     bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
     logo_base64: null, signature_base64: null,
+    smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
   });
   const [saving, setSaving] = useState(false);
+  const [showSmtp, setShowSmtp] = useState(false);
 
-  useEffect(() => { if (editingCompany) setForm(editingCompany); }, [editingCompany]);
+  useEffect(() => { if (editingCompany) setForm({ ...form, ...editingCompany }); }, [editingCompany]);
 
   const handleFileBase64 = (key, e) => {
     const file = e.target.files[0]; if (!file) return;
@@ -97,8 +250,8 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     finally { setSaving(false); }
   };
 
-  const Field = ({ label, name, type = 'text', half = false, placeholder = '' }) => (
-    <div className={cn('space-y-1.5', half && 'col-span-1')}>
+  const Field = ({ label, name, type = 'text', placeholder = '' }) => (
+    <div className="space-y-1.5">
       <Label className="text-xs font-semibold text-slate-600">{label}</Label>
       <Input type={type} value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))} placeholder={placeholder} className="h-9 rounded-xl text-sm" />
     </div>
@@ -106,7 +259,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
 
   return (
     <div className="space-y-5">
-      <h3 className="text-lg font-bold" style={{ color: COLORS.deepBlue }}>{editingCompany ? 'Edit Company' : 'Add Company Profile'}</h3>
+      <h3 className="text-lg font-bold" style={{ color: COLORS.deepBlue }}>{editingCompany?.id ? 'Edit Company' : 'Add Company Profile'}</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="md:col-span-2 space-y-1.5">
           <Label className="text-xs font-semibold">Company Name *</Label>
@@ -136,6 +289,30 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
             <Input type="file" accept="image/*" onChange={e => handleFileBase64(key, e)} className="h-9 rounded-xl text-sm" />
           </div>
         ))}
+
+        {/* SMTP Config */}
+        <div className="md:col-span-2">
+          <button onClick={() => setShowSmtp(p => !p)} className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 mt-2">
+            <Settings className="h-3.5 w-3.5" />{showSmtp ? '▲' : '▼'} Email (SMTP) Settings — for sending PDF via email
+          </button>
+        </div>
+        {showSmtp && (
+          <>
+            <div className="md:col-span-2 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-700">
+              Configure SMTP to send quotations directly via email. For Gmail: host=smtp.gmail.com, port=587, use App Password.
+            </div>
+            <Field label="SMTP Host" name="smtp_host" placeholder="smtp.gmail.com" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600">SMTP Port</Label>
+              <Input type="number" value={form.smtp_port || 587} onChange={e => setForm(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} placeholder="587" className="h-9 rounded-xl text-sm" />
+            </div>
+            <Field label="SMTP Username / Email" name="smtp_user" placeholder="yourfirm@gmail.com" />
+            <Field label="SMTP Password / App Password" name="smtp_password" type="password" placeholder="••••••••••••" />
+            <div className="md:col-span-2">
+              <Field label="From Name (shown to recipient)" name="smtp_from_name" placeholder="Your Firm Name" />
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
@@ -151,94 +328,141 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
 /* ─── QuotationDetailModal ───────────────────────────────────────────────── */
 function QuotationDetailModal({ quotation, company, open, onClose, onStatusChange, onDownloadPdf, onDownloadChecklist, downloading }) {
   const isDark = useDark();
+  const [emailModal,  setEmailModal]  = useState(null);  // 'quotation' | 'checklist' | null
+  const [waModal,     setWaModal]     = useState(null);   // 'quotation' | 'checklist' | null
 
   if (!quotation) return null;
   const stage = quotation.status || 'draft';
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-            <Receipt className="h-5 w-5" />Quotation — {quotation.quotation_no}
-          </DialogTitle>
-          <DialogDescription>
-            <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-xl text-xs font-bold border capitalize', STATUS_STYLES[stage])}>{stage}</span>
-            <span className="ml-3 text-xs text-slate-500">Issued: {quotation.date}</span>
-            {quotation.lead_id && <span className="ml-3 inline-flex items-center gap-1 text-xs text-purple-600 font-semibold"><Link className="h-3 w-3" />Linked to Lead</span>}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+              <Receipt className="h-5 w-5" />Quotation — {quotation.quotation_no}
+            </DialogTitle>
+            <DialogDescription>
+              <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-xl text-xs font-bold border capitalize', STATUS_STYLES[stage])}>{stage}</span>
+              <span className="ml-3 text-xs text-slate-500">Issued: {quotation.date}</span>
+              {quotation.lead_id && <span className="ml-3 inline-flex items-center gap-1 text-xs text-purple-600 font-semibold"><Link className="h-3 w-3" />Linked to Lead</span>}
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          {/* Client */}
-          <div className={`p-4 rounded-2xl border grid grid-cols-2 gap-2 text-sm ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-            <div className={`col-span-2 font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{quotation.client_name}</div>
-            {quotation.client_phone && <p className="text-slate-500 flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{quotation.client_phone}</p>}
-            {quotation.client_email && <p className="text-slate-500 flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{quotation.client_email}</p>}
-            {quotation.client_address && <p className="text-slate-400 col-span-2 text-xs">{quotation.client_address}</p>}
-          </div>
+          <div className="space-y-4 py-2">
+            {/* Client */}
+            <div className={`p-4 rounded-2xl border grid grid-cols-2 gap-2 text-sm ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
+              <div className={`col-span-2 font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{quotation.client_name}</div>
+              {quotation.client_phone && <p className="text-slate-500 flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{quotation.client_phone}</p>}
+              {quotation.client_email && <p className="text-slate-500 flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{quotation.client_email}</p>}
+              {quotation.client_address && <p className="text-slate-400 col-span-2 text-xs">{quotation.client_address}</p>}
+            </div>
 
-          {/* Items */}
-          {(quotation.items || []).length > 0 && (
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Line Items</p>
-              <div className="rounded-2xl border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className={`text-xs ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-                      <th className="text-left px-3 py-2 font-semibold">Description</th>
-                      <th className="text-center px-3 py-2 font-semibold">Qty</th>
-                      <th className="text-center px-3 py-2 font-semibold">Unit</th>
-                      <th className="text-right px-3 py-2 font-semibold">Unit Price</th>
-                      <th className="text-right px-3 py-2 font-semibold">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quotation.items.map((item, i) => (
-                      <tr key={i} className={cn('border-t border-slate-100', i % 2 === 0 ? (isDark ? 'bg-slate-800' : 'bg-white') : (isDark ? 'bg-slate-700/50' : 'bg-slate-50/50'))}>
-                        <td className="px-3 py-2">{item.description}</td>
-                        <td className="px-3 py-2 text-center">{item.quantity}</td>
-                        <td className="px-3 py-2 text-center text-slate-500">{item.unit}</td>
-                        <td className="px-3 py-2 text-right">₹{(item.unit_price || 0).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right font-semibold">₹{(item.amount || 0).toLocaleString()}</td>
+            {/* Items */}
+            {(quotation.items || []).length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Line Items</p>
+                <div className="rounded-2xl border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className={`text-xs ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                        <th className="text-left px-3 py-2 font-semibold">Description</th>
+                        <th className="text-center px-3 py-2 font-semibold">Qty</th>
+                        <th className="text-center px-3 py-2 font-semibold">Unit</th>
+                        <th className="text-right px-3 py-2 font-semibold">Unit Price</th>
+                        <th className="text-right px-3 py-2 font-semibold">Amount</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {quotation.items.map((item, i) => (
+                        <tr key={i} className={cn('border-t border-slate-100', i % 2 === 0 ? (isDark ? 'bg-slate-800' : 'bg-white') : (isDark ? 'bg-slate-700/50' : 'bg-slate-50/50'))}>
+                          <td className="px-3 py-2">{item.description}</td>
+                          <td className="px-3 py-2 text-center">{item.quantity}</td>
+                          <td className="px-3 py-2 text-center text-slate-500">{item.unit}</td>
+                          <td className="px-3 py-2 text-right">₹{(item.unit_price || 0).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right font-semibold">₹{(item.amount || 0).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-2 space-y-1 text-sm text-right pr-1">
+                  <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sub Total: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.subtotal || 0).toLocaleString()}</span></p>
+                  {quotation.gst_rate > 0 && <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>GST @ {quotation.gst_rate}%: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.gst_amount || 0).toLocaleString()}</span></p>}
+                  <p className="text-base font-bold" style={{ color: COLORS.deepBlue }}>Total: ₹{(quotation.total || 0).toLocaleString()}</p>
+                </div>
               </div>
-              <div className="mt-2 space-y-1 text-sm text-right pr-1">
-                <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sub Total: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.subtotal || 0).toLocaleString()}</span></p>
-                {quotation.gst_rate > 0 && <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>GST @ {quotation.gst_rate}%: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.gst_amount || 0).toLocaleString()}</span></p>}
-                <p className="text-base font-bold" style={{ color: COLORS.deepBlue }}>Total: ₹{(quotation.total || 0).toLocaleString()}</p>
+            )}
+
+            {/* Status change */}
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+              {['draft', 'sent', 'accepted', 'rejected'].map(s => (
+                <button key={s} onClick={() => onStatusChange(quotation.id, s)} disabled={stage === s}
+                  className={cn('px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95', stage === s ? cn(STATUS_STYLES[s], 'shadow-sm') : cn('bg-white text-slate-400 border-slate-200 hover:border-slate-400 hover:text-slate-700'))}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Action buttons — Download + Email + WhatsApp */}
+            <div className="space-y-3">
+              {/* Quotation PDF actions */}
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Quotation PDF</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => onDownloadPdf(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9 text-xs">
+                    {downloading === quotation.id + '-pdf' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</> : <><Download className="h-3.5 w-3.5" />Download PDF</>}
+                  </Button>
+                  <Button onClick={() => setEmailModal('quotation')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
+                    <Mail className="h-3.5 w-3.5" />Email to Client
+                  </Button>
+                  <Button onClick={() => setWaModal('quotation')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-green-200 text-green-700 hover:bg-green-50">
+                    <MessageCircle className="h-3.5 w-3.5" />WhatsApp
+                  </Button>
+                </div>
+              </div>
+
+              {/* Checklist PDF actions */}
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Document Checklist PDF</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => onDownloadChecklist(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9 text-xs">
+                    {downloading === quotation.id + '-checklist' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</> : <><FileText className="h-3.5 w-3.5" />Download Checklist</>}
+                  </Button>
+                  <Button onClick={() => setEmailModal('checklist')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
+                    <Mail className="h-3.5 w-3.5" />Email Checklist
+                  </Button>
+                  <Button onClick={() => setWaModal('checklist')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-green-200 text-green-700 hover:bg-green-50">
+                    <MessageCircle className="h-3.5 w-3.5" />WhatsApp Checklist
+                  </Button>
+                </div>
               </div>
             </div>
-          )}
-
-          {/* Status change */}
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
-            {['draft', 'sent', 'accepted', 'rejected'].map(s => (
-              <button key={s} onClick={() => onStatusChange(quotation.id, s)} disabled={stage === s}
-                className={cn('px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95', stage === s ? cn(STATUS_STYLES[s], 'shadow-sm') : cn('bg-white text-slate-400 border-slate-200 hover:border-slate-400 hover:text-slate-700'))}>
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
           </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={onClose} className="rounded-xl">Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-          {/* PDF buttons */}
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => onDownloadPdf(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9">
-              {downloading === quotation.id + '-pdf' ? <><Loader2 className="h-4 w-4 animate-spin" />Generating…</> : <><Download className="h-4 w-4" />Download Quotation PDF</>}
-            </Button>
-            <Button onClick={() => onDownloadChecklist(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9">
-              {downloading === quotation.id + '-checklist' ? <><Loader2 className="h-4 w-4 animate-spin" />Generating…</> : <><FileText className="h-4 w-4" />Download Checklist PDF</>}
-            </Button>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="rounded-xl">Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Email modal */}
+      <EmailModal
+        open={!!emailModal}
+        onClose={() => setEmailModal(null)}
+        quotation={quotation}
+        company={company}
+        pdfType={emailModal}
+      />
+
+      {/* WhatsApp modal */}
+      <WhatsAppModal
+        open={!!waModal}
+        onClose={() => setWaModal(null)}
+        quotation={quotation}
+        company={company}
+        pdfType={waModal}
+      />
+    </>
   );
 }
 
@@ -276,8 +500,6 @@ export default function Quotations() {
     notes: '', extra_checklist_items: [], status: 'draft',
   };
   const [form, setForm] = useState(emptyForm);
-
-  /* ── checklist from service ── */
   const [checklists, setChecklists] = useState({});
 
   /* ── fetch data ── */
@@ -331,7 +553,6 @@ export default function Quotations() {
     </div>
   );
 
-  /* ── computed ── */
   const detailCompany = detailQtn ? companies.find(c => c.id === detailQtn.company_id) : null;
 
   const filteredQtns = quotations
@@ -354,7 +575,6 @@ export default function Quotations() {
   const gst_amount = Math.round(subtotal * Number(form.gst_rate || 0) / 100 * 100) / 100;
   const total      = subtotal + gst_amount;
 
-  /* ── scope / checklist helpers ── */
   const addScopeLine     = () => setForm(p => ({ ...p, scope_of_work: [...p.scope_of_work, ''] }));
   const removeScopeLine  = i  => setForm(p => ({ ...p, scope_of_work: p.scope_of_work.filter((_, idx) => idx !== i) }));
   const updateScopeLine  = (i, v) => setForm(p => { const s = [...p.scope_of_work]; s[i] = v; return { ...p, scope_of_work: s }; });
@@ -375,13 +595,7 @@ export default function Quotations() {
     } catch { toast.error('Failed to update status'); }
   };
 
-  /* ── PDF download ──────────────────────────────────────────────────────────
-   * FIX: When axios gets a blob response with a non-2xx status code, the
-   * error.response.data is a Blob, not a parsed JSON object. We must convert
-   * it back to text to read the actual error detail from FastAPI.
-   * Without this fix the catch block only shows "Request failed with status 500"
-   * and the real reason (e.g. "fpdf2 not installed") is invisible to the user.
-   * ─────────────────────────────────────────────────────────────────────── */
+  /* ── PDF download ── */
   const handleDownloadPdf = async (qtnId, qtnNo) => {
     setDownloading(qtnId + '-pdf');
     try {
@@ -392,17 +606,11 @@ export default function Quotations() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Verify the response is actually a PDF (not an error JSON wrapped in blob)
       const contentType = response.headers?.['content-type'] || '';
       if (!contentType.includes('application/pdf')) {
-        // Server returned an error as blob — convert and show it
         const text = await response.data.text();
-        try {
-          const json = JSON.parse(text);
-          throw new Error(json?.detail || 'PDF generation failed');
-        } catch {
-          throw new Error(text || 'PDF generation failed');
-        }
+        try { const json = JSON.parse(text); throw new Error(json?.detail || 'PDF generation failed'); }
+        catch { throw new Error(text || 'PDF generation failed'); }
       }
 
       const url  = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
@@ -415,8 +623,6 @@ export default function Quotations() {
       window.URL.revokeObjectURL(url);
       toast.success('Quotation PDF downloaded');
     } catch (err) {
-      console.error('PDF download error:', err);
-      // FIX: extract real message from blob error response
       const message = await extractBlobError(err);
       toast.error(message);
     } finally {
@@ -437,12 +643,8 @@ export default function Quotations() {
       const contentType = response.headers?.['content-type'] || '';
       if (!contentType.includes('application/pdf')) {
         const text = await response.data.text();
-        try {
-          const json = JSON.parse(text);
-          throw new Error(json?.detail || 'Checklist PDF generation failed');
-        } catch {
-          throw new Error(text || 'Checklist PDF generation failed');
-        }
+        try { const json = JSON.parse(text); throw new Error(json?.detail || 'Checklist PDF generation failed'); }
+        catch { throw new Error(text || 'Checklist PDF generation failed'); }
       }
 
       const url  = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
@@ -455,7 +657,6 @@ export default function Quotations() {
       window.URL.revokeObjectURL(url);
       toast.success('Checklist PDF downloaded');
     } catch (err) {
-      console.error('Checklist download error:', err);
       const message = await extractBlobError(err);
       toast.error(message);
     } finally {
@@ -500,7 +701,6 @@ export default function Quotations() {
 
   const closeForm = () => { setShowForm(false); setEditingQtn(null); setForm(emptyForm); setCurrentStep(0); };
 
-  /* ── step validation ── */
   const canGoNext = () => {
     if (currentStep === 0) return !!form.company_id && !!form.client_name?.trim();
     if (currentStep === 1) return !!form.service;
@@ -510,7 +710,6 @@ export default function Quotations() {
   /* ── render steps ── */
   const renderStep = () => {
     switch (currentStep) {
-
       case 0: return (
         <div className="space-y-5">
           <div className="space-y-1.5">
@@ -547,7 +746,6 @@ export default function Quotations() {
                   {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.company_name} <span className="text-slate-400 text-xs capitalize">[{l.status}]</span></SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-[10px] text-slate-400">Linking updates the lead's pipeline stage automatically.</p>
             </div>
           )}
 
@@ -596,7 +794,6 @@ export default function Quotations() {
             </div>
           </div>
 
-          {/* Scope of Work */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="font-semibold">Scope of Work</Label>
@@ -608,10 +805,8 @@ export default function Quotations() {
                 <button onClick={() => removeScopeLine(i)} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3.5 w-3.5" /></button>
               </div>
             ))}
-            {form.scope_of_work.length === 0 && <p className="text-xs text-slate-400 italic">No scope lines. Click "Add line" to add.</p>}
           </div>
 
-          {/* Line Items */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="font-semibold">Line Items</Label>
@@ -623,30 +818,22 @@ export default function Quotations() {
                   <span className="text-xs font-bold text-slate-500">Item {i + 1}</span>
                   <button onClick={() => removeItem(i)} className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3.5 w-3.5" /></button>
                 </div>
-                <Input
-                  value={item.description}
-                  onChange={e => updateItem(i, 'description', e.target.value)}
-                  placeholder="Description of service / work"
-                  className={`h-9 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}
-                />
+                <Input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} placeholder="Description of service / work"
+                  className={`h-9 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
                 <div className="grid grid-cols-4 gap-2">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Qty</p>
-                    <Input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} placeholder="1"
-                      className={`h-8 rounded-xl text-sm text-center ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit</p>
-                    <Select value={item.unit || 'service'} onValueChange={v => updateItem(i, 'unit', v)}>
-                      <SelectTrigger className={`h-8 rounded-xl text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}><SelectValue /></SelectTrigger>
-                      <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Unit Price (₹)</p>
-                    <Input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} placeholder="0"
-                      className={`h-8 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
-                  </div>
+                  {[['quantity','Qty','number','1'],['unit','Unit','select',null],['unit_price','Unit Price (₹)','number','0']].map(([key, label, type]) => (
+                    <div key={key} className="space-y-1">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
+                      {type === 'select'
+                        ? <Select value={item.unit || 'service'} onValueChange={v => updateItem(i, 'unit', v)}>
+                            <SelectTrigger className={`h-8 rounded-xl text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                          </Select>
+                        : <Input type="number" value={item[key]} onChange={e => updateItem(i, key, e.target.value)}
+                            className={`h-8 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
+                      }
+                    </div>
+                  ))}
                   <div className="space-y-1">
                     <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Amount (₹)</p>
                     <div className="h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center px-3 text-sm font-bold text-emerald-700">
@@ -656,7 +843,6 @@ export default function Quotations() {
                 </div>
               </div>
             ))}
-            {form.items.length === 0 && <p className="text-xs text-slate-400 italic">No items yet. Click "Add item".</p>}
             {form.items.length > 0 && (
               <div className="flex flex-col items-end gap-1 pt-2 pr-1 text-sm">
                 <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sub Total: <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{subtotal.toLocaleString()}</span></p>
@@ -666,10 +852,9 @@ export default function Quotations() {
             )}
           </div>
 
-          {/* Extra checklist items */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="font-semibold">Extra Checklist Items <span className="text-slate-400 font-normal text-xs">(added to standard checklist)</span></Label>
+              <Label className="font-semibold">Extra Checklist Items</Label>
               <button onClick={addExtraCheck} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3" />Add</button>
             </div>
             {form.extra_checklist_items.map((item, i) => (
@@ -698,8 +883,6 @@ export default function Quotations() {
               <Input value={form.advance_terms} onChange={e => setForm(p => ({ ...p, advance_terms: e.target.value }))} placeholder="e.g. 50% advance before commencement" className="h-10 rounded-xl" />
             </div>
           </div>
-
-          {/* Extra Terms */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="font-semibold">Additional Terms</Label>
@@ -712,7 +895,6 @@ export default function Quotations() {
               </div>
             ))}
           </div>
-
           <div className="space-y-1.5">
             <Label className="font-semibold">Internal Notes</Label>
             <Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={3} className="resize-none rounded-xl text-sm" placeholder="Internal notes (not shown on PDF)…" />
@@ -744,7 +926,6 @@ export default function Quotations() {
             <div className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-xs text-purple-700">
               <p className="font-semibold flex items-center gap-1.5"><Link className="h-3.5 w-3.5" />Lead Integration Active</p>
               <p className="mt-0.5">Creating this quotation will auto-update the linked lead's stage to <strong>"Proposal"</strong>.</p>
-              <p>When you mark it as <strong>Accepted</strong>, the lead will advance to <strong>"Negotiation"</strong>.</p>
             </div>
           )}
         </div>
@@ -758,7 +939,7 @@ export default function Quotations() {
   return (
     <motion.div className={`space-y-5 p-2 md:p-4 min-h-screen rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`} variants={containerVariants} initial="hidden" animate="visible">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <motion.div variants={itemVariants}>
         <Card className={`rounded-3xl overflow-hidden border shadow-sm ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200'}`}>
           <div className="h-1.5 w-full bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600" />
@@ -780,7 +961,7 @@ export default function Quotations() {
         </Card>
       </motion.div>
 
-      {/* ── Filters ── */}
+      {/* Filters */}
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -796,7 +977,7 @@ export default function Quotations() {
         </Select>
       </motion.div>
 
-      {/* ── Quotation Cards ── */}
+      {/* Quotation Cards */}
       {loading
         ? <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className={`h-24 rounded-2xl animate-pulse ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`} />)}</div>
         : filteredQtns.length === 0
@@ -854,7 +1035,7 @@ export default function Quotations() {
             </motion.div>
           )}
 
-      {/* ── Quotation Detail Modal ── */}
+      {/* Quotation Detail Modal */}
       <QuotationDetailModal
         quotation={detailQtn}
         company={detailCompany}
@@ -866,7 +1047,7 @@ export default function Quotations() {
         downloading={downloading}
       />
 
-      {/* ── Company Manager Dialog ── */}
+      {/* Company Manager Dialog */}
       <Dialog open={companyManagerOpen} onOpenChange={setCompanyManagerOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {editingCompany !== null
@@ -887,7 +1068,7 @@ export default function Quotations() {
                           {c.logo_base64 && <img src={c.logo_base64} alt="logo" className={`h-8 w-8 object-contain rounded-lg border p-0.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-white'}`} />}
                           <div>
                             <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.name}</p>
-                            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.email}</p>
+                            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.email} {c.smtp_host ? '· ✉️ SMTP configured' : ''}</p>
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -905,7 +1086,7 @@ export default function Quotations() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Create / Edit Form Dialog ── */}
+      {/* Create / Edit Form Dialog */}
       <Dialog open={showForm} onOpenChange={v => { if (!v) closeForm(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -913,7 +1094,6 @@ export default function Quotations() {
             <DialogDescription>Step {currentStep + 1} of {STEPS.length}: {STEPS[currentStep]}</DialogDescription>
           </DialogHeader>
 
-          {/* Step indicator */}
           <div className="flex items-center gap-2 py-2">
             {STEPS.map((s, i) => (
               <React.Fragment key={s}>
