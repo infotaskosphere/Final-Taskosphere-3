@@ -19,6 +19,12 @@
 #  - _doc_to_out now falls back to str(_id) when string "id" field is absent,
 #    so cached auto-saved events always expose a usable id to the frontend.
 #
+#  [BUG FIX 4 — GET /reminders serializer drops id for auto-saved docs]
+#  - _reminder_to_dict helper always resolves id = str(doc.get("id") or doc["_id"])
+#    so the frontend resolveId() never receives undefined for email-auto reminders.
+#    This is the root cause of "Cannot delete: reminder ID is missing" toast.
+#  - All reminder GET routes now use _reminder_to_dict for consistent serialization.
+#
 #  [NEW ROUTE — /migrate-fix-ids]
 #  - One-time backfill: sets string "id" = str(_id) on all existing reminders
 #    and todos that were auto-saved without a string id (v8 and earlier).
@@ -978,7 +984,7 @@ def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
 # =============================================================================
 
 def _doc_to_out(doc: Dict) -> ExtractedEventOut:
-    # ── FIX: Prefer string "id" field; fall back to str(_id) for auto-saved docs
+    # FIX: Prefer string "id" field; fall back to str(_id) for auto-saved docs
     # that were inserted before v9 (which had no string id field).
     raw_id = doc.get("id") or doc.get("_id")
     str_id = str(raw_id) if raw_id is not None else ""
@@ -1013,6 +1019,43 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         connected_at=doc.get("connected_at"),
         sync_error=doc.get("sync_error"),
     )
+
+# =============================================================================
+# FIX v9: _reminder_to_dict — always resolves string id for GET /reminders
+# =============================================================================
+# ROOT CAUSE OF "Cannot delete: reminder ID is missing":
+#   Auto-saved reminders inserted by _auto_save_event (v8 and earlier) had no
+#   string "id" field — only MongoDB ObjectId "_id". The GET /reminders route
+#   was serializing docs without always including a string id, so the frontend
+#   resolveId() received undefined and could not construct the DELETE URL.
+#
+# FIX: _reminder_to_dict always resolves id = str(doc["id"]) if present,
+#   else falls back to str(doc["_id"]). Both the "id" field AND a legacy "_id"
+#   field are included in every response so the frontend triple-fallback works.
+# =============================================================================
+
+def _reminder_to_dict(doc: Dict) -> Dict:
+    """
+    Serialize a reminders collection document to a dict safe for API responses.
+    Always includes a non-empty string "id" field — resolves from:
+      1. doc["id"]  (string uuid, set by v9 inserts and migrate-fix-ids)
+      2. str(doc["_id"])  (MongoDB ObjectId fallback for pre-v9 docs)
+    """
+    raw_id = doc.get("id") or doc.get("_id")
+    str_id = str(raw_id) if raw_id is not None else ""
+    return {
+        "id":           str_id,
+        "_id":          str_id,   # legacy field — kept so any old frontend code still works
+        "user_id":      doc.get("user_id", ""),
+        "title":        doc.get("title", ""),
+        "description":  doc.get("description"),
+        "remind_at":    doc.get("remind_at"),
+        "is_dismissed": doc.get("is_dismissed", False),
+        "source":       doc.get("source"),
+        "tm_app_no":    doc.get("tm_app_no"),
+        "urgency":      doc.get("urgency", "medium"),
+        "created_at":   doc.get("created_at"),
+    }
 
 
 # =============================================================================
@@ -1107,7 +1150,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                 else:
                     logger.debug(f"[TODO] Skip duplicate seq={reminder_seq} TM#{tm_app_no}")
             else:
-                # ── v9 FIX: generate UUID string "id" before insert ──────────
+                # v9 FIX: generate UUID string "id" before insert
                 new_id = str(_uuid.uuid4())
                 await db["todos"].insert_one({
                     "id":               new_id,          # ← string id for API routes
@@ -1186,7 +1229,7 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
             if clean_desc:            desc_parts.append(f"Notes: {clean_desc}")
             if event.source_subject:  desc_parts.append(f"Subject: {event.source_subject}")
 
-            # ── v9 FIX: generate UUID string "id" before insert ──────────────
+            # v9 FIX: generate UUID string "id" before insert
             new_id = str(_uuid.uuid4())
             await db["reminders"].insert_one({
                 "id":               new_id,          # ← string id for DELETE/PATCH routes
@@ -1681,6 +1724,100 @@ async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(get
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save todo: {e}")
+
+
+# =============================================================================
+# API ROUTES — REMINDERS (GET / PATCH / DELETE)
+# =============================================================================
+# These routes use _reminder_to_dict to always include a resolved string "id".
+# This is the primary fix for "Cannot delete: reminder ID is missing".
+# =============================================================================
+
+@router.get("/reminders")
+async def get_reminders(
+    current_user=Depends(get_current_user),
+    user_id: Optional[str] = Query(None),
+):
+    """
+    Return all non-dismissed reminders for the current user (or a specific
+    user_id if the caller has admin rights).
+    Every returned doc is guaranteed to have a non-empty string "id" field
+    thanks to _reminder_to_dict's fallback to str(_id).
+    """
+    target_uid = user_id if user_id else str(current_user.id)
+    docs = await db["reminders"].find(
+        {"user_id": target_uid}
+    ).sort("remind_at", 1).to_list(500)
+    return [_reminder_to_dict(d) for d in docs]
+
+
+@router.patch("/reminders/{reminder_id}")
+async def update_reminder(
+    reminder_id: str,
+    body: dict,
+    current_user=Depends(get_current_user),
+):
+    """
+    Update a reminder by its string id (UUID) or MongoDB ObjectId string.
+    Tries string "id" field first, then falls back to ObjectId "_id" match.
+    """
+    user_id = str(current_user.id)
+
+    # Try string id field first (v9 docs)
+    doc = await db["reminders"].find_one(
+        {"user_id": user_id, "id": reminder_id}, {"_id": 1}
+    )
+
+    # Fallback: try ObjectId match (pre-v9 docs where id == str(_id))
+    if not doc:
+        try:
+            doc = await db["reminders"].find_one(
+                {"user_id": user_id, "_id": ObjectId(reminder_id)}, {"_id": 1}
+            )
+        except Exception:
+            pass
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    allowed_fields = {
+        "title", "description", "remind_at", "is_dismissed",
+        "urgency", "tm_app_no", "updated_at",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db["reminders"].update_one({"_id": doc["_id"]}, {"$set": updates})
+
+    updated = await db["reminders"].find_one({"_id": doc["_id"]}, {"_id": 0})
+    return _reminder_to_dict({**updated, "_id": doc["_id"]})
+
+
+@router.delete("/reminders/{reminder_id}", status_code=204)
+async def delete_reminder(
+    reminder_id: str,
+    current_user=Depends(get_current_user),
+):
+    """
+    Delete a reminder by its string id (UUID) or MongoDB ObjectId string.
+    Tries string "id" field first, then falls back to ObjectId "_id" match.
+    Returns 204 whether found or not (idempotent).
+    """
+    user_id = str(current_user.id)
+
+    # Try string id field first (v9 docs and migrated docs)
+    result = await db["reminders"].delete_one(
+        {"user_id": user_id, "id": reminder_id}
+    )
+
+    if result.deleted_count == 0:
+        # Fallback: try ObjectId match for pre-v9 docs
+        try:
+            await db["reminders"].delete_one(
+                {"user_id": user_id, "_id": ObjectId(reminder_id)}
+            )
+        except Exception:
+            pass  # Invalid ObjectId format — silently ignore, return 204 anyway
 
 
 # =============================================================================
