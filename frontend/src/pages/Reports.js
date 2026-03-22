@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { toast } from 'sonner';
