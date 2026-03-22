@@ -2185,25 +2185,42 @@ async def export_task_log_pdf(
         headers={"Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"}
     )
 
-# Dsc Routes
+# ═══════════════════════════════════════════════════════════════════════════════
+# DSC ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _to_iso(val) -> Optional[str]:
+    """Safely convert datetime/date/string/None to ISO string for MongoDB storage."""
+    if val is None:
+        return None
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
+    return str(val)  # already a plain string like "2026-03-22"
+
+
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(
     dsc_data: DSCCreate,
     current_user: User = Depends(get_current_user)
 ):
     try:
-        dsc = DSC(**dsc_data.model_dump(), created_by=current_user.id)
+        now = datetime.now(timezone.utc)
+        dsc = DSC(
+            **dsc_data.model_dump(),
+            created_by=current_user.id,
+            created_at=now,          # explicitly set — never None
+        )
         doc = dsc.model_dump()
-        # Convert datetime objects to ISO strings for MongoDB storage
-        doc["created_at"] = doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else doc["created_at"]
-        doc["issue_date"] = doc["issue_date"].isoformat() if isinstance(doc["issue_date"], datetime) else doc["issue_date"]
-        doc["expiry_date"] = doc["expiry_date"].isoformat() if isinstance(doc["expiry_date"], datetime) else doc["expiry_date"]
+        doc["created_at"]  = _to_iso(doc["created_at"])
+        doc["issue_date"]  = _to_iso(doc["issue_date"])
+        doc["expiry_date"] = _to_iso(doc["expiry_date"])
         await db.dsc_register.insert_one(doc)
         doc.pop("_id", None)
         return dsc
     except Exception as e:
         logger.error(f"DSC create error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save DSC: {str(e)}")
+
 
 @api_router.get("/dsc")
 async def get_dsc_list(
@@ -2230,67 +2247,102 @@ async def get_dsc_list(
     cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip(skip).limit(limit)
     dsc_list = await cursor.to_list(length=limit)
     now = datetime.now(IST)
+
     for dsc in dsc_list:
-        if isinstance(dsc.get("created_at"), str):
-            dsc["created_at"] = datetime.fromisoformat(dsc["created_at"])
-        if isinstance(dsc.get("issue_date"), str):
-            dsc["issue_date"] = datetime.fromisoformat(dsc["issue_date"])
-        if isinstance(dsc.get("expiry_date"), str):
-            dsc["expiry_date"] = datetime.fromisoformat(dsc["expiry_date"])
+        # Safely parse stored ISO strings back to datetime for comparison
+        for field in ("created_at", "issue_date", "expiry_date"):
+            val = dsc.get(field)
+            if isinstance(val, str):
+                try:
+                    dsc[field] = datetime.fromisoformat(val)
+                except ValueError:
+                    dsc[field] = None
+
         expiry_date = dsc.get("expiry_date")
-        if expiry_date and expiry_date < now:
-            movement_log = dsc.get("movement_log", [])
-            updated = False
-            if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
-                movement_log.append({
-                    "id": str(uuid.uuid4()),
-                    "movement_type": "EXPIRED",
-                    "person_name": "System Auto",
-                    "notes": "Auto marked as expired",
-                    "timestamp": now.isoformat(),
-                    "recorded_by": "System"
-                })
-                updated = True
-            if dsc.get("current_status") != "EXPIRED":
-                updated = True
-            if updated:
-                await db.dsc_register.update_one(
-                    {"id": dsc["id"]},
-                    {"$set": {"current_status": "EXPIRED", "movement_log": movement_log}}
-                )
-                dsc["current_status"] = "EXPIRED"
-                dsc["movement_log"] = movement_log
+        if expiry_date:
+            # Make expiry_date timezone-aware for comparison with IST now
+            if isinstance(expiry_date, datetime) and expiry_date.tzinfo is None:
+                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+
+            if expiry_date < now:
+                movement_log = dsc.get("movement_log", [])
+                updated = False
+                if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
+                    movement_log.append({
+                        "id": str(uuid.uuid4()),
+                        "movement_type": "EXPIRED",
+                        "person_name": "System Auto",
+                        "notes": "Auto marked as expired",
+                        "timestamp": now.isoformat(),
+                        "recorded_by": "System"
+                    })
+                    updated = True
+                if dsc.get("current_status") != "EXPIRED":
+                    updated = True
+                if updated:
+                    await db.dsc_register.update_one(
+                        {"id": dsc["id"]},
+                        {"$set": {"current_status": "EXPIRED", "movement_log": movement_log}}
+                    )
+                    dsc["current_status"] = "EXPIRED"
+                    dsc["movement_log"] = movement_log
+
     return DSCListResponse(data=dsc_list, total=total, page=page, limit=limit)
 
+
 @api_router.put("/dsc/{dsc_id}", response_model=DSC)
-async def update_dsc(dsc_id: str, dsc_data: DSCCreate, current_user: User = Depends(check_permission("can_edit_dsc"))):
+async def update_dsc(
+    dsc_id: str,
+    dsc_data: DSCCreate,
+    current_user: User = Depends(check_permission("can_edit_dsc"))
+):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+
     update_data = dsc_data.model_dump()
-    update_data["issue_date"] = update_data["issue_date"].isoformat()
-    update_data["expiry_date"] = update_data["expiry_date"].isoformat()
+    update_data["issue_date"]  = _to_iso(update_data["issue_date"])
+    update_data["expiry_date"] = _to_iso(update_data["expiry_date"])
+
     await db.dsc_register.update_one({"id": dsc_id}, {"$set": update_data})
-    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data=update_data)
+    await create_audit_log(
+        current_user, action="UPDATE_DSC", module="dsc",
+        record_id=dsc_id, old_data=existing, new_data=update_data
+    )
+
     updated = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
-    if isinstance(updated["created_at"], str):
-        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
-    if isinstance(updated["issue_date"], str):
-        updated["issue_date"] = datetime.fromisoformat(updated["issue_date"])
-    if isinstance(updated["expiry_date"], str):
-        updated["expiry_date"] = datetime.fromisoformat(updated["expiry_date"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="DSC not found after update")
+
+    # Parse ISO strings back to datetime for Pydantic response model
+    for field in ("created_at", "issue_date", "expiry_date"):
+        val = updated.get(field)
+        if isinstance(val, str):
+            try:
+                updated[field] = datetime.fromisoformat(val)
+            except ValueError:
+                updated[field] = None
+
     return DSC(**updated)
 
+
 @api_router.delete("/dsc/{dsc_id}")
-async def delete_dsc(dsc_id: str, current_user: User = Depends(check_permission("can_edit_dsc"))):
+async def delete_dsc(
+    dsc_id: str,
+    current_user: User = Depends(check_permission("can_edit_dsc"))
+):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
-    await create_audit_log(current_user, action="DELETE_DSC", module="dsc", record_id=dsc_id, old_data=existing)
+    await create_audit_log(
+        current_user, action="DELETE_DSC", module="dsc",
+        record_id=dsc_id, old_data=existing
+    )
     result = await db.dsc_register.delete_one({"id": dsc_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="DSC not found")
     return {"message": "DSC deleted successfully"}
+
 
 @api_router.post("/dsc/{dsc_id}/movement")
 async def record_dsc_movement(
@@ -2301,28 +2353,34 @@ async def record_dsc_movement(
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+
     movement = {
-        "id": str(uuid.uuid4()),
+        "id":            str(uuid.uuid4()),
         "movement_type": movement_data.movement_type,
-        "person_name": movement_data.person_name,
-        "timestamp": datetime.now(IST).isoformat(),
-        "notes": movement_data.notes,
-        "recorded_by": current_user.full_name
+        "person_name":   movement_data.person_name,
+        "timestamp":     datetime.now(IST).isoformat(),
+        "notes":         movement_data.notes,
+        "recorded_by":   current_user.full_name
     }
     movement_log = existing.get("movement_log", [])
     movement_log.append(movement)
+
     await db.dsc_register.update_one(
         {"id": dsc_id},
         {
             "$set": {
-                "current_status": movement_data.movement_type,
+                "current_status":   movement_data.movement_type,
                 "current_location": "with_company" if movement_data.movement_type == "IN" else "taken_by_client",
-                "movement_log": movement_log
+                "movement_log":     movement_log
             }
         }
     )
-    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
+    await create_audit_log(
+        current_user, action="UPDATE_DSC", module="dsc",
+        record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log}
+    )
     return {"message": f"DSC marked as {movement_data.movement_type}", "movement": movement}
+
 
 @api_router.put("/dsc/{dsc_id}/movement/{movement_id}")
 async def update_dsc_movement(
@@ -2334,8 +2392,10 @@ async def update_dsc_movement(
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
+
     movement_log = existing.get("movement_log", [])
     movement_found = False
+
     for i, movement in enumerate(movement_log):
         if movement.get("id") == movement_id:
             movement_log[i]["movement_type"] = update_data.movement_type
@@ -2347,16 +2407,23 @@ async def update_dsc_movement(
             movement_log[i]["edited_at"] = datetime.now(timezone.utc).isoformat()
             movement_found = True
             break
+
     if not movement_found:
         raise HTTPException(status_code=404, detail="Movement entry not found")
-    new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
+
+    # Derive current_status from the last non-EXPIRED movement entry
+    non_expired = [m for m in movement_log if m.get("movement_type") != "EXPIRED"]
+    new_status = non_expired[-1]["movement_type"] if non_expired else "IN"
+
     await db.dsc_register.update_one(
         {"id": dsc_id},
         {"$set": {"current_status": new_status, "movement_log": movement_log}}
     )
-    await create_audit_log(current_user, action="UPDATE_DSC", module="dsc", record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log})
+    await create_audit_log(
+        current_user, action="UPDATE_DSC", module="dsc",
+        record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log}
+    )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
-
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
 async def create_document(document_data: DocumentCreate, current_user: User = Depends(get_current_user)):
