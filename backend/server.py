@@ -3749,10 +3749,63 @@ async def update_client(
  
     updated = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if isinstance(updated.get("created_at"), str):
-        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+        try:
+            updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+        except ValueError:
+            updated["created_at"] = datetime.now(timezone.utc)
     if updated.get("birthday") and isinstance(updated["birthday"], str):
-        updated["birthday"] = date.fromisoformat(updated["birthday"])
-    return Client(**updated)
+        try:
+            updated["birthday"] = date.fromisoformat(updated["birthday"])
+        except ValueError:
+            updated["birthday"] = None
+    # Strip fields not in Pydantic model before constructing Client
+    client_fields = Client.model_fields.keys()
+    safe_updated = {k: v for k, v in updated.items() if k in client_fields}
+    return Client(**safe_updated)
+@api_router.delete("/clients/{client_id}")
+async def delete_client(
+    client_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a client by ID.
+    - Nullifies any leads that reference this client (converted_client_id)
+      so FK-style references don't leave dangling data.
+    - Requires can_delete_data permission (admin always passes).
+    """
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_delete_data", False):
+        raise HTTPException(status_code=403, detail="You do not have permission to delete clients")
+
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Nullify any leads that were converted to this client
+    await db.leads.update_many(
+        {"converted_client_id": client_id},
+        {"$set": {"converted_client_id": None}}
+    )
+
+    # Also unlink tasks referencing this client
+    await db.tasks.update_many(
+        {"client_id": client_id},
+        {"$set": {"client_id": None}}
+    )
+
+    await create_audit_log(
+        current_user,
+        action="DELETE_CLIENT",
+        module="client",
+        record_id=client_id,
+        old_data=existing,
+    )
+
+    result = await db.clients.delete_one({"id": client_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    return {"message": f"Client '{existing.get('company_name', client_id)}' deleted successfully"}
 #============================================
 # DASHBOARD ROUTES
 #============================================
