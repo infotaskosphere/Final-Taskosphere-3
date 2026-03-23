@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -52,14 +53,16 @@ const extractBlobError = async (error) => {
         return text || 'PDF generation failed';
       }
     }
+    // Handle non-blob errors as well
     return (
       error?.response?.data?.detail ||
       error?.response?.data?.message ||
       error?.message ||
       'PDF generation failed'
     );
-  } catch {
-    return 'PDF generation failed';
+  } catch (e) {
+    console.error("Error extracting blob error:", e);
+    return 'PDF generation failed due to an unknown error.';
   }
 };
 
@@ -228,374 +231,712 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
   });
   const [saving, setSaving] = useState(false);
-  const [showSmtp, setShowSmtp] = useState(false);
+  const logoInputRef = useRef(null);
+  const signatureInputRef = useRef(null);
 
-  useEffect(() => { if (editingCompany) setForm({ ...form, ...editingCompany }); }, [editingCompany]);
+  useEffect(() => {
+    if (editingCompany) {
+      setForm({
+        name: editingCompany.name || '',
+        address: editingCompany.address || '',
+        phone: editingCompany.phone || '',
+        email: editingCompany.email || '',
+        website: editingCompany.website || '',
+        gstin: editingCompany.gstin || '',
+        pan: editingCompany.pan || '',
+        bank_account_name: editingCompany.bank_account_name || '',
+        bank_name: editingCompany.bank_name || '',
+        bank_account_no: editingCompany.bank_account_no || '',
+        bank_ifsc: editingCompany.bank_ifsc || '',
+        logo_base64: editingCompany.logo_base64 || null,
+        signature_base64: editingCompany.signature_base64 || null,
+        smtp_host: editingCompany.smtp_host || '',
+        smtp_port: editingCompany.smtp_port || 587,
+        smtp_user: editingCompany.smtp_user || '',
+        smtp_password: editingCompany.smtp_password || '',
+        smtp_from_name: editingCompany.smtp_from_name || '',
+      });
+    } else {
+      setForm({
+        name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
+        bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
+        logo_base64: null, signature_base64: null,
+        smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
+      });
+    }
+  }, [editingCompany]);
 
-  const handleFileBase64 = (key, e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setForm(p => ({ ...p, [key]: reader.result }));
-    reader.readAsDataURL(file);
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (e, fieldName) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setForm(prev => ({ ...prev, [fieldName]: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast.error('Company name is required'); return; }
     setSaving(true);
     try {
-      if (editingCompany?.id) { await api.put(`/companies/${editingCompany.id}`, form); toast.success('Company updated'); }
-      else                    { await api.post('/companies', form); toast.success('Company created'); }
+      if (editingCompany) {
+        await api.put(`/companies/${editingCompany.id}`, form);
+        toast.success('Company updated successfully');
+      } else {
+        await api.post('/companies', form);
+        toast.success('Company created successfully');
+      }
       onSaved();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save company'); }
-    finally { setSaving(false); }
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save company');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const Field = ({ label, name, type = 'text', placeholder = '' }) => (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-semibold text-slate-600">{label}</Label>
-      <Input type={type} value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))} placeholder={placeholder} className="h-9 rounded-xl text-sm" />
-    </div>
-  );
-
   return (
-    <div className="space-y-5">
-      <h3 className="text-lg font-bold" style={{ color: COLORS.deepBlue }}>{editingCompany?.id ? 'Edit Company' : 'Add Company Profile'}</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="md:col-span-2 space-y-1.5">
-          <Label className="text-xs font-semibold">Company Name *</Label>
-          <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Your Firm Name" className="h-9 rounded-xl" />
-        </div>
-        <div className="md:col-span-2 space-y-1.5">
-          <Label className="text-xs font-semibold">Address</Label>
-          <Textarea value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className="resize-none rounded-xl text-sm" placeholder="Full address…" />
-        </div>
-        <Field label="Phone" name="phone" placeholder="+91 98765 43210" />
-        <Field label="Email" name="email" type="email" placeholder="info@firm.com" />
-        <Field label="Website" name="website" placeholder="https://yourfirm.com" />
-        <Field label="GSTIN" name="gstin" placeholder="22AAAAA0000A1Z5" />
-        <Field label="PAN" name="pan" placeholder="AAAAA1234A" />
+    <Dialog open={true} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <Building2 className="h-5 w-5" />
+            {editingCompany ? 'Edit Company Profile' : 'Create New Company Profile'}
+          </DialogTitle>
+          <DialogDescription>
+            Manage your company details, bank information, and SMTP settings for email. These details will be used in quotations.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="md:col-span-2"><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2 mb-1">Bank Details</p></div>
-        <Field label="Account Holder Name" name="bank_account_name" placeholder="Firm Name" />
-        <Field label="Bank Name" name="bank_name" placeholder="HDFC Bank" />
-        <Field label="Account Number" name="bank_account_no" placeholder="0000000000000" />
-        <Field label="IFSC Code" name="bank_ifsc" placeholder="HDFC0001234" />
-
-        <div className="md:col-span-2"><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-2 mb-1">Logo & Signature</p></div>
-        {['logo_base64', 'signature_base64'].map(key => (
-          <div key={key} className="space-y-1.5">
-            <Label className="text-xs font-semibold">{key === 'logo_base64' ? 'Company Logo' : 'Signature Image'}</Label>
-            {form[key] && <img src={form[key]} alt={key} className="h-12 object-contain rounded-lg border border-slate-200 bg-slate-50 px-2" />}
-            <Input type="file" accept="image/*" onChange={e => handleFileBase64(key, e)} className="h-9 rounded-xl text-sm" />
-          </div>
-        ))}
-
-        {/* SMTP Config */}
-        <div className="md:col-span-2">
-          <button onClick={() => setShowSmtp(p => !p)} className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 mt-2">
-            <Settings className="h-3.5 w-3.5" />{showSmtp ? '▲' : '▼'} Email (SMTP) Settings — for sending PDF via email
-          </button>
-        </div>
-        {showSmtp && (
-          <>
-            <div className="md:col-span-2 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-700">
-              Configure SMTP to send quotations directly via email. For Gmail: host=smtp.gmail.com, port=587, use App Password.
-            </div>
-            <Field label="SMTP Host" name="smtp_host" placeholder="smtp.gmail.com" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 py-2 max-h-[60vh] overflow-y-auto pr-4">
+          {/* Company Details */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Info className="h-4 w-4" />Company Details</h4>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-slate-600">SMTP Port</Label>
-              <Input type="number" value={form.smtp_port || 587} onChange={e => setForm(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} placeholder="587" className="h-9 rounded-xl text-sm" />
+              <Label className="text-xs font-semibold">Company Name *</Label>
+              <Input name="name" value={form.name} onChange={handleChange} className="h-9 rounded-xl text-sm" />
             </div>
-            <Field label="SMTP Username / Email" name="smtp_user" placeholder="yourfirm@gmail.com" />
-            <Field label="SMTP Password / App Password" name="smtp_password" type="password" placeholder="••••••••••••" />
-            <div className="md:col-span-2">
-              <Field label="From Name (shown to recipient)" name="smtp_from_name" placeholder="Your Firm Name" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Address</Label>
+              <Textarea name="address" value={form.address} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" />
             </div>
-          </>
-        )}
-      </div>
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-        <Button onClick={handleSave} disabled={saving} className="rounded-xl" style={{ background: COLORS.emeraldGreen }}>
-          {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : 'Save Company'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── QuotationDetailModal ───────────────────────────────────────────────── */
-function QuotationDetailModal({ quotation, company, open, onClose, onStatusChange, onDownloadPdf, onDownloadChecklist, downloading }) {
-  const isDark = useDark();
-  const [emailModal,  setEmailModal]  = useState(null);  // 'quotation' | 'checklist' | null
-  const [waModal,     setWaModal]     = useState(null);   // 'quotation' | 'checklist' | null
-
-  if (!quotation) return null;
-  const stage = quotation.status || 'draft';
-
-  return (
-    <>
-      <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-              <Receipt className="h-5 w-5" />Quotation — {quotation.quotation_no}
-            </DialogTitle>
-            <DialogDescription>
-              <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-xl text-xs font-bold border capitalize', STATUS_STYLES[stage])}>{stage}</span>
-              <span className="ml-3 text-xs text-slate-500">Issued: {quotation.date}</span>
-              {quotation.lead_id && <span className="ml-3 inline-flex items-center gap-1 text-xs text-purple-600 font-semibold"><Link className="h-3 w-3" />Linked to Lead</span>}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            {/* Client */}
-            <div className={`p-4 rounded-2xl border grid grid-cols-2 gap-2 text-sm ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-              <div className={`col-span-2 font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{quotation.client_name}</div>
-              {quotation.client_phone && <p className="text-slate-500 flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{quotation.client_phone}</p>}
-              {quotation.client_email && <p className="text-slate-500 flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{quotation.client_email}</p>}
-              {quotation.client_address && <p className="text-slate-400 col-span-2 text-xs">{quotation.client_address}</p>}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Phone</Label>
+              <Input name="phone" value={form.phone} onChange={handleChange} className="h-9 rounded-xl text-sm" />
             </div>
-
-            {/* Items */}
-            {(quotation.items || []).length > 0 && (
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Line Items</p>
-                <div className="rounded-2xl border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className={`text-xs ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-                        <th className="text-left px-3 py-2 font-semibold">Description</th>
-                        <th className="text-center px-3 py-2 font-semibold">Qty</th>
-                        <th className="text-center px-3 py-2 font-semibold">Unit</th>
-                        <th className="text-right px-3 py-2 font-semibold">Unit Price</th>
-                        <th className="text-right px-3 py-2 font-semibold">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {quotation.items.map((item, i) => (
-                        <tr key={i} className={cn('border-t border-slate-100', i % 2 === 0 ? (isDark ? 'bg-slate-800' : 'bg-white') : (isDark ? 'bg-slate-700/50' : 'bg-slate-50/50'))}>
-                          <td className="px-3 py-2">{item.description}</td>
-                          <td className="px-3 py-2 text-center">{item.quantity}</td>
-                          <td className="px-3 py-2 text-center text-slate-500">{item.unit}</td>
-                          <td className="px-3 py-2 text-right">₹{(item.unit_price || 0).toLocaleString()}</td>
-                          <td className="px-3 py-2 text-right font-semibold">₹{(item.amount || 0).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mt-2 space-y-1 text-sm text-right pr-1">
-                  <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sub Total: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.subtotal || 0).toLocaleString()}</span></p>
-                  {quotation.gst_rate > 0 && <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>GST @ {quotation.gst_rate}%: <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{(quotation.gst_amount || 0).toLocaleString()}</span></p>}
-                  <p className="text-base font-bold" style={{ color: COLORS.deepBlue }}>Total: ₹{(quotation.total || 0).toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Status change */}
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
-              {['draft', 'sent', 'accepted', 'rejected'].map(s => (
-                <button key={s} onClick={() => onStatusChange(quotation.id, s)} disabled={stage === s}
-                  className={cn('px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95', stage === s ? cn(STATUS_STYLES[s], 'shadow-sm') : cn('bg-white text-slate-400 border-slate-200 hover:border-slate-400 hover:text-slate-700'))}>
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Email</Label>
+              <Input name="email" value={form.email} onChange={handleChange} type="email" className="h-9 rounded-xl text-sm" />
             </div>
-
-            {/* Action buttons — Download + Email + WhatsApp */}
-            <div className="space-y-3">
-              {/* Quotation PDF actions */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Quotation PDF</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => onDownloadPdf(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9 text-xs">
-                    {downloading === quotation.id + '-pdf' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</> : <><Download className="h-3.5 w-3.5" />Download PDF</>}
-                  </Button>
-                  <Button onClick={() => setEmailModal('quotation')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
-                    <Mail className="h-3.5 w-3.5" />Email to Client
-                  </Button>
-                  <Button onClick={() => setWaModal('quotation')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-green-200 text-green-700 hover:bg-green-50">
-                    <MessageCircle className="h-3.5 w-3.5" />WhatsApp
-                  </Button>
-                </div>
-              </div>
-
-              {/* Checklist PDF actions */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Document Checklist PDF</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => onDownloadChecklist(quotation.id, quotation.quotation_no)} disabled={!!downloading} variant="outline" className="rounded-xl gap-2 h-9 text-xs">
-                    {downloading === quotation.id + '-checklist' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</> : <><FileText className="h-3.5 w-3.5" />Download Checklist</>}
-                  </Button>
-                  <Button onClick={() => setEmailModal('checklist')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
-                    <Mail className="h-3.5 w-3.5" />Email Checklist
-                  </Button>
-                  <Button onClick={() => setWaModal('checklist')} variant="outline" className="rounded-xl gap-2 h-9 text-xs border-green-200 text-green-700 hover:bg-green-50">
-                    <MessageCircle className="h-3.5 w-3.5" />WhatsApp Checklist
-                  </Button>
-                </div>
-              </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Website</Label>
+              <Input name="website" value={form.website} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">GSTIN</Label>
+              <Input name="gstin" value={form.gstin} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">PAN</Label>
+              <Input name="pan" value={form.pan} onChange={handleChange} className="h-9 rounded-xl text-sm" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={onClose} className="rounded-xl">Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Email modal */}
-      <EmailModal
-        open={!!emailModal}
-        onClose={() => setEmailModal(null)}
-        quotation={quotation}
-        company={company}
-        pdfType={emailModal}
-      />
+          {/* Bank Details & Logos */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><CreditCard className="h-4 w-4" />Bank Details</h4>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Bank Account Name</Label>
+              <Input name="bank_account_name" value={form.bank_account_name} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Bank Name</Label>
+              <Input name="bank_name" value={form.bank_name} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Bank Account No.</Label>
+              <Input name="bank_account_no" value={form.bank_account_no} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Bank IFSC Code</Label>
+              <Input name="bank_ifsc" value={form.bank_ifsc} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
 
-      {/* WhatsApp modal */}
-      <WhatsAppModal
-        open={!!waModal}
-        onClose={() => setWaModal(null)}
-        quotation={quotation}
-        company={company}
-        pdfType={waModal}
-      />
-    </>
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-6"><Tag className="h-4 w-4" />Logos & Signatures</h4>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Company Logo (Base64)</Label>
+              <Input type="file" accept="image/*" onChange={e => handleFileChange(e, 'logo_base64')} className="h-9 rounded-xl text-sm" ref={logoInputRef} />
+              {form.logo_base64 && <img src={form.logo_base64} alt="Company Logo" className="mt-2 h-16 object-contain" />}
+              {form.logo_base64 && <Button variant="outline" size="sm" onClick={() => { setForm(prev => ({ ...prev, logo_base64: null })); if(logoInputRef.current) logoInputRef.current.value = ''; }} className="mt-1">Remove Logo</Button>}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Signature (Base64)</Label>
+              <Input type="file" accept="image/*" onChange={e => handleFileChange(e, 'signature_base64')} className="h-9 rounded-xl text-sm" ref={signatureInputRef} />
+              {form.signature_base64 && <img src={form.signature_base64} alt="Signature" className="mt-2 h-16 object-contain" />}
+              {form.signature_base64 && <Button variant="outline" size="sm" onClick={() => { setForm(prev => ({ ...prev, signature_base64: null })); if(signatureInputRef.current) signatureInputRef.current.value = ''; }} className="mt-1">Remove Signature</Button>}
+            </div>
+
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-6"><Mail className="h-4 w-4" />SMTP Settings (for sending emails)</h4>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">SMTP Host</Label>
+              <Input name="smtp_host" value={form.smtp_host} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">SMTP Port</Label>
+              <Input name="smtp_port" value={form.smtp_port} onChange={handleChange} type="number" className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">SMTP User (From Email)</Label>
+              <Input name="smtp_user" value={form.smtp_user} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">SMTP Password</Label>
+              <Input name="smtp_password" value={form.smtp_password} onChange={handleChange} type="password" className="h-9 rounded-xl text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">SMTP From Name</Label>
+              <Input name="smtp_from_name" value={form.smtp_from_name} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
+            {saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : 'Save Company'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   MAIN COMPONENT
-═══════════════════════════════════════════════════════════════════════════ */
-export default function Quotations() {
-  const isDark = useDark();
+/* ─── QuotationManager ───────────────────────────────────────────────────── */
+function QuotationManager({ onClose, onSaved, editingQuotation }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const perms = user?.permissions || {};
-  const canAccess = isAdmin || !!perms.can_create_quotations;
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({
+    company_id: '', lead_id: '', client_name: '', client_address: '', client_email: '', client_phone: '',
+    service: '', subject: '', scope_of_work: [''], items: [{ description: '', quantity: 1, unit: 'service', unit_price: 0, amount: 0 }],
+    gst_rate: 18.0, payment_terms: '', timeline: '', validity_days: 30, advance_terms: '', extra_terms: [''], notes: '', extra_checklist_items: [''],
+    status: 'draft',
+  });
+  const [companies, setCompanies] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const [companies,    setCompanies]    = useState([]);
-  const [quotations,   setQuotations]   = useState([]);
-  const [leads,        setLeads]        = useState([]);
-  const [services,     setServices]     = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [searchQuery,  setSearchQuery]  = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [downloading,  setDownloading]  = useState(null);
-  const [detailQtn,    setDetailQtn]    = useState(null);
-  const [companyManagerOpen, setCompanyManagerOpen] = useState(false);
-  const [editingCompany, setEditingCompany] = useState(null);
-  const [showForm,     setShowForm]     = useState(false);
-  const [editingQtn,   setEditingQtn]   = useState(null);
-  const [currentStep,  setCurrentStep]  = useState(0);
-  const [submitting,   setSubmitting]   = useState(false);
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [companiesRes, leadsRes, servicesRes] = await Promise.all([
+          api.get('/companies'),
+          api.get('/leads'),
+          api.get('/quotations/services'),
+        ]);
+        setCompanies(companiesRes.data);
+        setLeads(leadsRes.data);
+        setServices(servicesRes.data.services);
 
-  /* ── form state ── */
-  const emptyForm = {
-    company_id: '', lead_id: '', client_name: '', client_address: '', client_email: '',
-    client_phone: '', service: '', subject: '', scope_of_work: [], items: [], gst_rate: 18,
-    payment_terms: '', timeline: '', validity_days: 30, advance_terms: '', extra_terms: [],
-    notes: '', extra_checklist_items: [], status: 'draft',
+        if (editingQuotation) {
+          setForm({
+            company_id: editingQuotation.company_id || '',
+            lead_id: editingQuotation.lead_id || '',
+            client_name: editingQuotation.client_name || '',
+            client_address: editingQuotation.client_address || '',
+            client_email: editingQuotation.client_email || '',
+            client_phone: editingQuotation.client_phone || '',
+            service: editingQuotation.service || '',
+            subject: editingQuotation.subject || '',
+            scope_of_work: editingQuotation.scope_of_work?.length ? editingQuotation.scope_of_work : [''],
+            items: editingQuotation.items?.length ? editingQuotation.items : [{ description: '', quantity: 1, unit: 'service', unit_price: 0, amount: 0 }],
+            gst_rate: editingQuotation.gst_rate || 18.0,
+            payment_terms: editingQuotation.payment_terms || '',
+            timeline: editingQuotation.timeline || '',
+            validity_days: editingQuotation.validity_days || 30,
+            advance_terms: editingQuotation.advance_terms || '',
+            extra_terms: editingQuotation.extra_terms?.length ? editingQuotation.extra_terms : [''],
+            notes: editingQuotation.notes || '',
+            extra_checklist_items: editingQuotation.extra_checklist_items?.length ? editingQuotation.extra_checklist_items : [''],
+            status: editingQuotation.status || 'draft',
+          });
+        } else if (companiesRes.data.length > 0) {
+          setForm(prev => ({ ...prev, company_id: companiesRes.data[0].id }));
+        }
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Failed to load data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [editingQuotation]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
   };
-  const [form, setForm] = useState(emptyForm);
-  const [checklists, setChecklists] = useState({});
 
-  /* ── fetch data ── */
-  const fetchAll = async () => {
+  const handleItemChange = (index, field, value) => {
+    const newItems = [...form.items];
+    newItems[index][field] = value;
+    if (field === 'quantity' || field === 'unit_price') {
+      newItems[index].amount = newItems[index].quantity * newItems[index].unit_price;
+    }
+    setForm(prev => ({ ...prev, items: newItems }));
+  };
+
+  const addItem = () => {
+    setForm(prev => ({ ...prev, items: [...prev.items, { description: '', quantity: 1, unit: 'service', unit_price: 0, amount: 0 }] }));
+  };
+
+  const removeItem = (index) => {
+    setForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
+  };
+
+  const handleListChange = (listName, index, value) => {
+    const newList = [...form[listName]];
+    newList[index] = value;
+    setForm(prev => ({ ...prev, [listName]: newList }));
+  };
+
+  const addListItem = (listName) => {
+    setForm(prev => ({ ...prev, [listName]: [...prev[listName], ''] }));
+  };
+
+  const removeListItem = (listName, index) => {
+    setForm(prev => ({ ...prev, [listName]: prev[listName].filter((_, i) => i !== index) }));
+  };
+
+  const handleSave = async () => {
+    if (!form.company_id) { toast.error('Please select a company'); return; }
+    if (!form.client_name.trim()) { toast.error('Client name is required'); return; }
+    if (!form.service.trim()) { toast.error('Service is required'); return; }
+    if (form.items.some(item => !item.description.trim() || item.quantity <= 0 || item.unit_price < 0)) {
+      toast.error('Please ensure all quotation items have a description, valid quantity, and unit price.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        scope_of_work: form.scope_of_work.filter(s => s.trim() !== ''),
+        extra_terms: form.extra_terms.filter(t => t.trim() !== ''),
+        extra_checklist_items: form.extra_checklist_items.filter(c => c.trim() !== ''),
+      };
+
+      if (editingQuotation) {
+        await api.put(`/quotations/${editingQuotation.id}`, payload);
+        toast.success('Quotation updated successfully');
+      } else {
+        await api.post('/quotations', payload);
+        toast.success('Quotation created successfully');
+      }
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save quotation');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const currentCompany = companies.find(c => c.id === form.company_id);
+  const currentLead = leads.find(l => l.id === form.lead_id);
+
+  const subtotal = form.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  const gstAmount = subtotal * (form.gst_rate / 100);
+  const total = subtotal + gstAmount;
+
+  if (loading) return <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto" />Loading...</div>;
+
+  return (
+    <Dialog open={true} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <Receipt className="h-5 w-5" />
+            {editingQuotation ? `Edit Quotation ${editingQuotation.quotation_no}` : 'Create New Quotation'}
+          </DialogTitle>
+          <DialogDescription>
+            Step-by-step process to generate a professional quotation for your clients.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex space-x-4 mb-4">
+          {STEPS.map((s, i) => (
+            <div key={s} className={cn(
+              "flex-1 text-center py-2 rounded-xl text-sm font-medium",
+              step === (i + 1) ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500 cursor-pointer hover:bg-slate-100'
+            )} onClick={() => setStep(i + 1)}>
+              {s}
+            </div>
+          ))}
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto pr-4">
+          {step === 1 && (
+            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Select Company *</Label>
+                <Select name="company_id" value={form.company_id} onValueChange={v => handleChange({ target: { name: 'company_id', value: v } })}>
+                  <SelectTrigger className="h-9 rounded-xl text-sm">
+                    <SelectValue placeholder="Select a company" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map(comp => (
+                      <SelectItem key={comp.id} value={comp.id}>{comp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Link to Lead (Optional)</Label>
+                <Select name="lead_id" value={form.lead_id} onValueChange={v => handleChange({ target: { name: 'lead_id', value: v } })}>
+                  <SelectTrigger className="h-9 rounded-xl text-sm">
+                    <SelectValue placeholder="Select a lead" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">-- No Lead --</SelectItem>
+                    {leads.map(lead => (
+                      <SelectItem key={lead.id} value={lead.id}>{lead.name} ({lead.email})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Client Name *</Label>
+                <Input name="client_name" value={form.client_name} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Client Email</Label>
+                <Input name="client_email" value={form.client_email} onChange={handleChange} type="email" className="h-9 rounded-xl text-sm" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Client Phone</Label>
+                <Input name="client_phone" value={form.client_phone} onChange={handleChange} className="h-9 rounded-xl text-sm" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Client Address</Label>
+                <Textarea name="client_address" value={form.client_address} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {step === 2 && (
+            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Service *</Label>
+                <Select name="service" value={form.service} onValueChange={v => handleChange({ target: { name: 'service', value: v } })}>
+                  <SelectTrigger className="h-9 rounded-xl text-sm">
+                    <SelectValue placeholder="Select a service" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {services.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Subject</Label>
+                <Input name="subject" value={form.subject} onChange={handleChange} className="h-9 rounded-xl text-sm" placeholder="e.g., Quotation for GST Registration" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-3">
+                <Label className="text-xs font-semibold">Scope of Work / Services</Label>
+                {form.scope_of_work.map((scopeItem, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      value={scopeItem}
+                      onChange={e => handleListChange('scope_of_work', index, e.target.value)}
+                      className="h-9 rounded-xl text-sm"
+                      placeholder="e.g., Filing of GSTR-1, GSTR-3B monthly"
+                    />
+                    {form.scope_of_work.length > 1 && (
+                      <Button variant="ghost" size="icon" onClick={() => removeListItem('scope_of_work', index)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="outline" onClick={() => addListItem('scope_of_work')} className="rounded-xl gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <Plus className="h-4 w-4" />Add Scope Item
+                </Button>
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-3">
+                <Label className="text-xs font-semibold">Quotation Items *</Label>
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-xs font-semibold text-slate-600 mb-2">
+                  <div className="col-span-2">Description</div>
+                  <div>Qty</div>
+                  <div>Unit</div>
+                  <div className="text-right">Unit Price</div>
+                  <div className="text-right">Amount</div>
+                </div>
+                {form.items.map((item, index) => (
+                  <div key={index} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
+                    <Input
+                      value={item.description}
+                      onChange={e => handleItemChange(index, 'description', e.target.value)}
+                      className="col-span-2 h-9 rounded-xl text-sm"
+                      placeholder="Item Description"
+                    />
+                    <Input
+                      value={item.quantity}
+                      onChange={e => handleItemChange(index, 'quantity', parseFloat(e.target.value) || 0)}
+                      type="number" step="0.01" className="h-9 rounded-xl text-sm"
+                    />
+                    <Select value={item.unit} onValueChange={v => handleItemChange(index, 'unit', v)}>
+                      <SelectTrigger className="h-9 rounded-xl text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNIT_OPTIONS.map(unit => <SelectItem key={unit} value={unit}>{unit}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={item.unit_price}
+                      onChange={e => handleItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
+                      type="number" step="0.01" className="h-9 rounded-xl text-sm text-right"
+                    />
+                    <Input
+                      value={item.amount.toFixed(2)}
+                      readOnly
+                      className="h-9 rounded-xl text-sm text-right bg-slate-50 text-slate-500"
+                    />
+                    {form.items.length > 1 && (
+                      <Button variant="ghost" size="icon" onClick={() => removeItem(index)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="outline" onClick={addItem} className="rounded-xl gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <Plus className="h-4 w-4" />Add Item
+                </Button>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {step === 3 && (
+            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">GST Rate (%)</Label>
+                <Input name="gst_rate" value={form.gst_rate} onChange={handleChange} type="number" step="0.01" className="h-9 rounded-xl text-sm" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Payment Terms</Label>
+                <Textarea name="payment_terms" value={form.payment_terms} onChange={handleChange} rows={2} className="resize-none rounded-xl text-sm" placeholder="e.g., 50% advance, 50% upon completion" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Timeline</Label>
+                <Input name="timeline" value={form.timeline} onChange={handleChange} className="h-9 rounded-xl text-sm" placeholder="e.g., 7 working days" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Validity (Days)</Label>
+                <Input name="validity_days" value={form.validity_days} onChange={handleChange} type="number" className="h-9 rounded-xl text-sm" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Advance Terms</Label>
+                <Input name="advance_terms" value={form.advance_terms} onChange={handleChange} className="h-9 rounded-xl text-sm" placeholder="e.g., 50% advance payment required" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-3">
+                <Label className="text-xs font-semibold">Extra Terms & Conditions</Label>
+                {form.extra_terms.map((term, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      value={term}
+                      onChange={e => handleListChange('extra_terms', index, e.target.value)}
+                      className="h-9 rounded-xl text-sm"
+                      placeholder="e.g., All disputes subject to Mumbai jurisdiction"
+                    />
+                    {form.extra_terms.length > 1 && (
+                      <Button variant="ghost" size="icon" onClick={() => removeListItem('extra_terms', index)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="outline" onClick={() => addListItem('extra_terms')} className="rounded-xl gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <Plus className="h-4 w-4" />Add Extra Term
+                </Button>
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-1.5">
+                <Label className="text-xs font-semibold">Notes</Label>
+                <Textarea name="notes" value={form.notes} onChange={handleChange} rows={3} className="resize-none rounded-xl text-sm" placeholder="Any additional notes for the client" />
+              </motion.div>
+              <motion.div variants={itemVariants} className="space-y-3">
+                <Label className="text-xs font-semibold">Extra Document Checklist Items</Label>
+                {form.extra_checklist_items.map((item, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      value={item}
+                      onChange={e => handleListChange('extra_checklist_items', index, e.target.value)}
+                      className="h-9 rounded-xl text-sm"
+                      placeholder="e.g., Copy of Latest Bank Statement"
+                    />
+                    {form.extra_checklist_items.length > 1 && (
+                      <Button variant="ghost" size="icon" onClick={() => removeListItem('extra_checklist_items', index)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="outline" onClick={() => addListItem('extra_checklist_items')} className="rounded-xl gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <Plus className="h-4 w-4" />Add Checklist Item
+                </Button>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {step === 4 && (
+            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
+              <h3 className="text-lg font-bold" style={{ color: COLORS.deepBlue }}>Quotation Summary</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <motion.div variants={itemVariants}><strong>Company:</strong> {currentCompany?.name}</motion.div>
+                <motion.div variants={itemVariants}><strong>Client:</strong> {form.client_name}</motion.div>
+                <motion.div variants={itemVariants}><strong>Service:</strong> {form.service}</motion.div>
+                <motion.div variants={itemVariants}><strong>Subject:</strong> {form.subject || 'N/A'}</motion.div>
+              </div>
+
+              <h4 className="text-md font-semibold mt-4">Items:</h4>
+              <ul className="list-disc pl-5">
+                {form.items.map((item, index) => (
+                  <motion.li key={index} variants={itemVariants}>{item.description} - {item.quantity} {item.unit} @ Rs. {item.unit_price} = Rs. {item.amount.toFixed(2)}</motion.li>
+                ))}
+              </ul>
+
+              <div className="text-right space-y-1 mt-4">
+                <motion.div variants={itemVariants}><strong>Subtotal:</strong> Rs. {subtotal.toFixed(2)}</motion.div>
+                <motion.div variants={itemVariants}><strong>GST ({form.gst_rate}%):</strong> Rs. {gstAmount.toFixed(2)}</motion.div>
+                <motion.div variants={itemVariants} className="text-lg font-bold" style={{ color: COLORS.emeraldGreen }}>Total: Rs. {total.toFixed(2)}</motion.div>
+              </div>
+
+              <h4 className="text-md font-semibold mt-4">Terms:</h4>
+              <ul className="list-disc pl-5">
+                {form.payment_terms && <motion.li variants={itemVariants}>Payment Terms: {form.payment_terms}</motion.li>}
+                {form.timeline && <motion.li variants={itemVariants}>Timeline: {form.timeline}</motion.li>}
+                <motion.li variants={itemVariants}>Validity: {form.validity_days} days</motion.li>
+                {form.advance_terms && <motion.li variants={itemVariants}>Advance: {form.advance_terms}</motion.li>}
+                {form.extra_terms.filter(t => t.trim() !== '').map((term, index) => (
+                  <motion.li key={index} variants={itemVariants}>{term}</motion.li>
+                ))}
+              </ul>
+
+              {form.notes && (
+                <motion.div variants={itemVariants} className="mt-4">
+                  <h4 className="text-md font-semibold">Notes:</h4>
+                  <p>{form.notes}</p>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          {step > 1 && (
+            <Button variant="outline" onClick={() => setStep(prev => prev - 1)} className="rounded-xl gap-2">
+              <ChevronLeft className="h-4 w-4" />Previous
+            </Button>
+          )}
+          {step < STEPS.length && (
+            <Button onClick={() => setStep(prev => prev + 1)} className="rounded-xl gap-2" style={{ background: COLORS.deepBlue }}>
+              Next <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+          {step === STEPS.length && (
+            <Button onClick={handleSave} disabled={saving} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}>
+              {saving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : 'Save Quotation'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ─── Quotations ─────────────────────────────────────────────────────────── */
+export default function Quotations() {
+  const { user } = useAuth();
+  const [quotations, setQuotations] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterService, setFilterService] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [services, setServices] = useState([]);
+
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [editingQuotation, setEditingQuotation] = useState(null);
+  const [isCompanyManagerOpen, setIsCompanyManagerOpen] = useState(false);
+  const [editingCompany, setEditingCompany] = useState(null);
+
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [emailModalQuotation, setEmailModalQuotation] = useState(null);
+  const [emailModalPdfType, setEmailModalPdfType] = useState('quotation');
+
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [whatsAppModalQuotation, setWhatsAppModalQuotation] = useState(null);
+  const [whatsAppModalPdfType, setWhatsAppModalPdfType] = useState('quotation');
+
+  const fetchQuotations = async () => {
     setLoading(true);
     try {
-      const [cRes, qRes, sRes] = await Promise.all([
+      const params = {};
+      if (filterStatus !== 'all') params.status = filterStatus;
+      if (filterService !== 'all') params.service = filterService;
+      const res = await api.get('/quotations', { params });
+      setQuotations(res.data);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to fetch quotations');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCompaniesAndServices = async () => {
+    try {
+      const [companiesRes, servicesRes] = await Promise.all([
         api.get('/companies'),
-        api.get('/quotations'),
         api.get('/quotations/services'),
       ]);
-      setCompanies(cRes.data || []);
-      setQuotations(qRes.data || []);
-      setServices(sRes.data?.services || []);
-      setChecklists(sRes.data?.checklists || {});
-      try {
-        const lRes = await api.get('/leads/');
-        setLeads((lRes.data || []).filter(l => !['won', 'lost'].includes(l.status)));
-      } catch {}
-    } catch (err) { toast.error('Failed to load data'); }
-    finally { setLoading(false); }
+      setCompanies(companiesRes.data);
+      setServices(servicesRes.data.services);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to fetch companies or services');
+    }
   };
 
   useEffect(() => {
-    fetchAll();
-    const raw = sessionStorage.getItem('createQuotationForLead');
-    if (raw) {
-      try {
-        const data = JSON.parse(raw);
-        setForm(p => ({
-          ...p,
-          lead_id: data.lead_id || '',
-          client_name: data.client_name || '',
-          client_phone: data.client_phone || '',
-          client_email: data.client_email || '',
-          service: data.service || '',
-        }));
-        setShowForm(true);
-        sessionStorage.removeItem('createQuotationForLead');
-      } catch {}
-    }
+    fetchCompaniesAndServices();
   }, []);
 
-  if (!canAccess) return (
-    <div className={`flex items-center justify-center h-64 ${isDark ? 'bg-[#0f172a]' : ''}`}>
-      <div className="text-center">
-        <Receipt className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-        <h2 className={`text-xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No Access</h2>
-        <p className="text-slate-400 text-sm">You don't have permission to use the Quotations module.</p>
-      </div>
-    </div>
-  );
+  useEffect(() => {
+    fetchQuotations();
+  }, [filterStatus, filterService]);
 
-  const detailCompany = detailQtn ? companies.find(c => c.id === detailQtn.company_id) : null;
-
-  const filteredQtns = quotations
-    .filter(q => !searchQuery || q.client_name?.toLowerCase().includes(searchQuery.toLowerCase()) || q.quotation_no?.toLowerCase().includes(searchQuery.toLowerCase()))
-    .filter(q => statusFilter === 'all' || q.status === statusFilter);
-
-  /* ── item helpers ── */
-  const addItem = () => setForm(p => ({ ...p, items: [...p.items, { description: '', quantity: 1, unit: 'service', unit_price: 0, amount: 0 }] }));
-  const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
-  const updateItem = (i, key, val) => setForm(p => {
-    const items = [...p.items];
-    items[i] = { ...items[i], [key]: val };
-    const qty   = key === 'quantity'   ? Number(val) || 0 : Number(items[i].quantity)  || 0;
-    const price = key === 'unit_price' ? Number(val) || 0 : Number(items[i].unit_price) || 0;
-    items[i].amount = Math.round(qty * price * 100) / 100;
-    return { ...p, items };
-  });
-
-  const subtotal   = form.items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const gst_amount = Math.round(subtotal * Number(form.gst_rate || 0) / 100 * 100) / 100;
-  const total      = subtotal + gst_amount;
-
-  const addScopeLine     = () => setForm(p => ({ ...p, scope_of_work: [...p.scope_of_work, ''] }));
-  const removeScopeLine  = i  => setForm(p => ({ ...p, scope_of_work: p.scope_of_work.filter((_, idx) => idx !== i) }));
-  const updateScopeLine  = (i, v) => setForm(p => { const s = [...p.scope_of_work]; s[i] = v; return { ...p, scope_of_work: s }; });
-  const addExtraCheck    = () => setForm(p => ({ ...p, extra_checklist_items: [...p.extra_checklist_items, ''] }));
-  const removeExtraCheck = i  => setForm(p => ({ ...p, extra_checklist_items: p.extra_checklist_items.filter((_, idx) => idx !== i) }));
-  const updateExtraCheck = (i, v) => setForm(p => { const a = [...p.extra_checklist_items]; a[i] = v; return { ...p, extra_checklist_items: a }; });
-  const addExtraTerm     = () => setForm(p => ({ ...p, extra_terms: [...p.extra_terms, ''] }));
-  const removeExtraTerm  = i  => setForm(p => ({ ...p, extra_terms: p.extra_terms.filter((_, idx) => idx !== i) }));
-  const updateExtraTerm  = (i, v) => setForm(p => { const a = [...p.extra_terms]; a[i] = v; return { ...p, extra_terms: a }; });
-
-  /* ── status change ── */
-  const handleStatusChange = async (id, newStatus) => {
-    try {
-      await api.put(`/quotations/${id}`, { status: newStatus });
-      toast.success(`Status → ${newStatus}`);
-      fetchAll();
-      if (detailQtn?.id === id) setDetailQtn(p => ({ ...p, status: newStatus }));
-    } catch { toast.error('Failed to update status'); }
+  const handleNewQuotation = () => {
+    setEditingQuotation(null);
+    setIsManagerOpen(true);
   };
 
-  /* ── PDF download ── */
+  const handleEditQuotation = (quotation) => {
+    setEditingQuotation(quotation);
+    setIsManagerOpen(true);
+  };
+
+  const handleDeleteQuotation = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this quotation?')) return;
+    try {
+      await api.delete(`/quotations/${id}`);
+      toast.success('Quotation deleted successfully');
+      fetchQuotations();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete quotation');
+    }
+  };
+
   const handleDownloadPdf = async (qtnId, qtnNo) => {
     setDownloading(qtnId + '-pdf');
     try {
@@ -630,8 +971,8 @@ export default function Quotations() {
     }
   };
 
-  const handleDownloadChecklist = async (qtnId, qtnNo) => {
-    setDownloading(qtnId + '-checklist');
+  const handleDownloadChecklistPdf = async (qtnId, qtnNo) => {
+    setDownloading(qtnId + '-checklist-pdf');
     try {
       const token   = getToken();
       const baseURL = (api.defaults?.baseURL || '/api').replace(/\/$/, '');
@@ -664,471 +1005,214 @@ export default function Quotations() {
     }
   };
 
-  /* ── delete ── */
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this quotation?')) return;
-    try { await api.delete(`/quotations/${id}`); toast.success('Deleted'); fetchAll(); }
-    catch { toast.error('Failed to delete'); }
+  const handleEmailPdf = (quotation, pdfType) => {
+    setEmailModalQuotation(quotation);
+    setEmailModalPdfType(pdfType);
+    setIsEmailModalOpen(true);
   };
 
-  /* ── submit form ── */
-  const handleSubmit = async () => {
-    if (!form.company_id)          { toast.error('Select a company profile'); return; }
-    if (!form.client_name?.trim()) { toast.error('Client name is required'); return; }
-    if (!form.service)             { toast.error('Select a service'); return; }
-    setSubmitting(true);
-    try {
-      const payload = { ...form, gst_rate: Number(form.gst_rate || 18), validity_days: Number(form.validity_days || 30) };
-      if (editingQtn) { await api.put(`/quotations/${editingQtn.id}`, payload); toast.success('Quotation updated'); }
-      else            { await api.post('/quotations', payload); toast.success('Quotation created'); }
-      setShowForm(false); setEditingQtn(null); setForm(emptyForm); setCurrentStep(0); fetchAll();
-    } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save'); }
-    finally { setSubmitting(false); }
+  const handleWhatsAppPdf = (quotation, pdfType) => {
+    setWhatsAppModalQuotation(quotation);
+    setWhatsAppModalPdfType(pdfType);
+    setIsWhatsAppModalOpen(true);
   };
 
-  const openEdit = (q) => {
-    setEditingQtn(q);
-    setForm({
-      company_id: q.company_id || '', lead_id: q.lead_id || '', client_name: q.client_name || '',
-      client_address: q.client_address || '', client_email: q.client_email || '', client_phone: q.client_phone || '',
-      service: q.service || '', subject: q.subject || '', scope_of_work: q.scope_of_work || [], items: q.items || [],
-      gst_rate: q.gst_rate || 18, payment_terms: q.payment_terms || '', timeline: q.timeline || '',
-      validity_days: q.validity_days || 30, advance_terms: q.advance_terms || '', extra_terms: q.extra_terms || [],
-      notes: q.notes || '', extra_checklist_items: q.extra_checklist_items || [], status: q.status || 'draft',
-    });
-    setCurrentStep(0); setShowForm(true);
-  };
+  const [downloading, setDownloading] = useState(null);
 
-  const closeForm = () => { setShowForm(false); setEditingQtn(null); setForm(emptyForm); setCurrentStep(0); };
+  const filteredQuotations = quotations.filter(q => {
+    const matchesSearch = searchTerm === '' ||
+      q.quotation_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      q.client_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      q.service.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  });
 
-  const canGoNext = () => {
-    if (currentStep === 0) return !!form.company_id && !!form.client_name?.trim();
-    if (currentStep === 1) return !!form.service;
-    return true;
-  };
+  const getCompanyById = (companyId) => companies.find(c => c.id === companyId);
 
-  /* ── render steps ── */
-  const renderStep = () => {
-    switch (currentStep) {
-      case 0: return (
-        <div className="space-y-5">
-          <div className="space-y-1.5">
-            <Label className="font-semibold">Company Profile *</Label>
-            {companies.length === 0
-              ? <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-700">No company profiles yet. <button onClick={() => setCompanyManagerOpen(true)} className="underline font-semibold">Add one</button></div>
-              : <Select value={form.company_id} onValueChange={v => setForm(p => ({ ...p, company_id: v }))}>
-                  <SelectTrigger className="h-10 rounded-xl text-sm"><SelectValue placeholder="Select your company…" /></SelectTrigger>
-                  <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>}
-            <button onClick={() => setCompanyManagerOpen(true)} className="text-xs text-blue-600 hover:underline mt-0.5">+ Add / edit company profile</button>
-          </div>
-
-          {leads.length > 0 && (
-            <div className="space-y-1.5">
-              <Label className="font-semibold flex items-center gap-1.5"><Link className="h-3.5 w-3.5 text-purple-400" />Link to Lead <span className="text-slate-400 font-normal text-xs">(optional)</span></Label>
-              <Select value={form.lead_id || 'none'} onValueChange={v => {
-                const leadId = v === 'none' ? '' : v;
-                setForm(p => {
-                  const lead = leads.find(l => l.id === leadId);
-                  return {
-                    ...p,
-                    lead_id: leadId,
-                    client_name: lead ? lead.company_name : p.client_name,
-                    client_phone: lead?.phone || p.client_phone,
-                    client_email: lead?.email || p.client_email,
-                    service: lead && (lead.services || []).length > 0 ? lead.services[0] : p.service,
-                  };
-                });
-              }}>
-                <SelectTrigger className="h-10 rounded-xl text-sm"><SelectValue placeholder="Select a lead…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— No linked lead —</SelectItem>
-                  {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.company_name} <span className="text-slate-400 text-xs capitalize">[{l.status}]</span></SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2 space-y-1.5">
-              <Label className="font-semibold">Client Name *</Label>
-              <Input value={form.client_name} onChange={e => setForm(p => ({ ...p, client_name: e.target.value }))} placeholder="Client / Company name" className="h-10 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-slate-400" />Phone</Label>
-              <Input value={form.client_phone} onChange={e => setForm(p => ({ ...p, client_phone: e.target.value }))} placeholder="+91 98765 43210" className="h-10 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold flex items-center gap-1"><Mail className="h-3.5 w-3.5 text-slate-400" />Email</Label>
-              <Input type="email" value={form.client_email} onChange={e => setForm(p => ({ ...p, client_email: e.target.value }))} placeholder="client@company.com" className="h-10 rounded-xl" />
-            </div>
-            <div className="md:col-span-2 space-y-1.5">
-              <Label className="font-semibold">Address</Label>
-              <Textarea value={form.client_address} onChange={e => setForm(p => ({ ...p, client_address: e.target.value }))} rows={2} className="resize-none rounded-xl text-sm" placeholder="Client address…" />
-            </div>
-          </div>
-        </div>
-      );
-
-      case 1: return (
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="font-semibold">Service *</Label>
-              <Select value={form.service} onValueChange={v => setForm(p => ({ ...p, service: v }))}>
-                <SelectTrigger className="h-10 rounded-xl text-sm"><SelectValue placeholder="Select service…" /></SelectTrigger>
-                <SelectContent>{services.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold">Subject</Label>
-              <Input value={form.subject} onChange={e => setForm(p => ({ ...p, subject: e.target.value }))} placeholder="Quotation subject…" className="h-10 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold flex items-center gap-1"><Percent className="h-3.5 w-3.5 text-slate-400" />GST Rate (%)</Label>
-              <Input type="number" value={form.gst_rate} onChange={e => setForm(p => ({ ...p, gst_rate: e.target.value }))} placeholder="18" className="h-10 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold flex items-center gap-1"><Calendar className="h-3.5 w-3.5 text-slate-400" />Validity (Days)</Label>
-              <Input type="number" value={form.validity_days} onChange={e => setForm(p => ({ ...p, validity_days: e.target.value }))} placeholder="30" className="h-10 rounded-xl" />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="font-semibold">Scope of Work</Label>
-              <button onClick={addScopeLine} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3" />Add line</button>
-            </div>
-            {form.scope_of_work.map((line, i) => (
-              <div key={i} className="flex gap-2">
-                <Input value={line} onChange={e => updateScopeLine(i, e.target.value)} placeholder={`Scope item ${i + 1}`} className="h-9 rounded-xl text-sm flex-1" />
-                <button onClick={() => removeScopeLine(i)} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3.5 w-3.5" /></button>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="font-semibold">Line Items</Label>
-              <button onClick={addItem} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3" />Add item</button>
-            </div>
-            {form.items.map((item, i) => (
-              <div key={i} className={`p-3 rounded-2xl border space-y-2 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500">Item {i + 1}</span>
-                  <button onClick={() => removeItem(i)} className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3.5 w-3.5" /></button>
-                </div>
-                <Input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} placeholder="Description of service / work"
-                  className={`h-9 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
-                <div className="grid grid-cols-4 gap-2">
-                  {[['quantity','Qty','number','1'],['unit','Unit','select',null],['unit_price','Unit Price (₹)','number','0']].map(([key, label, type]) => (
-                    <div key={key} className="space-y-1">
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
-                      {type === 'select'
-                        ? <Select value={item.unit || 'service'} onValueChange={v => updateItem(i, 'unit', v)}>
-                            <SelectTrigger className={`h-8 rounded-xl text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`}><SelectValue /></SelectTrigger>
-                            <SelectContent>{UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                          </Select>
-                        : <Input type="number" value={item[key]} onChange={e => updateItem(i, key, e.target.value)}
-                            className={`h-8 rounded-xl text-sm ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white'}`} />
-                      }
-                    </div>
-                  ))}
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Amount (₹)</p>
-                    <div className="h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center px-3 text-sm font-bold text-emerald-700">
-                      {(item.amount || 0).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {form.items.length > 0 && (
-              <div className="flex flex-col items-end gap-1 pt-2 pr-1 text-sm">
-                <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sub Total: <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{subtotal.toLocaleString()}</span></p>
-                {Number(form.gst_rate) > 0 && <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'}`}>GST @ {form.gst_rate}%: <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>₹{gst_amount.toLocaleString()}</span></p>}
-                <p className="text-base font-bold" style={{ color: COLORS.deepBlue }}>Total: ₹{total.toLocaleString()}</p>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="font-semibold">Extra Checklist Items</Label>
-              <button onClick={addExtraCheck} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3" />Add</button>
-            </div>
-            {form.extra_checklist_items.map((item, i) => (
-              <div key={i} className="flex gap-2">
-                <Input value={item} onChange={e => updateExtraCheck(i, e.target.value)} placeholder={`Extra doc ${i + 1}`} className="h-9 rounded-xl text-sm flex-1" />
-                <button onClick={() => removeExtraCheck(i)} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-
-      case 2: return (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="font-semibold">Payment Terms</Label>
-              <Input value={form.payment_terms} onChange={e => setForm(p => ({ ...p, payment_terms: e.target.value }))} placeholder="e.g. 50% advance, 50% on completion" className="h-10 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold">Timeline</Label>
-              <Input value={form.timeline} onChange={e => setForm(p => ({ ...p, timeline: e.target.value }))} placeholder="e.g. 7-10 working days" className="h-10 rounded-xl" />
-            </div>
-            <div className="md:col-span-2 space-y-1.5">
-              <Label className="font-semibold">Advance Terms</Label>
-              <Input value={form.advance_terms} onChange={e => setForm(p => ({ ...p, advance_terms: e.target.value }))} placeholder="e.g. 50% advance before commencement" className="h-10 rounded-xl" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="font-semibold">Additional Terms</Label>
-              <button onClick={addExtraTerm} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="h-3 w-3" />Add term</button>
-            </div>
-            {form.extra_terms.map((term, i) => (
-              <div key={i} className="flex gap-2">
-                <Input value={term} onChange={e => updateExtraTerm(i, e.target.value)} placeholder={`Term ${i + 1}`} className="h-9 rounded-xl text-sm flex-1" />
-                <button onClick={() => removeExtraTerm(i)} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
-              </div>
-            ))}
-          </div>
-          <div className="space-y-1.5">
-            <Label className="font-semibold">Internal Notes</Label>
-            <Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={3} className="resize-none rounded-xl text-sm" placeholder="Internal notes (not shown on PDF)…" />
-          </div>
-        </div>
-      );
-
-      case 3: return (
-        <div className="space-y-4">
-          <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 space-y-2 text-sm">
-            <p className="font-bold text-blue-800 flex items-center gap-2"><Check className="h-4 w-4" />Preview Summary</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <p><span className="text-slate-500">Client:</span> <span className="font-semibold">{form.client_name}</span></p>
-              <p><span className="text-slate-500">Service:</span> <span className="font-semibold">{form.service}</span></p>
-              <p><span className="text-slate-500">Company:</span> <span className="font-semibold">{companies.find(c => c.id === form.company_id)?.name}</span></p>
-              {form.lead_id && <p><span className="text-slate-500">Linked Lead:</span> <span className="font-semibold text-purple-700">{leads.find(l => l.id === form.lead_id)?.company_name || form.lead_id}</span></p>}
-              <p><span className="text-slate-500">Items:</span> <span className="font-semibold">{form.items.length} line item{form.items.length !== 1 ? 's' : ''}</span></p>
-              <p><span className="text-slate-500">Validity:</span> <span className="font-semibold">{form.validity_days} days</span></p>
-            </div>
-            {form.items.length > 0 && (
-              <div className="pt-2 border-t border-blue-200 space-y-0.5 text-xs text-right">
-                <p className="text-slate-600">Subtotal: <span className="font-bold text-slate-800">₹{subtotal.toLocaleString()}</span></p>
-                {Number(form.gst_rate) > 0 && <p className="text-slate-600">GST @ {form.gst_rate}%: <span className="font-bold text-slate-800">₹{gst_amount.toLocaleString()}</span></p>}
-                <p className="text-base font-bold" style={{ color: COLORS.deepBlue }}>Total: ₹{total.toLocaleString()}</p>
-              </div>
-            )}
-          </div>
-          {form.lead_id && (
-            <div className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-xs text-purple-700">
-              <p className="font-semibold flex items-center gap-1.5"><Link className="h-3.5 w-3.5" />Lead Integration Active</p>
-              <p className="mt-0.5">Creating this quotation will auto-update the linked lead's stage to <strong>"Proposal"</strong>.</p>
-            </div>
-          )}
-        </div>
-      );
-
-      default: return null;
-    }
-  };
-
-  /* ─── RENDER ─────────────────────────────────────────────────────────────── */
   return (
-    <motion.div className={`space-y-5 p-2 md:p-4 min-h-screen rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`} variants={containerVariants} initial="hidden" animate="visible">
-
-      {/* Header */}
-      <motion.div variants={itemVariants}>
-        <Card className={`rounded-3xl overflow-hidden border shadow-sm ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200'}`}>
-          <div className="h-1.5 w-full bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600" />
-          <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>Quotations</h1>
-              <p className={`text-sm mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{quotations.length} total · {quotations.filter(q => q.status === 'accepted').length} accepted</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-9 rounded-2xl gap-1.5" onClick={() => setCompanyManagerOpen(true)}>
-                <Building2 className="h-4 w-4" />Manage Companies
-              </Button>
-              <Button size="sm" className="h-9 px-4 rounded-2xl shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95"
-                onClick={() => { setForm(emptyForm); setEditingQtn(null); setCurrentStep(0); setShowForm(true); }}>
-                <Plus className="mr-2 h-4 w-4" />New Quotation
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Filters */}
-      <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-3">
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search quotations…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            className={`pl-10 rounded-2xl ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white'}`} />
+    <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>Quotations</h1>
+        <div className="flex gap-2">
+          <Button onClick={() => { setEditingCompany(null); setIsCompanyManagerOpen(true); }} className="rounded-xl gap-2" variant="outline">
+            <Building2 className="h-4 w-4" />Manage Companies
+          </Button>
+          <Button onClick={handleNewQuotation} className="rounded-xl gap-2" style={{ background: COLORS.emeraldGreen }}>
+            <Plus className="h-4 w-4" />Create New Quotation
+          </Button>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className={`w-36 rounded-2xl text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white'}`}><SelectValue placeholder="All Status" /></SelectTrigger>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Input
+          placeholder="Search by QTN No., Client, Service..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="rounded-xl h-10 col-span-2"
+          prefix={<Search className="h-4 w-4 text-slate-400" />}
+        />
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="h-10 rounded-xl">
+            <SelectValue placeholder="Filter by Status" />
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            {['draft', 'sent', 'accepted', 'rejected'].map(s => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="sent">Sent</SelectItem>
+            <SelectItem value="accepted">Accepted</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
           </SelectContent>
         </Select>
-      </motion.div>
+      </div>
 
-      {/* Quotation Cards */}
-      {loading
-        ? <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className={`h-24 rounded-2xl animate-pulse ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`} />)}</div>
-        : filteredQtns.length === 0
-          ? <div className="text-center py-20">
-              <Receipt className={`h-16 w-16 mx-auto mb-4 ${isDark ? 'text-slate-700' : 'text-slate-200'}`} />
-              <p className={`font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No quotations yet</p>
-              <p className={`text-xs mt-1 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Click "New Quotation" to create one</p>
-            </div>
-          : (
-            <motion.div className="space-y-3" variants={containerVariants}>
-              {filteredQtns.map(q => {
-                const linkedLead = q.lead_id ? leads.find(l => l.id === q.lead_id) : null;
-                return (
-                  <motion.div key={q.id} variants={itemVariants}>
-                    <Card className={`rounded-2xl border hover:shadow-md transition-all hover:-translate-y-[1px] cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200'}`} onClick={() => setDetailQtn(q)}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3 flex-wrap">
-                          <div className="flex flex-col gap-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{q.quotation_no}</span>
-                              <span className={cn('px-2.5 py-0.5 rounded-xl text-[11px] font-bold border capitalize', STATUS_STYLES[q.status] || STATUS_STYLES.draft)}>{q.status}</span>
-                              {q.lead_id && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                                  <Link className="h-3 w-3" />{linkedLead ? linkedLead.company_name : 'Linked Lead'}
-                                </span>
-                              )}
-                            </div>
-                            <p className={`text-base font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{q.client_name}</p>
-                            <div className={`flex flex-wrap items-center gap-3 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="flex items-center gap-1"><Tag className="h-3.5 w-3.5" />{q.service}</span>
-                              <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{q.date}</span>
-                              {q.client_phone && <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5" />{q.client_phone}</span>}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 flex-shrink-0">
-                            <div className="text-right">
-                              <p className="text-lg font-bold" style={{ color: isDark ? '#93c5fd' : COLORS.deepBlue }}>₹{(q.total || 0).toLocaleString()}</p>
-                              <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{q.items?.length || 0} item{q.items?.length !== 1 ? 's' : ''}</p>
-                            </div>
-                            <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                              <button onClick={() => handleDownloadPdf(q.id, q.quotation_no)} disabled={!!downloading}
-                                className={`p-2 rounded-xl text-slate-400 hover:text-blue-600 transition-all active:scale-90 ${isDark ? 'hover:bg-blue-900/30' : 'hover:bg-blue-50'}`} title="Download PDF">
-                                {downloading === q.id + '-pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                              </button>
-                              <button onClick={() => openEdit(q)} className={`p-2 rounded-xl text-slate-400 hover:text-blue-600 transition-all active:scale-90 ${isDark ? 'hover:bg-blue-900/30' : 'hover:bg-blue-50'}`} title="Edit"><Edit className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => handleDelete(q.id)} className={`p-2 rounded-xl text-slate-400 hover:text-red-600 transition-all active:scale-90 ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`} title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                );
-              })}
-            </motion.div>
-          )}
-
-      {/* Quotation Detail Modal */}
-      <QuotationDetailModal
-        quotation={detailQtn}
-        company={detailCompany}
-        open={!!detailQtn}
-        onClose={() => setDetailQtn(null)}
-        onStatusChange={handleStatusChange}
-        onDownloadPdf={handleDownloadPdf}
-        onDownloadChecklist={handleDownloadChecklist}
-        downloading={downloading}
-      />
-
-      {/* Company Manager Dialog */}
-      <Dialog open={companyManagerOpen} onOpenChange={setCompanyManagerOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {editingCompany !== null
-            ? <CompanyManager editingCompany={editingCompany} onClose={() => setEditingCompany(null)} onSaved={() => { setEditingCompany(null); fetchAll(); }} />
-            : (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <DialogTitle className="text-lg font-bold" style={{ color: COLORS.deepBlue }}>Company Profiles</DialogTitle>
-                  <Button size="sm" onClick={() => setEditingCompany({})} className="rounded-xl gap-1.5 text-xs" style={{ background: COLORS.emeraldGreen }}>
-                    <Plus className="h-3.5 w-3.5" />Add Company
-                  </Button>
-                </div>
-                {companies.length === 0
-                  ? <p className="text-slate-400 text-sm text-center py-8">No companies yet.</p>
-                  : <div className="space-y-2">{companies.map(c => (
-                      <div key={c.id} className={`flex items-center justify-between p-3 rounded-2xl border ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50'}`}>
-                        <div className="flex items-center gap-3">
-                          {c.logo_base64 && <img src={c.logo_base64} alt="logo" className={`h-8 w-8 object-contain rounded-lg border p-0.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-white'}`} />}
-                          <div>
-                            <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.name}</p>
-                            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{c.email} {c.smtp_host ? '· ✉️ SMTP configured' : ''}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <button onClick={() => setEditingCompany(c)} className="p-2 rounded-xl hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all"><Edit className="h-3.5 w-3.5" /></button>
-                          <button onClick={async () => {
-                            if (!window.confirm('Delete this company?')) return;
-                            await api.delete(`/companies/${c.id}`);
-                            fetchAll();
-                          }} className="p-2 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-600 transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
+      {loading ? (
+        <div className="text-center p-8"><Loader2 className="h-8 w-8 animate-spin mx-auto" />Loading Quotations...</div>
+      ) : filteredQuotations.length === 0 ? (
+        <div className="text-center p-8 text-slate-500">
+          No quotations found. Click "Create New Quotation" to get started!
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          <AnimatePresence>
+            {filteredQuotations.map(quotation => (
+              <motion.div
+                key={quotation.id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Card className="rounded-2xl shadow-lg hover:shadow-xl transition-shadow duration-200 border-t-4" style={{ borderTopColor: COLORS.deepBlue }}>
+                  <CardContent className="p-6">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>{quotation.quotation_no}</h3>
+                        <p className="text-sm text-slate-500">Issued: {new Date(quotation.date).toLocaleDateString()}</p>
                       </div>
-                    ))}</div>}
-              </div>
-            )}
-        </DialogContent>
-      </Dialog>
+                      <Badge className={cn("text-xs font-medium px-3 py-1 rounded-full", STATUS_STYLES[quotation.status])}>
+                        {quotation.status.charAt(0).toUpperCase() + quotation.status.slice(1)}
+                      </Badge>
+                    </div>
 
-      {/* Create / Edit Form Dialog */}
-      <Dialog open={showForm} onOpenChange={v => { if (!v) closeForm(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-semibold" style={{ color: COLORS.deepBlue }}>{editingQtn ? 'Edit Quotation' : 'New Quotation'}</DialogTitle>
-            <DialogDescription>Step {currentStep + 1} of {STEPS.length}: {STEPS[currentStep]}</DialogDescription>
-          </DialogHeader>
+                    <p className="text-slate-700 font-semibold text-lg mb-2">{quotation.client_name}</p>
+                    <p className="text-slate-600 text-sm mb-4">For: {quotation.service}</p>
 
-          <div className="flex items-center gap-2 py-2">
-            {STEPS.map((s, i) => (
-              <React.Fragment key={s}>
-                <div className={cn('flex items-center gap-1.5 text-xs font-semibold transition-all', i === currentStep ? 'text-indigo-700' : i < currentStep ? 'text-emerald-600' : 'text-slate-400')}>
-                  <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2 flex-shrink-0',
-                    i === currentStep ? 'bg-indigo-600 text-white border-indigo-600' : i < currentStep ? 'bg-emerald-500 text-white border-emerald-500' : isDark ? 'bg-slate-700 border-slate-500 text-slate-400' : 'bg-white border-slate-300 text-slate-400')}>
-                    {i < currentStep ? <Check className="h-3 w-3" /> : i + 1}
-                  </div>
-                  <span className="hidden sm:inline">{s}</span>
-                </div>
-                {i < STEPS.length - 1 && <div className={cn('flex-1 h-0.5 rounded-full', i < currentStep ? 'bg-emerald-400' : isDark ? 'bg-slate-600' : 'bg-slate-200')} />}
-              </React.Fragment>
+                    <div className="flex items-center justify-between text-sm text-slate-800 mb-4 p-3 bg-slate-50 rounded-xl">
+                      <span className="font-medium">Total Amount:</span>
+                      <span className="font-bold text-lg" style={{ color: COLORS.emeraldGreen }}>₹ {quotation.total.toLocaleString()}</span>
+                    </div>
+
+                    <div className="flex gap-2 flex-wrap mb-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownloadPdf(quotation.id, quotation.quotation_no)}
+                        disabled={downloading === quotation.id + '-pdf'}
+                        className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                      >
+                        {downloading === quotation.id + '-pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEmailPdf(quotation, 'quotation')}
+                        className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                      >
+                        <Mail className="h-4 w-4" /> Email to Client
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleWhatsAppPdf(quotation, 'quotation')}
+                        className="rounded-xl gap-1 text-green-600 border-green-200 hover:bg-green-50"
+                      >
+                        <MessageCircle className="h-4 w-4" /> WhatsApp
+                      </Button>
+                    </div>
+
+                    <div className="border-t pt-4 mt-4">
+                      <p className="text-sm font-semibold text-slate-700 mb-2">Document Checklist PDF:</p>
+                      <div className="flex gap-2 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownloadChecklistPdf(quotation.id, quotation.quotation_no)}
+                          disabled={downloading === quotation.id + '-checklist-pdf'}
+                          className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                        >
+                          {downloading === quotation.id + '-checklist-pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Checklist
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEmailPdf(quotation, 'checklist')}
+                          className="rounded-xl gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                        >
+                          <Mail className="h-4 w-4" /> Email Checklist
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleWhatsAppPdf(quotation, 'checklist')}
+                          className="rounded-xl gap-1 text-green-600 border-green-200 hover:bg-green-50"
+                        >
+                          <MessageCircle className="h-4 w-4" /> WhatsApp Checklist
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 mt-6">
+                      <Button variant="outline" size="sm" onClick={() => handleEditQuotation(quotation)} className="rounded-xl gap-1 text-slate-600 border-slate-200 hover:bg-slate-50">
+                        <Edit className="h-4 w-4" /> Edit
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleDeleteQuotation(quotation.id)} className="rounded-xl gap-1 text-red-600 border-red-200 hover:bg-red-50">
+                        <Trash2 className="h-4 w-4" /> Delete
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
             ))}
-          </div>
-
-          <AnimatePresence mode="wait">
-            <motion.div key={currentStep} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: .2 }} className="py-2">
-              {renderStep()}
-            </motion.div>
           </AnimatePresence>
+        </div>
+      )}
 
-          <DialogFooter className="gap-2 pt-4 border-t border-slate-200">
-            <Button variant="outline" onClick={closeForm} className="rounded-2xl">Cancel</Button>
-            {currentStep > 0 && <Button variant="outline" onClick={() => setCurrentStep(p => p - 1)} className="rounded-2xl gap-1"><ChevronLeft className="h-4 w-4" />Back</Button>}
-            {currentStep < STEPS.length - 1
-              ? <Button onClick={() => setCurrentStep(p => p + 1)} disabled={!canGoNext()} className="rounded-2xl gap-1 bg-indigo-600 hover:bg-indigo-700 text-white">
-                  Next<ChevronRight className="h-4 w-4" />
-                </Button>
-              : <Button onClick={handleSubmit} disabled={submitting || !canGoNext()} className="rounded-2xl min-w-[140px]" style={{ background: COLORS.emeraldGreen }}>
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : editingQtn ? 'Update Quotation' : 'Create Quotation'}
-                </Button>}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {isManagerOpen && (
+        <QuotationManager
+          onClose={() => setIsManagerOpen(false)}
+          onSaved={() => { fetchQuotations(); fetchCompaniesAndServices(); }}
+          editingQuotation={editingQuotation}
+        />
+      )}
 
-    </motion.div>
+      {isCompanyManagerOpen && (
+        <CompanyManager
+          onClose={() => setIsCompanyManagerOpen(false)}
+          onSaved={fetchCompaniesAndServices}
+          editingCompany={editingCompany}
+        />
+      )}
+
+      {isEmailModalOpen && (
+        <EmailModal
+          open={isEmailModalOpen}
+          onClose={() => setIsEmailModalOpen(false)}
+          quotation={emailModalQuotation}
+          company={getCompanyById(emailModalQuotation?.company_id)}
+          pdfType={emailModalPdfType}
+        />
+      )}
+
+      {isWhatsAppModalOpen && (
+        <WhatsAppModal
+          open={isWhatsAppModalOpen}
+          onClose={() => setIsWhatsAppModalOpen(false)}
+          quotation={whatsAppModalQuotation}
+          company={getCompanyById(whatsAppModalQuotation?.company_id)}
+          pdfType={whatsAppModalPdfType}
+        />
+      )}
+    </div>
   );
 }
