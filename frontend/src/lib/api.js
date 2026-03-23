@@ -11,7 +11,7 @@ const BACKEND =
   "https://final-taskosphere-backend.onrender.com";
 
 // ✅ FIXED: removed /api
-const BASE_URL = `${BACKEND.replace(/\/$/, "")}`;
+const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api`;
 
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token");
