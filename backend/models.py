@@ -195,6 +195,7 @@ class User(BaseModel):
     full_name: Optional[str] = None
     role: UserRole = UserRole.staff
     password: Optional[str] = None
+    consent_given: bool = False
     departments: List[str] = Field(default_factory=list)
     phone: Optional[str] = None
     birthday: Optional[Any] = None
@@ -209,7 +210,7 @@ class User(BaseModel):
     status: str = "pending_approval"
     approved_by: Optional[str] = None
     approved_at: Optional[Any] = None
-
+    
     @field_validator("birthday", mode="before")
     @classmethod
     def empty_string_to_none(cls, v):
