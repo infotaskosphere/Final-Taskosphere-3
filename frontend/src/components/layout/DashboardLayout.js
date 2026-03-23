@@ -23,6 +23,7 @@ import {
   Settings,
   Mail,
   Receipt,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -30,11 +31,11 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const COLORS = {
-  deepBlue:    '#0D3B66',
-  mediumBlue:  '#1F6FB2',
-  lightBlue:   '#E0F2FE',
-  emeraldGreen:'#1FAF5A',
-  lightGreen:  '#5CCB5F',
+  deepBlue:     '#0D3B66',
+  mediumBlue:   '#1F6FB2',
+  lightBlue:    '#E0F2FE',
+  emeraldGreen: '#1FAF5A',
+  lightGreen:   '#5CCB5F',
 };
 
 const SIDEBAR_EXPANDED  = 260;
@@ -65,10 +66,10 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
-      { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
-      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
-      { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
+      { path: '/staff-activity', icon: Activity,  label: 'Staff Activity',  permission: 'can_view_staff_activity' },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports'                                               },
+      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log', permission: 'can_view_audit_logs'    },
+      { path: '/users',          icon: Users,      label: 'Users',          permission: 'can_view_user_page'     },
     ],
   },
   {
@@ -95,8 +96,8 @@ const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
 const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
@@ -139,6 +140,11 @@ const DashboardLayout = ({ children }) => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
+  // Close sidebar on mobile when route changes
+  useEffect(() => {
+    if (!isDesktop) setSidebarOpen(false);
+  }, [location.pathname, isDesktop]);
+
   useEffect(() => {
     if (!userMenuOpen) return;
     const handle = (e) => {
@@ -160,7 +166,7 @@ const DashboardLayout = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
-  const allNavItems = NAV_GROUPS.flatMap(g => g.items);
+  const allNavItems    = NAV_GROUPS.flatMap(g => g.items);
   const visibleNavItems = allNavItems.filter(
     item => !item.permission || hasPermission(item.permission)
   );
@@ -183,7 +189,6 @@ const DashboardLayout = ({ children }) => {
       >
         <Link
           to={item.path}
-          onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
           title={collapsed ? item.label : undefined}
           className={`
             relative flex items-center gap-3
@@ -199,22 +204,33 @@ const DashboardLayout = ({ children }) => {
             boxShadow:  '0 4px 14px rgba(13,59,102,0.28)',
           } : {}}
         >
+          {/* Active left accent bar */}
           {isActive && !collapsed && (
             <span
               className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
               style={{ background: 'rgba(255,255,255,0.6)' }}
             />
           )}
+
           <Icon
             className={`flex-shrink-0 transition-colors ${
               collapsed ? 'h-5 w-5' : 'h-4 w-4'
             } ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`}
           />
+
           {!collapsed && (
             <span className="font-medium text-sm whitespace-nowrap tracking-tight">
               {item.label}
             </span>
           )}
+
+          {/* Active dot indicator when collapsed */}
+          {isActive && collapsed && (
+            <span
+              className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70"
+            />
+          )}
+
           {/* Tooltip when collapsed */}
           {collapsed && (
             <div className="
@@ -234,7 +250,7 @@ const DashboardLayout = ({ children }) => {
     );
   };
 
-  // ── Nav divider — identical plain text style for ALL sections ─────────────
+  // ── Nav divider ───────────────────────────────────────────────────────────
   const NavDivider = ({ label }) => (
     <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
@@ -252,7 +268,7 @@ const DashboardLayout = ({ children }) => {
 
       {/* ── Mobile Overlay ── */}
       <AnimatePresence>
-        {sidebarOpen && (
+        {sidebarOpen && !isDesktop && (
           <motion.div
             className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
             initial={{ opacity: 0 }}
@@ -278,45 +294,75 @@ const DashboardLayout = ({ children }) => {
           boxShadow:   '4px 0 24px rgba(0,0,0,0.06)',
         }}
       >
-        {/* Logo */}
+        {/* Logo + collapse button */}
         <div
           className="flex items-center justify-between px-3 sm:px-4 py-3 sm:py-4 flex-shrink-0"
           style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
         >
-          <div className={`flex items-center overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
+          <div className={`flex items-center gap-2.5 overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
             <img
               src="/logo.png"
               alt="Taskosphere"
-              className={`object-contain transition-all duration-300 ${collapsed ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 sm:h-12'}`}
+              className={`object-contain flex-shrink-0 transition-all duration-300 ${collapsed ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-8 w-8'}`}
             />
+            {/* App name — only visible when expanded */}
+            {!collapsed && (
+              <motion.div
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -8 }}
+                transition={springSoft}
+                className="min-w-0"
+              >
+                <p className={`font-bold text-sm leading-tight truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  Taskosphere
+                </p>
+                <p className={`text-[10px] font-medium truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Workspace
+                </p>
+              </motion.div>
+            )}
           </div>
-          <motion.button
-            onClick={() => setCollapsed(prev => !prev)}
-            className={`
-              ${isDark
-                ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-              }
-              ${collapsed ? 'absolute right-1 top-[18px]' : ''}
-              p-1 rounded-lg
-            `}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            transition={springMed}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!collapsed}
-          >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </motion.button>
+
+          {/* Collapse toggle — only on desktop */}
+          {isDesktop && (
+            <motion.button
+              onClick={() => setCollapsed(prev => !prev)}
+              className={`
+                flex-shrink-0 p-1.5 rounded-lg transition-colors
+                ${isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                }
+                ${collapsed ? 'absolute right-2 top-[18px]' : ''}
+              `}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              transition={springMed}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!collapsed}
+            >
+              {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </motion.button>
+          )}
+
+          {/* Close button on mobile */}
+          {!isDesktop && (
+            <motion.button
+              onClick={() => setSidebarOpen(false)}
+              className={`flex-shrink-0 p-1.5 rounded-lg transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
+              whileTap={{ scale: 0.9 }}
+            >
+              <X size={15} />
+            </motion.button>
+          )}
         </div>
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-3 overflow-y-auto scrollbar-none space-y-0.5">
           {NAV_GROUPS.map((group, gi) => (
             <React.Fragment key={group.id}>
-              {gi > 0 && (
-                <NavDivider label={group.dividerLabel} />
-              )}
+              {gi > 0 && <NavDivider label={group.dividerLabel} />}
               {group.items.map(item => (
                 <NavItem key={item.path} item={item} />
               ))}
@@ -324,14 +370,54 @@ const DashboardLayout = ({ children }) => {
           ))}
         </nav>
 
-        {/* Sidebar footer */}
-        {!collapsed && (
-          <div
-            className="flex-shrink-0 px-3 py-3"
-            style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
-          >
-            <div className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 sm:py-2.5 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+        {/* Sidebar footer — user info + logout */}
+        <div
+          className="flex-shrink-0 px-3 py-3"
+          style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
+        >
+          {!collapsed ? (
+            <div className={`rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+              {/* User row */}
+              <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 sm:py-2.5">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+                  {user?.profile_picture ? (
+                    <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div
+                      className="w-full h-full flex items-center justify-center text-white font-bold text-xs"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                    >
+                      {user?.full_name?.[0]?.toUpperCase() || 'U'}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-[10px] sm:text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    {user?.full_name}
+                  </p>
+                  <p className={`text-[10px] truncate capitalize ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                    {user?.role}
+                  </p>
+                </div>
+              </div>
+              {/* Logout row */}
+              <div className={`mx-2 mb-2 border-t ${isDark ? 'border-slate-600/50' : 'border-slate-200/70'}`} />
+              <motion.button
+                onClick={handleLogout}
+                whileHover={{ x: 2 }}
+                transition={springSnap}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 mb-1 rounded-lg text-xs font-medium transition-colors ${
+                  isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'
+                }`}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </motion.button>
+            </div>
+          ) : (
+            /* Collapsed: just show avatar + logout icon stacked */
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-8 h-8 rounded-lg overflow-hidden ring-1 ring-slate-200 dark:ring-slate-600">
                 {user?.profile_picture ? (
                   <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                 ) : (
@@ -343,28 +429,29 @@ const DashboardLayout = ({ children }) => {
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className={`font-semibold text-[10px] sm:text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                  {user?.full_name}
-                </p>
-                <p className={`text-[10px] truncate capitalize ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                  {user?.role}
-                </p>
-              </div>
+              <motion.button
+                onClick={handleLogout}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-400 hover:bg-red-50'}`}
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </motion.button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </aside>
 
       {/* ── HEADER ── */}
       <header
         className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
         style={{
-          left:         offsetPx,
-          width:        `calc(100% - ${offsetPx}px)`,
-          background:   isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
-          borderBottom: isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
-          boxShadow:    '0 1px 8px rgba(0,0,0,0.06)',
+          left:                 offsetPx,
+          width:                `calc(100% - ${offsetPx}px)`,
+          background:           isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
+          borderBottom:         isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
+          boxShadow:            '0 1px 8px rgba(0,0,0,0.06)',
           backdropFilter:       'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
         }}
@@ -383,52 +470,76 @@ const DashboardLayout = ({ children }) => {
             </Button>
           </motion.div>
 
-          {/* Breadcrumb */}
-          <div className="hidden lg:flex items-center gap-2">
-            {(() => {
-              const active = visibleNavItems.find(i => i.path === location.pathname);
-              if (!active) return null;
-              const Icon = active.icon;
-              return (
-                <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
-                  <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: COLORS.deepBlue }} />
-                </div>
-              );
-            })()}
-            <span className={`text-xs sm:text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {activeLabel}
-            </span>
-          </div>
+          {/* Breadcrumb — animated on route change */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18 }}
+              className="hidden lg:flex items-center gap-2"
+            >
+              {(() => {
+                const active = visibleNavItems.find(i => i.path === location.pathname);
+                if (!active) return null;
+                const Icon = active.icon;
+                return (
+                  <>
+                    <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
+                      <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: COLORS.deepBlue }} />
+                    </div>
+                    <span className={`text-xs sm:text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {activeLabel}
+                    </span>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </AnimatePresence>
 
           {/* Right cluster */}
           <div className="flex items-center gap-1 sm:gap-2 ml-auto">
 
             <NotificationBell />
 
-            {/* Theme toggle */}
+            {/* Theme toggle — pill style */}
             <motion.button
               onClick={() => setIsDark(prev => !prev)}
-              className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center border transition-all ${
+              className={`relative h-8 w-14 sm:h-9 sm:w-16 rounded-full flex items-center border transition-all overflow-hidden ${
                 isDark
-                  ? 'bg-slate-800 border-slate-600 text-amber-400 hover:bg-slate-700'
-                  : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                  ? 'bg-slate-800 border-slate-600'
+                  : 'bg-slate-100 border-slate-200'
               }`}
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
+              whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
             >
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={isDark ? 'sun' : 'moon'}
-                  initial={{ rotate: -30, opacity: 0 }}
-                  animate={{ rotate: 0,   opacity: 1 }}
-                  exit={{   rotate:  30, opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                >
-                  {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </motion.div>
-              </AnimatePresence>
+              {/* Track icons */}
+              <Sun className="absolute left-1.5 h-3 w-3 text-amber-400 opacity-70" />
+              <Moon className="absolute right-1.5 h-3 w-3 text-slate-400 opacity-70" />
+              {/* Thumb */}
+              <motion.div
+                className={`absolute w-6 h-6 rounded-full shadow-sm flex items-center justify-center ${isDark ? 'bg-slate-200' : 'bg-white'}`}
+                animate={{ x: isDark ? 32 : 4 }}
+                transition={springSnap}
+                style={{ top: '50%', marginTop: -12 }}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.div
+                    key={isDark ? 'moon' : 'sun'}
+                    initial={{ rotate: -30, opacity: 0, scale: 0.7 }}
+                    animate={{ rotate: 0,   opacity: 1, scale: 1   }}
+                    exit={{   rotate:  30, opacity: 0, scale: 0.7  }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {isDark
+                      ? <Moon className="h-3 w-3 text-slate-700" />
+                      : <Sun  className="h-3 w-3 text-amber-500" />
+                    }
+                  </motion.div>
+                </AnimatePresence>
+              </motion.div>
             </motion.button>
 
             {/* User dropdown */}
@@ -479,6 +590,7 @@ const DashboardLayout = ({ children }) => {
                         : '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
                     }}
                   >
+                    {/* User info header */}
                     <div
                       className="px-4 py-3.5"
                       style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
@@ -512,7 +624,20 @@ const DashboardLayout = ({ children }) => {
                         </div>
                       </div>
                     </div>
+
+                    {/* Quick links */}
                     <div className="p-1.5">
+                      <motion.button
+                        onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
+                        whileHover={{ x: 2 }}
+                        transition={springSnap}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors mb-0.5 ${
+                          isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Settings className="h-4 w-4" />
+                        Settings
+                      </motion.button>
                       <motion.button
                         onClick={handleLogout}
                         whileHover={{ x: 2 }}
