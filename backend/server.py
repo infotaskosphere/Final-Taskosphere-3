@@ -3548,22 +3548,29 @@ async def parse_mds_excel_for_client_form(
 @api_router.post("/clients", response_model=Client)
 async def create_client(payload: dict, current_user: User = Depends(get_current_user)):
     try:
-        # Strip unknown fields so ClientCreate doesn't choke on extras like
-        # address / city / state / client_type_label sent from the MDS form
         client_data = ClientCreate(**{k: v for k, v in payload.items() if k in ClientCreate.model_fields})
         client = Client(**client_data.model_dump(), created_by=current_user.id)
         doc = client.model_dump()
 
-        # ── FIX: safe isoformat — never call .isoformat() on None ────────────
-        doc["created_at"] = doc["created_at"].isoformat() if doc.get("created_at") else datetime.now(timezone.utc).isoformat()
-        doc["birthday"]   = doc["birthday"].isoformat()   if doc.get("birthday")   else None
+        # ── safe_iso: handles None, str, date, datetime — never crashes ──────
+        def safe_iso(val):
+            if val is None:
+                return None
+            if isinstance(val, str):
+                return val[:10] if val else None  # already "2015-04-01", keep as-is
+            if isinstance(val, (date, datetime)):
+                return val.isoformat()
+            return str(val)
 
-        # Persist extra flat fields that live outside the Pydantic schema
+        doc["created_at"] = safe_iso(doc.get("created_at")) or datetime.now(timezone.utc).isoformat()
+        doc["birthday"]   = safe_iso(doc.get("birthday"))
+
+        # Persist extra fields from frontend that live outside Pydantic schema
         for key in ("address", "city", "state", "client_type_label",
                     "contact_persons", "dsc_details", "assignments",
                     "referred_by"):
             val = payload.get(key)
-            if val is not None:           # keep explicit None / empty list
+            if val is not None:
                 doc[key] = val
 
         doc.pop("_id", None)
