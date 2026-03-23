@@ -53,6 +53,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": True,
+        # ── Visit delete permissions ──
+        "can_view_all_visits": True,
+        "can_edit_visits": True,
+        "can_delete_visits": True,       # can delete ANY user's visits
+        "can_delete_own_visits": True,   # can delete own visits
+        "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -93,6 +99,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Visit delete permissions ──
+        "can_view_all_visits": False,
+        "can_edit_visits": True,
+        "can_delete_visits": False,      # cannot delete other users' visits by default
+        "can_delete_own_visits": True,   # can delete own visits
+        "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -133,6 +145,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "can_connect_email": True,
         "can_view_own_data": True,
         "can_create_quotations": False,
+        # ── Visit delete permissions ──
+        "can_view_all_visits": False,
+        "can_edit_visits": False,
+        "can_delete_visits": False,      # cannot delete other users' visits
+        "can_delete_own_visits": True,   # can delete own visits by default
+        "view_other_visits": [],
         "view_other_tasks": [],
         "view_other_attendance": [],
         "view_other_reports": [],
@@ -178,6 +196,13 @@ class UserPermissions(BaseModel):
     can_connect_email: bool = True
     can_view_own_data: bool = True
     can_create_quotations: bool = False
+    # ── Visit-specific permissions ──────────────────────────────────────────
+    can_view_all_visits: bool = False       # see every user's visits
+    can_edit_visits: bool = False           # create/edit any visit
+    can_delete_visits: bool = False         # delete ANY user's visit
+    can_delete_own_visits: bool = True      # delete own visits (default True)
+    view_other_visits: List[str] = Field(default_factory=list)   # specific UIDs readable
+    # ── List permissions ────────────────────────────────────────────────────
     view_other_tasks: List[str] = Field(default_factory=list)
     view_other_attendance: List[str] = Field(default_factory=list)
     view_other_reports: List[str] = Field(default_factory=list)
@@ -210,7 +235,7 @@ class User(BaseModel):
     status: str = "pending_approval"
     approved_by: Optional[str] = None
     approved_at: Optional[Any] = None
-    
+
     @field_validator("birthday", mode="before")
     @classmethod
     def empty_string_to_none(cls, v):
@@ -578,6 +603,7 @@ class ClientBase(BaseModel):
         default_factory=list,
         description="List of {user_id, services} assignments"
     )
+
     @model_validator(mode="before")
     @classmethod
     def clean_empty_optional_strings(cls, data: Any) -> Any:
