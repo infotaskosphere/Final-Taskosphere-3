@@ -1,18 +1,17 @@
 /**
- * VisitsPage.jsx — Client Visits v3  COMPLETE REWRITE
+ * VisitsPage.jsx — Client Visits v5  BULK DELETE + PERMISSION FIX
  *
- * NEW IN v3:
- *  - Delete 404 fix: error boundary around deleteMut with clear user-facing
- *    message; forces full queryKey invalidation regardless of outcome so
- *    stale items don't linger in the list.
- *  - Smart recurring scheduling: UI for "every Thursday", "2nd Thursday of
- *    the month", "last Friday of the month", etc.  Sends recurrence_weekday
- *    and recurrence_week_number to the backend.
- *  - Duplicate prevention: pre-flight POST /visits/check-duplicate before
- *    saving; shows inline warning and blocks submission.
- *  - Modern refreshed design: tighter card layout, gradient stat pills,
- *    animated skeleton loader, compact form with collapsible recurrence
- *    section, updated colour palette.
+ * CHANGES IN v5:
+ *  - Bulk delete: checkbox on each card, "Select All" toggle, floating bulk-
+ *    action bar that appears when items are selected. Calls POST /visits/bulk-delete.
+ *    Shows per-visit results (deleted / forbidden / not-found) in a toast summary.
+ *  - Delete visibility fix: canDelete is now independent of canWrite.
+ *    Admin always sees delete. Regular users see delete only for their OWN visits
+ *    (matching backend can_delete_own_visits default=True). Users with
+ *    can_delete_visits permission see delete on all visits.
+ *  - Delete recurrences option in bulk-delete dialog.
+ *  - All v3 features retained: smart recurrence, duplicate prevention,
+ *    animated skeleton, compact card layout.
  */
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
@@ -36,6 +35,7 @@ import {
   Send, ChevronDown, ClipboardList, Loader2, Check,
   Mail, RefreshCw, Info, Zap, TrendingUp, Eye,
   CalendarDays, CalendarRange, Filter, MoreVertical,
+  Square, CheckSquare, Minus,
 } from "lucide-react";
 
 // ─── Brand palette ─────────────────────────────────────────────────────────
@@ -81,23 +81,22 @@ const STATUS_META = {
 };
 
 const PRIORITY_META = {
-  low:    { label: "Low",      color: "text-blue-500",   dot: "bg-blue-400"   },
-  medium: { label: "Medium",   color: "text-amber-500",  dot: "bg-amber-400"  },
-  high:   { label: "High",     color: "text-orange-500", dot: "bg-orange-500" },
-  urgent: { label: "Urgent",   color: "text-red-600",    dot: "bg-red-500"    },
+  low:    { label: "Low",    color: "text-blue-500",   dot: "bg-blue-400"   },
+  medium: { label: "Medium", color: "text-amber-500",  dot: "bg-amber-400"  },
+  high:   { label: "High",   color: "text-orange-500", dot: "bg-orange-500" },
+  urgent: { label: "Urgent", color: "text-red-600",    dot: "bg-red-500"    },
 };
 
-// Smart recurrence options shown in UI
 const RECURRENCE_OPTIONS = [
-  { value: "none",         label: "No repeat"                },
-  { value: "weekly",       label: "Every week (same day)"    },
-  { value: "biweekly",     label: "Every 2 weeks"            },
-  { value: "monthly",      label: "Same date each month"     },
-  { value: "nth_weekday",  label: "Nth weekday of month…"    },
-  { value: "last_weekday", label: "Last weekday of month…"   },
+  { value: "none",         label: "No repeat"              },
+  { value: "weekly",       label: "Every week (same day)"  },
+  { value: "biweekly",     label: "Every 2 weeks"          },
+  { value: "monthly",      label: "Same date each month"   },
+  { value: "nth_weekday",  label: "Nth weekday of month…"  },
+  { value: "last_weekday", label: "Last weekday of month…" },
 ];
 
-const WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const WEEKDAYS    = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const WEEK_NUMBERS = [
   { value: 1, label: "1st" },
   { value: 2, label: "2nd" },
@@ -107,10 +106,29 @@ const WEEK_NUMBERS = [
 ];
 
 // ─── API helpers ───────────────────────────────────────────────────────────
-const fetchVisits  = (p)         => api.get("/visits", { params: p }).then(r => r.data);
-const fetchClients = ()          => api.get("/clients").then(r => r.data);
-const fetchUsers   = ()          => api.get("/users").then(r => r.data);
-const fetchSummary = (uid, month)=> api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
+const fetchVisits  = (p)          => api.get("/visits", { params: p }).then(r => r.data);
+const fetchClients = ()           => api.get("/clients").then(r => r.data);
+const fetchUsers   = ()           => api.get("/users").then(r => r.data);
+const fetchSummary = (uid, month) => api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
+
+// ─── Permission helpers (frontend mirror of backend logic) ─────────────────
+/**
+ * Returns true if the current user is allowed to DELETE the given visit.
+ * Mirrors backend _can_delete_visit():
+ *   1. admin role → always
+ *   2. permissions.can_delete_visits → always
+ *   3. own visit + permissions.can_delete_own_visits !== false → yes
+ *   4. else → no
+ */
+function canUserDeleteVisit(currentUser, visit) {
+  if (!currentUser || !visit) return false;
+  if (currentUser.role === "admin") return true;
+  const perms = currentUser.permissions || {};
+  if (perms.can_delete_visits) return true;
+  const isOwn = String(visit.assigned_to) === String(currentUser.id);
+  if (isOwn) return perms.can_delete_own_visits !== false;
+  return false;
+}
 
 // ─── Skeleton loader ───────────────────────────────────────────────────────
 function SkeletonCard() {
@@ -236,17 +254,81 @@ function QuickStatusButtons({ visit, onDone }) {
   );
 }
 
+// ─── Bulk Delete Confirm Dialog ────────────────────────────────────────────
+function BulkDeleteDialog({ count, onConfirm, onCancel, isPending }) {
+  const [deleteRecurrences, setDeleteRecurrences] = useState(false);
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9500] flex items-center justify-center p-4"
+      style={{ background: "rgba(5,12,26,0.75)", backdropFilter: "blur(8px)" }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={e => e.target === e.currentTarget && onCancel()}
+    >
+      <motion.div
+        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm p-6"
+        initial={{ scale: 0.9, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 30 }}
+        transition={{ type: "spring", stiffness: 280, damping: 24 }}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-3 rounded-xl bg-red-100 dark:bg-red-950/40">
+            <Trash2 className="h-5 w-5 text-red-500" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-100">Delete {count} Visit{count !== 1 ? "s" : ""}?</h3>
+            <p className="text-xs text-slate-400 mt-0.5">This action cannot be undone.</p>
+          </div>
+        </div>
+
+        <div
+          onClick={() => setDeleteRecurrences(r => !r)}
+          className="flex items-center gap-3 p-3 rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 cursor-pointer mb-5 select-none"
+        >
+          <div className={cn(
+            "h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+            deleteRecurrences
+              ? "bg-red-500 border-red-500"
+              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+          )}>
+            {deleteRecurrences && <Check className="h-3 w-3 text-white" />}
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Also delete recurring visits</p>
+            <p className="text-[10px] text-slate-400">Removes all child recurrence entries for parent visits in selection</p>
+          </div>
+        </div>
+
+        <div className="flex gap-2.5">
+          <Button variant="outline" onClick={onCancel} className="flex-1 rounded-xl h-10 border-slate-200 dark:border-slate-700">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => onConfirm(deleteRecurrences)}
+            disabled={isPending}
+            className="flex-1 rounded-xl h-10 text-white font-bold"
+            style={{ background: GRAD.danger }}
+          >
+            {isPending
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Deleting…</>
+              : <><Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete {count}</>}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Compact Visit Card ────────────────────────────────────────────────────
-function VisitCard({ v, onClick, onEdit, currentUser }) {
+function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, selectionMode }) {
   const qc = useQueryClient();
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const menuRef = useRef(null);
 
   const isOver    = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
-  const showQuick = v.status === "scheduled" || v.status === "rescheduled";
-  const canWrite  = currentUser?.role === "admin" || v.assigned_to === currentUser?.id;
+  const showQuick = (v.status === "scheduled" || v.status === "rescheduled") && !selectionMode;
+  const canWrite  = currentUser?.role === "admin" || v.assigned_to === currentUser?.id
+    || currentUser?.permissions?.can_edit_visits;
+  const canDelete = canUserDeleteVisit(currentUser, v);
 
-  // Close status menu on outside click
   useEffect(() => {
     const handler = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target))
@@ -270,49 +352,74 @@ function VisitCard({ v, onClick, onEdit, currentUser }) {
     mutationFn: () => api.delete(`/visits/${v.id}`),
     onSuccess: () => {
       toast.success("Visit deleted");
-      // Always invalidate so stale items are removed even if the visit was
-      // previously in error state — this was the root cause of the 404 loop.
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
     },
     onError: (err) => {
-      // v3 FIX: even on 404, force a refetch so the UI clears the stale item
       qc.invalidateQueries({ queryKey: ["visits"] });
-      const detail = err.response?.data?.detail || "Delete failed";
-      // If it's a 404 "already deleted" — treat as success for UX purposes
       if (err.response?.status === 404) {
         toast.info("Visit was already removed — refreshing list.");
+      } else if (err.response?.status === 403) {
+        toast.error("You don't have permission to delete this visit.");
       } else {
-        toast.error(detail);
+        toast.error(err.response?.data?.detail || "Delete failed");
       }
     },
   });
 
+  const handleCardClick = () => {
+    if (selectionMode) {
+      onSelectToggle?.(v.id);
+    } else {
+      onClick?.();
+    }
+  };
+
   return (
     <motion.div
       variants={fadeUp} layout
-      whileHover={{ y: -1 }}
+      whileHover={{ y: selectionMode ? 0 : -1 }}
       transition={spring}
-      onClick={onClick}
+      onClick={handleCardClick}
       className={cn(
         "bg-white dark:bg-slate-800/90 border rounded-xl cursor-pointer group transition-all",
-        isOver
+        selected
+          ? "border-blue-400 dark:border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900 shadow-sm"
+          : isOver
           ? "border-orange-200 dark:border-orange-900 shadow-orange-50 dark:shadow-orange-950/20"
           : "border-slate-200/80 dark:border-slate-700/80 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm",
       )}
     >
-      {/* Left accent bar */}
       <div className="flex">
+        {/* Left accent bar */}
         <div className={cn(
           "w-0.5 rounded-l-xl flex-shrink-0",
-          v.status === "completed"   ? "bg-emerald-400" :
-          v.status === "missed"      ? "bg-orange-400"  :
-          v.status === "cancelled"   ? "bg-slate-300"   :
-          v.status === "rescheduled" ? "bg-purple-400"  :
-          isOver                     ? "bg-orange-400"  : "bg-blue-400"
+          selected                          ? "bg-blue-400" :
+          v.status === "completed"          ? "bg-emerald-400" :
+          v.status === "missed"             ? "bg-orange-400"  :
+          v.status === "cancelled"          ? "bg-slate-300"   :
+          v.status === "rescheduled"        ? "bg-purple-400"  :
+          isOver                            ? "bg-orange-400"  : "bg-blue-400"
         )} />
 
         <div className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0">
+          {/* Selection checkbox */}
+          {selectionMode && (
+            <div
+              onClick={(e) => { e.stopPropagation(); onSelectToggle?.(v.id); }}
+              className="flex-shrink-0"
+            >
+              <div className={cn(
+                "h-5 w-5 rounded-md border-2 flex items-center justify-center transition-colors",
+                selected
+                  ? "bg-blue-500 border-blue-500"
+                  : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-blue-400"
+              )}>
+                {selected && <Check className="h-3 w-3 text-white" />}
+              </div>
+            </div>
+          )}
+
           {/* Date badge */}
           <div className="flex-shrink-0 w-12 text-center">
             <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -395,92 +502,108 @@ function VisitCard({ v, onClick, onEdit, currentUser }) {
           </div>
 
           {/* Right action cluster */}
-          <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
-            <PriorityDot priority={v.priority} />
-            <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+          {!selectionMode && (
+            <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+              <PriorityDot priority={v.priority} />
+              <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
+              <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
 
-            {showQuick  && <QuickStatusButtons visit={v} />}
-            {v.status === "completed" && (
-              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40
-                border border-emerald-200 dark:border-emerald-800 text-emerald-600 text-[10px] font-bold">
-                <CheckCircle2 className="h-3 w-3" /> Done
-              </span>
-            )}
-            {v.status === "missed" && (
-              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 dark:bg-orange-950/40
-                border border-orange-200 dark:border-orange-800 text-orange-500 text-[10px] font-bold">
-                <AlertCircle className="h-3 w-3" /> Missed
-              </span>
-            )}
+              {showQuick && <QuickStatusButtons visit={v} />}
+              {v.status === "completed" && (
+                <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40
+                  border border-emerald-200 dark:border-emerald-800 text-emerald-600 text-[10px] font-bold">
+                  <CheckCircle2 className="h-3 w-3" /> Done
+                </span>
+              )}
+              {v.status === "missed" && (
+                <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 dark:bg-orange-950/40
+                  border border-orange-200 dark:border-orange-800 text-orange-500 text-[10px] font-bold">
+                  <AlertCircle className="h-3 w-3" /> Missed
+                </span>
+              )}
 
-            {canWrite && (
-              <>
-                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
-                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                  onClick={(e) => { e.stopPropagation(); onEdit?.(v); }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                  title="Edit">
-                  <Edit3 className="h-3.5 w-3.5" />
-                </motion.button>
+              {(canWrite || canDelete) && (
+                <>
+                  <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
 
-                {/* Status menu */}
-                <div className="relative" ref={menuRef}>
-                  <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                    onClick={(e) => { e.stopPropagation(); setShowStatusMenu(s => !s); }}
-                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-600
-                      text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                    title="Change status">
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </motion.button>
-                  <AnimatePresence>
-                    {showStatusMenu && (
-                      <motion.div
-                        className="absolute right-0 top-full mt-1.5 w-44 z-50
-                          bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700
-                          rounded-2xl shadow-xl overflow-hidden"
-                        initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                        transition={{ type: "spring", stiffness: 320, damping: 24 }}
-                      >
-                        <div className="p-1">
-                          {Object.entries(STATUS_META).map(([s, m]) => (
-                            <button key={s}
-                              onClick={(e) => { e.stopPropagation(); statusMut.mutate(s); }}
-                              disabled={statusMut.isPending}
-                              className={cn(
-                                "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors text-left",
-                                v.status === s
-                                  ? "bg-slate-100 dark:bg-slate-700"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-700/50",
-                              )}>
-                              <m.icon className={cn("h-3 w-3 flex-shrink-0", m.color)} />
-                              <span className={m.color}>{m.label}</span>
-                              {v.status === s && <Check className="h-3 w-3 ml-auto text-slate-400" />}
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                  {canWrite && (
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                      onClick={(e) => { e.stopPropagation(); onEdit?.(v); }}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                      title="Edit">
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </motion.button>
+                  )}
 
-                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm("Delete this visit? This cannot be undone.")) deleteMut.mutate();
-                  }}
-                  disabled={deleteMut.isPending}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
-                  title="Delete">
-                  {deleteMut.isPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <Trash2 className="h-3.5 w-3.5" />}
-                </motion.button>
-              </>
-            )}
-          </div>
+                  {canWrite && (
+                    <div className="relative" ref={menuRef}>
+                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                        onClick={(e) => { e.stopPropagation(); setShowStatusMenu(s => !s); }}
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-600
+                          text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                        title="Change status">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </motion.button>
+                      <AnimatePresence>
+                        {showStatusMenu && (
+                          <motion.div
+                            className="absolute right-0 top-full mt-1.5 w-44 z-50
+                              bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700
+                              rounded-2xl shadow-xl overflow-hidden"
+                            initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                            transition={{ type: "spring", stiffness: 320, damping: 24 }}
+                          >
+                            <div className="p-1">
+                              {Object.entries(STATUS_META).map(([s, m]) => (
+                                <button key={s}
+                                  onClick={(e) => { e.stopPropagation(); statusMut.mutate(s); }}
+                                  disabled={statusMut.isPending}
+                                  className={cn(
+                                    "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors text-left",
+                                    v.status === s
+                                      ? "bg-slate-100 dark:bg-slate-700"
+                                      : "hover:bg-slate-50 dark:hover:bg-slate-700/50",
+                                  )}>
+                                  <m.icon className={cn("h-3 w-3 flex-shrink-0", m.color)} />
+                                  <span className={m.color}>{m.label}</span>
+                                  {v.status === s && <Check className="h-3 w-3 ml-auto text-slate-400" />}
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+
+                  {canDelete && (
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm("Delete this visit? This cannot be undone.")) deleteMut.mutate();
+                      }}
+                      disabled={deleteMut.isPending}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
+                      title="Delete">
+                      {deleteMut.isPending
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Trash2 className="h-3.5 w-3.5" />}
+                    </motion.button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Selection mode: show priority + avatar on right */}
+          {selectionMode && (
+            <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+              <PriorityDot priority={v.priority} />
+              <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
@@ -491,17 +614,14 @@ function VisitCard({ v, onClick, onEdit, currentUser }) {
 function RecurrenceSection({ form, set }) {
   const needsWeekday = form.recurrence === "nth_weekday" || form.recurrence === "last_weekday";
 
-  // Auto-infer weekday from the selected visit_date
   const inferredWeekday = useMemo(() => {
     if (!form.visit_date) return 0;
     try {
-      // getDay() returns 0=Sun…6=Sat; we need 0=Mon…6=Sun
       const jsDay = getDay(parseISO(form.visit_date));
-      return jsDay === 0 ? 6 : jsDay - 1; // Convert Sun=0 → 6, Mon=1 → 0, etc.
+      return jsDay === 0 ? 6 : jsDay - 1;
     } catch { return 0; }
   }, [form.visit_date]);
 
-  // Auto-fill weekday when switching to nth/last mode
   useEffect(() => {
     if (needsWeekday && form.recurrence_weekday === undefined) {
       set("recurrence_weekday", inferredWeekday);
@@ -511,7 +631,6 @@ function RecurrenceSection({ form, set }) {
   const inputCls = "w-full px-3 py-2 rounded-xl border dark:border-slate-600 bg-white dark:bg-slate-800/80 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-shadow";
   const labelCls = "block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-1 uppercase tracking-wider";
 
-  // Human-readable summary of the recurrence rule
   const recurrenceSummary = useMemo(() => {
     if (form.recurrence === "none") return null;
     const wd = WEEKDAYS[form.recurrence_weekday ?? inferredWeekday] || "";
@@ -624,7 +743,6 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
   const calDays = eachDayOfInterval({ start: startOfMonth(bulkCalMonth), end: endOfMonth(bulkCalMonth) });
   const set     = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Duplicate check debounced whenever client+date+assigned_to changes
   useEffect(() => {
     if (!form.client_id || !form.visit_date || !form.assigned_to || bulkMode) return;
     clearTimeout(dupDebounceRef.current);
@@ -660,7 +778,7 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
         services: form.services.split(",").map(s => s.trim()).filter(Boolean),
         client_name: clients.find(c => c.id === form.client_id)?.company_name || "",
       };
-      if (!payload.visit_time)         delete payload.visit_time;
+      if (!payload.visit_time)          delete payload.visit_time;
       if (!payload.recurrence_end_date) delete payload.recurrence_end_date;
       if (payload.recurrence === "none") {
         delete payload.recurrence_weekday;
@@ -978,7 +1096,9 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 
   const isAdmin  = currentUser.role === "admin";
-  const canWrite = isAdmin || visit.assigned_to === currentUser.id;
+  const canWrite = isAdmin || visit.assigned_to === currentUser.id
+    || currentUser?.permissions?.can_edit_visits;
+  const canDelete = canUserDeleteVisit(currentUser, visit);
 
   const statusMut = useMutation({
     mutationFn: (status) => api.patch(`/visits/${visit.id}`, { status }),
@@ -1027,6 +1147,8 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
       if (err.response?.status === 404) {
         toast.info("Visit was already removed.");
         onClose();
+      } else if (err.response?.status === 403) {
+        toast.error("You don't have permission to delete this visit.");
       } else {
         toast.error(err.response?.data?.detail || "Delete failed");
       }
@@ -1085,15 +1207,17 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
                     )}
                   </AnimatePresence>
                 </div>
-                <button
-                  onClick={() => window.confirm("Delete this visit?") && deleteMut.mutate()}
-                  disabled={deleteMut.isPending}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors">
-                  {deleteMut.isPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <Trash2 className="h-3.5 w-3.5" />}
-                </button>
               </>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => window.confirm("Delete this visit?") && deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors">
+                {deleteMut.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Trash2 className="h-3.5 w-3.5" />}
+              </button>
             )}
             <button onClick={onClose}
               className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -1312,19 +1436,24 @@ export default function VisitsPage() {
   const { user } = useAuth();
   const qc       = useQueryClient();
 
-  const [viewMode,        setViewMode]        = useState("list");
-  const [currentMonth,    setCurrentMonth]    = useState(new Date());
-  const [filterStatus,    setFilterStatus]    = useState("all");
-  const [filterUser,      setFilterUser]      = useState("all");
-  const [showForm,        setShowForm]        = useState(false);
-  const [editingVisit,    setEditingVisit]    = useState(null);
-  const [selectedVisit,   setSelectedVisit]   = useState(null);
-  const [selectedDayVis,  setSelectedDayVis]  = useState(null);
-  const [showEmailImport, setShowEmailImport] = useState(false);
+  const [viewMode,         setViewMode]         = useState("list");
+  const [currentMonth,     setCurrentMonth]     = useState(new Date());
+  const [filterStatus,     setFilterStatus]     = useState("all");
+  const [filterUser,       setFilterUser]       = useState("all");
+  const [showForm,         setShowForm]         = useState(false);
+  const [editingVisit,     setEditingVisit]     = useState(null);
+  const [selectedVisit,    setSelectedVisit]    = useState(null);
+  const [selectedDayVis,   setSelectedDayVis]   = useState(null);
+  const [showEmailImport,  setShowEmailImport]  = useState(false);
 
-  const monthStr  = format(currentMonth, "yyyy-MM");
-  const isAdmin   = user?.role === "admin";
-  const isMgr     = user?.role === "manager";
+  // ── Bulk delete state ───────────────────────────────────────────────────
+  const [selectionMode,    setSelectionMode]    = useState(false);
+  const [selectedIds,      setSelectedIds]      = useState(new Set());
+  const [showBulkDialog,   setShowBulkDialog]   = useState(false);
+
+  const monthStr = format(currentMonth, "yyyy-MM");
+  const isAdmin  = user?.role === "admin";
+  const isMgr    = user?.role === "manager";
 
   const { data: visits = [], isLoading } = useQuery({
     queryKey: ["visits", monthStr, filterStatus, filterUser],
@@ -1351,15 +1480,82 @@ export default function VisitsPage() {
     }
   }, [visits]);
 
+  // Exit selection mode when visits change
+  useEffect(() => {
+    if (selectionMode) {
+      setSelectedIds(prev => {
+        const validIds = new Set(visits.map(v => v.id));
+        const next = new Set([...prev].filter(id => validIds.has(id)));
+        return next;
+      });
+    }
+  }, [visits]);
+
+  // ── Bulk delete helpers ─────────────────────────────────────────────────
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Only include visits the user actually has permission to delete
+  const deletableVisits = useMemo(
+    () => visits.filter(v => canUserDeleteVisit(user, v)),
+    [visits, user]
+  );
+
+  const allDeletableSelected = deletableVisits.length > 0
+    && deletableVisits.every(v => selectedIds.has(v.id));
+  const someDeletableSelected = deletableVisits.some(v => selectedIds.has(v.id));
+
+  const toggleSelectAll = () => {
+    if (allDeletableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(deletableVisits.map(v => v.id)));
+    }
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: ({ ids, deleteRecurrences }) =>
+      api.post("/visits/bulk-delete", { visit_ids: ids, delete_recurrences: deleteRecurrences }),
+    onSuccess: (res) => {
+      const { deleted = [], forbidden = [], not_found = [] } = res.data || {};
+      if (deleted.length > 0) {
+        toast.success(`Deleted ${deleted.length} visit${deleted.length !== 1 ? "s" : ""} successfully.`);
+      }
+      if (forbidden.length > 0) {
+        toast.warning(`${forbidden.length} visit${forbidden.length !== 1 ? "s" : ""} could not be deleted (no permission).`);
+      }
+      if (not_found.length > 0) {
+        toast.info(`${not_found.length} visit${not_found.length !== 1 ? "s were" : " was"} already removed.`);
+      }
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
+      setShowBulkDialog(false);
+      exitSelectionMode();
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.detail || "Bulk delete failed");
+    },
+  });
+
+  // ── Summary stat cards ──────────────────────────────────────────────────
   const statCards = [
-    { label: "Total",     value: summary?.total || 0,                                                         grad: GRAD.primary, icon: CalendarDays },
-    { label: "Completed", value: summary?.by_status?.completed || 0,                                          grad: GRAD.success, icon: CheckCircle2, rate: summary?.completion_rate },
+    { label: "Total",     value: summary?.total || 0,                                                            grad: GRAD.primary, icon: CalendarDays },
+    { label: "Completed", value: summary?.by_status?.completed || 0,                                            grad: GRAD.success, icon: CheckCircle2, rate: summary?.completion_rate },
     { label: "Upcoming",  value: (summary?.by_status?.scheduled || 0) + (summary?.by_status?.rescheduled || 0), grad: GRAD.amber,   icon: Clock        },
-    { label: "Missed",    value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0),    grad: GRAD.danger,  icon: AlertCircle  },
+    { label: "Missed",    value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0),      grad: GRAD.danger,  icon: AlertCircle  },
   ];
 
   const handleEmailEvent = useCallback((event) => {
-    const jsDay = getDay(parseISO(event.date || format(new Date(), "yyyy-MM-dd")));
     setEditingVisit({
       purpose:    event.title || "",
       visit_date: event.date  || format(new Date(), "yyyy-MM-dd"),
@@ -1377,6 +1573,11 @@ export default function VisitsPage() {
     });
     setShowForm(true);
   }, [user]);
+
+  // Number of selected IDs that are actually deletable
+  const selectedDeletableCount = [...selectedIds].filter(id =>
+    deletableVisits.some(v => v.id === id)
+  ).length;
 
   return (
     <motion.div className="space-y-4" variants={stagger} initial="hidden" animate="visible">
@@ -1406,6 +1607,24 @@ export default function VisitsPage() {
             ))}
           </div>
 
+          {/* Bulk select toggle — only shown in list view */}
+          {viewMode === "list" && deletableVisits.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
+              className={cn(
+                "rounded-xl h-9 font-bold text-sm",
+                selectionMode
+                  ? "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30"
+                  : "border-slate-200 dark:border-slate-700"
+              )}
+            >
+              {selectionMode
+                ? <><X className="h-3.5 w-3.5 mr-1" /> Cancel</>
+                : <><CheckSquare className="h-3.5 w-3.5 mr-1" /> Select</>}
+            </Button>
+          )}
+
           <Button variant="outline" onClick={() => setShowEmailImport(true)}
             className="rounded-xl h-9 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300
               hover:bg-purple-50 dark:hover:bg-purple-950/30 font-bold text-sm">
@@ -1425,7 +1644,6 @@ export default function VisitsPage() {
         {statCards.map(({ label, value, grad, icon: Icon, rate }) => (
           <div key={label}
             className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm relative overflow-hidden">
-            {/* Gradient accent stripe */}
             <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl" style={{ background: grad }} />
             <div className="flex items-start justify-between">
               <div>
@@ -1510,6 +1728,71 @@ export default function VisitsPage() {
         )}
       </motion.div>
 
+      {/* ── Bulk action bar (floats above list when in selection mode) ── */}
+      <AnimatePresence>
+        {selectionMode && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="sticky top-2 z-40 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border"
+            style={{
+              background: "rgba(255,255,255,0.95)",
+              backdropFilter: "blur(12px)",
+              borderColor: "rgba(148,163,184,0.3)",
+            }}
+          >
+            {/* Select all toggle */}
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors"
+            >
+              <div className={cn(
+                "h-5 w-5 rounded-md border-2 flex items-center justify-center transition-colors",
+                allDeletableSelected
+                  ? "bg-blue-500 border-blue-500"
+                  : someDeletableSelected
+                  ? "bg-blue-100 border-blue-400"
+                  : "border-slate-300 bg-white"
+              )}>
+                {allDeletableSelected
+                  ? <Check className="h-3 w-3 text-white" />
+                  : someDeletableSelected
+                  ? <Minus className="h-3 w-3 text-blue-500" />
+                  : null}
+              </div>
+              {allDeletableSelected ? "Deselect all" : `Select all (${deletableVisits.length})`}
+            </button>
+
+            <div className="w-px h-5 bg-slate-200 mx-1 flex-shrink-0" />
+
+            <span className="text-sm text-slate-500 flex-1">
+              {selectedIds.size > 0
+                ? <><span className="font-bold text-blue-600">{selectedIds.size}</span> selected</>
+                : "Tap visits to select"}
+            </span>
+
+            {selectedIds.size > 0 && (
+              <Button
+                onClick={() => setShowBulkDialog(true)}
+                className="rounded-xl h-9 text-white font-bold text-sm"
+                style={{ background: GRAD.danger }}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Delete {selectedIds.size}
+              </Button>
+            )}
+
+            <button
+              onClick={exitSelectionMode}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Main content ──────────────────────────────────────────────── */}
       <motion.div variants={fadeUp}>
         {isLoading ? (
@@ -1538,10 +1821,9 @@ export default function VisitsPage() {
           <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl p-4 shadow-sm">
             <MonthCalendar visits={visits} currentMonth={currentMonth}
               onDayClick={(d, dayVis) => {
-                if (dayVis.length === 1)     setSelectedVisit(dayVis[0]);
-                else if (dayVis.length > 1)  setSelectedDayVis({ date: d, visits: dayVis });
+                if (dayVis.length === 1)    setSelectedVisit(dayVis[0]);
+                else if (dayVis.length > 1) setSelectedDayVis({ date: d, visits: dayVis });
                 else {
-                  // Click on empty day — open form pre-filled with that date
                   setEditingVisit({ visit_date: format(d, "yyyy-MM-dd") });
                   setShowForm(true);
                 }
@@ -1551,8 +1833,14 @@ export default function VisitsPage() {
           <motion.div className="space-y-1.5" variants={stagger} initial="hidden" animate="visible">
             <AnimatePresence>
               {visits.map(v => (
-                <VisitCard key={v.id} v={v} currentUser={user}
-                  onClick={() => setSelectedVisit(v)}
+                <VisitCard
+                  key={v.id}
+                  v={v}
+                  currentUser={user}
+                  selected={selectedIds.has(v.id)}
+                  selectionMode={selectionMode}
+                  onSelectToggle={toggleSelect}
+                  onClick={() => !selectionMode && setSelectedVisit(v)}
                   onEdit={(visit) => { setEditingVisit(visit); setShowForm(true); }}
                 />
               ))}
@@ -1644,6 +1932,23 @@ export default function VisitsPage() {
               qc.invalidateQueries({ queryKey: ["visits"] });
               const updated = visits.find(v => v.id === selectedVisit?.id);
               if (updated) setSelectedVisit(updated);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Bulk delete confirmation dialog ──────────────────────────── */}
+      <AnimatePresence>
+        {showBulkDialog && (
+          <BulkDeleteDialog
+            count={selectedIds.size}
+            isPending={bulkDeleteMut.isPending}
+            onCancel={() => setShowBulkDialog(false)}
+            onConfirm={(deleteRecurrences) => {
+              bulkDeleteMut.mutate({
+                ids: [...selectedIds],
+                deleteRecurrences,
+              });
             }}
           />
         )}
