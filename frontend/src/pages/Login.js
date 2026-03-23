@@ -22,38 +22,56 @@ export default function Login() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
 
-  // ✅ NEW STATES (LOGIN CONFIRMATION)
-  const [showConfirm, setShowConfirm] = useState(
-    localStorage.getItem("loginConfirm") !== "true"
-  );
-  const [allowedToLogin, setAllowedToLogin] = useState(
-    localStorage.getItem("loginConfirm") === "true"
-  );
+  // 🔥 NEW STATES (BACKEND CONTROLLED)
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [tempToken, setTempToken] = useState(null);
 
   const navigate = useNavigate();
   const { login } = useAuth();
   const isDark = useDark();
 
-  // ✅ HANDLE YES / NO
-  const handleYes = () => {
-    localStorage.setItem("loginConfirm", "true");
-    setAllowedToLogin(true);
-    setShowConfirm(false);
-  };
-
-  const handleNo = () => {
-    setAllowedToLogin(false);
-    setShowConfirm(false);
-    toast.error("Login not allowed without confirmation");
-  };
-
-  // ✅ LOGIN FUNCTION
-  const handleSubmit = async () => {
-    if (!allowedToLogin) {
-      toast.error("Please confirm before login");
-      return;
+  // 🔥 SEND TOKEN TO EXTENSION
+  const sendTokenToExtension = (token) => {
+    if (window.chrome && chrome.runtime?.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({
+          type: "SET_TOKEN",
+          token: token
+        });
+      } catch {
+        console.log("Extension not available");
+      }
     }
+  };
 
+  // 🔥 HANDLE YES (FINAL LOGIN)
+  const handleYes = async () => {
+    try {
+      await api.post("/auth/confirm-login", {}, {
+        headers: { Authorization: `Bearer ${tempToken}` }
+      });
+
+      login({ access_token: tempToken }, true);
+      sendTokenToExtension(tempToken);
+
+      setShowConfirm(false);
+      toast.success("Welcome!");
+      navigate('/dashboard');
+
+    } catch {
+      toast.error("Something went wrong");
+    }
+  };
+
+  // 🔥 HANDLE NO (NO CRASH)
+  const handleNo = () => {
+    setShowConfirm(false);
+    setTempToken(null);
+    toast.error("Please select Yes to continue");
+  };
+
+  // 🔥 LOGIN FUNCTION (UPDATED)
+  const handleSubmit = async () => {
     if (!email || !password) {
       toast.error('Please enter email and password');
       return;
@@ -64,19 +82,17 @@ export default function Login() {
     try {
       const response = await api.post('/auth/login', { email, password });
 
-      login(response.data, true);
-
-      // 🔥 Send token to Chrome Extension
-      if (window.chrome && chrome.runtime?.sendMessage) {
-        try {
-          chrome.runtime.sendMessage({
-            type: "SET_TOKEN",
-            token: response.data.access_token
-          });
-        } catch (e) {
-          console.log("Extension not available");
-        }
+      // 🔥 CHECK CONSENT FROM BACKEND
+      if (!response.data.consent_given) {
+        setTempToken(response.data.access_token);
+        setShowConfirm(true);
+        setLoading(false);
+        return;
       }
+
+      // NORMAL LOGIN
+      login(response.data, true);
+      sendTokenToExtension(response.data.access_token);
 
       toast.success('Welcome back!');
       navigate('/dashboard');
@@ -113,12 +129,12 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: pageBg }}>
 
-      {/* ✅ LOGIN CONFIRM POPUP */}
+      {/* 🔥 POPUP */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl text-center shadow-xl">
             <h2 className="text-lg font-semibold mb-4">
-                Select YES To Continue
+              Select Yes To Continue
             </h2>
 
             <div className="flex gap-4 justify-center">
