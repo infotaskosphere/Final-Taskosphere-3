@@ -1,9 +1,26 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+/**
+ * VisitsPage.jsx — Client Visits v3  COMPLETE REWRITE
+ *
+ * NEW IN v3:
+ *  - Delete 404 fix: error boundary around deleteMut with clear user-facing
+ *    message; forces full queryKey invalidation regardless of outcome so
+ *    stale items don't linger in the list.
+ *  - Smart recurring scheduling: UI for "every Thursday", "2nd Thursday of
+ *    the month", "last Friday of the month", etc.  Sends recurrence_weekday
+ *    and recurrence_week_number to the backend.
+ *  - Duplicate prevention: pre-flight POST /visits/check-duplicate before
+ *    saving; shows inline warning and blocks submission.
+ *  - Modern refreshed design: tighter card layout, gradient stat pills,
+ *    animated skeleton loader, compact form with collapsible recurrence
+ *    section, updated colour palette.
+ */
+
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
-  isToday, parseISO, addMonths, subMonths, isBefore,
+  isToday, parseISO, addMonths, subMonths, isBefore, getDay,
 } from "date-fns";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,54 +34,110 @@ import {
   User, MessageSquare, Repeat, Building2, CheckCircle2,
   XCircle, AlertCircle, RotateCcw, Edit3, Trash2,
   Send, ChevronDown, ClipboardList, Loader2, Check,
-  Mail,    // ← ADD THIS
+  Mail, RefreshCw, Info, Zap, TrendingUp, Eye,
+  CalendarDays, CalendarRange, Filter, MoreVertical,
 } from "lucide-react";
-// ─── Brand palette ────────────────────────────────────────────────────────────
+
+// ─── Brand palette ─────────────────────────────────────────────────────────
 const C = {
-  deepBlue: "#0D3B66",
+  deepBlue:   "#0D3B66",
   mediumBlue: "#1F6FB2",
-  emerald: "#1FAF5A",
-  lightGreen: "#5CCB5F",
-  coral: "#FF6B6B",
-  amber: "#F59E0B",
+  sky:        "#38BDF8",
+  emerald:    "#059669",
+  lightGreen: "#34D399",
+  coral:      "#F43F5E",
+  amber:      "#F59E0B",
+  purple:     "#7C3AED",
+  slate:      "#64748B",
 };
-const spring = { type: "spring", stiffness: 300, damping: 24 };
+
+const GRAD = {
+  primary:  `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})`,
+  success:  `linear-gradient(135deg, ${C.emerald}, ${C.lightGreen})`,
+  danger:   `linear-gradient(135deg, #E11D48, #F43F5E)`,
+  amber:    `linear-gradient(135deg, #D97706, ${C.amber})`,
+  purple:   `linear-gradient(135deg, #6D28D9, ${C.purple})`,
+};
+
+// ─── Animation presets ─────────────────────────────────────────────────────
+const spring = { type: "spring", stiffness: 320, damping: 26 };
 const fadeUp = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.23, 1, 0.32, 1] } },
-  exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
+  hidden:  { opacity: 0, y: 12 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.23, 1, 0.32, 1] } },
+  exit:    { opacity: 0, y: -8, transition: { duration: 0.18 } },
 };
 const stagger = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.04 } },
 };
-// ─── Status meta ─────────────────────────────────────────────────────────────
+
+// ─── Status meta ───────────────────────────────────────────────────────────
 const STATUS_META = {
-  scheduled: { label: "Scheduled", icon: Clock, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-900/30", border: "border-blue-200 dark:border-blue-800" },
-  completed: { label: "Completed", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/30", border: "border-emerald-200 dark:border-emerald-800" },
-  cancelled: { label: "Cancelled", icon: XCircle, color: "text-red-500", bg: "bg-red-50 dark:bg-red-900/30", border: "border-red-200 dark:border-red-800" },
-  missed: { label: "Missed", icon: AlertCircle, color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-900/30", border: "border-orange-200 dark:border-orange-800"},
-  rescheduled: { label: "Rescheduled", icon: RotateCcw, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/30", border: "border-purple-200 dark:border-purple-800"},
+  scheduled:   { label: "Scheduled",   icon: Clock,         color: "text-blue-600",   bg: "bg-blue-50 dark:bg-blue-950/60",    border: "border-blue-200 dark:border-blue-800"   },
+  completed:   { label: "Completed",   icon: CheckCircle2,  color: "text-emerald-600",bg: "bg-emerald-50 dark:bg-emerald-950/60",border:"border-emerald-200 dark:border-emerald-800"},
+  cancelled:   { label: "Cancelled",   icon: XCircle,       color: "text-slate-500",  bg: "bg-slate-50 dark:bg-slate-800",     border: "border-slate-200 dark:border-slate-700" },
+  missed:      { label: "Missed",      icon: AlertCircle,   color: "text-orange-500", bg: "bg-orange-50 dark:bg-orange-950/60",border: "border-orange-200 dark:border-orange-800"},
+  rescheduled: { label: "Rescheduled", icon: RotateCcw,     color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-950/60",border: "border-purple-200 dark:border-purple-800"},
 };
+
 const PRIORITY_META = {
-  low: { label: "Low", color: "text-blue-500", dot: "bg-blue-400" },
-  medium: { label: "Medium", color: "text-amber-500", dot: "bg-amber-400" },
-  high: { label: "High", color: "text-orange-500", dot: "bg-orange-400" },
-  urgent: { label: "Urgent", color: "text-red-600", dot: "bg-red-500" },
+  low:    { label: "Low",      color: "text-blue-500",   dot: "bg-blue-400"   },
+  medium: { label: "Medium",   color: "text-amber-500",  dot: "bg-amber-400"  },
+  high:   { label: "High",     color: "text-orange-500", dot: "bg-orange-500" },
+  urgent: { label: "Urgent",   color: "text-red-600",    dot: "bg-red-500"    },
 };
-// ─── API helpers ──────────────────────────────────────────────────────────────
-const fetchVisits = (p) => api.get("/visits", { params: p }).then(r => r.data);
-const fetchClients = () => api.get("/clients").then(r => r.data);
-const fetchUsers = () => api.get("/users").then(r => r.data);
-const fetchSummary = (uid, month) =>
-  api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
-// ─── Tiny reusable pieces ─────────────────────────────────────────────────────
+
+// Smart recurrence options shown in UI
+const RECURRENCE_OPTIONS = [
+  { value: "none",         label: "No repeat"                },
+  { value: "weekly",       label: "Every week (same day)"    },
+  { value: "biweekly",     label: "Every 2 weeks"            },
+  { value: "monthly",      label: "Same date each month"     },
+  { value: "nth_weekday",  label: "Nth weekday of month…"    },
+  { value: "last_weekday", label: "Last weekday of month…"   },
+];
+
+const WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const WEEK_NUMBERS = [
+  { value: 1, label: "1st" },
+  { value: 2, label: "2nd" },
+  { value: 3, label: "3rd" },
+  { value: 4, label: "4th" },
+  { value: 5, label: "5th" },
+];
+
+// ─── API helpers ───────────────────────────────────────────────────────────
+const fetchVisits  = (p)         => api.get("/visits", { params: p }).then(r => r.data);
+const fetchClients = ()          => api.get("/clients").then(r => r.data);
+const fetchUsers   = ()          => api.get("/users").then(r => r.data);
+const fetchSummary = (uid, month)=> api.get("/visits/summary", { params: { user_id: uid, month } }).then(r => r.data);
+
+// ─── Skeleton loader ───────────────────────────────────────────────────────
+function SkeletonCard() {
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 animate-pulse">
+      <div className="flex items-center gap-3">
+        <div className="w-11 h-14 rounded-lg bg-slate-200 dark:bg-slate-700 flex-shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded-md w-2/3" />
+          <div className="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-md w-1/2" />
+        </div>
+        <div className="flex gap-1.5">
+          <div className="w-14 h-7 rounded-lg bg-slate-200 dark:bg-slate-700" />
+          <div className="w-10 h-7 rounded-lg bg-slate-100 dark:bg-slate-800" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tiny reusable pieces ─────────────────────────────────────────────────
 function StatusBadge({ status, size = "sm" }) {
   const m = STATUS_META[status] || STATUS_META.scheduled;
   const Icon = m.icon;
   return (
     <span className={cn(
-      "inline-flex items-center gap-1 rounded-lg font-medium border",
+      "inline-flex items-center gap-1 rounded-lg font-semibold border",
       m.bg, m.border, m.color,
       size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs",
     )}>
@@ -73,347 +146,513 @@ function StatusBadge({ status, size = "sm" }) {
     </span>
   );
 }
+
 function PriorityDot({ priority }) {
   const m = PRIORITY_META[priority] || PRIORITY_META.medium;
   return (
     <span className="inline-flex items-center gap-1">
-      <span className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0", m.dot)} />
-      <span className={cn("text-[10px] font-semibold", m.color)}>{m.label}</span>
+      <span className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-slate-700", m.dot)} />
+      <span className={cn("text-[10px] font-bold tracking-wide", m.color)}>{m.label}</span>
     </span>
   );
 }
+
 function Avatar({ src, name, size = 7 }) {
+  const initials = (name || "?").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
   return src ? (
     <img src={src} alt={name}
-      className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white dark:ring-slate-700 flex-shrink-0`} />
+      className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white dark:ring-slate-800 flex-shrink-0`}
+    />
   ) : (
     <div
-      className={`w-${size} h-${size} rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0`}
-      style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
+      className={`w-${size} h-${size} rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0 ring-2 ring-white dark:ring-slate-800`}
+      style={{ background: GRAD.primary }}
     >
-      {name?.charAt(0)?.toUpperCase() || "?"}
+      {initials}
     </div>
   );
 }
-// ─── Yes / No quick-action button pair ───────────────────────────────────────
+
+// ─── Duplicate warning banner ─────────────────────────────────────────────
+function DuplicateWarning({ existing }) {
+  if (!existing) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800"
+    >
+      <AlertCircle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Duplicate visit detected</p>
+        <p className="text-[11px] text-amber-600 dark:text-amber-500 mt-0.5">
+          A <strong>{existing.status}</strong> visit already exists for this client on this date
+          {existing.purpose ? ` — "${existing.purpose}"` : ""}.
+          Change the date or cancel the existing visit first.
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Yes / No quick-action button pair ────────────────────────────────────
 function QuickStatusButtons({ visit, onDone }) {
   const qc = useQueryClient();
   const quickMut = useMutation({
-    mutationFn: (done) =>
-      api.post(`/visits/${visit.id}/quick-status`, { done }),
+    mutationFn: (done) => api.post(`/visits/${visit.id}/quick-status`, { done }),
     onSuccess: (_, done) => {
-      toast.success(done ? "Marked as completed ✓" : "Marked as missed");
+      toast.success(done ? "✓ Marked as completed" : "Marked as missed");
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
       onDone?.();
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
   });
-  const pending = quickMut.isPending;
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      {/* YES — visit done */}
       <motion.button
-        whileHover={{ scale: 1.06 }}
-        whileTap={{ scale: 0.93 }}
-        disabled={pending}
+        whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.93 }}
+        disabled={quickMut.isPending}
         onClick={() => quickMut.mutate(true)}
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold
-          bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm
-          disabled:opacity-50 transition-colors"
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold
+          bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 transition-colors"
       >
-        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        {quickMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
         Yes
       </motion.button>
-      {/* NO — visit missed */}
       <motion.button
-        whileHover={{ scale: 1.06 }}
-        whileTap={{ scale: 0.93 }}
-        disabled={pending}
+        whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.93 }}
+        disabled={quickMut.isPending}
         onClick={() => quickMut.mutate(false)}
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold
-          bg-slate-100 hover:bg-red-50 dark:bg-slate-700 dark:hover:bg-red-900/30
-          text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400
-          border border-slate-200 dark:border-slate-600 hover:border-red-200 dark:hover:border-red-800
-          disabled:opacity-50 transition-colors"
+        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold
+          bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600
+          text-slate-500 dark:text-slate-300 hover:text-red-500 hover:border-red-200
+          dark:hover:border-red-800 disabled:opacity-50 transition-colors"
       >
-        <X className="h-3 w-3" />
-        No
+        <X className="h-3 w-3" /> No
       </motion.button>
     </div>
   );
 }
-// ─── Compact Visit Card ───────────────────────────────────────────────────────
-// Includes: date badge · purpose · client · meta · Yes/No · status dropdown · edit · delete
-function VisitCard({ v, onClick, onEdit, onDelete, currentUser }) {
+
+// ─── Compact Visit Card ────────────────────────────────────────────────────
+function VisitCard({ v, onClick, onEdit, currentUser }) {
   const qc = useQueryClient();
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-  const isOver = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
+  const menuRef = useRef(null);
+
+  const isOver    = isBefore(parseISO(v.visit_date), new Date()) && v.status === "scheduled";
   const showQuick = v.status === "scheduled" || v.status === "rescheduled";
-  const isAdmin = currentUser?.role === "admin";
-  const isOwner = v.assigned_to === currentUser?.id;
-  const canWrite = isAdmin || isOwner;
-  // Status change mutation — used by the inline dropdown on the card
+  const canWrite  = currentUser?.role === "admin" || v.assigned_to === currentUser?.id;
+
+  // Close status menu on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target))
+        setShowStatusMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const statusMut = useMutation({
-    mutationFn: (newStatus) => api.patch(`/visits/${v.id}`, { status: newStatus }),
-    onSuccess: (_, newStatus) => {
-      toast.success(`Status updated to ${newStatus}`);
+    mutationFn: (s) => api.patch(`/visits/${v.id}`, { status: s }),
+    onSuccess: (_, s) => {
+      toast.success(`Status → ${s}`);
       qc.invalidateQueries({ queryKey: ["visits"] });
-      qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
       setShowStatusMenu(false);
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
   });
-  // Delete mutation — inline on the card
+
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/visits/${v.id}`),
     onSuccess: () => {
       toast.success("Visit deleted");
+      // Always invalidate so stale items are removed even if the visit was
+      // previously in error state — this was the root cause of the 404 loop.
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
     },
-    onError: (err) => toast.error(err.response?.data?.detail || "Delete failed"),
+    onError: (err) => {
+      // v3 FIX: even on 404, force a refetch so the UI clears the stale item
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      const detail = err.response?.data?.detail || "Delete failed";
+      // If it's a 404 "already deleted" — treat as success for UX purposes
+      if (err.response?.status === 404) {
+        toast.info("Visit was already removed — refreshing list.");
+      } else {
+        toast.error(detail);
+      }
+    },
   });
+
   return (
     <motion.div
-      variants={fadeUp}
-      layout
-      whileHover={{ y: -1, boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}
+      variants={fadeUp} layout
+      whileHover={{ y: -1 }}
       transition={spring}
       onClick={onClick}
       className={cn(
-        "bg-white dark:bg-slate-800 border rounded-xl cursor-pointer transition-all group",
+        "bg-white dark:bg-slate-800/90 border rounded-xl cursor-pointer group transition-all",
         isOver
-          ? "border-orange-200 dark:border-orange-800"
-          : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600",
+          ? "border-orange-200 dark:border-orange-900 shadow-orange-50 dark:shadow-orange-950/20"
+          : "border-slate-200/80 dark:border-slate-700/80 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm",
       )}
     >
-      <div className="flex items-center gap-3 px-3 py-2.5">
-        {/* ── Date badge ── */}
-        <div className="flex-shrink-0 w-11 text-center">
-          <div className="rounded-lg overflow-hidden border dark:border-slate-700">
-            <div
-              className="py-0.5 text-[8px] font-black text-white uppercase tracking-wide"
-              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
-            >
-              {format(parseISO(v.visit_date), "MMM")}
-            </div>
-            <div className="py-0.5 bg-white dark:bg-slate-800">
-              <p className="text-sm font-black text-slate-800 dark:text-slate-100 leading-none">
-                {format(parseISO(v.visit_date), "d")}
-              </p>
-              <p className="text-[9px] text-slate-400 font-medium leading-tight">
-                {format(parseISO(v.visit_date), "EEE")}
-              </p>
-            </div>
-          </div>
-          {v.visit_time && (
-            <p className="text-[9px] text-slate-400 mt-0.5 font-medium leading-none">{v.visit_time}</p>
-          )}
-        </div>
-        {/* ── Main content ── */}
-        <div className="flex-1 min-w-0">
-          {/* Row 1: purpose + status badge + flags */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
-              {v.purpose}
-            </p>
-            <StatusBadge status={v.status} />
-            {isOver && (
-              <span className="text-[9px] font-bold text-orange-500 bg-orange-50 dark:bg-orange-900/30
-                border border-orange-200 dark:border-orange-800 px-1.5 py-0.5 rounded-md">
-                Overdue
-              </span>
-            )}
-            {v.recurrence && v.recurrence !== "none" && (
-              <span className="text-[9px] font-semibold text-purple-500 bg-purple-50 dark:bg-purple-900/30
-                border border-purple-200 dark:border-purple-800 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                <Repeat className="h-2 w-2" />{v.recurrence}
-              </span>
-            )}
-          </div>
-          {/* Row 2: client + location + services + comments */}
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
-              <Building2 className="h-3 w-3 flex-shrink-0 text-slate-400" />
-              {v.client_name || "—"}
-            </span>
-            {v.location && (
-              <span className="flex items-center gap-0.5 text-[10px] text-slate-400 truncate max-w-[120px]">
-                <MapPin className="h-2.5 w-2.5 flex-shrink-0" />
-                {v.location.slice(0, 28)}{v.location.length > 28 ? "…" : ""}
-              </span>
-            )}
-            {v.services?.length > 0 && (
-              <div className="flex items-center gap-0.5">
-                {v.services.slice(0, 2).map(s => (
-                  <span key={s}
-                    className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700
-                      text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600">
-                    {s}
-                  </span>
-                ))}
-                {v.services.length > 2 && (
-                  <span className="text-[9px] text-slate-400">+{v.services.length - 2}</span>
-                )}
+      {/* Left accent bar */}
+      <div className="flex">
+        <div className={cn(
+          "w-0.5 rounded-l-xl flex-shrink-0",
+          v.status === "completed"   ? "bg-emerald-400" :
+          v.status === "missed"      ? "bg-orange-400"  :
+          v.status === "cancelled"   ? "bg-slate-300"   :
+          v.status === "rescheduled" ? "bg-purple-400"  :
+          isOver                     ? "bg-orange-400"  : "bg-blue-400"
+        )} />
+
+        <div className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0">
+          {/* Date badge */}
+          <div className="flex-shrink-0 w-12 text-center">
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm">
+              <div className="py-0.5 text-[8px] font-black text-white uppercase tracking-widest"
+                style={{ background: isOver ? GRAD.amber : GRAD.primary }}>
+                {format(parseISO(v.visit_date), "MMM")}
               </div>
-            )}
-            {v.comments?.length > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] text-slate-400">
-                <MessageSquare className="h-2.5 w-2.5" />{v.comments.length}
-              </span>
+              <div className="py-1 bg-white dark:bg-slate-800">
+                <p className="text-sm font-black text-slate-800 dark:text-slate-100 leading-none">
+                  {format(parseISO(v.visit_date), "d")}
+                </p>
+                <p className="text-[9px] text-slate-400 font-semibold leading-tight">
+                  {format(parseISO(v.visit_date), "EEE")}
+                </p>
+              </div>
+            </div>
+            {v.visit_time && (
+              <p className="text-[9px] text-slate-400 mt-1 font-medium">{v.visit_time}</p>
             )}
           </div>
-        </div>
-        {/* ── Right action cluster — single flat horizontal row ── */}
-        <div
-          className="flex items-center gap-1.5 flex-shrink-0"
-          onClick={e => e.stopPropagation()}
-        >
-          {/* Priority dot */}
-          <PriorityDot priority={v.priority} />
-          {/* Avatar */}
-          <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
-          {/* Thin divider */}
-          <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
-          {/* Yes / No — only for scheduled/rescheduled */}
-          {showQuick && <QuickStatusButtons visit={v} />}
-          {/* Completed pill */}
-          {v.status === "completed" && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg
-              bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800
-              text-emerald-600 text-[10px] font-bold">
-              <CheckCircle2 className="h-3 w-3" /> Done
-            </span>
-          )}
-          {/* Missed pill */}
-          {v.status === "missed" && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg
-              bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800
-              text-orange-500 text-[10px] font-bold">
-              <AlertCircle className="h-3 w-3" /> Missed
-            </span>
-          )}
-          {/* Divider before icon actions */}
-          {canWrite && (
-            <div className="h-5 w-px bg-slate-200 dark:bg-slate-600 mx-0.5" />
-          )}
-          {/* Edit */}
-          {canWrite && (
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={(e) => { e.stopPropagation(); onEdit?.(v); }}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500
-                hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-              title="Edit visit"
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-            </motion.button>
-          )}
-          {/* Status dropdown chevron */}
-          {canWrite && (
-            <div className="relative">
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={(e) => { e.stopPropagation(); setShowStatusMenu(s => !s); }}
-                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-600
-                  text-slate-500 dark:text-slate-400
-                  hover:border-slate-300 dark:hover:border-slate-500
-                  hover:bg-slate-50 dark:hover:bg-slate-700
-                  transition-colors"
-                title="Change status"
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-              </motion.button>
-              <AnimatePresence>
-                {showStatusMenu && (
-                  <motion.div
-                    className="absolute right-0 top-full mt-1 w-40 z-50
-                      bg-white dark:bg-slate-800
-                      border border-slate-200 dark:border-slate-700
-                      rounded-xl shadow-xl overflow-hidden"
-                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 22 }}
-                  >
-                    {Object.entries(STATUS_META).map(([s, m]) => (
-                      <button
-                        key={s}
-                        onClick={(e) => { e.stopPropagation(); statusMut.mutate(s); }}
-                        disabled={statusMut.isPending}
-                        className={cn(
-                          "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold",
-                          "hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-left",
-                          v.status === s ? "bg-slate-50 dark:bg-slate-700" : "",
-                        )}
-                      >
-                        <m.icon className={cn("h-3 w-3 flex-shrink-0", m.color)} />
-                        <span className={m.color}>{m.label}</span>
-                        {v.status === s && (
-                          <Check className="h-3 w-3 ml-auto text-slate-400" />
-                        )}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+
+          {/* Main content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate max-w-[220px]">
+                {v.purpose}
+              </p>
+              <StatusBadge status={v.status} />
+              {isOver && (
+                <span className="text-[9px] font-bold text-orange-500 bg-orange-50 dark:bg-orange-950/50
+                  border border-orange-200 dark:border-orange-800 px-1.5 py-0.5 rounded-md">
+                  Overdue
+                </span>
+              )}
+              {v.recurrence && v.recurrence !== "none" && (
+                <span className="text-[9px] font-semibold text-purple-600 dark:text-purple-400
+                  bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800
+                  px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                  <Repeat className="h-2 w-2" />
+                  {v.recurrence === "nth_weekday"
+                    ? `${WEEK_NUMBERS.find(w => w.value === v.recurrence_week_number)?.label || ""} ${WEEKDAYS[v.recurrence_weekday] || ""}`
+                    : v.recurrence === "last_weekday"
+                    ? `Last ${WEEKDAYS[v.recurrence_weekday] || ""}`
+                    : v.recurrence}
+                </span>
+              )}
             </div>
-          )}
-          {/* Delete */}
-          {canWrite && (
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (window.confirm("Delete this visit?")) deleteMut.mutate();
-              }}
-              disabled={deleteMut.isPending}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-red-500
-                hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors
-                disabled:opacity-50"
-              title="Delete visit"
-            >
-              {deleteMut.isPending
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <Trash2 className="h-3.5 w-3.5" />
-              }
-            </motion.button>
-          )}
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 truncate max-w-[160px]">
+                <Building2 className="h-3 w-3 flex-shrink-0 text-slate-400" />
+                {v.client_name || "—"}
+              </span>
+              {v.location && (
+                <span className="flex items-center gap-0.5 text-[10px] text-slate-400 truncate max-w-[120px]">
+                  <MapPin className="h-2.5 w-2.5 flex-shrink-0" />
+                  {v.location.slice(0, 25)}{v.location.length > 25 ? "…" : ""}
+                </span>
+              )}
+              {v.services?.length > 0 && (
+                <div className="flex items-center gap-0.5">
+                  {v.services.slice(0, 2).map(s => (
+                    <span key={s}
+                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md
+                        bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400
+                        border border-slate-200 dark:border-slate-600">
+                      {s}
+                    </span>
+                  ))}
+                  {v.services.length > 2 && (
+                    <span className="text-[9px] text-slate-400 font-medium">+{v.services.length - 2}</span>
+                  )}
+                </div>
+              )}
+              {v.comments?.length > 0 && (
+                <span className="flex items-center gap-0.5 text-[10px] text-slate-400">
+                  <MessageSquare className="h-2.5 w-2.5" />{v.comments.length}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Right action cluster */}
+          <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            <PriorityDot priority={v.priority} />
+            <Avatar src={v.assigned_to_picture} name={v.assigned_to_name} size={6} />
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {showQuick  && <QuickStatusButtons visit={v} />}
+            {v.status === "completed" && (
+              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40
+                border border-emerald-200 dark:border-emerald-800 text-emerald-600 text-[10px] font-bold">
+                <CheckCircle2 className="h-3 w-3" /> Done
+              </span>
+            )}
+            {v.status === "missed" && (
+              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 dark:bg-orange-950/40
+                border border-orange-200 dark:border-orange-800 text-orange-500 text-[10px] font-bold">
+                <AlertCircle className="h-3 w-3" /> Missed
+              </span>
+            )}
+
+            {canWrite && (
+              <>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                  onClick={(e) => { e.stopPropagation(); onEdit?.(v); }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                  title="Edit">
+                  <Edit3 className="h-3.5 w-3.5" />
+                </motion.button>
+
+                {/* Status menu */}
+                <div className="relative" ref={menuRef}>
+                  <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                    onClick={(e) => { e.stopPropagation(); setShowStatusMenu(s => !s); }}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-600
+                      text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                    title="Change status">
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </motion.button>
+                  <AnimatePresence>
+                    {showStatusMenu && (
+                      <motion.div
+                        className="absolute right-0 top-full mt-1.5 w-44 z-50
+                          bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700
+                          rounded-2xl shadow-xl overflow-hidden"
+                        initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                        transition={{ type: "spring", stiffness: 320, damping: 24 }}
+                      >
+                        <div className="p-1">
+                          {Object.entries(STATUS_META).map(([s, m]) => (
+                            <button key={s}
+                              onClick={(e) => { e.stopPropagation(); statusMut.mutate(s); }}
+                              disabled={statusMut.isPending}
+                              className={cn(
+                                "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors text-left",
+                                v.status === s
+                                  ? "bg-slate-100 dark:bg-slate-700"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-700/50",
+                              )}>
+                              <m.icon className={cn("h-3 w-3 flex-shrink-0", m.color)} />
+                              <span className={m.color}>{m.label}</span>
+                              {v.status === s && <Check className="h-3 w-3 ml-auto text-slate-400" />}
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm("Delete this visit? This cannot be undone.")) deleteMut.mutate();
+                  }}
+                  disabled={deleteMut.isPending}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
+                  title="Delete">
+                  {deleteMut.isPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Trash2 className="h-3.5 w-3.5" />}
+                </motion.button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </motion.div>
   );
 }
-// ─── Visit Form Modal ─────────────────────────────────────────────────────────
+
+// ─── Smart Recurrence Section ──────────────────────────────────────────────
+function RecurrenceSection({ form, set }) {
+  const needsWeekday = form.recurrence === "nth_weekday" || form.recurrence === "last_weekday";
+
+  // Auto-infer weekday from the selected visit_date
+  const inferredWeekday = useMemo(() => {
+    if (!form.visit_date) return 0;
+    try {
+      // getDay() returns 0=Sun…6=Sat; we need 0=Mon…6=Sun
+      const jsDay = getDay(parseISO(form.visit_date));
+      return jsDay === 0 ? 6 : jsDay - 1; // Convert Sun=0 → 6, Mon=1 → 0, etc.
+    } catch { return 0; }
+  }, [form.visit_date]);
+
+  // Auto-fill weekday when switching to nth/last mode
+  useEffect(() => {
+    if (needsWeekday && form.recurrence_weekday === undefined) {
+      set("recurrence_weekday", inferredWeekday);
+    }
+  }, [needsWeekday]);
+
+  const inputCls = "w-full px-3 py-2 rounded-xl border dark:border-slate-600 bg-white dark:bg-slate-800/80 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-shadow";
+  const labelCls = "block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-1 uppercase tracking-wider";
+
+  // Human-readable summary of the recurrence rule
+  const recurrenceSummary = useMemo(() => {
+    if (form.recurrence === "none") return null;
+    const wd = WEEKDAYS[form.recurrence_weekday ?? inferredWeekday] || "";
+    const wn = WEEK_NUMBERS.find(w => w.value === (form.recurrence_week_number ?? 1))?.label || "1st";
+    switch (form.recurrence) {
+      case "weekly":       return `Repeats every week on ${wd}`;
+      case "biweekly":     return `Repeats every 2 weeks on ${wd}`;
+      case "monthly":      return `Repeats on the same date each month`;
+      case "nth_weekday":  return `Repeats on the ${wn} ${wd} of each month`;
+      case "last_weekday": return `Repeats on the last ${wd} of each month`;
+      default: return null;
+    }
+  }, [form.recurrence, form.recurrence_weekday, form.recurrence_week_number, inferredWeekday]);
+
+  return (
+    <div className="space-y-2.5 p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900">
+      <div className="flex items-center gap-1.5 mb-1">
+        <Repeat className="h-3.5 w-3.5 text-purple-500" />
+        <span className="text-xs font-bold text-purple-700 dark:text-purple-300">Repeat Schedule</span>
+      </div>
+
+      <div>
+        <label className={labelCls}>Recurrence Pattern</label>
+        <select value={form.recurrence} onChange={e => set("recurrence", e.target.value)} className={inputCls}>
+          {RECURRENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+
+      {needsWeekday && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelCls}>Day of Week</label>
+            <select
+              value={form.recurrence_weekday ?? inferredWeekday}
+              onChange={e => set("recurrence_weekday", Number(e.target.value))}
+              className={inputCls}
+            >
+              {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+            </select>
+          </div>
+          {form.recurrence === "nth_weekday" && (
+            <div>
+              <label className={labelCls}>Which Occurrence</label>
+              <select
+                value={form.recurrence_week_number ?? 1}
+                onChange={e => set("recurrence_week_number", Number(e.target.value))}
+                className={inputCls}
+              >
+                {WEEK_NUMBERS.map(w => <option key={w.value} value={w.value}>{w.label} of month</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {form.recurrence !== "none" && (
+        <div>
+          <label className={labelCls}>Repeat Until</label>
+          <input type="date" value={form.recurrence_end_date || ""}
+            onChange={e => set("recurrence_end_date", e.target.value)}
+            min={form.visit_date}
+            className={inputCls}
+          />
+        </div>
+      )}
+
+      {recurrenceSummary && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="flex items-center gap-2 p-2 rounded-lg bg-purple-100 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800"
+        >
+          <Info className="h-3 w-3 text-purple-500 flex-shrink-0" />
+          <p className="text-[11px] font-semibold text-purple-700 dark:text-purple-300">{recurrenceSummary}</p>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+// ─── Visit Form Modal ──────────────────────────────────────────────────────
 function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
   const isEdit = !!visit?.id;
-  const qc = useQueryClient();
+  const qc     = useQueryClient();
+
   const [form, setForm] = useState({
-    client_id: visit?.client_id || "",
-    assigned_to: visit?.assigned_to || currentUser.id,
-    visit_date: visit?.visit_date || format(new Date(), "yyyy-MM-dd"),
-    visit_time: visit?.visit_time || "",
-    purpose: visit?.purpose || "",
-    services: (visit?.services || []).join(", "),
-    priority: visit?.priority || "medium",
-    notes: visit?.notes || "",
-    location: visit?.location || "",
-    recurrence: visit?.recurrence || "none",
-    recurrence_end_date: visit?.recurrence_end_date || "",
+    client_id:              visit?.client_id              || "",
+    assigned_to:            visit?.assigned_to            || currentUser.id,
+    visit_date:             visit?.visit_date             || format(new Date(), "yyyy-MM-dd"),
+    visit_time:             visit?.visit_time             || "",
+    purpose:                visit?.purpose                || "",
+    services:               (visit?.services || []).join(", "),
+    priority:               visit?.priority               || "medium",
+    notes:                  visit?.notes                  || "",
+    location:               visit?.location               || "",
+    recurrence:             visit?.recurrence             || "none",
+    recurrence_end_date:    visit?.recurrence_end_date    || "",
+    recurrence_weekday:     visit?.recurrence_weekday     ?? undefined,
+    recurrence_week_number: visit?.recurrence_week_number ?? 1,
   });
-  const [bulkMode, setBulkMode] = useState(false);
-  const [bulkDates, setBulkDates] = useState([]);
-  const [bulkCalMonth, setBulkCalMonth] = useState(new Date());
+
+  const [bulkMode,      setBulkMode]      = useState(false);
+  const [bulkDates,     setBulkDates]     = useState([]);
+  const [bulkCalMonth,  setBulkCalMonth]  = useState(new Date());
+  const [showRecur,     setShowRecur]     = useState(form.recurrence !== "none");
+  const [dupWarning,    setDupWarning]    = useState(null);
+  const [checkingDup,   setCheckingDup]   = useState(false);
+  const dupDebounceRef = useRef(null);
+
   const calDays = eachDayOfInterval({ start: startOfMonth(bulkCalMonth), end: endOfMonth(bulkCalMonth) });
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set     = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Duplicate check debounced whenever client+date+assigned_to changes
+  useEffect(() => {
+    if (!form.client_id || !form.visit_date || !form.assigned_to || bulkMode) return;
+    clearTimeout(dupDebounceRef.current);
+    setDupWarning(null);
+    dupDebounceRef.current = setTimeout(async () => {
+      setCheckingDup(true);
+      try {
+        const res = await api.post("/visits/check-duplicate", {
+          client_id:   form.client_id,
+          assigned_to: form.assigned_to,
+          visit_date:  form.visit_date,
+        });
+        if (res.data.is_duplicate && res.data.existing?.id !== visit?.id) {
+          setDupWarning(res.data.existing);
+        } else {
+          setDupWarning(null);
+        }
+      } catch { /* ignore */ }
+      finally { setCheckingDup(false); }
+    }, 500);
+    return () => clearTimeout(dupDebounceRef.current);
+  }, [form.client_id, form.visit_date, form.assigned_to, bulkMode]);
+
   const toggleBulkDate = (d) => {
     const s = format(d, "yyyy-MM-dd");
     setBulkDates(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
   };
+
   const saveMut = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -421,42 +660,62 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
         services: form.services.split(",").map(s => s.trim()).filter(Boolean),
         client_name: clients.find(c => c.id === form.client_id)?.company_name || "",
       };
-      if (!payload.visit_time) delete payload.visit_time;
+      if (!payload.visit_time)         delete payload.visit_time;
       if (!payload.recurrence_end_date) delete payload.recurrence_end_date;
+      if (payload.recurrence === "none") {
+        delete payload.recurrence_weekday;
+        delete payload.recurrence_week_number;
+      }
       if (bulkMode && bulkDates.length)
         return api.post("/visits/bulk-schedule", { ...payload, visit_dates: bulkDates });
       if (isEdit)
         return api.patch(`/visits/${visit.id}`, payload);
       return api.post("/visits", payload);
     },
-    onSuccess: () => {
-      toast.success(isEdit ? "Visit updated" : "Visit(s) scheduled");
+    onSuccess: (res) => {
+      const skipped = res?.data?.skipped_duplicates?.length || 0;
+      if (skipped > 0) {
+        toast.warning(`Scheduled ${res.data.created} visit(s). ${skipped} duplicate date(s) were skipped.`);
+      } else {
+        toast.success(isEdit ? "Visit updated ✓" : "Visit(s) scheduled ✓");
+      }
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
       onClose();
     },
-    onError: err => toast.error(err.response?.data?.detail || "Save failed"),
+    onError: (err) => {
+      const msg = err.response?.data?.detail || "Save failed";
+      if (err.response?.status === 409) {
+        toast.error("Duplicate visit — " + msg.split(".")[0]);
+      } else {
+        toast.error(msg);
+      }
+    },
   });
+
   const canAssign = currentUser.role === "admin" || currentUser.role === "manager";
-  const inputCls = "w-full px-3 py-2 rounded-xl border dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400";
+  const canSave   = !dupWarning && form.client_id && form.purpose && (bulkMode ? bulkDates.length > 0 : true);
+
+  const inputCls = "w-full px-3 py-2 rounded-xl border dark:border-slate-600 bg-white dark:bg-slate-800/80 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-shadow";
   const labelCls = "block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-1 uppercase tracking-wider";
+
   return (
     <motion.div
       className="fixed inset-0 z-[9000] flex items-center justify-center p-4"
-      style={{ background: "rgba(7,15,30,0.72)", backdropFilter: "blur(8px)" }}
+      style={{ background: "rgba(5,12,26,0.75)", backdropFilter: "blur(10px)" }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
       <motion.div
-        className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl"
-        initial={{ scale: 0.92, y: 32 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 32 }}
-        transition={{ type: "spring", stiffness: 220, damping: 22 }}
+        className="w-full max-w-xl max-h-[92vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl"
+        initial={{ scale: 0.9, y: 40 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 40 }}
+        transition={{ type: "spring", stiffness: 240, damping: 24 }}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b dark:border-slate-700/80 bg-white dark:bg-slate-900">
           <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg" style={{ background: `${C.deepBlue}12` }}>
-              <Calendar className="h-4 w-4" style={{ color: C.deepBlue }} />
+            <div className="p-2 rounded-xl" style={{ background: `${C.deepBlue}15` }}>
+              <CalendarDays className="h-4 w-4" style={{ color: C.deepBlue }} />
             </div>
             <div>
               <h2 className="font-bold text-sm text-slate-800 dark:text-slate-100">
@@ -468,28 +727,31 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
             </div>
           </div>
           <button onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>
+
         <div className="p-5 space-y-3.5">
           {/* Bulk toggle */}
           {!isEdit && (
-            <div className="flex items-center gap-3 p-2.5 rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-              <Repeat className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">
-                Schedule multiple dates at once
-              </span>
+            <div className="flex items-center gap-3 p-3 rounded-xl border dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50">
+              <CalendarRange className="h-4 w-4 text-purple-500 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Multi-date scheduling</p>
+                <p className="text-[10px] text-slate-400">Pick multiple dates at once from a calendar</p>
+              </div>
               <button
                 onClick={() => setBulkMode(b => !b)}
                 className={cn("relative h-5 w-9 rounded-full transition-colors flex-shrink-0",
                   bulkMode ? "bg-purple-500" : "bg-slate-300 dark:bg-slate-600")}
               >
-                <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
                   bulkMode ? "translate-x-4" : "translate-x-0.5")} />
               </button>
             </div>
           )}
+
           {/* Client + Assigned To */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -511,46 +773,85 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </div>
             )}
           </div>
-          {/* Date / bulk calendar */}
+
+          {/* Duplicate warning */}
+          <AnimatePresence>
+            {dupWarning && <DuplicateWarning existing={dupWarning} />}
+            {checkingDup && (
+              <motion.div key="checking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="flex items-center gap-2 text-xs text-slate-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Checking for duplicates…
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Date picker / bulk calendar */}
           {bulkMode ? (
             <div>
-              <label className={labelCls}>Select Dates ({bulkDates.length} selected)</label>
-              <div className="border dark:border-slate-700 rounded-xl p-3">
+              <label className={labelCls}>
+                Select Dates
+                {bulkDates.length > 0 && (
+                  <span className="ml-2 text-blue-500 font-bold">{bulkDates.length} selected</span>
+                )}
+              </label>
+              <div className="border dark:border-slate-700 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-800/30">
                 <div className="flex items-center justify-between mb-2">
                   <button onClick={() => setBulkCalMonth(m => subMonths(m, 1))}
-                    className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors">
                     <ChevronLeft className="h-4 w-4 text-slate-500" />
                   </button>
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
                     {format(bulkCalMonth, "MMMM yyyy")}
                   </span>
                   <button onClick={() => setBulkCalMonth(m => addMonths(m, 1))}
-                    className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors">
                     <ChevronRight className="h-4 w-4 text-slate-500" />
                   </button>
                 </div>
                 <div className="grid grid-cols-7 gap-0.5 text-center">
                   {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => (
-                    <div key={d} className="text-[9px] font-bold text-slate-400 py-1">{d}</div>
+                    <div key={d} className="text-[9px] font-black text-slate-400 py-1 uppercase">{d}</div>
                   ))}
                   {Array(startOfMonth(bulkCalMonth).getDay()).fill(null).map((_, i) => <div key={`e${i}`} />)}
                   {calDays.map(d => {
-                    const s = format(d, "yyyy-MM-dd");
-                    const sel = bulkDates.includes(s);
+                    const s    = format(d, "yyyy-MM-dd");
+                    const sel  = bulkDates.includes(s);
                     const past = isBefore(d, new Date()) && !isToday(d);
                     return (
                       <button key={s} disabled={past} onClick={() => !past && toggleBulkDate(d)}
-                        className={cn("rounded-lg py-1 text-xs font-medium transition-all",
-                          sel ? "text-white" : past
-                            ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-                            : "text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                        className={cn(
+                          "rounded-xl py-1.5 text-xs font-semibold transition-all",
+                          sel  ? "text-white shadow-sm scale-105" :
+                          past ? "text-slate-300 dark:text-slate-600 cursor-not-allowed" :
+                                 "text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/30"
                         )}
-                        style={sel ? { background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` } : {}}>
+                        style={sel ? { background: GRAD.primary } : {}}>
                         {format(d, "d")}
                       </button>
                     );
                   })}
                 </div>
+                {bulkDates.length > 0 && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex flex-wrap gap-1 flex-1">
+                      {bulkDates.sort().slice(0, 4).map(d => (
+                        <span key={d}
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40
+                            text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          {format(parseISO(d), "MMM d")}
+                        </span>
+                      ))}
+                      {bulkDates.length > 4 && (
+                        <span className="text-[9px] text-slate-400 font-medium">+{bulkDates.length - 4} more</span>
+                      )}
+                    </div>
+                    <button onClick={() => setBulkDates([])}
+                      className="text-[9px] text-red-400 hover:text-red-600 font-semibold flex-shrink-0 ml-2">
+                      Clear all
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -567,12 +868,14 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </div>
             </div>
           )}
+
           {/* Purpose */}
           <div>
             <label className={labelCls}>Purpose *</label>
             <input value={form.purpose} onChange={e => set("purpose", e.target.value)}
               placeholder="e.g. Annual GST review meeting" className={inputCls} />
           </div>
+
           {/* Services + Priority */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -589,33 +892,54 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               </select>
             </div>
           </div>
+
           {/* Location */}
           <div>
             <label className={labelCls}>Location / Address</label>
             <input value={form.location} onChange={e => set("location", e.target.value)}
               placeholder="Address or Google Maps link" className={inputCls} />
           </div>
-          {/* Recurrence */}
+
+          {/* Recurrence toggle */}
           {!isEdit && !bulkMode && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Repeat</label>
-                <select value={form.recurrence} onChange={e => set("recurrence", e.target.value)} className={inputCls}>
-                  <option value="none">No repeat</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="biweekly">Bi-weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </div>
-              {form.recurrence !== "none" && (
-                <div>
-                  <label className={labelCls}>Until</label>
-                  <input type="date" value={form.recurrence_end_date}
-                    onChange={e => set("recurrence_end_date", e.target.value)} className={inputCls} />
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowRecur(r => !r)}
+                className={cn(
+                  "w-full flex items-center justify-between gap-2.5 p-3 rounded-xl border transition-all text-left",
+                  showRecur
+                    ? "border-purple-200 dark:border-purple-800 bg-purple-50/60 dark:bg-purple-950/20"
+                    : "border-slate-200 dark:border-slate-700 hover:border-slate-300 bg-slate-50/50 dark:bg-slate-800/30",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Repeat className={cn("h-3.5 w-3.5", showRecur ? "text-purple-500" : "text-slate-400")} />
+                  <span className={cn("text-xs font-semibold", showRecur ? "text-purple-700 dark:text-purple-300" : "text-slate-600 dark:text-slate-300")}>
+                    {showRecur
+                      ? (form.recurrence !== "none" ? "Recurring visit — " + (RECURRENCE_OPTIONS.find(o => o.value === form.recurrence)?.label || "") : "Set recurrence…")
+                      : "Add recurring schedule"}
+                  </span>
                 </div>
-              )}
+                <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform", showRecur && "rotate-180")} />
+              </button>
+
+              <AnimatePresence>
+                {showRecur && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.22 }}
+                    className="overflow-hidden mt-2"
+                  >
+                    <RecurrenceSection form={form} set={set} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
+
           {/* Notes */}
           <div>
             <label className={labelCls}>Notes</label>
@@ -623,19 +947,21 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
               placeholder="Any pre-visit notes or reminders…"
               className={cn(inputCls, "resize-none")} />
           </div>
+
           {/* Actions */}
           <div className="flex gap-2.5 pt-1">
-            <Button variant="outline" onClick={onClose} className="flex-1 rounded-xl h-9 text-sm">
+            <Button variant="outline" onClick={onClose}
+              className="flex-1 rounded-xl h-10 text-sm border-slate-200 dark:border-slate-700">
               Cancel
             </Button>
             <Button
               onClick={() => saveMut.mutate()}
-              disabled={saveMut.isPending || !form.client_id || !form.purpose}
-              className="flex-1 rounded-xl h-9 text-sm text-white font-semibold"
-              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
+              disabled={saveMut.isPending || !canSave}
+              className="flex-1 rounded-xl h-10 text-sm text-white font-bold shadow-sm disabled:opacity-50"
+              style={{ background: canSave ? GRAD.primary : undefined }}
             >
               {saveMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              {isEdit ? "Save Changes" : bulkMode ? `Schedule ${bulkDates.length} Visits` : "Schedule Visit"}
+              {isEdit ? "Save Changes" : bulkMode ? `Schedule ${bulkDates.length || "…"} Visits` : "Schedule Visit"}
             </Button>
           </div>
         </div>
@@ -643,12 +969,17 @@ function VisitFormModal({ visit, clients, users, currentUser, onClose }) {
     </motion.div>
   );
 }
-// ─── Visit Detail Panel ───────────────────────────────────────────────────────
+
+// ─── Visit Detail Panel ────────────────────────────────────────────────────
 function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
   const qc = useQueryClient();
-  const [comment, setComment] = useState("");
-  const [outcome, setOutcome] = useState(visit?.outcome || "");
+  const [comment,        setComment]        = useState("");
+  const [outcome,        setOutcome]        = useState(visit?.outcome || "");
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+
+  const isAdmin  = currentUser.role === "admin";
+  const canWrite = isAdmin || visit.assigned_to === currentUser.id;
+
   const statusMut = useMutation({
     mutationFn: (status) => api.patch(`/visits/${visit.id}`, { status }),
     onSuccess: () => {
@@ -659,11 +990,13 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Update failed"),
   });
+
   const outcomeMut = useMutation({
     mutationFn: () => api.patch(`/visits/${visit.id}`, { outcome }),
-    onSuccess: () => { toast.success("Outcome saved"); qc.invalidateQueries({ queryKey: ["visits"] }); },
+    onSuccess: () => { toast.success("Outcome saved ✓"); qc.invalidateQueries({ queryKey: ["visits"] }); },
     onError: err => toast.error(err.response?.data?.detail || "Save failed"),
   });
+
   const commentMut = useMutation({
     mutationFn: () => api.post(`/visits/${visit.id}/comments`, { text: comment }),
     onSuccess: () => {
@@ -674,11 +1007,13 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     },
     onError: err => toast.error(err.response?.data?.detail || "Failed"),
   });
+
   const deleteCommentMut = useMutation({
     mutationFn: (cid) => api.delete(`/visits/${visit.id}/comments/${cid}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["visits"] }); onDeleted?.(); },
     onError: err => toast.error(err.response?.data?.detail || "Failed"),
   });
+
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/visits/${visit.id}`),
     onSuccess: () => {
@@ -687,50 +1022,61 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
       onDeleted?.();
       onClose();
     },
-    onError: err => toast.error(err.response?.data?.detail || "Delete failed"),
+    onError: (err) => {
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      if (err.response?.status === 404) {
+        toast.info("Visit was already removed.");
+        onClose();
+      } else {
+        toast.error(err.response?.data?.detail || "Delete failed");
+      }
+    },
   });
-  const isAdmin = currentUser.role === "admin";
-  const isOwner = visit.assigned_to === currentUser.id;
-  const canWrite = isAdmin || isOwner;
+
   return (
     <motion.div
       className="fixed inset-0 z-[9000] flex items-end sm:items-center justify-center p-0 sm:p-4"
-      style={{ background: "rgba(7,15,30,0.72)", backdropFilter: "blur(8px)" }}
+      style={{ background: "rgba(5,12,26,0.75)", backdropFilter: "blur(10px)" }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
       <motion.div
         className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 sm:rounded-2xl rounded-t-2xl shadow-2xl"
-        initial={{ y: 64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 64, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 240, damping: 26 }}
+        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 260, damping: 28 }}
       >
+        {/* Drag handle (mobile) */}
+        <div className="flex justify-center pt-2.5 pb-0 sm:hidden">
+          <div className="w-8 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+        </div>
+
         {/* Header */}
-        <div className="sticky top-0 z-10 px-5 py-3.5 border-b dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-between">
+        <div className="sticky top-0 z-10 px-5 py-3.5 border-b dark:border-slate-700/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <StatusBadge status={visit.status} size="md" />
           <div className="flex items-center gap-1.5">
             {canWrite && (
               <>
                 <button onClick={onEdit}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors">
                   <Edit3 className="h-3.5 w-3.5" />
                 </button>
-                {/* Status dropdown */}
                 <div className="relative">
                   <button onClick={() => setShowStatusMenu(s => !s)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
                   <AnimatePresence>
                     {showStatusMenu && (
                       <motion.div
-                        className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-50"
-                        initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                        className="absolute right-0 top-full mt-1.5 w-44 bg-white dark:bg-slate-800
+                          border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden z-50 p-1"
+                        initial={{ opacity: 0, y: -6, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.95 }}
                       >
                         {Object.entries(STATUS_META).map(([s, m]) => (
                           <button key={s} onClick={() => statusMut.mutate(s)}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-left">
+                            className="w-full flex items-center gap-2 px-3 py-2 text-xs rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
                             <m.icon className={cn("h-3 w-3", m.color)} />
                             <span className={cn("font-semibold", m.color)}>{m.label}</span>
                           </button>
@@ -741,52 +1087,51 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
                 </div>
                 <button
                   onClick={() => window.confirm("Delete this visit?") && deleteMut.mutate()}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  disabled={deleteMut.isPending}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors">
+                  {deleteMut.isPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Trash2 className="h-3.5 w-3.5" />}
                 </button>
               </>
             )}
             <button onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
+
         <div className="p-5 space-y-4">
-          {/* Title block */}
+          {/* Title */}
           <div>
             <div className="flex items-start justify-between gap-2">
-              <h2 className="font-bold text-base text-slate-800 dark:text-slate-100 leading-snug">
-                {visit.purpose}
-              </h2>
+              <h2 className="font-bold text-base text-slate-800 dark:text-slate-100 leading-snug">{visit.purpose}</h2>
               <PriorityDot priority={visit.priority} />
             </div>
             <div className="flex items-center gap-1.5 mt-1.5">
               <Building2 className="h-3.5 w-3.5 text-slate-400" />
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                {visit.client_name || "—"}
-              </span>
+              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{visit.client_name || "—"}</span>
             </div>
           </div>
-          {/* Quick yes/no inside detail panel too */}
+
+          {/* Quick yes/no */}
           {(visit.status === "scheduled" || visit.status === "rescheduled") && (
-            <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border dark:border-slate-700">
-              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex-1">
-                Was this visit completed?
-              </p>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border dark:border-slate-700">
+              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex-1">Was this visit completed?</p>
               <QuickStatusButtons visit={visit} onDone={onDeleted} />
             </div>
           )}
+
           {/* Detail grid */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { icon: Calendar, label: "Date", value: format(parseISO(visit.visit_date), "MMM d, yyyy") },
-              { icon: Clock, label: "Time", value: visit.visit_time || "—" },
-              { icon: User, label: "Assigned To", value: visit.assigned_to_name || "—" },
-              { icon: MapPin, label: "Location", value: visit.location || "—" },
+              { icon: Calendar, label: "Date",        value: format(parseISO(visit.visit_date), "MMM d, yyyy") },
+              { icon: Clock,    label: "Time",        value: visit.visit_time || "—" },
+              { icon: User,     label: "Assigned To", value: visit.assigned_to_name || "—" },
+              { icon: MapPin,   label: "Location",    value: visit.location || "—" },
             ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800">
+              <div key={label} className="flex items-start gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80">
                 <Icon className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
                 <div className="min-w-0">
                   <p className="text-[9px] text-slate-400 uppercase tracking-wider font-bold">{label}</p>
@@ -795,6 +1140,22 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               </div>
             ))}
           </div>
+
+          {/* Recurrence info */}
+          {visit.recurrence && visit.recurrence !== "none" && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900">
+              <Repeat className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+                {visit.recurrence === "nth_weekday"
+                  ? `Recurring — ${WEEK_NUMBERS.find(w => w.value === visit.recurrence_week_number)?.label || ""} ${WEEKDAYS[visit.recurrence_weekday] || ""} of each month`
+                  : visit.recurrence === "last_weekday"
+                  ? `Recurring — last ${WEEKDAYS[visit.recurrence_weekday] || ""} of each month`
+                  : `Recurring — ${visit.recurrence}`}
+                {visit.recurrence_end_date && ` until ${format(parseISO(visit.recurrence_end_date), "MMM d, yyyy")}`}
+              </p>
+            </div>
+          )}
+
           {/* Services */}
           {visit.services?.length > 0 && (
             <div>
@@ -802,45 +1163,39 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               <div className="flex flex-wrap gap-1">
                 {visit.services.map(s => (
                   <span key={s}
-                    className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-blue-50 dark:bg-blue-900/30
-                      text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
+                    className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/30
+                      text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900">
                     {s}
                   </span>
                 ))}
               </div>
             </div>
           )}
+
           {/* Notes */}
           {visit.notes && (
-            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800">
-              <p className="text-[9px] font-bold text-amber-600 uppercase tracking-wider mb-1">Notes</p>
-              <p className="text-xs text-amber-800 dark:text-amber-200">{visit.notes}</p>
+            <div className="p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900">
+              <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider mb-1">Notes</p>
+              <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">{visit.notes}</p>
             </div>
           )}
+
           {/* Outcome */}
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-              Outcome / Result
-            </p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Outcome / Result</p>
             <div className="flex gap-2">
-              <textarea
-                value={outcome}
-                onChange={e => setOutcome(e.target.value)}
-                rows={2}
+              <textarea value={outcome} onChange={e => setOutcome(e.target.value)} rows={2}
                 placeholder="What happened during the visit?"
                 className="flex-1 px-3 py-2 rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-800
-                  text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-              />
-              <button
-                onClick={() => outcomeMut.mutate()}
-                disabled={outcomeMut.isPending}
-                className="px-3 rounded-xl text-white text-xs font-semibold disabled:opacity-60 transition-all"
-                style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
-              >
+                  text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none" />
+              <button onClick={() => outcomeMut.mutate()} disabled={outcomeMut.isPending}
+                className="px-3 rounded-xl text-white text-xs font-bold disabled:opacity-60"
+                style={{ background: GRAD.primary }}>
                 {outcomeMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
               </button>
             </div>
           </div>
+
           {/* Comments */}
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
@@ -850,8 +1205,9 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
               <AnimatePresence>
                 {(visit.comments || []).map(c => (
                   <motion.div key={c.id} variants={fadeUp} initial="hidden" animate="visible" exit="exit"
-                    className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800">
-                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
+                    className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                      style={{ background: GRAD.primary }}>
                       {c.user_name?.charAt(0)?.toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -871,24 +1227,19 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
                 ))}
               </AnimatePresence>
               {(!visit.comments || visit.comments.length === 0) && (
-                <p className="text-xs text-slate-400 text-center py-3">No comments yet</p>
+                <p className="text-xs text-slate-400 text-center py-4">No comments yet</p>
               )}
             </div>
             <div className="flex gap-2">
-              <input
-                value={comment}
-                onChange={e => setComment(e.target.value)}
+              <input value={comment} onChange={e => setComment(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && !e.shiftKey && comment.trim() && commentMut.mutate()}
                 placeholder="Add a comment (Enter to send)…"
                 className="flex-1 px-3 py-2 rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-800
-                  text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-              <button
-                onClick={() => comment.trim() && commentMut.mutate()}
+                  text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              <button onClick={() => comment.trim() && commentMut.mutate()}
                 disabled={!comment.trim() || commentMut.isPending}
-                className="px-3 rounded-xl text-white transition-all disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
-              >
+                className="px-3 rounded-xl text-white disabled:opacity-50"
+                style={{ background: GRAD.primary }}>
                 <Send className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -898,10 +1249,12 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
     </motion.div>
   );
 }
-// ─── Month Calendar View ──────────────────────────────────────────────────────
+
+// ─── Month Calendar View ───────────────────────────────────────────────────
 function MonthCalendar({ visits, currentMonth, onDayClick }) {
-  const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+  const days     = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
   const startDay = startOfMonth(currentMonth).getDay();
+
   const visitsByDate = useMemo(() => {
     const map = {};
     visits.forEach(v => {
@@ -910,94 +1263,104 @@ function MonthCalendar({ visits, currentMonth, onDayClick }) {
     });
     return map;
   }, [visits]);
+
   return (
-    <div className="grid grid-cols-7 gap-0.5">
+    <div className="grid grid-cols-7 gap-1">
       {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
-        <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider py-2">{d}</div>
+        <div key={d} className="text-center text-[9px] font-black text-slate-400 uppercase tracking-widest py-2">{d}</div>
       ))}
       {Array(startDay).fill(null).map((_, i) => <div key={`e${i}`} />)}
       {days.map(d => {
-        const key = format(d, "yyyy-MM-dd");
+        const key    = format(d, "yyyy-MM-dd");
         const dayVis = visitsByDate[key] || [];
-        const today = isToday(d);
+        const today  = isToday(d);
         return (
-          <button key={key} onClick={() => onDayClick(d, dayVis)}
-            className={cn("min-h-[64px] p-1.5 rounded-xl border text-left transition-all hover:shadow-sm",
+          <motion.button key={key} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+            onClick={() => onDayClick(d, dayVis)}
+            className={cn("min-h-[68px] p-1.5 rounded-xl border text-left transition-all",
               today
-                ? "border-blue-400 bg-blue-50 dark:bg-blue-900/20"
-                : "border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600 bg-white dark:bg-slate-800/50"
+                ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30 shadow-sm"
+                : "border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600 bg-white dark:bg-slate-800/50 hover:shadow-sm",
             )}>
             <span className={cn("text-xs font-bold",
               today ? "text-blue-600 dark:text-blue-400" : "text-slate-600 dark:text-slate-300")}>
               {format(d, "d")}
             </span>
-            <div className="mt-0.5 space-y-0.5 overflow-hidden max-h-[36px]">
+            <div className="mt-0.5 space-y-0.5 overflow-hidden">
               {dayVis.slice(0, 2).map(v => {
                 const m = STATUS_META[v.status] || STATUS_META.scheduled;
                 return (
                   <div key={v.id}
-                    className={cn("text-[8px] font-semibold px-1 py-0.5 rounded truncate", m.bg, m.color)}>
+                    className={cn("text-[8px] font-bold px-1 py-0.5 rounded-md truncate", m.bg, m.color)}>
                     {v.client_name || v.purpose}
                   </div>
                 );
               })}
               {dayVis.length > 2 && (
-                <div className="text-[8px] text-slate-400 px-1">+{dayVis.length - 2} more</div>
+                <div className="text-[8px] text-slate-400 font-semibold px-1">+{dayVis.length - 2} more</div>
               )}
             </div>
-          </button>
+          </motion.button>
         );
       })}
     </div>
   );
 }
-// ─── Main Page ────────────────────────────────────────────────────────────────
+
+// ─── Main Page ─────────────────────────────────────────────────────────────
 export default function VisitsPage() {
   const { user } = useAuth();
-  const qc = useQueryClient();
-  const [viewMode, setViewMode] = useState("list");
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterUser, setFilterUser] = useState("all");
-  const [showForm, setShowForm] = useState(false);
-  const [editingVisit, setEditingVisit] = useState(null);
-  const [selectedVisit, setSelectedVisit] = useState(null);
-  const [selectedDayVisits, setSelectedDayVisits] = useState(null);
-  const [showEmailImporter, setShowEmailImporter] = useState(false);
-  const monthStr = format(currentMonth, "yyyy-MM");
-  const isAdmin = user?.role === "admin";
-  const isMgr = user?.role === "manager";
+  const qc       = useQueryClient();
+
+  const [viewMode,        setViewMode]        = useState("list");
+  const [currentMonth,    setCurrentMonth]    = useState(new Date());
+  const [filterStatus,    setFilterStatus]    = useState("all");
+  const [filterUser,      setFilterUser]      = useState("all");
+  const [showForm,        setShowForm]        = useState(false);
+  const [editingVisit,    setEditingVisit]    = useState(null);
+  const [selectedVisit,   setSelectedVisit]   = useState(null);
+  const [selectedDayVis,  setSelectedDayVis]  = useState(null);
+  const [showEmailImport, setShowEmailImport] = useState(false);
+
+  const monthStr  = format(currentMonth, "yyyy-MM");
+  const isAdmin   = user?.role === "admin";
+  const isMgr     = user?.role === "manager";
+
   const { data: visits = [], isLoading } = useQuery({
     queryKey: ["visits", monthStr, filterStatus, filterUser],
-    queryFn: () => fetchVisits({
-      month: monthStr,
-      status: filterStatus !== "all" ? filterStatus : undefined,
+    queryFn:  () => fetchVisits({
+      month:   monthStr,
+      status:  filterStatus !== "all" ? filterStatus : undefined,
       user_id: filterUser !== "all" ? filterUser : undefined,
     }),
     staleTime: 0,
   });
+
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClients });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: fetchUsers, enabled: isAdmin || isMgr });
-  const { data: summary } = useQuery({
+  const { data: users = []   } = useQuery({ queryKey: ["users"],   queryFn: fetchUsers, enabled: isAdmin || isMgr });
+  const { data: summary      } = useQuery({
     queryKey: ["visits-summary", filterUser !== "all" ? filterUser : user?.id, monthStr],
-    queryFn: () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
+    queryFn:  () => fetchSummary(filterUser !== "all" ? filterUser : user?.id, monthStr),
   });
-  // Keep detail panel in sync when list refreshes
+
+  // Keep detail panel in sync on list refresh
   useEffect(() => {
     if (selectedVisit) {
       const updated = visits.find(v => v.id === selectedVisit.id);
       if (updated) setSelectedVisit(updated);
     }
   }, [visits]);
+
   const statCards = [
-    { label: "Total", value: summary?.total || 0, color: C.deepBlue },
-    { label: "Completed", value: summary?.by_status?.completed || 0, color: C.emerald },
-    { label: "Upcoming", value: summary?.by_status?.scheduled || 0, color: C.mediumBlue },
-    { label: "Missed", value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0), color: C.coral },
+    { label: "Total",     value: summary?.total || 0,                                                         grad: GRAD.primary, icon: CalendarDays },
+    { label: "Completed", value: summary?.by_status?.completed || 0,                                          grad: GRAD.success, icon: CheckCircle2, rate: summary?.completion_rate },
+    { label: "Upcoming",  value: (summary?.by_status?.scheduled || 0) + (summary?.by_status?.rescheduled || 0), grad: GRAD.amber,   icon: Clock        },
+    { label: "Missed",    value: (summary?.by_status?.missed || 0) + (summary?.by_status?.cancelled || 0),    grad: GRAD.danger,  icon: AlertCircle  },
   ];
 
-  const handleEmailEventForVisit = useCallback((event) => {
-    const prefilled = {
+  const handleEmailEvent = useCallback((event) => {
+    const jsDay = getDay(parseISO(event.date || format(new Date(), "yyyy-MM-dd")));
+    setEditingVisit({
       purpose:    event.title || "",
       visit_date: event.date  || format(new Date(), "yyyy-MM-dd"),
       visit_time: event.time  || "",
@@ -1007,82 +1370,102 @@ export default function VisitsPage() {
         event.organizer   ? `Organiser: ${event.organizer}`             : "",
         event.source_from ? `From email: ${event.source_from}`          : "",
       ].filter(Boolean).join("\n"),
-      priority:  event.urgency === "urgent" ? "urgent"
-               : event.urgency === "high"   ? "high"
-               : "medium",
+      priority:    event.urgency === "urgent" ? "urgent" : event.urgency === "high" ? "high" : "medium",
       client_id:   "",
-      assigned_to: "",
+      assigned_to: user?.id || "",
       services:    event.event_type === "hearing" ? "Trademark, Legal" : "",
-    };
-    setEditingVisit(prefilled);
+    });
     setShowForm(true);
-  }, []);
+  }, [user]);
 
   return (
     <motion.div className="space-y-4" variants={stagger} initial="hidden" animate="visible">
-      {/* ── Page header ─────────────────────────────────────────────────── */}
+      {/* ── Header ────────────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">Client Visits</h1>
+          <h1 className="text-xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Client Visits</h1>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
             {format(currentMonth, "MMMM yyyy")} · {visits.length} visit{visits.length !== 1 ? "s" : ""}
+            {filterStatus !== "all" && ` · ${STATUS_META[filterStatus]?.label}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {/* View toggle */}
-          <div className="flex rounded-xl border dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800 p-0.5">
-            {[["list", ClipboardList], ["calendar", Calendar]].map(([mode, Icon]) => (
+          <div className="flex rounded-xl border dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800 p-0.5 shadow-sm">
+            {[
+              ["list",     ClipboardList],
+              ["calendar", CalendarDays ],
+            ].map(([mode, Icon]) => (
               <button key={mode} onClick={() => setViewMode(mode)}
-                className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
                   viewMode === mode ? "text-white shadow-sm" : "text-slate-500 dark:text-slate-400")}
-                style={viewMode === mode ? { background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` } : {}}>
+                style={viewMode === mode ? { background: GRAD.primary } : {}}>
                 <Icon className="h-3.5 w-3.5" />
                 <span className="capitalize hidden sm:inline">{mode}</span>
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setShowEmailImporter(true)}
-              className="rounded-xl h-9 border-purple-200 text-purple-700 hover:bg-purple-50 font-semibold text-sm"
-            >
-              <Mail className="h-4 w-4 mr-1.5" /> From Email
-            </Button>
-            <Button
-              onClick={() => { setEditingVisit(null); setShowForm(true); }}
-              className="rounded-xl text-white font-semibold shadow-sm h-9"
-              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}
-            >
-              <Plus className="h-4 w-4 mr-1.5" /> Schedule
-            </Button>
-          </div>
+
+          <Button variant="outline" onClick={() => setShowEmailImport(true)}
+            className="rounded-xl h-9 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300
+              hover:bg-purple-50 dark:hover:bg-purple-950/30 font-bold text-sm">
+            <Mail className="h-4 w-4 mr-1.5" /> From Email
+          </Button>
+
+          <Button onClick={() => { setEditingVisit(null); setShowForm(true); }}
+            className="rounded-xl text-white font-bold shadow-sm h-9"
+            style={{ background: GRAD.primary }}>
+            <Plus className="h-4 w-4 mr-1" /> Schedule
+          </Button>
         </div>
       </motion.div>
-      {/* ── Summary cards ───────────────────────────────────────────────── */}
+
+      {/* ── Summary cards ─────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {statCards.map(({ label, value, color }) => (
+        {statCards.map(({ label, value, grad, icon: Icon, rate }) => (
           <div key={label}
-            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-            <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color }}>{value}</p>
-            {label === "Completed" && summary?.total > 0 && (
-              <div className="mt-2 h-1 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${summary?.completion_rate || 0}%`, background: `linear-gradient(90deg, ${C.emerald}, ${C.lightGreen})` }} />
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            {/* Gradient accent stripe */}
+            <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl" style={{ background: grad }} />
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                <p className="text-2xl font-black mt-1 tracking-tight text-slate-800 dark:text-slate-100">{value}</p>
+              </div>
+              <div className="p-2 rounded-xl" style={{ background: grad.replace("linear-gradient", "linear-gradient").replace(", ", "20, ").replace(")", "20)") }}>
+                <Icon className="h-4 w-4 text-white" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.2))" }} />
+              </div>
+            </div>
+            {rate !== undefined && (
+              <div className="mt-2.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Completion</span>
+                  <span className="text-[10px] font-black text-emerald-600">{rate}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ background: GRAD.success }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${rate}%` }}
+                    transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
+                  />
+                </div>
               </div>
             )}
           </div>
         ))}
       </motion.div>
-      {/* ── Controls ────────────────────────────────────────────────────── */}
+
+      {/* ── Controls ──────────────────────────────────────────────────── */}
       <motion.div variants={fadeUp} className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl px-2 py-1.5">
+        {/* Month nav */}
+        <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl px-2 py-1.5 shadow-sm">
           <button onClick={() => setCurrentMonth(m => subMonths(m, 1))}
             className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
             <ChevronLeft className="h-4 w-4 text-slate-500" />
           </button>
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 w-28 text-center">
+          <span className="text-sm font-bold text-slate-700 dark:text-slate-200 w-28 text-center">
             {format(currentMonth, "MMM yyyy")}
           </span>
           <button onClick={() => setCurrentMonth(m => addMonths(m, 1))}
@@ -1090,116 +1473,153 @@ export default function VisitsPage() {
             <ChevronRight className="h-4 w-4 text-slate-500" />
           </button>
         </div>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400">
-          <option value="all">All Statuses</option>
-          {Object.entries(STATUS_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-        </select>
+
+        {/* Status filter */}
+        <div className="relative">
+          <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            className="pl-8 pr-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800
+              text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
+            <option value="all">All Statuses</option>
+            {Object.entries(STATUS_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+          </select>
+        </div>
+
+        {/* User filter (admin/manager) */}
         {(isAdmin || isMgr) && (
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
-            className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400">
-            <option value="all">All Users</option>
+            className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800
+              text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
+            <option value="all">All Staff</option>
             {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
           </select>
         )}
+
         <button onClick={() => setCurrentMonth(new Date())}
-          className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-medium">
+          className="px-3 py-2 rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800
+            text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-semibold shadow-sm">
           Today
         </button>
+
+        {(filterStatus !== "all" || filterUser !== "all") && (
+          <button onClick={() => { setFilterStatus("all"); setFilterUser("all"); }}
+            className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold text-red-500
+              hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-100 dark:border-red-900 transition-colors">
+            <X className="h-3.5 w-3.5" /> Clear filters
+          </button>
+        )}
       </motion.div>
-      {/* ── Main content ────────────────────────────────────────────────── */}
+
+      {/* ── Main content ──────────────────────────────────────────────── */}
       <motion.div variants={fadeUp}>
         {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
+          <div className="space-y-1.5">
+            {Array(5).fill(0).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : visits.length === 0 ? (
-          <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl flex flex-col items-center justify-center py-14 gap-4">
-            <div className="p-4 rounded-2xl" style={{ background: `${C.deepBlue}10` }}>
-              <MapPin className="h-7 w-7" style={{ color: C.deepBlue }} />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl flex flex-col items-center justify-center py-16 gap-4 shadow-sm"
+          >
+            <div className="p-4 rounded-2xl" style={{ background: `${C.deepBlue}12` }}>
+              <CalendarDays className="h-7 w-7" style={{ color: C.deepBlue }} />
             </div>
             <div className="text-center">
-              <p className="font-semibold text-slate-700 dark:text-slate-200">
-                No visits for {format(currentMonth, "MMMM yyyy")}
-              </p>
+              <p className="font-bold text-slate-700 dark:text-slate-200">No visits for {format(currentMonth, "MMMM yyyy")}</p>
               <p className="text-sm text-slate-400 mt-1">Schedule a client visit to get started</p>
             </div>
-            <Button onClick={() => setShowForm(true)} className="rounded-xl text-white h-9"
-              style={{ background: `linear-gradient(135deg, ${C.deepBlue}, ${C.mediumBlue})` }}>
+            <Button onClick={() => setShowForm(true)} className="rounded-xl text-white h-9 font-bold"
+              style={{ background: GRAD.primary }}>
               <Plus className="h-4 w-4 mr-1.5" /> Schedule First Visit
             </Button>
-          </div>
+          </motion.div>
         ) : viewMode === "calendar" ? (
           <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl p-4 shadow-sm">
             <MonthCalendar visits={visits} currentMonth={currentMonth}
               onDayClick={(d, dayVis) => {
-                if (dayVis.length === 1) setSelectedVisit(dayVis[0]);
-                else if (dayVis.length > 1) setSelectedDayVisits({ date: d, visits: dayVis });
+                if (dayVis.length === 1)     setSelectedVisit(dayVis[0]);
+                else if (dayVis.length > 1)  setSelectedDayVis({ date: d, visits: dayVis });
+                else {
+                  // Click on empty day — open form pre-filled with that date
+                  setEditingVisit({ visit_date: format(d, "yyyy-MM-dd") });
+                  setShowForm(true);
+                }
               }} />
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <motion.div className="space-y-1.5" variants={stagger} initial="hidden" animate="visible">
             <AnimatePresence>
               {visits.map(v => (
-                <VisitCard
-                  key={v.id}
-                  v={v}
-                  currentUser={user}
+                <VisitCard key={v.id} v={v} currentUser={user}
                   onClick={() => setSelectedVisit(v)}
                   onEdit={(visit) => { setEditingVisit(visit); setShowForm(true); }}
-                  onDelete={() => qc.invalidateQueries({ queryKey: ["visits"] })}
                 />
               ))}
             </AnimatePresence>
-          </div>
+          </motion.div>
         )}
       </motion.div>
-      {/* ── Day picker (calendar multi-visit) ───────────────────────────── */}
+
+      {/* ── Day multi-visit picker ─────────────────────────────────────── */}
       <AnimatePresence>
-        {selectedDayVisits && (
+        {selectedDayVis && (
           <motion.div
             className="fixed inset-0 z-[9000] flex items-center justify-center p-4"
-            style={{ background: "rgba(7,15,30,0.6)", backdropFilter: "blur(6px)" }}
+            style={{ background: "rgba(5,12,26,0.65)", backdropFilter: "blur(8px)" }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={e => e.target === e.currentTarget && setSelectedDayVisits(null)}
+            onClick={e => e.target === e.currentTarget && setSelectedDayVis(null)}
           >
             <motion.div
               className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
-              initial={{ scale: 0.92 }} animate={{ scale: 1 }} exit={{ scale: 0.92 }}
+              initial={{ scale: 0.92, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 20 }}
             >
               <div className="px-4 py-3.5 border-b dark:border-slate-700 flex items-center justify-between">
                 <div>
                   <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">
-                    {format(selectedDayVisits.date, "MMMM d, yyyy")}
+                    {format(selectedDayVis.date, "MMMM d, yyyy")}
                   </h3>
-                  <p className="text-xs text-slate-400">{selectedDayVisits.visits.length} visits</p>
+                  <p className="text-xs text-slate-400">{selectedDayVis.visits.length} visits</p>
                 </div>
-                <button onClick={() => setSelectedDayVisits(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <button onClick={() => setSelectedDayVis(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
                   <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="p-3 space-y-1.5 max-h-72 overflow-y-auto">
-                {selectedDayVisits.visits.map(v => (
+                {selectedDayVis.visits.map(v => (
                   <button key={v.id}
-                    onClick={() => { setSelectedVisit(v); setSelectedDayVisits(null); }}
+                    onClick={() => { setSelectedVisit(v); setSelectedDayVis(null); }}
                     className="w-full text-left p-3 rounded-xl border dark:border-slate-700
                       hover:border-blue-300 dark:hover:border-blue-700
-                      bg-slate-50 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 transition-all"
-                  >
+                      bg-slate-50 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 transition-all">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{v.purpose}</p>
+                      <p className="font-bold text-sm text-slate-800 dark:text-slate-100 truncate">{v.purpose}</p>
                       <StatusBadge status={v.status} />
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">{v.client_name}</p>
                   </button>
                 ))}
               </div>
+              <div className="p-3 border-t dark:border-slate-700">
+                <button
+                  onClick={() => {
+                    setEditingVisit({ visit_date: format(selectedDayVis.date, "yyyy-MM-dd") });
+                    setShowForm(true);
+                    setSelectedDayVis(null);
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-bold text-white"
+                  style={{ background: GRAD.primary }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Visit for This Day
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-      {/* ── Form modal ───────────────────────────────────────────────────── */}
+
+      {/* ── Form modal ───────────────────────────────────────────────── */}
       <AnimatePresence>
         {showForm && (
           <VisitFormModal
@@ -1211,7 +1631,8 @@ export default function VisitsPage() {
           />
         )}
       </AnimatePresence>
-      {/* ── Detail panel ────────────────────────────────────────────────── */}
+
+      {/* ── Detail panel ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedVisit && (
           <VisitDetailPanel
@@ -1227,12 +1648,14 @@ export default function VisitsPage() {
           />
         )}
       </AnimatePresence>
+
+      {/* ── Email importer ───────────────────────────────────────────── */}
       <AnimatePresence>
-        {showEmailImporter && (
+        {showEmailImport && (
           <EmailEventImporter
             mode="visit"
-            onSelectEvent={handleEmailEventForVisit}
-            onClose={() => setShowEmailImporter(false)}
+            onSelectEvent={handleEmailEvent}
+            onClose={() => setShowEmailImport(false)}
           />
         )}
       </AnimatePresence>
