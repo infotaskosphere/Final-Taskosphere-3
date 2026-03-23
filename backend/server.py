@@ -327,6 +327,10 @@ async def startup_event():
 async def health():
     return {"status": "ok", "cors": "configured correctly"}
 
+@app.get("/")
+async def root():
+    return {"message": "Server is running"}
+
 # ====================== SECURITY & DB ======================
 rankings_cache = {}
 # Store cache times as timezone-aware UTC datetimes for consistent comparison
