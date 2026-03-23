@@ -538,21 +538,36 @@ class ContactPerson(BaseModel):
 
 
 class ClientDSC(BaseModel):
-    certificate_number: str
-    holder_name: str
-    issue_date: Any
-    expiry_date: Any
+    certificate_number: Optional[str] = None
+    holder_name: Optional[str] = None
+    issue_date: Optional[Any] = None
+    expiry_date: Optional[Any] = None
     notes: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_dsc_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field in ["certificate_number", "holder_name", "issue_date", "expiry_date", "notes"]:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
 
 
 class ClientBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     company_name: str = Field(..., min_length=3, max_length=255)
     client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
+    client_type_label: Optional[str] = None
     contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     date_of_incorporation: Optional[Any] = None
     birthday: Optional[Any] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    status: Optional[str] = "active"
     services: List[str] = Field(default_factory=list)
     dsc_details: List[ClientDSC] = Field(default_factory=list)
     assigned_to: Optional[str] = None
@@ -562,7 +577,6 @@ class ClientBase(BaseModel):
         default_factory=list,
         description="List of {user_id, services} assignments"
     )
-
     @model_validator(mode="before")
     @classmethod
     def clean_empty_optional_strings(cls, data: Any) -> Any:
