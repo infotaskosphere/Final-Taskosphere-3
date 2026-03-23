@@ -1,5 +1,5 @@
 """
-visits.py — Client Visit Planning Module  v4  PERMISSIONS & BULK DELETE UPDATE
+visits.py — Client Visit Planning Module  v5  PERMISSIONS & BULK DELETE FIX
 Attach to your FastAPI app via:
     from backend.visits import router as visits_router
     api_router.include_router(visits_router)
@@ -16,14 +16,22 @@ Permissions model (stored in user.permissions dict):
     can_delete_visits     : bool   — delete any visit (admin auto-gets this)
     can_delete_own_visits : bool   — delete own visits (default True for all users)
 
-v4 CHANGES:
-  - DELETE PERMISSIONS: Admin can delete any visit. Regular users can only delete:
-    * Their own visits (if can_delete_own_visits !== False)
-    * Other users' visits only if they have can_delete_visits permission
-  - BULK DELETE: New POST /visits/bulk-delete endpoint for mass deletion with
-    proper permission checks per visit. Returns detailed results of what was
-    deleted vs forbidden vs not found.
-  - Enhanced _can_delete_visit() helper with granular permission checks.
+v5 CHANGES (fixes over v4):
+  - models.py now includes can_delete_visits and can_delete_own_visits in
+    UserPermissions class AND in DEFAULT_ROLE_PERMISSIONS for all roles.
+    Previously those fields were missing, causing _get_perms() to always return
+    None for them — breaking permission-gated deletes for non-admins.
+  - DELETE PERMISSIONS enforced correctly:
+    * Admin: can delete any visit regardless of status.
+    * User with can_delete_visits=True: can delete any visit.
+    * Regular user: can delete ONLY their own visits when can_delete_own_visits=True
+      (the default). If can_delete_own_visits=False they cannot delete anything.
+    * Users without permission get 403, never 404-masking.
+  - BULK DELETE (POST /visits/bulk-delete): permission checked per visit.
+    Returns detailed results: deleted / forbidden / not_found lists.
+  - Single DELETE /{visit_id}: correctly uses _can_delete_visit(), not
+    _can_write_visit(), so a user who lost edit rights can still delete their
+    own visits if can_delete_own_visits is True.
 """
 
 import uuid
@@ -51,7 +59,6 @@ router = APIRouter(prefix="/visits", tags=["visits"])
 VisitStatus       = Literal["scheduled", "completed", "cancelled", "missed", "rescheduled"]
 VisitPriority     = Literal["low", "medium", "high", "urgent"]
 
-# Extended recurrence patterns — v3
 RecurrencePattern = Literal[
     "none",
     "weekly",        # every 7 days from start
@@ -75,9 +82,8 @@ class VisitCreate(BaseModel):
     location:               Optional[str] = None
     recurrence:             RecurrencePattern = "none"
     recurrence_end_date:    Optional[str] = None        # YYYY-MM-DD
-    # Smart recurrence fields
     recurrence_weekday:     Optional[int] = None        # 0=Mon, 1=Tue … 6=Sun
-    recurrence_week_number: Optional[int] = None        # 1=first, 2=second … 5=fifth, 0=last
+    recurrence_week_number: Optional[int] = None        # 1=first … 5=fifth, 0=last
 
     @field_validator("visit_date", "recurrence_end_date", mode="before")
     @classmethod
@@ -148,13 +154,13 @@ class DuplicateCheckPayload(BaseModel):
 
 
 class BulkDeletePayload(BaseModel):
-    """v4: Bulk delete request payload"""
+    """Bulk delete request payload"""
     visit_ids: List[str] = Field(..., min_length=1, max_length=100)
     delete_recurrences: bool = False
 
 
 class BulkDeleteResult(BaseModel):
-    """v4: Bulk delete response"""
+    """Bulk delete response"""
     deleted: List[str] = Field(default_factory=list)
     forbidden: List[str] = Field(default_factory=list)
     not_found: List[str] = Field(default_factory=list)
@@ -167,6 +173,10 @@ class BulkDeleteResult(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_perms(user: User) -> dict:
+    """
+    Always returns a plain dict of the user's permissions.
+    Handles both dict-stored and Pydantic-model-stored permissions.
+    """
     if isinstance(user.permissions, dict):
         return user.permissions
     if user.permissions:
@@ -200,28 +210,34 @@ def _can_write_visit(current_user: User, visit_owner_id: str) -> bool:
 
 def _can_delete_visit(current_user: User, visit_owner_id: str) -> bool:
     """
-    v4: Granular delete permissions.
-    - Admin: can delete any visit
-    - Users with can_delete_visits permission: can delete any visit
-    - Regular users: can delete only their own visits (unless can_delete_own_visits is False)
+    Granular delete permission check.
+
+    Rules (evaluated in order):
+      1. Admin role  → always allowed.
+      2. can_delete_visits perm  → allowed for any visit.
+      3. Own visit + can_delete_own_visits not explicitly False  → allowed.
+      4. Everything else  → denied.
+
+    NOTE: This uses _can_delete_visit, NOT _can_write_visit, so write
+    permission and delete permission are independently controlled.
     """
+    # 1. Admin always wins
     if current_user.role == "admin":
         return True
-    
+
     perms = _get_perms(current_user)
-    
-    # Global delete permission overrides everything
+
+    # 2. Explicit global delete permission covers any visit
     if perms.get("can_delete_visits"):
         return True
-    
-    # Check if it's the user's own visit
+
+    # 3. Own visit — allowed unless can_delete_own_visits is explicitly False
     is_own_visit = str(current_user.id) == str(visit_owner_id)
-    
     if is_own_visit:
-        # Users can delete their own visits unless explicitly forbidden
-        return perms.get("can_delete_own_visits", True)
-    
-    # Not own visit and no global delete permission = forbidden
+        # Default is True; only deny when explicitly set to False
+        return perms.get("can_delete_own_visits", True) is not False
+
+    # 4. Not own visit, no global delete permission
     return False
 
 
@@ -231,14 +247,11 @@ def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> Option
     in the given year/month, or None if it doesn't exist.
     `n=0` means the LAST occurrence.
     """
-    # Python's weekday(): Monday=0 … Sunday=6
     first_day = date(year, month, 1)
-    # Offset from first_day to the first occurrence of `weekday` in this month
     offset = (weekday - first_day.weekday()) % 7
     first_occurrence = first_day + timedelta(days=offset)
 
     if n == 0:
-        # Last occurrence: go to the last day and walk back
         last_day = date(year, month, monthrange(year, month)[1])
         offset_back = (last_day.weekday() - weekday) % 7
         result = last_day - timedelta(days=offset_back)
@@ -256,8 +269,8 @@ def _generate_smart_recurrence(
     week_number: Optional[int] = None,
 ) -> List[date]:
     """
-    Generate all recurrence dates between base_date (exclusive) and end_date (inclusive).
-    Returns a list of date objects.
+    Generate all recurrence dates between base_date (exclusive) and
+    end_date (inclusive). Hard cap: no more than 366 days ahead.
     """
     if recurrence == "none" or not end_date_str:
         return []
@@ -268,7 +281,6 @@ def _generate_smart_recurrence(
     except (ValueError, TypeError):
         return []
 
-    # Hard safety cap — never generate more than 1 year of occurrences
     hard_cap = base_date + timedelta(days=366)
     end_date  = min(end_date, hard_cap)
 
@@ -287,12 +299,10 @@ def _generate_smart_recurrence(
             current += timedelta(weeks=2)
 
     elif recurrence == "monthly":
-        # Same calendar date each month
         month_offset = 1
         while True:
             year  = base_date.year + (base_date.month - 1 + month_offset) // 12
             month = (base_date.month - 1 + month_offset) % 12 + 1
-            # Clamp day to last valid day of that month
             max_day = monthrange(year, month)[1]
             day = min(base_date.day, max_day)
             d = date(year, month, day)
@@ -300,15 +310,13 @@ def _generate_smart_recurrence(
                 break
             dates.append(d)
             month_offset += 1
-            if month_offset > 120:  # 10-year hard cap
+            if month_offset > 120:
                 break
 
     elif recurrence in ("nth_weekday", "last_weekday"):
         if weekday is None:
             return []
-        # Determine n: for nth_weekday use week_number (1-5), for last use 0
         n = 0 if recurrence == "last_weekday" else (week_number or 1)
-
         month_offset = 1
         while True:
             year  = base_date.year + (base_date.month - 1 + month_offset) // 12
@@ -367,17 +375,22 @@ def _expand_recurrence(
     return children
 
 
-async def _check_duplicate(client_id: str, assigned_to: str, visit_date: str, exclude_id: Optional[str] = None) -> Optional[dict]:
+async def _check_duplicate(
+    client_id: str,
+    assigned_to: str,
+    visit_date: str,
+    exclude_id: Optional[str] = None,
+) -> Optional[dict]:
     """
     Return an existing visit document if one already exists for the same
-    client + user + date combination, else return None.
+    client + user + date, else None.  cancelled visits don't block re-scheduling.
     Pass exclude_id when editing to avoid self-conflict.
     """
     query: dict = {
         "client_id":   client_id,
         "assigned_to": assigned_to,
         "visit_date":  visit_date,
-        "status":      {"$nin": ["cancelled"]},   # cancelled visits don't block re-scheduling
+        "status":      {"$nin": ["cancelled"]},
     }
     if exclude_id:
         query["id"] = {"$ne": exclude_id}
@@ -421,8 +434,8 @@ def _build_date_filter(
     to_date: Optional[str],
 ) -> Optional[dict]:
     """
-    FIX: MongoDB does not allow $regex and $gte/$lte in the same field query dict.
     Convert month (YYYY-MM) to an equivalent $gte / $lte range.
+    MongoDB does not allow $regex and $gte/$lte in the same field query dict.
     """
     date_filter: dict = {}
 
@@ -462,7 +475,6 @@ async def create_visit(
     if not _can_write_visit(current_user, data.assigned_to):
         raise HTTPException(403, "Not authorised to create visits for this user")
 
-    # ── DUPLICATE CHECK (v3 FIX) ────────────────────────────────────────────
     existing = await _check_duplicate(data.client_id, data.assigned_to, data.visit_date)
     if existing:
         raise HTTPException(
@@ -514,7 +526,6 @@ async def create_visit(
         data.recurrence_week_number,
     )
 
-    # Deduplicate children against existing visits before inserting
     if children:
         filtered_children = []
         for child in children:
@@ -555,7 +566,6 @@ async def list_visits(
 ):
     query: dict = {}
 
-    # ── Role-based visibility scoping ────────────────────────────────────────
     if current_user.role == "admin":
         if user_id:
             query["assigned_to"] = user_id
@@ -725,7 +735,6 @@ async def bulk_schedule(
         except (ValueError, TypeError):
             continue
 
-        # Duplicate check per date
         dup = await _check_duplicate(payload.client_id, payload.assigned_to, str(d)[:10])
         if dup:
             duplicates.append(str(d)[:10])
@@ -766,51 +775,56 @@ async def bulk_schedule(
     return {"created": len(docs), "skipped_duplicates": duplicates, "visits": docs}
 
 
-# ── 6. BULK DELETE — v4 NEW FEATURE ─────────────────────────────────────────
+# ── 6. BULK DELETE ────────────────────────────────────────────────────────────
 @router.post("/bulk-delete")
 async def bulk_delete_visits(
     payload: BulkDeletePayload,
     current_user: User = Depends(get_current_user),
 ):
     """
-    v4: Bulk delete visits with permission checking per visit.
-    Admin can delete any visit. Regular users can only delete their own visits
-    unless they have can_delete_visits permission.
+    Bulk delete visits with per-visit permission checking.
+
+    Permission rules (same as single DELETE):
+      - Admin: can delete any visit.
+      - can_delete_visits perm: can delete any visit.
+      - Own visit + can_delete_own_visits not False: allowed.
+      - Otherwise: forbidden (included in `forbidden` list, not an error).
+
+    If delete_recurrences=True and a visit is a parent (parent_visit_id=None),
+    all its child recurrence visits are also deleted (subject to permission on
+    the parent only — children inherit the parent's permission decision).
     """
     if not payload.visit_ids:
         raise HTTPException(400, "No visit IDs provided")
 
     result = BulkDeleteResult(total_requested=len(payload.visit_ids))
-    
-    # Fetch all visits to check permissions
+
+    # Fetch all requested visits in one query
     visits_cursor = db.visits.find(
         {"id": {"$in": payload.visit_ids}},
-        {"_id": 0, "id": 1, "assigned_to": 1, "parent_visit_id": 1}
+        {"_id": 0, "id": 1, "assigned_to": 1, "parent_visit_id": 1},
     )
     visits = await visits_cursor.to_list(length=len(payload.visit_ids))
-    
-    # Build lookup map
+
     visit_map = {v["id"]: v for v in visits}
-    
-    # Track which IDs weren't found
-    found_ids = set(visit_map.keys())
+
+    # IDs that were not found in DB
+    found_ids    = set(visit_map.keys())
     result.not_found = [vid for vid in payload.visit_ids if vid not in found_ids]
-    
-    # Process each found visit
-    ids_to_delete = []
+
+    ids_to_delete: List[str] = []
+
     for vid, visit in visit_map.items():
         owner_id = visit.get("assigned_to", "")
-        
+
         if _can_delete_visit(current_user, owner_id):
             ids_to_delete.append(vid)
-            
-            # If this is a parent visit and delete_recurrences is True, 
-            # also delete children
+
+            # Cascade to children when deleting a parent and flag is set
             if payload.delete_recurrences and visit.get("parent_visit_id") is None:
-                # Find all child visits
                 children = await db.visits.find(
                     {"parent_visit_id": vid},
-                    {"_id": 0, "id": 1}
+                    {"_id": 0, "id": 1},
                 ).to_list(1000)
                 for child in children:
                     child_id = child.get("id")
@@ -818,20 +832,18 @@ async def bulk_delete_visits(
                         ids_to_delete.append(child_id)
         else:
             result.forbidden.append(vid)
-    
-    # Perform deletion
+
     if ids_to_delete:
         delete_result = await db.visits.delete_many({"id": {"$in": ids_to_delete}})
         result.total_deleted = delete_result.deleted_count
         result.deleted = ids_to_delete
-    
-    # Log the operation
+
     logger.info(
         f"bulk_delete: user={current_user.id} role={current_user.role} "
         f"requested={len(payload.visit_ids)} deleted={result.total_deleted} "
         f"forbidden={len(result.forbidden)} not_found={len(result.not_found)}"
     )
-    
+
     return result
 
 
@@ -1046,7 +1058,6 @@ async def update_visit(
     if not _can_write_visit(current_user, visit.get("assigned_to", "")):
         raise HTTPException(403, "Not authorised to edit this visit")
 
-    # If date is changing, run duplicate check (excluding self)
     new_date = data.visit_date
     if new_date and new_date != visit.get("visit_date"):
         dup = await _check_duplicate(
@@ -1068,7 +1079,7 @@ async def update_visit(
     return updated
 
 
-# ── 15. DELETE — PARAMETERISED, LAST — v4 PERMISSION FIX ─────────────────────
+# ── 15. DELETE — PARAMETERISED, LAST ─────────────────────────────────────────
 @router.delete("/{visit_id}")
 async def delete_visit(
     visit_id: str,
@@ -1076,12 +1087,19 @@ async def delete_visit(
     current_user: User = Depends(get_current_user),
 ):
     """
-    v4 PERMISSION FIX — Delete with proper permission checks:
-    - Admin can delete any visit
-    - Users with can_delete_visits permission can delete any visit
-    - Regular users can only delete their own visits (unless can_delete_own_visits is False)
+    Delete a single visit with proper permission enforcement.
+
+    Permission rules:
+      - Admin: can always delete.
+      - User with can_delete_visits=True: can always delete.
+      - Regular user: can delete only their own visits (unless
+        can_delete_own_visits is explicitly False).
+      - 403 is returned when the user lacks permission — never silently ignored.
+
+    Pass ?delete_recurrences=true to also remove all child recurrence visits
+    when deleting a parent visit.
     """
-    # Pass 1 — look up by our custom uuid string field
+    # Pass 1 — look up by custom uuid string field
     visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
 
     if not visit:
@@ -1091,7 +1109,6 @@ async def delete_visit(
             oid   = ObjectId(visit_id)
             visit = await db.visits.find_one({"_id": oid})
             if visit:
-                # Normalise — treat the _id as the effective id for deletion
                 visit_id = str(visit.get("id", visit_id))
                 visit.pop("_id", None)
         except Exception:
@@ -1103,20 +1120,20 @@ async def delete_visit(
             f"Visit not found (id={visit_id}). It may have already been deleted."
         )
 
-    # v4: Check delete permissions (not just write permissions)
+    # Use _can_delete_visit (NOT _can_write_visit) for delete checks
     owner_id = visit.get("assigned_to", "")
     if not _can_delete_visit(current_user, owner_id):
         raise HTTPException(
-            403, 
-            "Not authorised to delete this visit. Only admins or the assigned user can delete visits."
+            403,
+            "Not authorised to delete this visit. "
+            "Only admins or the assigned user (with delete permission) can delete visits."
         )
 
     deleted_count = 0
 
-    # Delete the visit itself (match on custom id field OR fallback)
     result = await db.visits.delete_one({"id": visit_id})
     if result.deleted_count == 0:
-        # Fallback: delete by MongoDB _id string if custom id field is missing
+        # Fallback: delete by MongoDB _id if custom id field is missing
         from bson import ObjectId
         try:
             result = await db.visits.delete_one({"_id": ObjectId(visit_id)})
@@ -1124,7 +1141,7 @@ async def delete_visit(
             pass
     deleted_count += result.deleted_count if result else 0
 
-    # Optionally cascade-delete all child recurrence visits
+    # Cascade-delete all child recurrence visits if requested
     if delete_recurrences and visit.get("parent_visit_id") is None:
         recurrence_result = await db.visits.delete_many({"parent_visit_id": visit_id})
         deleted_count += recurrence_result.deleted_count
