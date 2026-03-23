@@ -519,7 +519,7 @@ class DocumentMovementUpdateRequest(BaseModel):
 # CLIENT MANAGEMENT
 # ======================
 class ContactPerson(BaseModel):
-    name: str
+    name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     designation: Optional[str] = None
