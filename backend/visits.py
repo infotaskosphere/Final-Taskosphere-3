@@ -1,5 +1,5 @@
 """
-visits.py — Client Visit Planning Module  v3  COMPLETE REWRITE
+visits.py — Client Visit Planning Module  v4  PERMISSIONS & BULK DELETE UPDATE
 Attach to your FastAPI app via:
     from backend.visits import router as visits_router
     api_router.include_router(visits_router)
@@ -13,47 +13,17 @@ Permissions model (stored in user.permissions dict):
     can_view_all_visits   : bool   — see every user's visits (admin auto-gets this)
     view_other_visits     : [uid]  — list of user IDs whose visits this user can read
     can_edit_visits       : bool   — create/edit any visit (admin auto-gets this)
+    can_delete_visits     : bool   — delete any visit (admin auto-gets this)
+    can_delete_own_visits : bool   — delete own visits (default True for all users)
 
-FIXES in v3:
-  - DELETE 404 BUG FIXED: The root cause was that the frontend was calling
-    DELETE /visits/<id> but sometimes the visit_id contained characters
-    (spaces, slashes) that FastAPI couldn't route correctly, OR the visit
-    document was stored with a different id format. Now we do a
-    find_one_and_delete with {"id": visit_id} AND a fallback lookup by
-    string-coerced _id so the delete always finds the document.
-    Additionally added explicit 404 with detail message so the frontend
-    can display it meaningfully rather than a generic network error.
-
-  - DUPLICATE PREVENTION: create_visit now checks for an existing visit
-    with the same (client_id, assigned_to, visit_date) before inserting.
-    Returns HTTP 409 Conflict with a clear message.
-
-  - SMART RECURRENCE: Added new RecurrencePattern values and a
-    generate_smart_recurrence() helper that supports:
-      * "weekly"         — every 7 days from start_date
-      * "biweekly"       — every 14 days
-      * "monthly"        — same day-of-month each month
-      * "nth_weekday"    — e.g. "every 2nd Thursday of the month"
-      * "last_weekday"   — e.g. "every last Friday of the month"
-    The frontend sends recurrence_weekday (0=Mon…6=Sun) and
-    recurrence_week_number (1-5, or 0 = "last") alongside the
-    recurrence pattern.
-
-  - list_visits: manager branch guarded with filter(None, ...) to prevent
-    None values crashing $in.
-  - list_visits: month filter now uses $gte/$lte instead of $regex to avoid
-    MongoDB conflict between $regex and comparison operators on the same key.
-  - All routes: {"_id": 0} projection consistently applied everywhere to
-    prevent ObjectId serialisation errors.
-  - get_visit: client lookup handles missing client gracefully.
-  - _expand_recurrence: child docs get all required fields.
-  - VisitCreate validator: accepts both date objects and strings.
-  - Robust null guards on every field that touches DB data.
-
-IMPORTANT — Route ordering:
-    All static-path routes (/summary, /upcoming, /bulk-schedule,
-    /admin/monthly-plan, /from-email, /check-duplicate) MUST be declared
-    BEFORE any parameterised routes (/{visit_id}).
+v4 CHANGES:
+  - DELETE PERMISSIONS: Admin can delete any visit. Regular users can only delete:
+    * Their own visits (if can_delete_own_visits !== False)
+    * Other users' visits only if they have can_delete_visits permission
+  - BULK DELETE: New POST /visits/bulk-delete endpoint for mass deletion with
+    proper permission checks per visit. Returns detailed results of what was
+    deleted vs forbidden vs not found.
+  - Enhanced _can_delete_visit() helper with granular permission checks.
 """
 
 import uuid
@@ -177,6 +147,21 @@ class DuplicateCheckPayload(BaseModel):
     visit_date:  str
 
 
+class BulkDeletePayload(BaseModel):
+    """v4: Bulk delete request payload"""
+    visit_ids: List[str] = Field(..., min_length=1, max_length=100)
+    delete_recurrences: bool = False
+
+
+class BulkDeleteResult(BaseModel):
+    """v4: Bulk delete response"""
+    deleted: List[str] = Field(default_factory=list)
+    forbidden: List[str] = Field(default_factory=list)
+    not_found: List[str] = Field(default_factory=list)
+    total_requested: int = 0
+    total_deleted: int = 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -211,6 +196,33 @@ def _can_write_visit(current_user: User, visit_owner_id: str) -> bool:
         return True
     perms = _get_perms(current_user)
     return bool(perms.get("can_edit_visits"))
+
+
+def _can_delete_visit(current_user: User, visit_owner_id: str) -> bool:
+    """
+    v4: Granular delete permissions.
+    - Admin: can delete any visit
+    - Users with can_delete_visits permission: can delete any visit
+    - Regular users: can delete only their own visits (unless can_delete_own_visits is False)
+    """
+    if current_user.role == "admin":
+        return True
+    
+    perms = _get_perms(current_user)
+    
+    # Global delete permission overrides everything
+    if perms.get("can_delete_visits"):
+        return True
+    
+    # Check if it's the user's own visit
+    is_own_visit = str(current_user.id) == str(visit_owner_id)
+    
+    if is_own_visit:
+        # Users can delete their own visits unless explicitly forbidden
+        return perms.get("can_delete_own_visits", True)
+    
+    # Not own visit and no global delete permission = forbidden
+    return False
 
 
 def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> Optional[date]:
@@ -754,7 +766,76 @@ async def bulk_schedule(
     return {"created": len(docs), "skipped_duplicates": duplicates, "visits": docs}
 
 
-# ── 6. FROM EMAIL — static path, BEFORE /{visit_id} ─────────────────────────
+# ── 6. BULK DELETE — v4 NEW FEATURE ─────────────────────────────────────────
+@router.post("/bulk-delete")
+async def bulk_delete_visits(
+    payload: BulkDeletePayload,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    v4: Bulk delete visits with permission checking per visit.
+    Admin can delete any visit. Regular users can only delete their own visits
+    unless they have can_delete_visits permission.
+    """
+    if not payload.visit_ids:
+        raise HTTPException(400, "No visit IDs provided")
+
+    result = BulkDeleteResult(total_requested=len(payload.visit_ids))
+    
+    # Fetch all visits to check permissions
+    visits_cursor = db.visits.find(
+        {"id": {"$in": payload.visit_ids}},
+        {"_id": 0, "id": 1, "assigned_to": 1, "parent_visit_id": 1}
+    )
+    visits = await visits_cursor.to_list(length=len(payload.visit_ids))
+    
+    # Build lookup map
+    visit_map = {v["id"]: v for v in visits}
+    
+    # Track which IDs weren't found
+    found_ids = set(visit_map.keys())
+    result.not_found = [vid for vid in payload.visit_ids if vid not in found_ids]
+    
+    # Process each found visit
+    ids_to_delete = []
+    for vid, visit in visit_map.items():
+        owner_id = visit.get("assigned_to", "")
+        
+        if _can_delete_visit(current_user, owner_id):
+            ids_to_delete.append(vid)
+            
+            # If this is a parent visit and delete_recurrences is True, 
+            # also delete children
+            if payload.delete_recurrences and visit.get("parent_visit_id") is None:
+                # Find all child visits
+                children = await db.visits.find(
+                    {"parent_visit_id": vid},
+                    {"_id": 0, "id": 1}
+                ).to_list(1000)
+                for child in children:
+                    child_id = child.get("id")
+                    if child_id and child_id not in ids_to_delete:
+                        ids_to_delete.append(child_id)
+        else:
+            result.forbidden.append(vid)
+    
+    # Perform deletion
+    if ids_to_delete:
+        delete_result = await db.visits.delete_many({"id": {"$in": ids_to_delete}})
+        result.total_deleted = delete_result.deleted_count
+        result.deleted = ids_to_delete
+    
+    # Log the operation
+    logger.info(
+        f"bulk_delete: user={current_user.id} role={current_user.role} "
+        f"requested={len(payload.visit_ids)} deleted={result.total_deleted} "
+        f"forbidden={len(result.forbidden)} not_found={len(result.not_found)}"
+    )
+    
+    return result
+
+
+# ── 7. FROM EMAIL — static path, BEFORE /{visit_id} ─────────────────────────
 @router.get("/from-email")
 async def list_email_visits(
     month:  Optional[str] = Query(None),
@@ -781,7 +862,7 @@ async def list_email_visits(
     return visits
 
 
-# ── 7. CHECK DUPLICATE — static path, BEFORE /{visit_id} ────────────────────
+# ── 8. CHECK DUPLICATE — static path, BEFORE /{visit_id} ────────────────────
 @router.post("/check-duplicate")
 async def check_duplicate_endpoint(
     data: DuplicateCheckPayload,
@@ -798,7 +879,7 @@ async def check_duplicate_endpoint(
     }
 
 
-# ── 8. ADMIN MONTHLY PLAN — static path, BEFORE /{visit_id} ─────────────────
+# ── 9. ADMIN MONTHLY PLAN — static path, BEFORE /{visit_id} ─────────────────
 @router.get("/admin/monthly-plan")
 async def admin_monthly_plan(
     month: str = Query(...),
@@ -836,7 +917,7 @@ async def admin_monthly_plan(
     return {"month": month, "users": list(grouped.values())}
 
 
-# ── 9. QUICK STATUS — /{visit_id}/quick-status ───────────────────────────────
+# ── 10. QUICK STATUS — /{visit_id}/quick-status ───────────────────────────────
 @router.post("/{visit_id}/quick-status")
 async def quick_status(
     visit_id: str,
@@ -864,7 +945,7 @@ async def quick_status(
     return updated
 
 
-# ── 10. ADD COMMENT — /{visit_id}/comments ───────────────────────────────────
+# ── 11. ADD COMMENT — /{visit_id}/comments ───────────────────────────────────
 @router.post("/{visit_id}/comments", status_code=201)
 async def add_comment(
     visit_id: str,
@@ -894,7 +975,7 @@ async def add_comment(
     return comment
 
 
-# ── 11. DELETE COMMENT — /{visit_id}/comments/{comment_id} ──────────────────
+# ── 12. DELETE COMMENT — /{visit_id}/comments/{comment_id} ──────────────────
 @router.delete("/{visit_id}/comments/{comment_id}")
 async def delete_comment(
     visit_id:   str,
@@ -922,7 +1003,7 @@ async def delete_comment(
     return {"message": "Comment deleted"}
 
 
-# ── 12. GET SINGLE — PARAMETERISED, AFTER all static routes ──────────────────
+# ── 13. GET SINGLE — PARAMETERISED, AFTER all static routes ──────────────────
 @router.get("/{visit_id}")
 async def get_visit(
     visit_id: str,
@@ -952,7 +1033,7 @@ async def get_visit(
     return visit
 
 
-# ── 13. UPDATE — PARAMETERISED, AFTER all static routes ──────────────────────
+# ── 14. UPDATE — PARAMETERISED, AFTER all static routes ──────────────────────
 @router.patch("/{visit_id}")
 async def update_visit(
     visit_id: str,
@@ -987,7 +1068,7 @@ async def update_visit(
     return updated
 
 
-# ── 14. DELETE — PARAMETERISED, LAST — v3 FIX ────────────────────────────────
+# ── 15. DELETE — PARAMETERISED, LAST — v4 PERMISSION FIX ─────────────────────
 @router.delete("/{visit_id}")
 async def delete_visit(
     visit_id: str,
@@ -995,15 +1076,10 @@ async def delete_visit(
     current_user: User = Depends(get_current_user),
 ):
     """
-    v3 FIX — The previous delete was returning 404 because:
-    1. The frontend was calling DELETE /visits/<id> but the visit document
-       wasn't always found by the 'id' string field (vs MongoDB _id).
-    2. We now do a two-pass lookup: first by the custom 'id' field, and if
-       that fails we try to match against the stringified MongoDB _id.
-
-    If the visit genuinely doesn't exist after both passes we return 404
-    with a clear message so the frontend can show a useful error rather
-    than a raw network failure.
+    v4 PERMISSION FIX — Delete with proper permission checks:
+    - Admin can delete any visit
+    - Users with can_delete_visits permission can delete any visit
+    - Regular users can only delete their own visits (unless can_delete_own_visits is False)
     """
     # Pass 1 — look up by our custom uuid string field
     visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
@@ -1027,8 +1103,13 @@ async def delete_visit(
             f"Visit not found (id={visit_id}). It may have already been deleted."
         )
 
-    if not _can_write_visit(current_user, visit.get("assigned_to", "")):
-        raise HTTPException(403, "Not authorised to delete this visit")
+    # v4: Check delete permissions (not just write permissions)
+    owner_id = visit.get("assigned_to", "")
+    if not _can_delete_visit(current_user, owner_id):
+        raise HTTPException(
+            403, 
+            "Not authorised to delete this visit. Only admins or the assigned user can delete visits."
+        )
 
     deleted_count = 0
 
@@ -1050,7 +1131,7 @@ async def delete_visit(
 
     logger.info(
         f"delete_visit: id={visit_id} deleted={deleted_count} "
-        f"cascade={delete_recurrences} by={current_user.id}"
+        f"cascade={delete_recurrences} by={current_user.id} role={current_user.role}"
     )
 
     return {
