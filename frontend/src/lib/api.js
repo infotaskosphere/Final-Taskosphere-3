@@ -10,14 +10,15 @@ const BACKEND =
   process.env.REACT_APP_BACKEND_URL ||
   "https://final-taskosphere-backend.onrender.com";
 
-const BASE_URL = `${BACKEND.replace(/\/$/, "")}/api/`;
+// ✅ FIXED: removed /api
+const BASE_URL = `${BACKEND.replace(/\/$/, "")}`;
 
 const getToken = () =>
   localStorage.getItem("token") || sessionStorage.getItem("token");
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000,
+  timeout: 120000, // ✅ increased timeout
   headers: {
     "Content-Type": "application/json",
   },
@@ -35,7 +36,9 @@ api.interceptors.request.use(
     }
 
     if (process.env.NODE_ENV === "development") {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url?.replace(/^\/+/, "")}`);
+      console.log(
+        `[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url?.replace(/^\/+/, "")}`
+      );
     }
 
     return config;
@@ -51,9 +54,9 @@ api.interceptors.response.use(
   (error) => {
     const status = error.response?.status;
 
-    // Network error
+    // Network error (Render cold start)
     if (!error.response) {
-      console.error("Network error:", error.message);
+      console.error("Network error (likely backend sleeping):", error.message);
       return Promise.reject(error);
     }
 
