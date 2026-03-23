@@ -25,18 +25,41 @@ export default function Login() {
   const { login } = useAuth();
   const isDark = useDark();
 
-  const handleSubmit = async () => {
-    if (!email || !password) { toast.error('Please enter email and password'); return; }
-    setLoading(true);
-    try {
-      const response = await api.post('/auth/login', { email, password });
-      login(response.data, true);
-      toast.success('Welcome back!');
-      navigate('/dashboard');
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Invalid email or password');
-    } finally { setLoading(false); }
-  };
+const handleSubmit = async () => {
+  if (!email || !password) {
+    toast.error('Please enter email and password');
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const response = await api.post('/auth/login', { email, password });
+
+    // Existing login logic
+    login(response.data, true);
+
+    // 🔥 Send token to Chrome Extension
+    if (window.chrome && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({
+          type: "SET_TOKEN",
+          token: response.data.access_token
+        });
+      } catch (e) {
+        console.log("Extension not available");
+      }
+    }
+
+    toast.success('Welcome back!');
+    navigate('/dashboard');
+
+  } catch (error) {
+    toast.error(error.response?.data?.detail || 'Invalid email or password');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleForgotPassword = () => {
     if (!forgotEmail) { toast.error('Please enter your email address'); return; }
