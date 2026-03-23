@@ -252,6 +252,10 @@ async def startup_event():
         await db.quotations.create_index("service")
         await db.companies.create_index("created_by")
         await db.companies.create_index("name")
+        await db.staff_activity.create_index("type")
+        await db.staff_activity.create_index("domain")
+        await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
+        await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
 
     # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
         try:
@@ -587,6 +591,51 @@ def send_email(to_email: str, subject: str, body: str):
         return response.status_code == 202
     except Exception as e:
         raise Exception(f"SendGrid error: {str(e)}")
+
+
+#===========================================================
+#Website activity
+#===========================================================
+
+@api_router.get("/activity/websites")
+async def get_website_activity(
+    current_user: User = Depends(get_current_user)
+):
+    data = await db.staff_activity.find(
+        {
+            "user_id": current_user.id,
+            "type": "website"
+        },
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(1000)
+
+    return data
+
+
+@api_router.post("/activity/track-website")
+async def track_website(
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        activity = {
+            "id": str(uuid.uuid4()),
+            "user_id": current_user.id,
+            "type": "website",
+            "url": data.get("url"),
+            "domain": data.get("domain"),
+            "title": data.get("title"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "duration": data.get("duration", 0)
+        }
+
+        await db.staff_activity.insert_one(activity)
+
+        return {"status": "tracked"}
+
+    except Exception as e:
+        logger.error(f"Website tracking error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Tracking failed")
 
 #===========================================================
 # AUTH ROUTES
