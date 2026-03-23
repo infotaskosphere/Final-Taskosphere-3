@@ -72,90 +72,113 @@ export default function Login() {
 
   // 🔥 LOGIN FUNCTION (UPDATED)
   const handleSubmit = async () => {
-    if (!email || !password) {
-      toast.error('Please enter email and password');
-      return;
-    }
+  if (!email || !password) {
+    toast.error('Please enter email and password');
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
+  try {
+    // 🔥 STEP 1: Wake backend
+    await fetch("https://final-taskosphere-backend.onrender.com/health");
+
+    // 🔥 STEP 2: Give backend time to wake
+    await new Promise((r) => setTimeout(r, 4000));
+
+    // 🔥 STEP 3: Retry login (important for cold start)
+    let response;
     try {
-      const response = await api.post('/auth/login', { email, password });
-
-      // 🔥 CHECK CONSENT FROM BACKEND
-      if (!response.data.consent_given) {
-        setTempToken(response.data.access_token);
-        setShowConfirm(true);
-        setLoading(false);
-        return;
-      }
-
-      // NORMAL LOGIN
-      login(response.data, true);
-      sendTokenToExtension(response.data.access_token);
-
-      toast.success('Welcome back!');
-      navigate('/dashboard');
-
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Invalid email or password');
-    } finally {
-      setLoading(false);
+      response = await api.post('/auth/login', { email, password });
+    } catch (err) {
+      console.warn("Retrying login after cold start...");
+      await new Promise((r) => setTimeout(r, 3000));
+      response = await api.post('/auth/login', { email, password });
     }
-  };
 
-  const handleForgotPassword = () => {
-    if (!forgotEmail) {
-      toast.error('Please enter your email address');
+    // 🔥 CHECK CONSENT FROM BACKEND
+    if (!response.data.consent_given) {
+      setTempToken(response.data.access_token);
+      setShowConfirm(true);
       return;
     }
-    toast.info('Password reset functionality will be available soon.');
-    setShowForgotPassword(false);
-    setForgotEmail('');
-  };
 
-  /* THEME */
-  const pageBg = isDark
-    ? `linear-gradient(135deg,#0f172a,#1e293b,#0f172a)`
-    : `linear-gradient(135deg,#f0f9ff,#f0fdf4,#ecfeff)`;
+    // ✅ NORMAL LOGIN
+    login(response.data, true);
+    sendTokenToExtension(response.data.access_token);
 
-  const cardBg = isDark
-    ? 'rgba(30,41,59,0.95)'
-    : 'rgba(255,255,255,0.95)';
+    toast.success('Welcome back!');
+    navigate('/dashboard');
 
-  const headingClr = isDark ? '#f1f5f9' : '#1e293b';
-  const subClr = isDark ? '#94a3b8' : '#64748b';
+  } catch (error) {
+    console.error("Login error:", error);
 
-  return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: pageBg }}>
+    if (error.code === "ECONNABORTED") {
+      toast.error("Server is waking up, please try again...");
+    } else {
+      toast.error(error.response?.data?.detail || 'Invalid email or password');
+    }
 
-      {/* 🔥 POPUP */}
-      {showConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl text-center shadow-xl">
-            <h2 className="text-lg font-semibold mb-4">
-              Select Yes To Continue
-            </h2>
+  } finally {
+    setLoading(false);
+  }
+};
 
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={handleYes}
-                className="bg-green-600 text-white px-4 py-2 rounded"
-              >
-                Yes
-              </button>
+const handleForgotPassword = () => {
+  if (!forgotEmail) {
+    toast.error('Please enter your email address');
+    return;
+  }
 
-              <button
-                onClick={handleNo}
-                className="bg-gray-400 text-white px-4 py-2 rounded"
-              >
-                No
-              </button>
-            </div>
+  toast.info('Password reset functionality will be available soon.');
+  setShowForgotPassword(false);
+  setForgotEmail('');
+};
+
+/* =========================
+   THEME
+========================= */
+
+const pageBg = isDark
+  ? `linear-gradient(135deg,#0f172a,#1e293b,#0f172a)`
+  : `linear-gradient(135deg,#f0f9ff,#f0fdf4,#ecfeff)`;
+
+const cardBg = isDark
+  ? 'rgba(30,41,59,0.95)'
+  : 'rgba(255,255,255,0.95)';
+
+const headingClr = isDark ? '#f1f5f9' : '#1e293b';
+const subClr = isDark ? '#94a3b8' : '#64748b';
+
+return (
+  <div className="min-h-screen flex items-center justify-center" style={{ background: pageBg }}>
+
+    {/* 🔥 POPUP */}
+    {showConfirm && (
+      <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+        <div className="bg-white p-6 rounded-xl text-center shadow-xl">
+          <h2 className="text-lg font-semibold mb-4">
+            Select Yes To Continue
+          </h2>
+
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={handleYes}
+              className="bg-green-600 text-white px-4 py-2 rounded"
+            >
+              Yes
+            </button>
+
+            <button
+              onClick={handleNo}
+              className="bg-gray-400 text-white px-4 py-2 rounded"
+            >
+              No
+            </button>
           </div>
         </div>
-      )}
-
+      </div>
+    )}
       <div className="w-full max-w-md p-8 rounded-2xl shadow-xl" style={{ background: cardBg }}>
 
         <div className="text-center mb-6">
