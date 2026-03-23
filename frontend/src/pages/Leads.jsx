@@ -18,7 +18,7 @@ import {
   CheckCircle2, Loader2, Circle, X, ArrowRight, IndianRupee, FileText,
   UserCheck, Tag, MessageSquare, Target, ChevronRight, ShieldCheck,
   Timer, Layers, RefreshCw, Receipt, ClipboardCheck, FolderCheck,
-  Users, CalendarDays, Flag, ClipboardList,
+  Users, CalendarDays, Flag, ClipboardList, MapPin, Briefcase,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -98,6 +98,16 @@ const PRIORITY_OPTIONS = [
   { value: 'critical', label: 'Critical', color: 'text-red-600'    },
 ];
 
+const CLIENT_TYPES = [
+  { value: 'proprietor',  label: 'Proprietor'      },
+  { value: 'pvt_ltd',     label: 'Private Limited' },
+  { value: 'llp',         label: 'LLP'             },
+  { value: 'partnership', label: 'Partnership'     },
+  { value: 'huf',         label: 'HUF'             },
+  { value: 'trust',       label: 'Trust'           },
+  { value: 'other',       label: 'Other'           },
+];
+
 /* ─── tiny helpers ──────────────────────────────────────────────────────── */
 const svcStyle  = (val) => LEAD_SERVICES.find(s => s.value === val) || LEAD_SERVICES[LEAD_SERVICES.length - 1];
 const stageOf   = (id)  => PIPELINE_STAGES.find(s => s.id === id) || PIPELINE_STAGES[0];
@@ -105,12 +115,6 @@ const isOverdue = (l)   => l.next_follow_up && new Date(l.next_follow_up) < new 
 
 const toLocalDT   = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const fromLocalDT = (s)   => { if (!s) return null; return new Date(s).toISOString(); };
-
-// Return tomorrow as datetime-local string for default task due date
-const tomorrowLocalDT = () => {
-  const d = new Date(); d.setDate(d.getDate() + 7);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-};
 
 function addRipple(e) {
   const btn = e.currentTarget, circle = document.createElement('span'),
@@ -245,222 +249,7 @@ function LeadQuotationsPanel({ leadId, canCreateQuotation, onCreateQuotation }) 
   );
 }
 
-/* ─── Enhanced Client Conversion Dialog ──────────────────────────────────── */
-function ClientConversionDialog({
-  lead, open, onClose, onConvertNow, onConvertLater, converting,
-  allUsers, currentUser,
-}) {
-  const [step, setStep] = useState(1); // 1 = choose action, 2 = task details
-  const [taskForm, setTaskForm] = useState({
-    assigned_to: lead?.assigned_to || currentUser?.id || '',
-    due_date: tomorrowLocalDT(),
-    priority: 'medium',
-    task_title: '',
-    task_notes: '',
-  });
-
-  // Reset step when dialog opens/closes
-  useEffect(() => {
-    if (open) {
-      setStep(1);
-      setTaskForm({
-        assigned_to: lead?.assigned_to || currentUser?.id || '',
-        due_date: tomorrowLocalDT(),
-        priority: 'medium',
-        task_title: `Client Onboarding - ${lead?.company_name || ''}`,
-        task_notes: '- Send welcome email\n- Collect KYC documents\n- Schedule onboarding call\n- Set up client portal access',
-      });
-    }
-  }, [open, lead]);
-
-  const handleConvertNow = () => {
-    if (step === 1) { setStep(2); return; }
-    // step 2 → actually convert
-    onConvertNow({
-      assigned_to: taskForm.assigned_to || null,
-      due_date: taskForm.due_date ? new Date(taskForm.due_date).toISOString() : null,
-      priority: taskForm.priority,
-      task_title: taskForm.task_title || null,
-      task_notes: taskForm.task_notes || null,
-    });
-  };
-
-  const [hovered, setHovered] = useState(null);
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v && !converting) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
-            <ShieldCheck className="h-5 w-5 text-emerald-500" />
-            {step === 1 ? 'Convert to Client?' : 'Onboarding Task Details'}
-          </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 leading-relaxed">
-            {step === 1
-              ? <><strong>{lead?.company_name}</strong> marked as <strong className="text-emerald-600">Won</strong>. Convert to a client now, or just mark as won?</>
-              : <>Set up the onboarding task for <strong>{lead?.company_name}</strong>. This task will be created automatically when you convert.</>
-            }
-          </DialogDescription>
-        </DialogHeader>
-
-        {step === 1 && (
-          <div className="space-y-3 py-2">
-            {[
-              {
-                key: 'now', icon: Building2,
-                title: 'Convert to Client Now',
-                desc: 'Creates a client profile, marks as Won, and sets up an onboarding task.',
-                onClick: handleConvertNow,
-                cls: 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400',
-                activeCls: 'border-emerald-400 bg-emerald-100 shadow-md',
-                iconBg: 'bg-emerald-100', iconActive: 'bg-emerald-300',
-                iconColor: 'text-emerald-600', labelCls: 'text-emerald-800', descCls: 'text-emerald-600',
-              },
-              {
-                key: 'later', icon: Timer,
-                title: 'Mark Won — Convert Later',
-                desc: 'Marks the lead as Won only. You can convert to client anytime from the closed section.',
-                onClick: () => onConvertLater(),
-                cls: 'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300',
-                activeCls: 'border-slate-400 bg-slate-100 shadow-md',
-                iconBg: 'bg-slate-100', iconActive: 'bg-slate-300',
-                iconColor: 'text-slate-500', labelCls: 'text-slate-700', descCls: 'text-slate-500',
-              },
-            ].map(opt => (
-              <button key={opt.key} onClick={opt.onClick} disabled={converting}
-                onMouseEnter={() => setHovered(opt.key)} onMouseLeave={() => setHovered(null)}
-                className={cn('w-full text-left rounded-2xl border-2 p-4 transition-all duration-200 ripple-container',
-                  hovered === opt.key ? opt.activeCls : opt.cls,
-                  converting && 'opacity-60 cursor-not-allowed')}>
-                <div className="flex items-start gap-3">
-                  <div className={cn('h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all',
-                    hovered === opt.key ? cn(opt.iconActive, 'scale-110') : opt.iconBg)}>
-                    {converting ? <Loader2 className={cn('h-4 w-4 animate-spin', opt.iconColor)} /> : <opt.icon className={cn('h-4 w-4', opt.iconColor)} />}
-                  </div>
-                  <div>
-                    <p className={cn('text-sm font-semibold', opt.labelCls)}>{opt.title}</p>
-                    <p className={cn('text-xs mt-0.5 leading-relaxed', opt.descCls)}>{opt.desc}</p>
-                  </div>
-                  <ChevronRight className={cn('h-4 w-4 ml-auto flex-shrink-0 mt-0.5 transition-all',
-                    hovered === opt.key ? cn(opt.iconColor, 'translate-x-1') : 'text-slate-300')} />
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-4 py-2">
-            {/* Task title */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                <ClipboardList className="h-3.5 w-3.5" /> Task Title
-              </Label>
-              <Input
-                value={taskForm.task_title}
-                onChange={e => setTaskForm(p => ({ ...p, task_title: e.target.value }))}
-                placeholder="Client Onboarding..."
-                className="h-9 rounded-2xl text-sm"
-              />
-            </div>
-
-            {/* Assign To + Priority */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                  <UserCheck className="h-3.5 w-3.5" /> Assign Task To
-                </Label>
-                <Select value={taskForm.assigned_to || 'unassigned'}
-                  onValueChange={v => setTaskForm(p => ({ ...p, assigned_to: v === 'unassigned' ? '' : v }))}>
-                  <SelectTrigger className="h-9 rounded-2xl text-sm"><SelectValue placeholder="Select user…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">— Unassigned —</SelectItem>
-                    {allUsers.map(u => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name}{u.id === currentUser?.id ? ' (you)' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                  <Flag className="h-3.5 w-3.5" /> Priority
-                </Label>
-                <Select value={taskForm.priority} onValueChange={v => setTaskForm(p => ({ ...p, priority: v }))}>
-                  <SelectTrigger className="h-9 rounded-2xl text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PRIORITY_OPTIONS.map(p => (
-                      <SelectItem key={p.value} value={p.value}>
-                        <span className={p.color}>{p.label}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Due Date */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5" /> Task Due Date
-              </Label>
-              <Input
-                type="datetime-local"
-                value={taskForm.due_date}
-                onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))}
-                className="h-9 rounded-2xl text-sm"
-              />
-            </div>
-
-            {/* Task Notes / Checklist */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                <ClipboardCheck className="h-3.5 w-3.5" /> Task Checklist / Notes
-              </Label>
-              <Textarea
-                value={taskForm.task_notes}
-                onChange={e => setTaskForm(p => ({ ...p, task_notes: e.target.value }))}
-                placeholder="- Item 1&#10;- Item 2"
-                rows={4}
-                className="resize-none rounded-2xl text-sm"
-              />
-              <p className="text-[10px] text-slate-400">Use "- item" format to create a checklist in the task.</p>
-            </div>
-
-            {/* Summary box */}
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-700 space-y-1">
-              <p className="font-semibold flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> What will happen:</p>
-              <p>• Client profile created for <strong>{lead?.company_name}</strong></p>
-              <p>• Lead marked as <strong>Won</strong></p>
-              <p>• Onboarding task assigned to <strong>{allUsers.find(u => u.id === taskForm.assigned_to)?.full_name || 'Unassigned'}</strong></p>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="pt-2 gap-2">
-          {step === 2 && (
-            <Button variant="ghost" onClick={() => setStep(1)} disabled={converting} className="rounded-2xl h-9 text-slate-500">
-              ← Back
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose} disabled={converting} className="rounded-2xl h-9 text-slate-500">
-            Cancel
-          </Button>
-          {step === 2 && (
-            <Button onClick={handleConvertNow} disabled={converting}
-              className="rounded-2xl h-9 bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]">
-              {converting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Converting…</> : <><Building2 className="h-4 w-4 mr-2" />Convert Now</>}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/* ─── Service selector ───────────────────────────────────────────────────── */
+/* ─── Service selector (used in lead form + conversion dialog) ───────────── */
 const ServiceSelector = ({ selected = [], onChange, extra = [] }) => {
   const extras = extra.filter(s => !LEAD_SERVICES.find(ls => ls.value.toLowerCase() === s.toLowerCase()))
     .map(s => ({ value: s, color: 'bg-slate-50 text-slate-600 border-slate-200', dot: 'bg-slate-400' }));
@@ -494,6 +283,380 @@ const ServiceSelector = ({ selected = [], onChange, extra = [] }) => {
     </div>
   );
 };
+
+/* ─── Client Conversion Dialog ───────────────────────────────────────────── */
+// Step 1: Choose action  |  Step 2: Full client profile form
+function ClientConversionDialog({
+  lead, open, onClose, onConvertNow, onConvertLater, converting,
+  allUsers, currentUser, availableServices,
+}) {
+  const [step, setStep]     = useState(1);
+  const [hovered, setHovered] = useState(null);
+
+  const emptyContact = { name: '', email: '', phone: '', designation: '', birthday: '', din: '' };
+
+  const buildInitialForm = (l) => ({
+    company_name:      l?.company_name || '',
+    client_type:       'proprietor',
+    client_type_other: '',
+    email:             l?.email || '',
+    phone:             l?.phone || '',
+    birthday:          '',
+    address:           '',
+    city:              '',
+    state:             '',
+    services:          l?.services || [],
+    notes:             l?.notes || '',
+    referred_by:       '',
+    contact_persons: l?.contact_name
+      ? [{ name: l.contact_name, email: l.email || '', phone: l.phone || '', designation: '', birthday: '', din: '' }]
+      : [{ ...emptyContact }],
+    assignments: l?.assigned_to ? [{ user_id: l.assigned_to, services: [] }] : [{ user_id: '', services: [] }],
+  });
+
+  const [clientForm, setClientForm] = useState(buildInitialForm(lead));
+
+  useEffect(() => {
+    if (open) {
+      setStep(1);
+      setClientForm(buildInitialForm(lead));
+    }
+  }, [open, lead]);
+
+  const setField = (key, val) => setClientForm(p => ({ ...p, [key]: val }));
+
+  /* contact helpers */
+  const updateContact = (idx, field, val) =>
+    setClientForm(p => ({ ...p, contact_persons: p.contact_persons.map((c, i) => i === idx ? { ...c, [field]: val } : c) }));
+  const addContact    = () => setClientForm(p => ({ ...p, contact_persons: [...p.contact_persons, { ...emptyContact }] }));
+  const removeContact = (idx) => setClientForm(p => ({ ...p, contact_persons: p.contact_persons.filter((_, i) => i !== idx) }));
+
+  /* assignment helpers */
+  const updateAssignment = (idx, userId) =>
+    setClientForm(p => ({ ...p, assignments: p.assignments.map((a, i) => i === idx ? { ...a, user_id: userId } : a) }));
+  const addAssignment    = () => setClientForm(p => ({ ...p, assignments: [...p.assignments, { user_id: '', services: [] }] }));
+  const removeAssignment = (idx) => setClientForm(p => ({ ...p, assignments: p.assignments.filter((_, i) => i !== idx) }));
+
+  const handleProceed = () => {
+    if (step === 1) { setStep(2); }
+  };
+
+  const handleSubmit = () => {
+    if (!clientForm.company_name?.trim()) {
+      toast.error('Company name is required');
+      return;
+    }
+    onConvertNow(clientForm);
+  };
+
+  const labelCls = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block';
+  const inputCls = 'h-9 rounded-xl text-sm border-slate-200 focus:border-emerald-400';
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !converting) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-semibold flex items-center gap-2" style={{ color: COLORS.deepBlue }}>
+            <ShieldCheck className="h-5 w-5 text-emerald-500" />
+            {step === 1 ? 'Convert to Client?' : 'New Client Profile'}
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 leading-relaxed">
+            {step === 1
+              ? <><strong>{lead?.company_name}</strong> marked as <strong className="text-emerald-600">Won</strong>. Convert to a full client profile now, or just mark as won?</>
+              : <>Fill in the client details for <strong>{lead?.company_name}</strong>. All fields are pre-filled from the lead — review and complete before saving.</>
+            }
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* ── STEP 1: Choose action ── */}
+        {step === 1 && (
+          <div className="space-y-3 py-2">
+            {[
+              {
+                key: 'now', icon: Building2,
+                title: 'Convert to Client Now',
+                desc: 'Creates a full client profile (pre-filled from lead data). Review and complete before saving.',
+                cls: 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400',
+                activeCls: 'border-emerald-400 bg-emerald-100 shadow-md',
+                iconBg: 'bg-emerald-100', iconActive: 'bg-emerald-300',
+                iconColor: 'text-emerald-600', labelCls: 'text-emerald-800', descCls: 'text-emerald-600',
+                onClick: handleProceed,
+              },
+              {
+                key: 'later', icon: Timer,
+                title: 'Mark Won — Convert Later',
+                desc: 'Marks the lead as Won only. You can create a client profile anytime from the closed section.',
+                cls: 'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300',
+                activeCls: 'border-slate-400 bg-slate-100 shadow-md',
+                iconBg: 'bg-slate-100', iconActive: 'bg-slate-300',
+                iconColor: 'text-slate-500', labelCls: 'text-slate-700', descCls: 'text-slate-500',
+                onClick: () => onConvertLater(),
+              },
+            ].map(opt => (
+              <button key={opt.key} onClick={opt.onClick} disabled={converting}
+                onMouseEnter={() => setHovered(opt.key)} onMouseLeave={() => setHovered(null)}
+                className={cn('w-full text-left rounded-2xl border-2 p-4 transition-all duration-200 ripple-container',
+                  hovered === opt.key ? opt.activeCls : opt.cls,
+                  converting && 'opacity-60 cursor-not-allowed')}>
+                <div className="flex items-start gap-3">
+                  <div className={cn('h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all',
+                    hovered === opt.key ? cn(opt.iconActive, 'scale-110') : opt.iconBg)}>
+                    {converting ? <Loader2 className={cn('h-4 w-4 animate-spin', opt.iconColor)} /> : <opt.icon className={cn('h-4 w-4', opt.iconColor)} />}
+                  </div>
+                  <div>
+                    <p className={cn('text-sm font-semibold', opt.labelCls)}>{opt.title}</p>
+                    <p className={cn('text-xs mt-0.5 leading-relaxed', opt.descCls)}>{opt.desc}</p>
+                  </div>
+                  <ChevronRight className={cn('h-4 w-4 ml-auto flex-shrink-0 mt-0.5 transition-all',
+                    hovered === opt.key ? cn(opt.iconColor, 'translate-x-1') : 'text-slate-300')} />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── STEP 2: Full Client Profile Form ── */}
+        {step === 2 && (
+          <div className="space-y-5 py-2">
+
+            {/* ── Company Info ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Building2 className="h-4 w-4 text-slate-400" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Company Information</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className={labelCls}>Company Name <span className="text-red-500">*</span></label>
+                  <Input value={clientForm.company_name}
+                    onChange={e => setField('company_name', e.target.value)}
+                    placeholder="e.g. Sharma & Associates"
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Client Type</label>
+                  <Select value={clientForm.client_type} onValueChange={v => setField('client_type', v)}>
+                    <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {clientForm.client_type === 'other' && (
+                    <Input className="mt-2 h-9 rounded-xl text-sm border-slate-200"
+                      placeholder="Specify type…"
+                      value={clientForm.client_type_other}
+                      onChange={e => setField('client_type_other', e.target.value)} />
+                  )}
+                </div>
+                <div>
+                  <label className={labelCls}>Date of Incorporation</label>
+                  <Input type="date" value={clientForm.birthday}
+                    onChange={e => setField('birthday', e.target.value)}
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Email</label>
+                  <Input type="email" value={clientForm.email}
+                    onChange={e => setField('email', e.target.value)}
+                    placeholder="contact@company.com"
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Phone</label>
+                  <Input value={clientForm.phone}
+                    onChange={e => setField('phone', e.target.value)}
+                    placeholder="10-digit number"
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Referred By</label>
+                  <Input value={clientForm.referred_by}
+                    onChange={e => setField('referred_by', e.target.value)}
+                    placeholder="Referral source"
+                    className={inputCls} />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Address ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <MapPin className="h-4 w-4 text-slate-400" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Address</p>
+              </div>
+              <Input value={clientForm.address}
+                onChange={e => setField('address', e.target.value)}
+                placeholder="Street address"
+                className={inputCls} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>City</label>
+                  <Input value={clientForm.city} onChange={e => setField('city', e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>State</label>
+                  <Input value={clientForm.state} onChange={e => setField('state', e.target.value)} className={inputCls} />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Contact Persons ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-slate-400" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Contact Persons</p>
+                </div>
+                <button type="button" onClick={addContact}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all active:scale-95">
+                  <Plus className="h-3 w-3" /> Add Person
+                </button>
+              </div>
+              <div className="space-y-3">
+                {clientForm.contact_persons.map((cp, idx) => (
+                  <div key={idx} className="border border-slate-200 rounded-xl p-4 bg-white relative">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div>
+                        <span className="text-xs font-semibold text-slate-600">{cp.name || `Contact ${idx + 1}`}</span>
+                      </div>
+                      {clientForm.contact_persons.length > 1 && (
+                        <button type="button" onClick={() => removeContact(idx)}
+                          className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className={labelCls}>Full Name</label>
+                        <Input value={cp.name} onChange={e => updateContact(idx, 'name', e.target.value)}
+                          placeholder="Contact name" className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Designation</label>
+                        <Input value={cp.designation} onChange={e => updateContact(idx, 'designation', e.target.value)}
+                          placeholder="Director, Partner…" className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Email</label>
+                        <Input type="email" value={cp.email} onChange={e => updateContact(idx, 'email', e.target.value)}
+                          placeholder="email@example.com" className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Phone</label>
+                        <Input value={cp.phone} onChange={e => updateContact(idx, 'phone', e.target.value)}
+                          placeholder="10-digit number" className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Date of Birth</label>
+                        <Input type="date" value={cp.birthday || ''}
+                          onChange={e => updateContact(idx, 'birthday', e.target.value)} className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>DIN (Director ID)</label>
+                        <Input value={cp.din || ''} onChange={e => updateContact(idx, 'din', e.target.value)}
+                          placeholder="DIN number" className={inputCls} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Services ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Tag className="h-4 w-4 text-slate-400" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</p>
+              </div>
+              <ServiceSelector
+                selected={clientForm.services}
+                onChange={v => setField('services', v)}
+                extra={availableServices || []}
+              />
+            </div>
+
+            {/* ── Staff Assignment ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 space-y-3">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="h-4 w-4 text-slate-400" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Staff Assignment</p>
+                </div>
+                <button type="button" onClick={addAssignment}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-all active:scale-95">
+                  <Plus className="h-3 w-3" /> Add Staff
+                </button>
+              </div>
+              <div className="space-y-2">
+                {clientForm.assignments.map((a, idx) => (
+                  <div key={idx} className="flex items-center gap-2 border border-slate-200 rounded-xl p-3 bg-white">
+                    <div className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{idx + 1}</div>
+                    <Select value={a.user_id || 'unassigned'} onValueChange={v => updateAssignment(idx, v === 'unassigned' ? '' : v)}>
+                      <SelectTrigger className="flex-1 h-8 rounded-xl text-xs border-slate-200"><SelectValue placeholder="Select staff…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">— Unassigned —</SelectItem>
+                        {allUsers.map(u => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name}{u.id === currentUser?.id ? ' (you)' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {clientForm.assignments.length > 1 && (
+                      <button type="button" onClick={() => removeAssignment(idx)}
+                        className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Notes ── */}
+            <div>
+              <label className={labelCls}>Internal Notes</label>
+              <Textarea value={clientForm.notes}
+                onChange={e => setField('notes', e.target.value)}
+                placeholder="Internal remarks, requirements…"
+                rows={3}
+                className="resize-none rounded-2xl text-sm border-slate-200" />
+            </div>
+
+            {/* ── Summary ── */}
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-700 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> What will happen:</p>
+              <p>• New client profile created for <strong>{clientForm.company_name || lead?.company_name}</strong></p>
+              <p>• Lead marked as <strong>Won</strong> with client link</p>
+              {clientForm.services.length > 0 && <p>• Services: <strong>{clientForm.services.join(', ')}</strong></p>}
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="pt-2 gap-2">
+          {step === 2 && (
+            <Button variant="ghost" onClick={() => setStep(1)} disabled={converting} className="rounded-2xl h-9 text-slate-500">
+              ← Back
+            </Button>
+          )}
+          <Button variant="ghost" onClick={onClose} disabled={converting} className="rounded-2xl h-9 text-slate-500">
+            Cancel
+          </Button>
+          {step === 2 && (
+            <Button onClick={handleSubmit} disabled={converting}
+              className="rounded-2xl h-9 bg-emerald-600 hover:bg-emerald-700 text-white min-w-[160px]">
+              {converting
+                ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating Client…</>
+                : <><Building2 className="h-4 w-4 mr-2" />Create Client Profile</>}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN PAGE
@@ -674,23 +837,76 @@ export default function LeadsPage() {
     }
   };
 
-  // Convert now — receives task details from the dialog
-  const handleClientConvertNow = async (taskDetails) => {
+  /* ── Convert lead → full client profile (NO task auto-created) ── */
+  const handleClientConvertNow = async (clientFormData) => {
     if (!clientConvLead) return;
     setClientConverting(true);
     try {
-      await api.post(`/leads/${clientConvLead.id}/convert`, taskDetails);
-      toast.success(`"${clientConvLead.company_name}" converted to client!`);
+      /* Clean contact persons */
+      const cleanedContacts = (clientFormData.contact_persons || [])
+        .filter(cp => cp.name?.trim())
+        .map(cp => ({
+          name:        cp.name.trim(),
+          designation: cp.designation?.trim() || null,
+          email:       cp.email?.trim() || null,
+          phone:       cp.phone?.replace(/\D/g, '') || null,
+          birthday:    cp.birthday || null,
+          din:         cp.din?.trim() || null,
+        }));
+
+      /* Clean assignments */
+      const cleanedAssignments = (clientFormData.assignments || [])
+        .filter(a => a.user_id && a.user_id !== 'unassigned')
+        .map(a => ({ user_id: a.user_id, services: a.services || [] }));
+
+      /* Build client payload */
+      const clientPayload = {
+        company_name:  clientFormData.company_name?.trim() || clientConvLead.company_name,
+        client_type:   clientFormData.client_type || 'proprietor',
+        ...(clientFormData.client_type === 'other'
+          ? { client_type_label: clientFormData.client_type_other?.trim() || 'Other' }
+          : {}),
+        email:       clientFormData.email?.trim() || null,
+        phone:       clientFormData.phone?.replace(/\D/g, '') || null,
+        birthday:    clientFormData.birthday || null,
+        address:     clientFormData.address?.trim() || null,
+        city:        clientFormData.city?.trim() || null,
+        state:       clientFormData.state?.trim() || null,
+        services:    clientFormData.services || [],
+        notes:       clientFormData.notes?.trim() || null,
+        referred_by: clientFormData.referred_by?.trim() || null,
+        contact_persons: cleanedContacts,
+        assignments:     cleanedAssignments,
+        assigned_to:     cleanedAssignments[0]?.user_id || null,
+        dsc_details:     [],
+        status:          'active',
+        created_by:      user?.id,
+      };
+
+      /* 1. Create client */
+      const clientRes = await api.post('/clients', clientPayload);
+      const clientId = clientRes.data?.id;
+
+      if (!clientId) throw new Error('Client creation failed — no ID returned');
+
+      /* 2. Mark lead as Won + link client */
+      await api.patch(`/leads/${clientConvLead.id}`, {
+        status:              'won',
+        converted_client_id: clientId,
+      });
+
+      toast.success(`"${clientConvLead.company_name}" converted to client successfully!`);
       setClientConvLead(null);
       fetchLeads();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Conversion failed');
+      const detail = err?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : (err?.message || 'Conversion failed'));
     } finally {
       setClientConverting(false);
     }
   };
 
-  // Mark won only (no conversion)
+  /* Mark won only — no client created */
   const handleClientConvertLater = async () => {
     if (!clientConvLead) return;
     setClientConverting(true);
@@ -863,7 +1079,6 @@ export default function LeadsPage() {
                         <span className="hidden md:inline text-sm font-bold text-slate-700">
                           ₹{(Number(lead.quotation_amount) || 0).toLocaleString()}
                         </span>
-                        {/* Quotation toggle */}
                         {canUseQuotations && (
                           <button onClick={() => setExpandedQtn(p => ({ ...p, [lead.id]: !p[lead.id] }))} title="Linked Quotations"
                             className={cn('p-1.5 rounded-xl transition-all active:scale-90 hover:shadow-sm',
@@ -1222,7 +1437,7 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Enhanced Client Conversion Dialog */}
+      {/* ── Client Conversion Dialog (Full Client Profile) ── */}
       {clientConvLead && (
         <ClientConversionDialog
           lead={clientConvLead}
@@ -1233,6 +1448,7 @@ export default function LeadsPage() {
           converting={clientConverting}
           allUsers={allUsers}
           currentUser={user}
+          availableServices={availableServices}
         />
       )}
     </motion.div>
