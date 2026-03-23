@@ -23,7 +23,6 @@ import {
   Settings,
   Mail,
   Receipt,
-  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -31,35 +30,35 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const COLORS = {
-  deepBlue: '#0D3B66',
-  mediumBlue: '#1F6FB2',
-  lightBlue: '#E0F2FE',
-  emeraldGreen: '#1FAF5A',
-  lightGreen: '#5CCB5F',
+  deepBlue:    '#0D3B66',
+  mediumBlue:  '#1F6FB2',
+  lightBlue:   '#E0F2FE',
+  emeraldGreen:'#1FAF5A',
+  lightGreen:  '#5CCB5F',
 };
 
-const SIDEBAR_EXPANDED = 260;
+const SIDEBAR_EXPANDED  = 260;
 const SIDEBAR_COLLAPSED = 72;
 
 const NAV_GROUPS = [
   {
     id: 'core',
     items: [
-      { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-      { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
-      { path: '/todos', icon: CheckSquare, label: 'To Do' },
-      { path: '/attendance', icon: Clock, label: 'Attendance' },
-      { path: '/duedates', icon: Calendar, label: 'Compliance Calendar' },
-      { path: '/visits', icon: MapPin, label: 'Client Visits' },
+      { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'           },
+      { path: '/tasks',      icon: CheckSquare,     label: 'Tasks'               },
+      { path: '/todos',      icon: CheckSquare,     label: 'To Do'               },
+      { path: '/attendance', icon: Clock,           label: 'Attendance'          },
+      { path: '/duedates',   icon: Calendar,        label: 'Compliance Calendar' },
+      { path: '/visits',     icon: MapPin,          label: 'Client Visits'       },
     ],
   },
   {
     id: 'records',
     dividerLabel: 'Records',
     items: [
-      { path: '/dsc', icon: FileText, label: 'DSC Register', permission: 'can_view_all_dsc' },
-      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents' },
-      { path: '/clients', icon: Users, label: 'Clients', permission: 'can_view_all_clients' },
+      { path: '/dsc',       icon: FileText, label: 'DSC Register',      permission: 'can_view_all_dsc'     },
+      { path: '/documents', icon: FileText, label: 'Document Register', permission: 'can_view_documents'   },
+      { path: '/clients',   icon: Users,    label: 'Clients',           permission: 'can_view_all_clients' },
     ],
   },
   {
@@ -67,31 +66,31 @@ const NAV_GROUPS = [
     dividerLabel: 'Admin',
     items: [
       { path: '/staff-activity', icon: Activity, label: 'Staff Activity', permission: 'can_view_staff_activity' },
-      { path: '/reports', icon: BarChart3, label: 'Reports' },
-      { path: '/task-audit', icon: Activity, label: 'Task Audit Log', permission: 'can_view_audit_logs' },
-      { path: '/users', icon: Users, label: 'Users', permission: 'can_view_user_page' },
+      { path: '/reports',        icon: BarChart3, label: 'Reports'                                              },
+      { path: '/task-audit',     icon: Activity,  label: 'Task Audit Log', permission: 'can_view_audit_logs'   },
+      { path: '/users',          icon: Users,     label: 'Users',          permission: 'can_view_user_page'    },
     ],
   },
   {
     id: 'proposals',
     dividerLabel: 'Client Proposals',
     items: [
-      { path: '/leads', icon: Target, label: 'Lead Management', permission: 'can_view_all_leads' },
-      { path: '/quotations', icon: Receipt, label: 'Quotations', permission: 'can_create_quotations' },
+      { path: '/leads',      icon: Target,  label: 'Lead Management', permission: 'can_view_all_leads'    },
+      { path: '/quotations', icon: Receipt, label: 'Quotations',      permission: 'can_create_quotations' },
     ],
   },
   {
     id: 'settings',
     dividerLabel: 'Settings',
     items: [
-      { path: '/settings/email', icon: Mail, label: 'Email Accounts' },
-      { path: '/settings', icon: Settings, label: 'General Settings' },
+      { path: '/settings/email', icon: Mail,     label: 'Email Accounts'   },
+      { path: '/settings',       icon: Settings, label: 'General Settings' },
     ],
   },
 ];
 
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
-const springMed = { type: 'spring', stiffness: 400, damping: 24 };
+const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
 const DashboardLayout = ({ children }) => {
@@ -109,28 +108,9 @@ const DashboardLayout = ({ children }) => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('theme') === 'dark';
   });
-
-  // ── Responsive detection ──────────────────────────────────────────────────
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' && window.innerWidth < 1024
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= 1024
   );
-
-  useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 1024;
-      setIsMobile(mobile);
-      if (mobile) {
-        setCollapsed(false); // Never collapse on mobile
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const sidebarWidth = isMobile ? '100%' : (collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED);
-  const headerOffset = isMobile ? 0 : (collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED);
 
   useEffect(() => {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
@@ -143,21 +123,32 @@ const DashboardLayout = ({ children }) => {
     localStorage.setItem('sidebarCollapsed', String(collapsed));
   }, [collapsed]);
 
+  const handleResize = useCallback(() => {
+    const desktop = window.innerWidth >= 1024;
+    setIsDesktop(desktop);
+    if (!desktop) setCollapsed(false);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, [handleResize]);
+
   useEffect(() => {
     if (window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
   useEffect(() => {
     if (!userMenuOpen) return;
-    const handleClickOutside = (e) => {
+    const handle = (e) => {
       if (!e.target.closest('[data-user-menu]')) setUserMenuOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
   }, [userMenuOpen]);
 
   if (loading) return null;
-
   if (!user) {
     navigate('/login', { replace: true });
     return null;
@@ -169,13 +160,16 @@ const DashboardLayout = ({ children }) => {
     navigate('/login', { replace: true });
   };
 
-  const allNavItems = NAV_GROUPS.flatMap((g) => g.items);
+  const allNavItems = NAV_GROUPS.flatMap(g => g.items);
   const visibleNavItems = allNavItems.filter(
-    (item) => !item.permission || hasPermission(item.permission)
+    item => !item.permission || hasPermission(item.permission)
   );
-  const activeLabel = visibleNavItems.find((i) => i.path === location.pathname)?.label || 'Dashboard';
+  const activeLabel = visibleNavItems.find(i => i.path === location.pathname)?.label || 'Dashboard';
 
-  // ── Sidebar Nav Item ──────────────────────────────────────────────────────
+  const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
+  const offsetPx  = isDesktop ? sidebarPx : 0;
+
+  // ── Sidebar nav item ──────────────────────────────────────────────────────
   const NavItem = ({ item }) => {
     if (item.permission && !hasPermission(item.permission)) return null;
     const isActive = location.pathname === item.path;
@@ -183,51 +177,56 @@ const DashboardLayout = ({ children }) => {
 
     return (
       <motion.div
-        whileHover={{ x: collapsed && !isMobile ? 0 : 4 }}
+        whileHover={{ x: collapsed ? 0 : 3 }}
         whileTap={{ scale: 0.97 }}
         transition={springSnap}
       >
         <Link
           to={item.path}
-          onClick={() => {
-            if (isMobile) setSidebarOpen(false);
-          }}
-          title={collapsed && !isMobile ? item.label : undefined}
+          onClick={() => { if (window.innerWidth < 1024) setSidebarOpen(false); }}
+          title={collapsed ? item.label : undefined}
           className={`
-            group relative flex items-center
-            ${isMobile || !collapsed ? 'gap-3.5 px-4 py-3.5' : 'justify-center px-0 py-3.5'}
-            rounded-xl transition-all duration-200 touch-manipulation
+            relative flex items-center gap-3
+            ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
+            rounded-xl transition-all duration-200 group
             ${isActive
-              ? 'text-white bg-gradient-to-r from-[#0D3B66] to-[#1F6FB2] shadow-md'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 dark:hover:bg-slate-700/40'
+              ? 'text-white'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 dark:hover:text-slate-200 dark:hover:bg-slate-700/60'
             }
           `}
+          style={isActive ? {
+            background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+            boxShadow:  '0 4px 14px rgba(13,59,102,0.28)',
+          } : {}}
         >
+          {isActive && !collapsed && (
+            <span
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
+              style={{ background: 'rgba(255,255,255,0.6)' }}
+            />
+          )}
           <Icon
-            className={`
-              flex-shrink-0 transition-colors
-              ${isMobile ? 'h-5 w-5' : collapsed ? 'h-6 w-6' : 'h-4.5 w-4.5'}
-              ${isActive ? 'text-white' : 'group-hover:text-slate-200'}
-            `}
+            className={`flex-shrink-0 transition-colors ${
+              collapsed ? 'h-5 w-5' : 'h-4 w-4'
+            } ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`}
           />
-          {(isMobile || !collapsed) && (
-            <span className="font-medium text-sm sm:text-base tracking-tight">
+          {!collapsed && (
+            <span className="font-medium text-sm whitespace-nowrap tracking-tight">
               {item.label}
             </span>
           )}
-
-          {/* Collapsed tooltip (desktop only) */}
-          {collapsed && !isMobile && (
-            <div
-              className="
-                pointer-events-none absolute left-full ml-4 px-3 py-2
-                bg-slate-900 text-white text-sm font-medium rounded-lg
-                opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0
-                transition-all duration-200 shadow-xl z-50 whitespace-nowrap
-              "
-            >
+          {/* Tooltip when collapsed */}
+          {collapsed && (
+            <div className="
+              absolute left-full ml-3 px-2.5 py-1.5
+              bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium
+              rounded-lg whitespace-nowrap pointer-events-none
+              opacity-0 group-hover:opacity-100
+              translate-x-1 group-hover:translate-x-0
+              transition-all duration-200 z-[100] shadow-lg
+            ">
               {item.label}
-              <div className="absolute right-full top-1/2 -translate-y-1/2 border-6 border-transparent border-r-slate-900" />
+              <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800 dark:border-r-slate-700" />
             </div>
           )}
         </Link>
@@ -235,26 +234,27 @@ const DashboardLayout = ({ children }) => {
     );
   };
 
-  // ── Nav Divider ───────────────────────────────────────────────────────────
+  // ── Nav divider — identical plain text style for ALL sections ─────────────
   const NavDivider = ({ label }) => (
-    <div className={`my-5 ${collapsed && !isMobile ? 'px-2' : 'px-4'}`}>
-      {label && !(collapsed && !isMobile) ? (
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 px-1">
+    <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
+      {!collapsed && label ? (
+        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
           {label}
         </p>
       ) : (
-        <div className="border-t border-slate-200/60 dark:border-slate-700/50 mx-2" />
+        <div className="border-t border-slate-100 dark:border-slate-700/60 mx-1" />
       )}
     </div>
   );
 
   return (
-    <div className={`min-h-screen relative ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-      {/* Mobile sidebar overlay */}
+    <div className={`min-h-screen relative ${isDark ? 'bg-[#0f172a]' : 'bg-[#F4F6FA]'}`}>
+
+      {/* ── Mobile Overlay ── */}
       <AnimatePresence>
-        {sidebarOpen && isMobile && (
+        {sidebarOpen && (
           <motion.div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -266,212 +266,262 @@ const DashboardLayout = ({ children }) => {
       {/* ── Sidebar ── */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 flex flex-col
-          transform transition-transform duration-300 ease-in-out
+          fixed top-0 left-0 h-full z-50 flex flex-col
+          transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:translate-x-0 lg:relative
+          lg:translate-x-0
         `}
         style={{
-          width: sidebarWidth,
-          background: isDark ? '#0f172a' : '#ffffff',
-          borderRight: isMobile ? 'none' : (isDark ? '1px solid #334155' : '1px solid #e2e8f0'),
-          boxShadow: isMobile ? 'none' : '4px 0 20px rgba(0,0,0,0.08)',
-          paddingTop: 'env(safe-area-inset-top)',
+          width:       sidebarPx,
+          background:  isDark ? '#1e293b' : '#ffffff',
+          borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+          boxShadow:   '4px 0 24px rgba(0,0,0,0.06)',
         }}
       >
-        {/* Logo / header area */}
+        {/* Logo */}
         <div
-          className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0"
-          style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}
+          className="flex items-center justify-between px-3 sm:px-4 py-3 sm:py-4 flex-shrink-0"
+          style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
         >
-          <img
-            src="/logo.png"
-            alt="Taskosphere"
-            className="h-9 sm:h-10 object-contain"
-          />
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden h-10 w-10"
-            onClick={() => setSidebarOpen(false)}
+          <div className={`flex items-center overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
+            <img
+              src="/logo.png"
+              alt="Taskosphere"
+              className={`object-contain transition-all duration-300 ${collapsed ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 sm:h-12'}`}
+            />
+          </div>
+          <motion.button
+            onClick={() => setCollapsed(prev => !prev)}
+            className={`
+              ${isDark
+                ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+              }
+              ${collapsed ? 'absolute right-1 top-[18px]' : ''}
+              p-1 rounded-lg
+            `}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            transition={springMed}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!collapsed}
           >
-            <X className="h-6 w-6" />
-          </Button>
-
-          {!isMobile && (
-            <motion.button
-              onClick={() => setCollapsed((prev) => !prev)}
-              className={`
-                hidden lg:flex items-center justify-center h-9 w-9 rounded-lg
-                ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}
-              `}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.92 }}
-              transition={springMed}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-            </motion.button>
-          )}
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </motion.button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-2 sm:px-3 py-5 overflow-y-auto scrollbar-thin space-y-1">
+        {/* Nav */}
+        <nav className="flex-1 px-3 py-3 overflow-y-auto scrollbar-none space-y-0.5">
           {NAV_GROUPS.map((group, gi) => (
             <React.Fragment key={group.id}>
-              {gi > 0 && <NavDivider label={group.dividerLabel} />}
-              {group.items.map((item) => (
+              {gi > 0 && (
+                <NavDivider label={group.dividerLabel} />
+              )}
+              {group.items.map(item => (
                 <NavItem key={item.path} item={item} />
               ))}
             </React.Fragment>
           ))}
         </nav>
 
-        {/* User profile footer – always visible on mobile */}
-        <div
-          className="p-4 border-t flex-shrink-0"
-          style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-slate-200/60 dark:ring-slate-600/60">
-              {user?.profile_picture ? (
-                <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center text-white font-semibold text-base"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
-                >
-                  {user?.full_name?.[0]?.toUpperCase() || '?'}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className={`font-medium text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                {user?.full_name}
-              </p>
-              <p className={`text-xs truncate mt-0.5 capitalize ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {user?.role}
-              </p>
+        {/* Sidebar footer */}
+        {!collapsed && (
+          <div
+            className="flex-shrink-0 px-3 py-3"
+            style={{ borderTop: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
+          >
+            <div className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 sm:py-2.5 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+                {user?.profile_picture ? (
+                  <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-white font-bold text-xs"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+                  >
+                    {user?.full_name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold text-[10px] sm:text-xs truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  {user?.full_name}
+                </p>
+                <p className={`text-[10px] truncate capitalize ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                  {user?.role}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </aside>
 
-      {/* ── Header ── */}
+      {/* ── HEADER ── */}
       <header
-        className="fixed top-0 right-0 left-0 z-40 transition-all duration-300"
+        className="fixed top-0 right-0 z-40 transition-all duration-300 ease-in-out"
         style={{
-          left: isMobile ? 0 : `${headerOffset}px`,
-          height: 'var(--header-height, 64px)',
-          background: isDark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.96)',
-          backdropFilter: 'blur(12px)',
+          left:         offsetPx,
+          width:        `calc(100% - ${offsetPx}px)`,
+          background:   isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
+          borderBottom: isDark ? '1px solid rgba(51,65,85,0.8)' : '1px solid rgba(0,0,0,0.07)',
+          boxShadow:    '0 1px 8px rgba(0,0,0,0.06)',
+          backdropFilter:       'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
-          borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="flex items-center justify-between h-full px-4 sm:px-6">
-          {/* Mobile menu toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden -ml-1.5 h-11 w-11"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu className="h-6 w-6" />
-          </Button>
+        <div className="flex items-center justify-between px-3 sm:px-5 md:px-7 h-12 sm:h-14">
 
-          {/* Page title – centered on mobile */}
-          <div className="absolute left-1/2 -translate-x-1/2 font-medium text-base sm:text-lg lg:hidden">
-            {activeLabel}
-          </div>
-
-          {/* Right side actions */}
-          <div className="flex items-center gap-2 sm:gap-3 ml-auto">
-            <NotificationBell />
-
-            {/* Theme toggle */}
+          {/* Mobile menu button */}
+          <motion.div whileTap={{ scale: 0.9 }}>
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 sm:h-11 sm:w-11 rounded-full"
-              onClick={() => setIsDark((prev) => !prev)}
+              onClick={() => setSidebarOpen(prev => !prev)}
+              className={`lg:hidden h-8 w-8 sm:h-9 sm:w-9 rounded-lg ${isDark ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-600'}`}
             >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              <Menu className="h-4 w-4" />
             </Button>
+          </motion.div>
 
-            {/* User menu trigger */}
+          {/* Breadcrumb */}
+          <div className="hidden lg:flex items-center gap-2">
+            {(() => {
+              const active = visibleNavItems.find(i => i.path === location.pathname);
+              if (!active) return null;
+              const Icon = active.icon;
+              return (
+                <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
+                  <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: COLORS.deepBlue }} />
+                </div>
+              );
+            })()}
+            <span className={`text-xs sm:text-sm font-semibold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {activeLabel}
+            </span>
+          </div>
+
+          {/* Right cluster */}
+          <div className="flex items-center gap-1 sm:gap-2 ml-auto">
+
+            <NotificationBell />
+
+            {/* Theme toggle */}
+            <motion.button
+              onClick={() => setIsDark(prev => !prev)}
+              className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center border transition-all ${
+                isDark
+                  ? 'bg-slate-800 border-slate-600 text-amber-400 hover:bg-slate-700'
+                  : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+              }`}
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              transition={springMed}
+              aria-label="Toggle theme"
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={isDark ? 'sun' : 'moon'}
+                  initial={{ rotate: -30, opacity: 0 }}
+                  animate={{ rotate: 0,   opacity: 1 }}
+                  exit={{   rotate:  30, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                >
+                  {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </motion.div>
+              </AnimatePresence>
+            </motion.button>
+
+            {/* User dropdown */}
             <div className="relative" data-user-menu>
-              <Button
-                variant="ghost"
-                className="h-10 w-10 sm:h-11 sm:w-11 p-0.5 rounded-full"
-                onClick={() => setUserMenuOpen((prev) => !prev)}
+              <motion.button
+                onClick={() => setUserMenuOpen(prev => !prev)}
+                className={`flex items-center gap-1.5 sm:gap-2.5 pl-1.5 sm:pl-2 pr-2 sm:pr-3 py-1 sm:py-1.5 rounded-xl border transition-all ${
+                  isDark
+                    ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/60 bg-slate-800/60'
+                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                }`}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
               >
-                <div className="w-full h-full rounded-full overflow-hidden ring-1 ring-slate-200/40 dark:ring-slate-600/40">
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
                   {user?.profile_picture ? (
                     <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                   ) : (
                     <div
-                      className="w-full h-full flex items-center justify-center text-white font-semibold text-base"
+                      className="w-full h-full flex items-center justify-center text-white font-semibold text-xs"
                       style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                     >
-                      {user?.full_name?.[0]?.toUpperCase() || '?'}
+                      {user?.full_name?.[0]?.toUpperCase() || 'U'}
                     </div>
                   )}
                 </div>
-              </Button>
+                <span className={`hidden md:block text-xs sm:text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  {user?.full_name?.split(' ')[0]}
+                </span>
+                <motion.div animate={{ rotate: userMenuOpen ? 180 : 0 }} transition={springSoft}>
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                </motion.div>
+              </motion.button>
 
               <AnimatePresence>
                 {userMenuOpen && (
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.96, y: -8 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96, y: -8 }}
+                    initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0,  scale: 1    }}
+                    exit={{   opacity: 0, y: -8, scale: 0.96  }}
                     transition={springSoft}
-                    className="absolute right-0 mt-2 w-64 sm:w-72 z-50 overflow-hidden rounded-2xl shadow-2xl"
+                    className="absolute right-0 mt-2 w-60 z-50 overflow-hidden"
                     style={{
-                      background: isDark ? '#0f172a' : '#ffffff',
-                      border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+                      background:   isDark ? '#1e293b' : '#ffffff',
+                      borderRadius: '16px',
+                      boxShadow:    isDark
+                        ? '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(51,65,85,0.8)'
+                        : '0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)',
                     }}
                   >
-                    {/* User info */}
-                    <div className="p-5 border-b" style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}>
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl overflow-hidden ring-2 ring-slate-200/40 dark:ring-slate-600/40 flex-shrink-0">
+                    <div
+                      className="px-4 py-3.5"
+                      style={{ borderBottom: isDark ? '1px solid #334155' : '1px solid #f1f5f9' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 ring-2 ring-slate-100 dark:ring-slate-700">
                           {user?.profile_picture ? (
                             <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                           ) : (
                             <div
-                              className="w-full h-full flex items-center justify-center text-white font-bold text-lg"
+                              className="w-full h-full flex items-center justify-center text-white font-bold text-sm"
                               style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                             >
-                              {user?.full_name?.[0]?.toUpperCase() || '?'}
+                              {user?.full_name?.[0]?.toUpperCase() || 'U'}
                             </div>
                           )}
                         </div>
                         <div className="min-w-0">
-                          <p className={`font-semibold text-base truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          <p className={`font-semibold text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                             {user?.full_name}
                           </p>
-                          <p className={`text-sm truncate mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
                             {user?.email}
                           </p>
+                          <span
+                            className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-md capitalize"
+                            style={{ background: `${COLORS.deepBlue}12`, color: COLORS.deepBlue }}
+                          >
+                            {user?.role}
+                          </span>
                         </div>
                       </div>
                     </div>
-
-                    {/* Logout */}
-                    <div className="p-2">
+                    <div className="p-1.5">
                       <motion.button
                         onClick={handleLogout}
-                        whileHover={{ x: 4 }}
-                        className={`
-                          w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium
-                          ${isDark ? 'text-red-400 hover:bg-red-950/30' : 'text-red-600 hover:bg-red-50'}
-                        `}
+                        whileHover={{ x: 2 }}
+                        transition={springSnap}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                          isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'
+                        }`}
                       >
-                        <LogOut className="h-4.5 w-4.5" />
+                        <LogOut className="h-4 w-4" />
                         Sign out
                       </motion.button>
                     </div>
@@ -483,21 +533,21 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
-      {/* ── Main Content Area ── */}
+      {/* ── Main Content ── */}
       <div
-        className="flex flex-col min-h-screen transition-all duration-300"
+        className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{
-          marginLeft: isMobile ? 0 : `${headerOffset}px`,
-          paddingTop: 'var(--header-height, 64px)',
-          paddingBottom: 'env(safe-area-inset-bottom)',
+          marginLeft: offsetPx,
+          paddingTop: 56,
         }}
       >
-        <main className="flex-1">
-          <div className="max-w-[1600px] mx-auto px-4 sm:px-5 md:px-6 lg:px-8 py-6 md:py-8">
+        <main className="flex-1 p-5 md:p-7">
+          <div className="max-w-[1400px] mx-auto">
             {children}
           </div>
         </main>
       </div>
+
     </div>
   );
 };
