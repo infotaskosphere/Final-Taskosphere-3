@@ -2,7 +2,7 @@ import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { format, parseISO, isToday, isTomorrow } from 'date-fns';
+import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 import RoleGuard from "@/RoleGuard";
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,7 +25,6 @@ import {
   LogIn, LogOut, Calendar as CalendarIcon, Users, Key,
   Briefcase, ArrowUpRight, Building2, ChevronRight, Target,
   Activity, MapPin, Repeat, Plus,
-  // ── NEW: modal icons ──
   X, CheckCircle2, User as UserIcon, Tag, Layers, Star,
 } from 'lucide-react';
 
@@ -98,12 +97,40 @@ if (typeof document !== 'undefined' && !document.getElementById('dash-slim-scrol
   document.head.appendChild(s);
 }
 
+// ── Helper: is a task "visibly completed today or before" ────────────────────
+// A task should be hidden from the dashboard strips if:
+//  1. Its status is 'completed'  AND
+//  2. It was completed on a previous day (updated_at < start of today)
+//     OR we have no updated_at (treat as same-day, keep visible)
+// Tasks completed TODAY remain visible so the user gets feedback.
+const isTaskHiddenAsCompleted = (task) => {
+  if (task.status !== 'completed') return false;
+  if (!task.updated_at) return false; // no timestamp → keep visible
+  const completedAt = new Date(task.updated_at);
+  const todayStart  = startOfDay(new Date());
+  return completedAt < todayStart; // completed on a previous day → hide
+};
+
+// ── Sort tasks newest-first by created_at ─────────────────────────────────────
+const sortNewestFirst = (arr) =>
+  [...arr].sort((a, b) => {
+    const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return db - da;
+  });
+
 // ══════════════════════════════════════════════════════════════════════════════
 // DETAIL MODAL PRIMITIVES
 // ══════════════════════════════════════════════════════════════════════════════
 
-/** Reusable modal shell — header gradient + scrollable body + footer actions */
 function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, headerTitle, children, footer, isDark }) {
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
     <motion.div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
@@ -161,7 +188,6 @@ function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, heade
   );
 }
 
-/** Small chip badge */
 function Chip({ label, color }) {
   return (
     <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full"
@@ -171,7 +197,6 @@ function Chip({ label, color }) {
   );
 }
 
-/** Single meta row inside a modal */
 function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDark }) {
   return (
     <div className="flex items-center gap-3">
@@ -187,7 +212,6 @@ function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDa
   );
 }
 
-/** Notes / description block inside a modal */
 function NoteBlock({ label = 'Notes', text, isDark }) {
   if (!text) return null;
   return (
@@ -199,7 +223,6 @@ function NoteBlock({ label = 'Notes', text, isDark }) {
   );
 }
 
-/** Footer action button */
 function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
   if (muted) return (
     <button onClick={onClick}
@@ -251,7 +274,6 @@ function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
             onClick={() => { onClose(); navigate(`/tasks?taskId=${task.id}`); }} />
         </>
       }>
-      {/* Status chips */}
       <div className="flex flex-wrap gap-2">
         <Chip label={task.status?.replace('_', ' ') || 'Pending'}
           color={isCompleted ? COLORS.emeraldGreen : isInProgress ? COLORS.mediumBlue : '#94A3B8'} />
@@ -365,7 +387,6 @@ function VisitDetailModal({ visit, onClose, navigate, isDark }) {
         <FooterBtn isDark={isDark} muted icon={ArrowUpRight} label="View All Visits"
           onClick={() => { onClose(); navigate('/visits'); }} />
       }>
-      {/* Status chips */}
       <div className="flex flex-wrap gap-2">
         <span className={cn('inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full', sc.bg, sc.text)}>
           <span className={cn('h-1.5 w-1.5 rounded-full', sc.dot)} />{visit.status || 'Scheduled'}
@@ -409,7 +430,7 @@ function VisitDetailModal({ visit, onClose, navigate, isDark }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 4. TODO DETAIL MODAL (dashboard strip)
+// 4. TODO DETAIL MODAL
 // ══════════════════════════════════════════════════════════════════════════════
 function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
   if (!todo) return null;
@@ -499,13 +520,11 @@ function PerformerDetailModal({ member, index, period, onClose, isDark }) {
       }
       headerEyebrow={`${medal} ${periodLabel} · Rank #${index + 1}`}
       headerTitle={member.user_name || 'Unknown'}>
-      {/* Badge */}
       <div className="flex gap-2 flex-wrap">
         <Chip label={member.badge || 'Good Performer'} color={isGold ? '#D97706' : isSilver ? '#6B7280' : isBronze ? '#92400E' : COLORS.mediumBlue} />
         <Chip label={`Score: ${member.overall_score}%`} color={COLORS.emeraldGreen} />
       </div>
 
-      {/* Stats grid */}
       <div className="rounded-xl overflow-hidden border"
         style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
         <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
@@ -526,15 +545,19 @@ function PerformerDetailModal({ member, index, period, onClose, isDark }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TASK STRIP — with onSelect prop added
+// TASK STRIP
 // ══════════════════════════════════════════════════════════════════════════════
 function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSelect }) {
   const status       = task.status || 'pending';
   const isCompleted  = status === 'completed';
   const isInProgress = status === 'in_progress';
 
+  // Badge for "New" — created within last 24 hours
+  const isNew = task.created_at && (Date.now() - new Date(task.created_at).getTime()) < 86_400_000;
+
   return (
     <motion.div
+      layout
       whileHover={{ y: -3, transition: springPhysics.lift }}
       whileTap={{ scale: 0.99, transition: springPhysics.tap }}
       className={`relative flex flex-col p-3 rounded-xl border bg-white dark:bg-slate-800 cursor-pointer group transition-all
@@ -543,10 +566,16 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
           ? 'opacity-75 bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'
           : 'border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-md'
         }`}
-      onClick={() => onSelect?.(task)}         // ← opens detail modal
+      onClick={() => onSelect?.(task)}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 flex items-start gap-1.5">
+          {/* "New" badge */}
+          {isNew && !isCompleted && (
+            <span className="flex-shrink-0 mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500 text-white leading-none">
+              NEW
+            </span>
+          )}
           <p className={`font-medium text-sm truncate leading-tight transition ${
             isCompleted ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-100'
           }`}>
@@ -592,6 +621,9 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
         {task.due_date && (
           <span>· Due: <span className="text-amber-600 dark:text-amber-400 font-medium">{format(new Date(task.due_date), 'MMM d, yyyy')}</span></span>
         )}
+        {isCompleted && (
+          <span className="text-emerald-500 font-medium">· ✓ Completed today</span>
+        )}
       </div>
     </motion.div>
   );
@@ -607,13 +639,21 @@ function SectionCard({ children, className = '' }) {
 }
 
 // ── Card Header Row ───────────────────────────────────────────────────────────
-function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
+function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
       <div className="flex items-center gap-2.5">
         <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
         <div>
-          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+            {/* Count badge */}
+            {badge !== undefined && badge > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">
+                {badge}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
         </div>
       </div>
@@ -623,7 +663,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VISITS CARD — with onSelect wired to visit rows
+// VISITS CARD
 // ══════════════════════════════════════════════════════════════════════════════
 function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
   const { data: allVisits = [], isLoading, isError } = useQuery({
@@ -635,10 +675,16 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
     onError: () => {},
   });
 
-  const visits = useMemo(
-    () => allVisits.filter(v => v.assigned_to === currentUserId),
-    [allVisits, currentUserId]
-  );
+  // Sort: today's visits first, then by date
+  const visits = useMemo(() => {
+    const filtered = allVisits.filter(v => v.assigned_to === currentUserId);
+    return [...filtered].sort((a, b) => {
+      const aToday = isToday(parseISO(a.visit_date)) ? 0 : 1;
+      const bToday = isToday(parseISO(b.visit_date)) ? 0 : 1;
+      if (aToday !== bToday) return aToday - bToday;
+      return new Date(a.visit_date) - new Date(b.visit_date);
+    });
+  }, [allVisits, currentUserId]);
 
   const todayCount    = visits.filter(v => isToday(parseISO(v.visit_date))).length;
   const tomorrowCount = visits.filter(v => isTomorrow(parseISO(v.visit_date))).length;
@@ -649,7 +695,9 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
       <CardHeaderRow
         iconBg={isDark ? 'bg-teal-900/40' : 'bg-teal-50'}
         icon={<MapPin className="h-4 w-4 text-teal-500" />}
-        title="Client Visits" subtitle={subtitleText}
+        title="Client Visits"
+        subtitle={subtitleText}
+        badge={todayCount}
         action={
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 rounded-lg ${isDark ? 'text-teal-400 hover:text-teal-300' : 'text-teal-500'}`}
@@ -692,10 +740,11 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit }) {
                 return (
                   <motion.div
                     key={v.id}
+                    layout
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0, transition: { delay: i * 0.05, ...springPhysics.card } }}
                     whileHover={{ y: -2, transition: springPhysics.lift }}
-                    onClick={() => onSelectVisit?.(v)}   // ← opens detail modal
+                    onClick={() => onSelectVisit?.(v)}
                     className={`relative flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all group ${
                       isT
                         ? 'border-teal-200 dark:border-teal-800 bg-teal-50/60 dark:bg-teal-900/15 hover:border-teal-300 dark:hover:border-teal-700'
@@ -763,26 +812,25 @@ export default function Dashboard() {
   const navigate    = useNavigate();
   const queryClient = useQueryClient();
 
-  const [loading,          setLoading]          = useState(false);
-  const [rankings,         setRankings]         = useState([]);
-  const [rankingPeriod,    setRankingPeriod]    = useState('monthly');
-  const [newTodo,          setNewTodo]          = useState('');
-  const [showDueDatePicker,setShowDueDatePicker]= useState(false);
-  const [selectedDueDate,  setSelectedDueDate]  = useState(undefined);
-  const [mustPunchIn,      setMustPunchIn]      = useState(false);
-  const [actionDone,       setActionDone]       = useState(false);
+  const [loading,           setLoading]           = useState(false);
+  const [rankings,          setRankings]          = useState([]);
+  const [rankingPeriod,     setRankingPeriod]     = useState('monthly');
+  const [newTodo,           setNewTodo]           = useState('');
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
+  const [selectedDueDate,   setSelectedDueDate]   = useState(undefined);
+  const [mustPunchIn,       setMustPunchIn]       = useState(false);
+  const [actionDone,        setActionDone]        = useState(false);
 
-  // ── NEW: modal state ────────────────────────────────────────────────────────
+  // Modal state
   const [selectedTask,      setSelectedTask]      = useState(null);
   const [selectedDeadline,  setSelectedDeadline]  = useState(null);
   const [selectedVisit,     setSelectedVisit]     = useState(null);
   const [selectedTodo,      setSelectedTodo]      = useState(null);
-  const [selectedPerformer, setSelectedPerformer] = useState(null); // { member, index }
+  const [selectedPerformer, setSelectedPerformer] = useState(null);
 
-  // Dark mode via shared hook
   const isDark = useDark();
 
-  // ── Data queries ─────────────────────────────────────────────────────────────
+  // ── Data queries ──────────────────────────────────────────────────────────
   const { data: tasks = [] }            = useTasks();
   const { data: stats }                 = useDashboardStats();
   const { data: upcomingDueDates = [] } = useUpcomingDueDates();
@@ -832,24 +880,52 @@ export default function Dashboard() {
   );
   const pendingTodos = useMemo(() => todos.filter(todo => !todo.completed), [todos]);
 
-  const tasksAssignedToMe = useMemo(() =>
-    tasks.filter(t => t.assigned_to === user?.id && t.status !== 'completed').slice(0, 6),
-    [tasks, user?.id]
-  );
-  const tasksAssignedByMe = useMemo(() =>
-    tasks.filter(t => t.created_by === user?.id && t.assigned_to !== user?.id).slice(0, 6),
-    [tasks, user?.id]
-  );
-  const recentTasks = useMemo(() =>
-    [...tasks]
-      .sort((a, b) => {
-        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return db - da;
-      })
-      .slice(0, 5),
-    [tasks]
-  );
+  // ── TASK FILTERING — newest first, completed-yesterday+ tasks hidden ──────
+  //
+  // "Tasks Assigned to Me" strip:
+  //   - exclude tasks hidden as completed (completed before today)
+  //   - tasks completed TODAY remain visible with a "✓ Completed today" label
+  //   - sort newest created_at first
+  //   - cap at 6
+  const tasksAssignedToMe = useMemo(() => {
+    const filtered = tasks.filter(t =>
+      t.assigned_to === user?.id &&
+      !isTaskHiddenAsCompleted(t)          // hide if completed before today
+    );
+    return sortNewestFirst(filtered).slice(0, 6);
+  }, [tasks, user?.id]);
+
+  // "Tasks Assigned by Me" strip:
+  //   - same hidden-completed rule
+  //   - exclude tasks assigned to self (those appear above)
+  //   - newest first, cap at 6
+  const tasksAssignedByMe = useMemo(() => {
+    const filtered = tasks.filter(t =>
+      t.created_by === user?.id &&
+      t.assigned_to !== user?.id &&
+      !isTaskHiddenAsCompleted(t)
+    );
+    return sortNewestFirst(filtered).slice(0, 6);
+  }, [tasks, user?.id]);
+
+  // "Recent Tasks" card (top-center panel):
+  //   - ALL tasks (not filtered by user), newest first
+  //   - exclude tasks completed before today
+  //   - cap at 5
+  const recentTasks = useMemo(() => {
+    const filtered = tasks.filter(t => !isTaskHiddenAsCompleted(t));
+    return sortNewestFirst(filtered).slice(0, 5);
+  }, [tasks]);
+
+  // Overdue deadlines float to top
+  const sortedDueDates = useMemo(() => {
+    return [...upcomingDueDates].sort((a, b) => {
+      const aOD = (a.days_remaining ?? 0) <= 0 ? 0 : 1;
+      const bOD = (b.days_remaining ?? 0) <= 0 ? 0 : 1;
+      if (aOD !== bOD) return aOD - bOD;
+      return (a.days_remaining ?? 0) - (b.days_remaining ?? 0);
+    });
+  }, [upcomingDueDates]);
 
   useEffect(() => {
     async function fetchRankings() {
@@ -862,7 +938,7 @@ export default function Dashboard() {
     fetchRankings();
   }, [rankingPeriod]);
 
-  // ── Mutations ────────────────────────────────────────────────────────────
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const createTodo = useMutation({
     mutationFn: data => api.post('/todos', data),
     onSuccess: () => {
@@ -893,7 +969,7 @@ export default function Dashboard() {
     onError: () => toast.error('Failed to delete todo'),
   });
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const addTodo = () => {
     if (!newTodo.trim()) return;
     createTodo.mutate({ title: newTodo.trim(), status: 'pending', due_date: selectedDueDate ? selectedDueDate.toISOString() : null });
@@ -991,7 +1067,7 @@ export default function Dashboard() {
     return format(d, 'hh:mm a');
   };
 
-  // ── Ranking Item — now clickable ─────────────────────────────────────────
+  // ── Ranking Item ──────────────────────────────────────────────────────────
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
     const isSilver = index === 1;
@@ -1009,7 +1085,7 @@ export default function Dashboard() {
     return (
       <motion.div
         whileHover={{ y: -2, scale: 1.01, transition: springPhysics.lift }}
-        onClick={() => setSelectedPerformer({ member, index })}   // ← opens detail modal
+        onClick={() => setSelectedPerformer({ member, index })}
         className="flex items-center justify-between p-3 rounded-xl transition-all hover:shadow-lg cursor-pointer"
         style={rowStyle}
       >
@@ -1074,7 +1150,7 @@ export default function Dashboard() {
   const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
   const metricCardDefault = isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300';
 
-  // ── JSX ──────────────────────────────────────────────────────────────────
+  // ── JSX ───────────────────────────────────────────────────────────────────
   return (
     <>
       {/* ── DETAIL MODALS ─────────────────────────────────────────────────── */}
@@ -1114,7 +1190,7 @@ export default function Dashboard() {
 
       <motion.div className="space-y-4" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* ── Welcome Banner ──────────────────────────────────────────────── */}
+        {/* ── Welcome Banner ────────────────────────────────────────────────── */}
         <motion.div variants={itemVariants}>
           <div className="relative overflow-hidden rounded-2xl px-6 py-5"
             style={{ background:`linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow:`0 8px 32px rgba(13,59,102,0.28)` }}>
@@ -1124,7 +1200,9 @@ export default function Dashboard() {
             <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div>
                 <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
-                <h1 className="text-2xl font-bold text-white tracking-tight">Welcome back, {user?.full_name?.split(' ')[0] || 'User'} 👋</h1>
+                <h1 className="text-2xl font-bold text-white tracking-tight">
+                  Welcome back, {user?.full_name?.split(' ')[0] || 'User'} 👋
+                </h1>
                 <p className="text-white/60 text-sm mt-1">
                   {todayIsHoliday ? `🎉 Today is a holiday${todayHolidayName ? ` — ${todayHolidayName}` : ''}. Have a great day!` : "Here's your business overview for today."}
                 </p>
@@ -1133,7 +1211,7 @@ export default function Dashboard() {
                 <motion.div whileHover={{ scale:1.03, y:-2, transition:springPhysics.card }}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
                   style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.18)', backdropFilter:'blur(8px)' }}
-                  onClick={() => setSelectedDeadline(nextDeadline)}>   {/* ← opens modal */}
+                  onClick={() => setSelectedDeadline(nextDeadline)}>
                   <div className="p-2 rounded-lg bg-white/15"><CalendarIcon className="h-4 w-4 text-white" /></div>
                   <div>
                     <p className="text-white/60 text-xs font-medium uppercase tracking-wider">Next Deadline</p>
@@ -1148,7 +1226,7 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* ── Key Metrics ─────────────────────────────────────────────────── */}
+        {/* ── Key Metrics ───────────────────────────────────────────────────── */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3" variants={itemVariants}>
           <motion.div whileHover={{ y:-3, transition:springPhysics.card }} whileTap={{ scale:0.985 }} onClick={() => navigate('/tasks')} className={`${metricCardCls} ${metricCardDefault}`}>
             <CardContent className="p-4">
@@ -1237,14 +1315,19 @@ export default function Dashboard() {
           </motion.div>
         </motion.div>
 
-        {/* ── Recent Tasks + Deadlines + Attendance ────────────────────────── */}
+        {/* ── Recent Tasks + Deadlines + Attendance ─────────────────────────── */}
         <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3" variants={itemVariants}>
 
-          {/* Recent Tasks — clicking opens TaskDetailModal */}
+          {/* Recent Tasks */}
           <SectionCard>
-            <CardHeaderRow iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'} icon={<Target className="h-4 w-4 text-blue-500" />}
-              title="Recent Tasks" subtitle="Newest first"
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`} onClick={() => navigate('/tasks')}>View All</Button>} />
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+              icon={<Target className="h-4 w-4 text-blue-500" />}
+              title="Recent Tasks"
+              subtitle="Newest first · completed yesterday+ hidden"
+              badge={recentTasks.length}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`} onClick={() => navigate('/tasks')}>View All</Button>}
+            />
             <div className="p-3">
               {recentTasks.length === 0
                 ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No recent tasks</div>
@@ -1254,13 +1337,21 @@ export default function Dashboard() {
                       {recentTasks.map(task => {
                         const statusStyle   = getStatusStyle(task.status);
                         const priorityStyle = getPriorityStyle(task.priority);
+                        const isNew = task.created_at && (Date.now() - new Date(task.created_at).getTime()) < 86_400_000;
                         return (
-                          <motion.div key={task.id} variants={itemVariants} whileHover={{ y:-1 }}
+                          <motion.div key={task.id} variants={itemVariants} layout whileHover={{ y:-1 }}
                             className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${priorityStyle.bg} ${priorityStyle.border}`}
-                            onClick={() => setSelectedTask(task)}>    {/* ← opens modal */}
-                            <div className="flex items-center justify-between mb-1">
-                              <p className={`font-medium text-sm truncate flex-1 mr-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{task.title || 'Untitled Task'}</p>
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${statusStyle.bg} ${statusStyle.text} whitespace-nowrap`}>{task.status?.replace('_',' ') || 'PENDING'}</span>
+                            onClick={() => setSelectedTask(task)}>
+                            <div className="flex items-center justify-between mb-1 gap-2">
+                              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                {isNew && (
+                                  <span className="flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500 text-white leading-none">NEW</span>
+                                )}
+                                <p className={`font-medium text-sm truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{task.title || 'Untitled Task'}</p>
+                              </div>
+                              <span className={`flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md ${statusStyle.bg} ${statusStyle.text} whitespace-nowrap`}>
+                                {task.status?.replace('_',' ') || 'PENDING'}
+                              </span>
                             </div>
                             <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                               <CalendarIcon className="h-3 w-3" />
@@ -1275,23 +1366,28 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Upcoming Deadlines — clicking opens DeadlineDetailModal */}
+          {/* Upcoming Deadlines — overdue floated to top */}
           <SectionCard>
-            <CardHeaderRow iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'} icon={<CalendarIcon className="h-4 w-4 text-orange-500" />}
-              title="Upcoming Deadlines" subtitle="Next 30 days"
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/duedates')}>View All</Button>} />
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
+              icon={<CalendarIcon className="h-4 w-4 text-orange-500" />}
+              title="Upcoming Deadlines"
+              subtitle="Overdue pinned · Next 30 days"
+              badge={sortedDueDates.filter(d => (d.days_remaining ?? 0) <= 0).length || undefined}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/duedates')}>View All</Button>}
+            />
             <div className="p-3">
-              {upcomingDueDates.length === 0
+              {sortedDueDates.length === 0
                 ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming deadlines</div>
                 : (
                   <div className="slim-scroll space-y-2 max-h-[220px]" style={slimScroll}>
                     <AnimatePresence>
-                      {upcomingDueDates.map(due => {
+                      {sortedDueDates.map(due => {
                         const color = getDeadlineColor(due.days_remaining || 0);
                         return (
-                          <motion.div key={due.id} variants={itemVariants} whileHover={{ y:-1 }}
+                          <motion.div key={due.id} variants={itemVariants} layout whileHover={{ y:-1 }}
                             className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${color.bg}`}
-                            onClick={() => setSelectedDeadline(due)}>   {/* ← opens modal */}
+                            onClick={() => setSelectedDeadline(due)}>
                             <div className="flex items-center justify-between mb-1">
                               <p className={`font-medium text-sm truncate flex-1 mr-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{due.title || 'Untitled Deadline'}</p>
                               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${color.badge} whitespace-nowrap`}>
@@ -1311,11 +1407,15 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Attendance Card — unchanged */}
+          {/* Attendance Card */}
           <SectionCard>
-            <CardHeaderRow iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'} icon={<Activity className="h-4 w-4 text-purple-500" />}
-              title="Attendance" subtitle="Daily work hours"
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-500'}`} onClick={() => navigate('/attendance')}>View Log</Button>} />
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
+              icon={<Activity className="h-4 w-4 text-purple-500" />}
+              title="Attendance"
+              subtitle="Daily work hours"
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-500'}`} onClick={() => navigate('/attendance')}>View Log</Button>}
+            />
             <div className="p-3">
               {todayIsHoliday ? (
                 <div className="rounded-xl px-4 py-4 text-center"
@@ -1373,9 +1473,14 @@ export default function Dashboard() {
           <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {/* Tasks Assigned to Me */}
             <SectionCard className="hover:shadow-md transition">
-              <CardHeaderRow iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'} icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
-                title="Tasks Assigned to Me" subtitle="Tasks others gave you · click to view details"
-                action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} onClick={() => navigate('/tasks?filter=assigned-to-me')}>View All →</Button>} />
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
+                icon={<Briefcase className="h-4 w-4 text-emerald-600" />}
+                title="Tasks Assigned to Me"
+                subtitle="Newest first · completed yesterday+ hidden"
+                badge={tasksAssignedToMe.filter(t => t.status !== 'completed').length || undefined}
+                action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} onClick={() => navigate('/tasks?filter=assigned-to-me')}>View All →</Button>}
+              />
               <div className="p-3">
                 {tasksAssignedToMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned to you</div>
@@ -1386,7 +1491,7 @@ export default function Dashboard() {
                           <TaskStrip key={task.id} task={task} isToMe={true}
                             assignedName={task.assigned_by_name || task.created_by_name || 'Unknown'}
                             onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                            onSelect={setSelectedTask} />   // ← opens modal
+                            onSelect={setSelectedTask} />
                         ))}
                       </AnimatePresence>
                     </div>
@@ -1396,9 +1501,14 @@ export default function Dashboard() {
 
             {/* Tasks Assigned by Me */}
             <SectionCard className="hover:shadow-md transition">
-              <CardHeaderRow iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'} icon={<Briefcase className="h-4 w-4 text-blue-600" />}
-                title="Tasks Assigned by Me" subtitle="Tasks you delegated · click to view details"
-                action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} onClick={() => navigate('/tasks?filter=assigned-by-me')}>View All →</Button>} />
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<Briefcase className="h-4 w-4 text-blue-600" />}
+                title="Tasks Assigned by Me"
+                subtitle="Newest first · completed yesterday+ hidden"
+                badge={tasksAssignedByMe.filter(t => t.status !== 'completed').length || undefined}
+                action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} onClick={() => navigate('/tasks?filter=assigned-by-me')}>View All →</Button>}
+              />
               <div className="p-3">
                 {tasksAssignedByMe.length === 0
                   ? <div className={`h-24 flex items-center justify-center text-sm border border-dashed rounded-xl ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-200'}`}>No tasks assigned yet</div>
@@ -1409,7 +1519,7 @@ export default function Dashboard() {
                           <TaskStrip key={task.id} task={task} isToMe={false}
                             assignedName={task.assigned_to_name || 'Unknown'}
                             onUpdateStatus={updateAssignedTaskStatus} navigate={navigate}
-                            onSelect={setSelectedTask} />    // ← opens modal
+                            onSelect={setSelectedTask} />
                         ))}
                       </AnimatePresence>
                     </div>
@@ -1419,13 +1529,16 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* ── Star Performers + To-Do + Visits ─────────────────────────────── */}
+        {/* ── Star Performers + To-Do + Visits ──────────────────────────────── */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
 
-          {/* Star Performers — RankingItem now clickable */}
+          {/* Star Performers */}
           <SectionCard>
-            <CardHeaderRow iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'} icon={<TrendingUp className="h-4 w-4 text-yellow-500" />}
-              title="Star Performers" subtitle="Click any row for full stats"
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-yellow-900/40' : 'bg-yellow-50'}
+              icon={<TrendingUp className="h-4 w-4 text-yellow-500" />}
+              title="Star Performers"
+              subtitle="Click any row for full stats"
               action={
                 isAdmin ? (
                   <div className={`flex gap-0.5 rounded-lg p-0.5 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
@@ -1452,11 +1565,16 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* My To-Do List — clicking row opens TodoDetailModal */}
+          {/* My To-Do List */}
           <SectionCard>
-            <CardHeaderRow iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'} icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
-              title="My To-Do List" subtitle="Click any item for details"
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} onClick={() => navigate('/todos')}>View All</Button>} />
+            <CardHeaderRow
+              iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+              icon={<CheckSquare className="h-4 w-4 text-blue-500" />}
+              title="My To-Do List"
+              subtitle="Click any item for details"
+              badge={pendingTodos.length || undefined}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} onClick={() => navigate('/todos')}>View All</Button>}
+            />
             <div className="p-3">
               <div className="flex gap-2 mb-3">
                 <input type="text" value={newTodo} onChange={e => setNewTodo(e.target.value)} placeholder="Add new task..."
@@ -1485,8 +1603,8 @@ export default function Dashboard() {
                   <div className="slim-scroll space-y-1.5 max-h-[200px]" style={slimScroll}>
                     <AnimatePresence>
                       {pendingTodos.map(todo => (
-                        <motion.div key={todo._id || todo.id} variants={itemVariants}
-                          onClick={() => setSelectedTodo(todo)}   // ← opens modal
+                        <motion.div key={todo._id || todo.id} variants={itemVariants} layout
+                          onClick={() => setSelectedTodo(todo)}
                           className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
                             todo.completed ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
                             : !todo.completed && isOverdue(todo.due_date) ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
@@ -1523,7 +1641,7 @@ export default function Dashboard() {
             </div>
           </SectionCard>
 
-          {/* Visits Card — rows open VisitDetailModal */}
+          {/* Visits Card */}
           <VisitsCard isDark={isDark} navigate={navigate} currentUserId={user?.id} onSelectVisit={setSelectedVisit} />
 
         </motion.div>
@@ -1531,8 +1649,8 @@ export default function Dashboard() {
         {/* ── Quick Access Tiles ─────────────────────────────────────────────── */}
         <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" variants={itemVariants}>
           {[
-            { path:'/leads',    icon:<Target className="h-4 w-4" style={{ color:COLORS.mediumBlue }} />,   iconBg: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12`,     label:String(openLeadsCount),               sub:'Open Leads'   },
-            { path:'/clients',  icon:<Building2 className="h-4 w-4" style={{ color:COLORS.emeraldGreen }}/>,iconBg: isDark ? 'rgba(31,175,90,0.2)'  : `${COLORS.emeraldGreen}12`,   label:String(stats?.total_clients || 0),   sub:'Clients'      },
+            { path:'/leads',    icon:<Target className="h-4 w-4" style={{ color:COLORS.mediumBlue }} />,    iconBg: isDark ? 'rgba(31,111,178,0.2)'  : `${COLORS.mediumBlue}12`,    label:String(openLeadsCount),              sub:'Open Leads'   },
+            { path:'/clients',  icon:<Building2 className="h-4 w-4" style={{ color:COLORS.emeraldGreen }}/>, iconBg: isDark ? 'rgba(31,175,90,0.2)'   : `${COLORS.emeraldGreen}12`,  label:String(stats?.total_clients || 0),   sub:'Clients'      },
             { path:'/dsc',      icon:<Key className={`h-4 w-4 ${stats?.expiring_dsc_count > 0 ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.expiring_dsc_count > 0 ? isDark ? 'rgba(239,68,68,0.2)' : '#fef2f2' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label:String(stats?.total_dsc || 0), sub:'DSC Certs' },
             { path:'/duedates', icon:<CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />, iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc', label:String(stats?.upcoming_due_dates || 0), sub:'Compliance' },
           ].map(tile => (
