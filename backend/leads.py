@@ -112,6 +112,20 @@ class Lead(LeadBase):
     )
 
 
+# ====================== ONBOARDING TASK REQUEST ======================
+
+class OnboardingTaskRequest(BaseModel):
+    """
+    Payload sent by the frontend when a won lead is being converted to a client.
+    Carries task-creation details filled in by the user in the conversion dialog.
+    """
+    assigned_to: Optional[str] = None          # user id to assign the onboarding task
+    due_date: Optional[datetime] = None         # task due date
+    priority: Optional[str] = "medium"         # low | medium | high | critical
+    task_notes: Optional[str] = None           # additional task description / checklist
+    task_title: Optional[str] = None           # override default task title
+
+
 # ====================== HELPERS ======================
 
 def normalize_lead_doc(doc: dict) -> dict:
@@ -383,12 +397,9 @@ async def update_lead(
                 detail="Use the /convert endpoint to mark a lead as won"
             )
 
-    if update_dict.get("next_follow_up"):
-        if update_dict["next_follow_up"] < datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=400,
-                detail="Follow-up date cannot be in the past"
-            )
+    # NOTE: Removed the past-date validation for next_follow_up on edit.
+    # On edit, users may legitimately keep or view past follow-up dates.
+    # Validation is only applied on create via frontend guidance.
 
     if "notes" in update_dict:
         update_dict["closure_probability"] = calculate_closure_probability(
@@ -415,9 +426,20 @@ async def update_lead(
 @router.post("/{lead_id}/convert", status_code=status.HTTP_201_CREATED)
 async def convert_lead_to_client(
     lead_id: str,
+    task_request: Optional[OnboardingTaskRequest] = None,
     current_user=Depends(get_current_user),
 ):
-    """Convert a lead to a client."""
+    """
+    Convert a lead to a client.
+
+    Accepts an optional OnboardingTaskRequest body that carries the
+    onboarding task details filled in by the user in the conversion dialog:
+      - assigned_to : user id for the task (defaults to lead's assigned_to)
+      - due_date    : task due date
+      - priority    : task priority (low/medium/high/critical)
+      - task_notes  : extra description / checklist for the onboarding task
+      - task_title  : override the default "Client Onboarding - <company>" title
+    """
     obj_id = validate_obj_id(lead_id)
 
     lead = await db.leads.find_one({"_id": obj_id})
@@ -464,20 +486,56 @@ async def convert_lead_to_client(
         }
     )
 
+    # ── Build onboarding task with user-provided details ──────────────────
+    tr = task_request or OnboardingTaskRequest()
+
+    task_assigned_to = (
+        tr.assigned_to
+        or lead.get("assigned_to")
+        or current_user.id
+    )
+    task_title = (
+        tr.task_title
+        or f"Client Onboarding - {lead['company_name']}"
+    )
+    default_description = (
+        "Lead converted to client. Start onboarding process.\n"
+        "- Send welcome email\n"
+        "- Collect KYC documents\n"
+        "- Schedule onboarding call\n"
+        "- Set up client portal access"
+    )
+    task_description = tr.task_notes or default_description
+
     task = {
         "id": str(uuid.uuid4()),
-        "title": f"Client Onboarding - {lead['company_name']}",
-        "description": "Lead converted to client. Start onboarding process.",
-        "assigned_to": lead.get("assigned_to") or current_user.id,
+        "title": task_title,
+        "description": task_description,
+        "assigned_to": task_assigned_to,
+        "sub_assignees": [],
         "status": "pending",
-        "priority": "medium",
+        "priority": tr.priority or "medium",
         "created_by": current_user.id,
         "client_id": client_id,
         "lead_id": str(obj_id),
+        "category": "other",
+        "is_recurring": False,
         "created_at": now,
         "updated_at": now,
     }
+    if tr.due_date:
+        task["due_date"] = tr.due_date
+
     await db.tasks.insert_one(task)
+
+    # Notify the task assignee (if different from current user)
+    if task_assigned_to != current_user.id:
+        await create_notification(
+            user_id=task_assigned_to,
+            title="Onboarding Task Assigned",
+            message=f"You have been assigned the onboarding task for {lead['company_name']}",
+            type="task"
+        )
 
     await create_audit_log(
         current_user=current_user,
@@ -508,7 +566,9 @@ async def convert_lead_to_client(
     return {
         "status": "success",
         "message": "Lead successfully converted to client",
-        "client_id": client_id
+        "client_id": client_id,
+        "task_id": task["id"],
+        "task_assigned_to": task_assigned_to,
     }
 
 
