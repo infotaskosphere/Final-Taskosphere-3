@@ -3,7 +3,7 @@ import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
-import AppRoutes from "./AppRoutes";
+import AppRoutes from "./AppRoutes.jsx";
 
 const queryClient = new QueryClient();
 
