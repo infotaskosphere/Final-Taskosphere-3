@@ -296,27 +296,19 @@ const DashboardLayout = ({ children }) => {
         }}
       >
         {/* Logo Section */}
-<div className={`h-16 flex items-center ${collapsed ? 'justify-center' : 'px-6'} flex-shrink-0 transition-all duration-300`}>
-  <div className="flex items-center gap-3">
-    {/* Logo Image Container */}
-    <div className={`flex items-center justify-center transition-all ${collapsed ? 'w-10 h-10' : 'w-9 h-9'}`}>
-      <img 
-        src="/logo.png" 
-        alt="TaskOsphere Logo" 
-        className="w-full h-auto object-contain"
-        style={{ 
-          // Applies a slight brightness boost and shadow if the sidebar is dark
-          filter: isDark ? 'brightness(1.2) drop-shadow(0px 0px 1px rgba(255,255,255,0.3))' : 'none' 
-        }}
-      />
-    </div>
-
-    {/* Brand Text with Capital 'O' */}
-    {!collapsed && (
-      <span className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
-        Task<span style={{ color: COLORS.mediumBlue }}>Osphere</span>
-      </span>
-    )}
+<div className={`h-20 flex items-center justify-center flex-shrink-0 transition-all duration-300 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-100'}`}>
+  <div className={`flex items-center justify-center transition-all duration-300 ${collapsed ? 'w-12 px-2' : 'w-full px-6'}`}>
+    <img 
+      src="/logo.png" 
+      alt="TaskOsphere Logo" 
+      className="max-w-full h-auto object-contain"
+      style={{ 
+        // Ensures visibility on dark backgrounds
+        filter: isDark ? 'brightness(1.1) drop-shadow(0px 0px 1px rgba(255,255,255,0.2))' : 'none',
+        // Increased height slightly for the full logo look
+        maxHeight: collapsed ? '40px' : '48px'
+      }}
+    />
   </div>
 </div>
 
