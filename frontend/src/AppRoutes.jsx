@@ -245,7 +245,15 @@ function AppRoutes() {
           path="/settings"
           element={<Navigate to="/settings/general" replace />}
         />
-
+        {/* Password Repository */}
+<Route
+  path="/passwords"
+  element={
+    <Protected>
+      <PasswordRepository />
+    </Protected>
+  }
+/>
         {/* Client Visits */}
         <Route
           path="/visits"
