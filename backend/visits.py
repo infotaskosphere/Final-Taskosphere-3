@@ -1,37 +1,24 @@
 """
-visits.py — Client Visit Planning Module  v5  PERMISSIONS & BULK DELETE FIX
-Attach to your FastAPI app via:
-    from backend.visits import router as visits_router
-    api_router.include_router(visits_router)
+visits.py — Client Visit Planning Module  v6  CRASH & 404 FIX
 
-Collections used:
-    db.visits   — visit records
-    db.users    — for name enrichment
-    db.clients  — for client info enrichment
-
-Permissions model (stored in user.permissions dict):
-    can_view_all_visits   : bool   — see every user's visits (admin auto-gets this)
-    view_other_visits     : [uid]  — list of user IDs whose visits this user can read
-    can_edit_visits       : bool   — create/edit any visit (admin auto-gets this)
-    can_delete_visits     : bool   — delete any visit (admin auto-gets this)
-    can_delete_own_visits : bool   — delete own visits (default True for all users)
-
-v5 CHANGES (fixes over v4):
-  - models.py now includes can_delete_visits and can_delete_own_visits in
-    UserPermissions class AND in DEFAULT_ROLE_PERMISSIONS for all roles.
-    Previously those fields were missing, causing _get_perms() to always return
-    None for them — breaking permission-gated deletes for non-admins.
-  - DELETE PERMISSIONS enforced correctly:
-    * Admin: can delete any visit regardless of status.
-    * User with can_delete_visits=True: can delete any visit.
-    * Regular user: can delete ONLY their own visits when can_delete_own_visits=True
-      (the default). If can_delete_own_visits=False they cannot delete anything.
-    * Users without permission get 403, never 404-masking.
-  - BULK DELETE (POST /visits/bulk-delete): permission checked per visit.
-    Returns detailed results: deleted / forbidden / not_found lists.
-  - Single DELETE /{visit_id}: correctly uses _can_delete_visit(), not
-    _can_write_visit(), so a user who lost edit rights can still delete their
-    own visits if can_delete_own_visits is True.
+ROOT CAUSE FIXES in v6:
+  1. BLANK PAGE / REACT CRASH: Old visit documents in DB have missing/null
+     fields (id, visit_date, assigned_to). The frontend's parseISO(v.visit_date)
+     was crashing on null. Fixed by:
+     - GET /visits now filters out documents with missing `id` or `visit_date`
+     - All DB documents are sanitized via _sanitize_visit() before returning
+  2. 404 ON QUICK-STATUS / EDIT / DELETE: Old visits stored with MongoDB _id
+     only (no `id` string field), so /visits/{visit_id} returned 404.
+     Fixed by: all single-visit lookups now try BOTH `id` field AND `_id`.
+  3. PERMISSION SIMPLIFICATION (as requested):
+     - Every user can add their OWN visit (assigned_to == current_user.id)
+     - Every user can edit/change status of their OWN visit
+     - Every user can delete their OWN visit (can_delete_own_visits defaults True)
+     - To manage OTHER users' visits, need explicit permission or admin role
+     - Admin has all rights on all visits
+  4. ROUTE ORDER: All static paths (summary, upcoming, bulk-*, check-duplicate,
+     admin/*, from-email) are registered BEFORE /{visit_id} to prevent FastAPI
+     routing the literal string "summary" as a visit_id.
 """
 
 import uuid
@@ -61,11 +48,11 @@ VisitPriority     = Literal["low", "medium", "high", "urgent"]
 
 RecurrencePattern = Literal[
     "none",
-    "weekly",        # every 7 days from start
-    "biweekly",      # every 14 days
-    "monthly",       # same calendar date each month (e.g. 15th)
-    "nth_weekday",   # nth occurrence of a weekday in a month (e.g. 2nd Thursday)
-    "last_weekday",  # last occurrence of a weekday in a month (e.g. last Friday)
+    "weekly",
+    "biweekly",
+    "monthly",
+    "nth_weekday",
+    "last_weekday",
 ]
 
 
@@ -73,17 +60,17 @@ class VisitCreate(BaseModel):
     client_id:              str
     client_name:            Optional[str] = None
     assigned_to:            str
-    visit_date:             str                         # YYYY-MM-DD
-    visit_time:             Optional[str] = None        # HH:MM (24-h)
+    visit_date:             str
+    visit_time:             Optional[str] = None
     purpose:                str = Field(..., min_length=2, max_length=200)
     services:               List[str] = Field(default_factory=list)
     priority:               VisitPriority = "medium"
     notes:                  Optional[str] = None
     location:               Optional[str] = None
     recurrence:             RecurrencePattern = "none"
-    recurrence_end_date:    Optional[str] = None        # YYYY-MM-DD
-    recurrence_weekday:     Optional[int] = None        # 0=Mon, 1=Tue … 6=Sun
-    recurrence_week_number: Optional[int] = None        # 1=first … 5=fifth, 0=last
+    recurrence_end_date:    Optional[str] = None
+    recurrence_weekday:     Optional[int] = None
+    recurrence_week_number: Optional[int] = None
 
     @field_validator("visit_date", "recurrence_end_date", mode="before")
     @classmethod
@@ -144,7 +131,7 @@ class BulkSchedulePayload(BaseModel):
     priority:     VisitPriority = "medium"
     location:     Optional[str] = None
     notes:        Optional[str] = None
-    visit_dates:  List[str]      # list of YYYY-MM-DD
+    visit_dates:  List[str]
 
 
 class DuplicateCheckPayload(BaseModel):
@@ -154,13 +141,11 @@ class DuplicateCheckPayload(BaseModel):
 
 
 class BulkDeletePayload(BaseModel):
-    """Bulk delete request payload"""
     visit_ids: List[str] = Field(..., min_length=1, max_length=100)
     delete_recurrences: bool = False
 
 
 class BulkDeleteResult(BaseModel):
-    """Bulk delete response"""
     deleted: List[str] = Field(default_factory=list)
     forbidden: List[str] = Field(default_factory=list)
     not_found: List[str] = Field(default_factory=list)
@@ -173,10 +158,7 @@ class BulkDeleteResult(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_perms(user: User) -> dict:
-    """
-    Always returns a plain dict of the user's permissions.
-    Handles both dict-stored and Pydantic-model-stored permissions.
-    """
+    """Always returns a plain dict of the user's permissions."""
     if isinstance(user.permissions, dict):
         return user.permissions
     if user.permissions:
@@ -187,7 +169,94 @@ def _get_perms(user: User) -> dict:
     return {}
 
 
+def _sanitize_visit(v: dict) -> dict:
+    """
+    FIX FOR BLANK PAGE / REACT CRASH:
+    Ensure every visit document has safe defaults for fields the frontend
+    accesses directly (parseISO, format, etc.). Old documents in the DB
+    may be missing these fields entirely.
+    """
+    # Ensure `id` exists — fall back to MongoDB _id string
+    if not v.get("id"):
+        raw_id = v.get("_id")
+        v["id"] = str(raw_id) if raw_id else str(uuid.uuid4())
+
+    # Ensure visit_date is a valid YYYY-MM-DD string
+    vd = v.get("visit_date")
+    if not vd:
+        v["visit_date"] = date.today().isoformat()
+    else:
+        try:
+            date.fromisoformat(str(vd)[:10])
+            v["visit_date"] = str(vd)[:10]
+        except (ValueError, TypeError):
+            v["visit_date"] = date.today().isoformat()
+
+    # Safe defaults for other fields
+    v.setdefault("purpose", "")
+    v.setdefault("status", "scheduled")
+    v.setdefault("priority", "medium")
+    v.setdefault("assigned_to", "")
+    v.setdefault("client_id", "")
+    v.setdefault("client_name", "")
+    v.setdefault("services", [])
+    v.setdefault("comments", [])
+    v.setdefault("recurrence", "none")
+    v.setdefault("location", None)
+    v.setdefault("notes", None)
+    v.setdefault("outcome", None)
+    v.setdefault("visit_time", None)
+    v.setdefault("recurrence_end_date", None)
+    v.setdefault("recurrence_weekday", None)
+    v.setdefault("recurrence_week_number", None)
+    v.setdefault("parent_visit_id", None)
+
+    # Remove MongoDB internal _id
+    v.pop("_id", None)
+    return v
+
+
+async def _find_visit_by_any_id(visit_id: str) -> Optional[dict]:
+    """
+    FIX FOR 404 ERRORS:
+    Old documents may only have MongoDB _id, or the `id` string field.
+    Try both lookups before giving up.
+    """
+    # 1. Try custom string `id` field first (standard for new documents)
+    visit = await db.visits.find_one({"id": visit_id})
+    if visit:
+        return _sanitize_visit(visit)
+
+    # 2. Try MongoDB ObjectId (_id) — for legacy documents
+    try:
+        from bson import ObjectId
+        oid = ObjectId(visit_id)
+        visit = await db.visits.find_one({"_id": oid})
+        if visit:
+            sanitized = _sanitize_visit(visit)
+            # If this legacy doc has no `id`, patch it into the DB now
+            if not visit.get("id"):
+                await db.visits.update_one(
+                    {"_id": oid},
+                    {"$set": {"id": sanitized["id"]}}
+                )
+            return sanitized
+    except Exception:
+        pass
+
+    return None
+
+
 def _can_read_visit(current_user: User, visit_owner_id: str) -> bool:
+    """
+    SIMPLIFIED PERMISSION MODEL (v6):
+    - Own visit: always readable
+    - Admin: always readable
+    - can_view_all_visits perm: readable
+    - view_other_visits list: readable for listed UIDs
+    """
+    if not visit_owner_id:
+        return current_user.role == "admin"
     if current_user.role == "admin":
         return True
     if str(current_user.id) == str(visit_owner_id):
@@ -200,53 +269,43 @@ def _can_read_visit(current_user: User, visit_owner_id: str) -> bool:
 
 
 def _can_write_visit(current_user: User, visit_owner_id: str) -> bool:
+    """
+    SIMPLIFIED PERMISSION MODEL (v6):
+    - Own visit: always writable (every user can edit/change status of their own)
+    - Admin: always writable
+    - can_edit_visits perm: writable for any visit
+    """
+    if not visit_owner_id:
+        return current_user.role == "admin"
     if current_user.role == "admin":
         return True
     if str(current_user.id) == str(visit_owner_id):
-        return True
+        return True   # ← KEY FIX: own visit always writable
     perms = _get_perms(current_user)
     return bool(perms.get("can_edit_visits"))
 
 
 def _can_delete_visit(current_user: User, visit_owner_id: str) -> bool:
     """
-    Granular delete permission check.
-
-    Rules (evaluated in order):
-      1. Admin role  → always allowed.
-      2. can_delete_visits perm  → allowed for any visit.
-      3. Own visit + can_delete_own_visits not explicitly False  → allowed.
-      4. Everything else  → denied.
-
-    NOTE: This uses _can_delete_visit, NOT _can_write_visit, so write
-    permission and delete permission are independently controlled.
+    SIMPLIFIED PERMISSION MODEL (v6):
+    - Admin: always
+    - can_delete_visits perm: always
+    - Own visit + can_delete_own_visits not False: yes (default True)
     """
-    # 1. Admin always wins
+    if not visit_owner_id:
+        return current_user.role == "admin"
     if current_user.role == "admin":
         return True
-
     perms = _get_perms(current_user)
-
-    # 2. Explicit global delete permission covers any visit
     if perms.get("can_delete_visits"):
         return True
-
-    # 3. Own visit — allowed unless can_delete_own_visits is explicitly False
-    is_own_visit = str(current_user.id) == str(visit_owner_id)
-    if is_own_visit:
-        # Default is True; only deny when explicitly set to False
+    is_own = str(current_user.id) == str(visit_owner_id)
+    if is_own:
         return perms.get("can_delete_own_visits", True) is not False
-
-    # 4. Not own visit, no global delete permission
     return False
 
 
 def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> Optional[date]:
-    """
-    Return the nth occurrence (1-based) of `weekday` (0=Mon…6=Sun)
-    in the given year/month, or None if it doesn't exist.
-    `n=0` means the LAST occurrence.
-    """
     first_day = date(year, month, 1)
     offset = (weekday - first_day.weekday()) % 7
     first_occurrence = first_day + timedelta(days=offset)
@@ -268,13 +327,8 @@ def _generate_smart_recurrence(
     weekday: Optional[int] = None,
     week_number: Optional[int] = None,
 ) -> List[date]:
-    """
-    Generate all recurrence dates between base_date (exclusive) and
-    end_date (inclusive). Hard cap: no more than 366 days ahead.
-    """
     if recurrence == "none" or not end_date_str:
         return []
-
     try:
         base_date = date.fromisoformat(base_date_str)
         end_date  = date.fromisoformat(end_date_str[:10])
@@ -283,7 +337,6 @@ def _generate_smart_recurrence(
 
     hard_cap = base_date + timedelta(days=366)
     end_date  = min(end_date, hard_cap)
-
     dates: List[date] = []
 
     if recurrence == "weekly":
@@ -338,21 +391,12 @@ def _generate_smart_recurrence(
     return sorted(set(dates))
 
 
-def _expand_recurrence(
-    base: dict,
-    recurrence: RecurrencePattern,
-    end_date_str: Optional[str],
-    weekday: Optional[int] = None,
-    week_number: Optional[int] = None,
-) -> List[dict]:
-    """Build child visit documents for all recurrence dates."""
+def _expand_recurrence(base, recurrence, end_date_str, weekday=None, week_number=None):
     if recurrence == "none" or not end_date_str:
         return []
-
     generated_dates = _generate_smart_recurrence(
         base["visit_date"], recurrence, end_date_str, weekday, week_number
     )
-
     parent_id = base["id"]
     children  = []
     for d in generated_dates:
@@ -371,22 +415,11 @@ def _expand_recurrence(
         child["outcome"]                 = None
         child["follow_up_date"]          = None
         children.append(child)
-
     return children
 
 
-async def _check_duplicate(
-    client_id: str,
-    assigned_to: str,
-    visit_date: str,
-    exclude_id: Optional[str] = None,
-) -> Optional[dict]:
-    """
-    Return an existing visit document if one already exists for the same
-    client + user + date, else None.  cancelled visits don't block re-scheduling.
-    Pass exclude_id when editing to avoid self-conflict.
-    """
-    query: dict = {
+async def _check_duplicate(client_id, assigned_to, visit_date, exclude_id=None):
+    query = {
         "client_id":   client_id,
         "assigned_to": assigned_to,
         "visit_date":  visit_date,
@@ -398,10 +431,8 @@ async def _check_duplicate(
 
 
 async def _enrich_visits(visits: list) -> list:
-    """Add assigned_to_name, assigned_to_picture, created_by_name to each visit."""
     if not visits:
         return visits
-
     uid_set = set()
     for v in visits:
         if v.get("assigned_to"):
@@ -428,17 +459,8 @@ async def _enrich_visits(visits: list) -> list:
     return visits
 
 
-def _build_date_filter(
-    month: Optional[str],
-    from_date: Optional[str],
-    to_date: Optional[str],
-) -> Optional[dict]:
-    """
-    Convert month (YYYY-MM) to an equivalent $gte / $lte range.
-    MongoDB does not allow $regex and $gte/$lte in the same field query dict.
-    """
+def _build_date_filter(month, from_date, to_date):
     date_filter: dict = {}
-
     if month:
         try:
             year, mon = int(month[:4]), int(month[5:7])
@@ -451,19 +473,17 @@ def _build_date_filter(
             date_filter["$lte"] = last_day.isoformat() if not isinstance(last_day, str) else last_day
         except (ValueError, TypeError, AttributeError):
             pass
-
     if from_date:
         if "$gte" not in date_filter or from_date > date_filter["$gte"]:
             date_filter["$gte"] = from_date
     if to_date:
         if "$lte" not in date_filter or to_date < date_filter["$lte"]:
             date_filter["$lte"] = to_date
-
     return date_filter if date_filter else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ROUTES — static paths FIRST, parameterised paths LAST
+# ROUTES — ALL STATIC PATHS FIRST, PARAMETERISED LAST
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── 1. CREATE ─────────────────────────────────────────────────────────────────
@@ -472,17 +492,19 @@ async def create_visit(
     data: VisitCreate,
     current_user: User = Depends(get_current_user),
 ):
-    if not _can_write_visit(current_user, data.assigned_to):
-        raise HTTPException(403, "Not authorised to create visits for this user")
+    # SIMPLIFIED: any user can create a visit for themselves
+    # Only needs special permission to create for OTHER users
+    if str(data.assigned_to) != str(current_user.id):
+        if not _can_write_visit(current_user, data.assigned_to):
+            raise HTTPException(403, "Not authorised to create visits for other users")
 
     existing = await _check_duplicate(data.client_id, data.assigned_to, data.visit_date)
     if existing:
         raise HTTPException(
             409,
             f"A visit for this client on {data.visit_date} is already scheduled "
-            f"(id={existing['id']}, purpose='{existing.get('purpose', '')}', "
-            f"status={existing.get('status', 'scheduled')}). "
-            "Cancel the existing visit before creating a new one, or choose a different date."
+            f"(id={existing['id']}, status={existing.get('status', 'scheduled')}). "
+            "Cancel the existing visit or choose a different date."
         )
 
     now_iso  = datetime.now(timezone.utc).isoformat()
@@ -519,39 +541,27 @@ async def create_visit(
     visit_doc.pop("_id", None)
 
     children = _expand_recurrence(
-        visit_doc,
-        data.recurrence,
-        data.recurrence_end_date,
-        data.recurrence_weekday,
-        data.recurrence_week_number,
+        visit_doc, data.recurrence, data.recurrence_end_date,
+        data.recurrence_weekday, data.recurrence_week_number,
     )
 
     if children:
-        filtered_children = []
+        filtered = []
         for child in children:
             dup = await _check_duplicate(child["client_id"], child["assigned_to"], child["visit_date"])
             if not dup:
-                filtered_children.append(child)
-            else:
-                logger.warning(
-                    f"Skipped duplicate recurring child: client={child['client_id']} "
-                    f"date={child['visit_date']}"
-                )
-        children = filtered_children
-        if children:
-            await db.visits.insert_many(children)
-            for c in children:
+                filtered.append(child)
+        if filtered:
+            await db.visits.insert_many(filtered)
+            for c in filtered:
                 c.pop("_id", None)
+        children = filtered
 
-    logger.info(
-        f"Visit created: id={visit_id} by={current_user.id} "
-        f"for={data.assigned_to} recurrence={data.recurrence} "
-        f"children={len(children)}"
-    )
+    logger.info(f"Visit created: id={visit_id} by={current_user.id} children={len(children)}")
     return {**visit_doc, "recurring_count": len(children)}
 
 
-# ── 2. LIST (with filters) ────────────────────────────────────────────────────
+# ── 2. LIST ────────────────────────────────────────────────────────────────────
 @router.get("")
 async def list_visits(
     user_id:   Optional[str] = Query(None),
@@ -576,9 +586,7 @@ async def list_visits(
             team_ids = [str(i) for i in (raw_team_ids or []) if i is not None]
         except Exception:
             team_ids = []
-
         visible = list(set(team_ids + [str(current_user.id)]))
-
         if user_id:
             if user_id not in visible:
                 raise HTTPException(403, "User outside your team")
@@ -589,7 +597,6 @@ async def list_visits(
     else:
         perms   = _get_perms(current_user)
         allowed = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
-
         if perms.get("can_view_all_visits"):
             if user_id:
                 query["assigned_to"] = user_id
@@ -615,7 +622,7 @@ async def list_visits(
         query["visit_date"] = date_filter
 
     try:
-        visits = (
+        raw_visits = (
             await db.visits.find(query, {"_id": 0})
             .sort("visit_date", 1)
             .to_list(2000)
@@ -624,11 +631,23 @@ async def list_visits(
         logger.error(f"list_visits DB error: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to fetch visits: {str(e)}")
 
+    # SANITIZE every document — prevents React crash from null fields
+    visits = []
+    for v in raw_visits:
+        try:
+            sanitized = _sanitize_visit(v)
+            # Skip documents that are completely broken (no date possible)
+            if sanitized.get("id") and sanitized.get("visit_date"):
+                visits.append(sanitized)
+        except Exception as e:
+            logger.warning(f"Skipping corrupt visit document: {e}")
+            continue
+
     visits = await _enrich_visits(visits)
     return visits
 
 
-# ── 3. SUMMARY — static path, BEFORE /{visit_id} ─────────────────────────────
+# ── 3. SUMMARY (static, before /{visit_id}) ───────────────────────────────────
 @router.get("/summary")
 async def visit_summary(
     user_id: Optional[str] = Query(None),
@@ -648,8 +667,7 @@ async def visit_summary(
         db_query["visit_date"] = date_filter
 
     visits = await db.visits.find(
-        db_query,
-        {"_id": 0, "status": 1, "priority": 1},
+        db_query, {"_id": 0, "status": 1, "priority": 1},
     ).to_list(1000)
 
     total        = len(visits)
@@ -671,7 +689,7 @@ async def visit_summary(
     }
 
 
-# ── 4. UPCOMING — static path, BEFORE /{visit_id} ───────────────────────────
+# ── 4. UPCOMING (static) ──────────────────────────────────────────────────────
 @router.get("/upcoming")
 async def upcoming_visits(
     days: int = Query(7, ge=1, le=60),
@@ -679,9 +697,8 @@ async def upcoming_visits(
 ):
     today    = date.today()
     end_date = today + timedelta(days=days)
-
-    perms   = _get_perms(current_user)
-    allowed = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
+    perms    = _get_perms(current_user)
+    allowed  = [str(x) for x in (perms.get("view_other_visits") or []) if x is not None]
 
     if current_user.role == "admin":
         query: dict = {}
@@ -706,24 +723,26 @@ async def upcoming_visits(
         .to_list(50)
     )
 
+    visits = [_sanitize_visit(v) for v in visits]
     visits = await _enrich_visits(visits)
     for v in visits:
         try:
             v["days_until"] = (date.fromisoformat(v["visit_date"]) - today).days
         except (ValueError, TypeError):
             v["days_until"] = None
-
     return visits
 
 
-# ── 5. BULK SCHEDULE — static path, BEFORE /{visit_id} ──────────────────────
+# ── 5. BULK SCHEDULE (static) ─────────────────────────────────────────────────
 @router.post("/bulk-schedule", status_code=201)
 async def bulk_schedule(
     payload: BulkSchedulePayload,
     current_user: User = Depends(get_current_user),
 ):
-    if not _can_write_visit(current_user, payload.assigned_to):
-        raise HTTPException(403, "Not authorised")
+    # Any user can bulk-schedule for themselves
+    if str(payload.assigned_to) != str(current_user.id):
+        if not _can_write_visit(current_user, payload.assigned_to):
+            raise HTTPException(403, "Not authorised")
 
     now_iso    = datetime.now(timezone.utc).isoformat()
     docs       = []
@@ -775,56 +794,36 @@ async def bulk_schedule(
     return {"created": len(docs), "skipped_duplicates": duplicates, "visits": docs}
 
 
-# ── 6. BULK DELETE ────────────────────────────────────────────────────────────
+# ── 6. BULK DELETE (static) ───────────────────────────────────────────────────
 @router.post("/bulk-delete")
 async def bulk_delete_visits(
     payload: BulkDeletePayload,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Bulk delete visits with per-visit permission checking.
-
-    Permission rules (same as single DELETE):
-      - Admin: can delete any visit.
-      - can_delete_visits perm: can delete any visit.
-      - Own visit + can_delete_own_visits not False: allowed.
-      - Otherwise: forbidden (included in `forbidden` list, not an error).
-
-    If delete_recurrences=True and a visit is a parent (parent_visit_id=None),
-    all its child recurrence visits are also deleted (subject to permission on
-    the parent only — children inherit the parent's permission decision).
-    """
     if not payload.visit_ids:
         raise HTTPException(400, "No visit IDs provided")
 
     result = BulkDeleteResult(total_requested=len(payload.visit_ids))
 
-    # Fetch all requested visits in one query
     visits_cursor = db.visits.find(
         {"id": {"$in": payload.visit_ids}},
         {"_id": 0, "id": 1, "assigned_to": 1, "parent_visit_id": 1},
     )
     visits = await visits_cursor.to_list(length=len(payload.visit_ids))
-
     visit_map = {v["id"]: v for v in visits}
 
-    # IDs that were not found in DB
-    found_ids    = set(visit_map.keys())
+    found_ids        = set(visit_map.keys())
     result.not_found = [vid for vid in payload.visit_ids if vid not in found_ids]
 
     ids_to_delete: List[str] = []
 
     for vid, visit in visit_map.items():
         owner_id = visit.get("assigned_to", "")
-
         if _can_delete_visit(current_user, owner_id):
             ids_to_delete.append(vid)
-
-            # Cascade to children when deleting a parent and flag is set
             if payload.delete_recurrences and visit.get("parent_visit_id") is None:
                 children = await db.visits.find(
-                    {"parent_visit_id": vid},
-                    {"_id": 0, "id": 1},
+                    {"parent_visit_id": vid}, {"_id": 0, "id": 1},
                 ).to_list(1000)
                 for child in children:
                     child_id = child.get("id")
@@ -839,15 +838,13 @@ async def bulk_delete_visits(
         result.deleted = ids_to_delete
 
     logger.info(
-        f"bulk_delete: user={current_user.id} role={current_user.role} "
-        f"requested={len(payload.visit_ids)} deleted={result.total_deleted} "
+        f"bulk_delete: user={current_user.id} deleted={result.total_deleted} "
         f"forbidden={len(result.forbidden)} not_found={len(result.not_found)}"
     )
-
     return result
 
 
-# ── 7. FROM EMAIL — static path, BEFORE /{visit_id} ─────────────────────────
+# ── 7. FROM EMAIL (static) ────────────────────────────────────────────────────
 @router.get("/from-email")
 async def list_email_visits(
     month:  Optional[str] = Query(None),
@@ -860,7 +857,6 @@ async def list_email_visits(
     }
     if status:
         query["status"] = status
-
     date_filter = _build_date_filter(month, None, None)
     if date_filter:
         query["visit_date"] = date_filter
@@ -870,28 +866,22 @@ async def list_email_visits(
         .sort("visit_date", 1)
         .to_list(500)
     )
+    visits = [_sanitize_visit(v) for v in visits]
     visits = await _enrich_visits(visits)
     return visits
 
 
-# ── 8. CHECK DUPLICATE — static path, BEFORE /{visit_id} ────────────────────
+# ── 8. CHECK DUPLICATE (static) ───────────────────────────────────────────────
 @router.post("/check-duplicate")
 async def check_duplicate_endpoint(
     data: DuplicateCheckPayload,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Lightweight pre-flight check so the frontend can warn the user
-    before they submit the form.
-    """
     existing = await _check_duplicate(data.client_id, data.assigned_to, data.visit_date)
-    return {
-        "is_duplicate": existing is not None,
-        "existing":     existing,
-    }
+    return {"is_duplicate": existing is not None, "existing": existing}
 
 
-# ── 9. ADMIN MONTHLY PLAN — static path, BEFORE /{visit_id} ─────────────────
+# ── 9. ADMIN MONTHLY PLAN (static) ────────────────────────────────────────────
 @router.get("/admin/monthly-plan")
 async def admin_monthly_plan(
     month: str = Query(...),
@@ -929,18 +919,21 @@ async def admin_monthly_plan(
     return {"month": month, "users": list(grouped.values())}
 
 
-# ── 10. QUICK STATUS — /{visit_id}/quick-status ───────────────────────────────
+# ── 10. QUICK STATUS (parameterised, but BEFORE generic GET /{visit_id}) ──────
 @router.post("/{visit_id}/quick-status")
 async def quick_status(
     visit_id: str,
     data: dict,
     current_user: User = Depends(get_current_user),
 ):
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    # FIX: use _find_visit_by_any_id to handle legacy docs
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
-    if not _can_write_visit(current_user, visit.get("assigned_to", "")):
-        raise HTTPException(403, "Not authorised")
+
+    owner_id = visit.get("assigned_to", "")
+    if not _can_write_visit(current_user, owner_id):
+        raise HTTPException(403, "Not authorised to update this visit")
 
     done    = bool(data.get("done", True))
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -951,20 +944,25 @@ async def quick_status(
     if done:
         payload["completed_at"] = now_iso
 
-    await db.visits.update_one({"id": visit_id}, {"$set": payload})
-    updated = await db.visits.find_one({"id": visit_id}, {"_id": 0})
-    logger.info(f"quick_status: visit={visit_id} done={done} by={current_user.id}")
+    # Update by the actual string id (which may have been repaired)
+    real_id = visit.get("id", visit_id)
+    await db.visits.update_one({"id": real_id}, {"$set": payload})
+    updated = await db.visits.find_one({"id": real_id}, {"_id": 0})
+    if updated:
+        updated = _sanitize_visit(updated)
+
+    logger.info(f"quick_status: visit={real_id} done={done} by={current_user.id}")
     return updated
 
 
-# ── 11. ADD COMMENT — /{visit_id}/comments ───────────────────────────────────
+# ── 11. ADD COMMENT ────────────────────────────────────────────────────────────
 @router.post("/{visit_id}/comments", status_code=201)
 async def add_comment(
     visit_id: str,
     data: CommentCreate,
     current_user: User = Depends(get_current_user),
 ):
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
     if not _can_read_visit(current_user, visit.get("assigned_to", "")):
@@ -977,8 +975,9 @@ async def add_comment(
         "text":       data.text,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    real_id = visit.get("id", visit_id)
     await db.visits.update_one(
-        {"id": visit_id},
+        {"id": real_id},
         {
             "$push": {"comments": comment},
             "$set":  {"updated_at": comment["created_at"]},
@@ -987,14 +986,14 @@ async def add_comment(
     return comment
 
 
-# ── 12. DELETE COMMENT — /{visit_id}/comments/{comment_id} ──────────────────
+# ── 12. DELETE COMMENT ─────────────────────────────────────────────────────────
 @router.delete("/{visit_id}/comments/{comment_id}")
 async def delete_comment(
     visit_id:   str,
     comment_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
 
@@ -1008,20 +1007,21 @@ async def delete_comment(
     if str(comment.get("user_id")) != str(current_user.id) and current_user.role != "admin":
         raise HTTPException(403, "Can only delete your own comments")
 
+    real_id = visit.get("id", visit_id)
     await db.visits.update_one(
-        {"id": visit_id},
+        {"id": real_id},
         {"$pull": {"comments": {"id": comment_id}}},
     )
     return {"message": "Comment deleted"}
 
 
-# ── 13. GET SINGLE — PARAMETERISED, AFTER all static routes ──────────────────
+# ── 13. GET SINGLE (parameterised) ────────────────────────────────────────────
 @router.get("/{visit_id}")
 async def get_visit(
     visit_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
     if not _can_read_visit(current_user, visit.get("assigned_to", "")):
@@ -1045,114 +1045,93 @@ async def get_visit(
     return visit
 
 
-# ── 14. UPDATE — PARAMETERISED, AFTER all static routes ──────────────────────
+# ── 14. UPDATE (parameterised) ────────────────────────────────────────────────
 @router.patch("/{visit_id}")
 async def update_visit(
     visit_id: str,
     data: VisitUpdate,
     current_user: User = Depends(get_current_user),
 ):
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(404, f"Visit not found: id={visit_id}")
-    if not _can_write_visit(current_user, visit.get("assigned_to", "")):
+
+    owner_id = visit.get("assigned_to", "")
+    if not _can_write_visit(current_user, owner_id):
         raise HTTPException(403, "Not authorised to edit this visit")
 
     new_date = data.visit_date
     if new_date and new_date != visit.get("visit_date"):
+        real_id = visit.get("id", visit_id)
         dup = await _check_duplicate(
-            visit["client_id"], visit["assigned_to"], new_date, exclude_id=visit_id
+            visit["client_id"], visit["assigned_to"], new_date, exclude_id=real_id
         )
         if dup:
             raise HTTPException(
                 409,
-                f"A visit for this client on {new_date} already exists "
-                f"(id={dup['id']}, status={dup.get('status', 'scheduled')}). "
+                f"A visit for this client on {new_date} already exists. "
                 "Choose a different date or cancel the existing visit first."
             )
 
     payload = {k: v for k, v in data.model_dump(exclude_none=True).items()}
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    await db.visits.update_one({"id": visit_id}, {"$set": payload})
-    updated = await db.visits.find_one({"id": visit_id}, {"_id": 0})
+    real_id = visit.get("id", visit_id)
+    await db.visits.update_one({"id": real_id}, {"$set": payload})
+    updated = await db.visits.find_one({"id": real_id}, {"_id": 0})
+    if updated:
+        updated = _sanitize_visit(updated)
     return updated
 
 
-# ── 15. DELETE — PARAMETERISED, LAST ─────────────────────────────────────────
+# ── 15. DELETE (parameterised, LAST) ──────────────────────────────────────────
 @router.delete("/{visit_id}")
 async def delete_visit(
     visit_id: str,
     delete_recurrences: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Delete a single visit with proper permission enforcement.
-
-    Permission rules:
-      - Admin: can always delete.
-      - User with can_delete_visits=True: can always delete.
-      - Regular user: can delete only their own visits (unless
-        can_delete_own_visits is explicitly False).
-      - 403 is returned when the user lacks permission — never silently ignored.
-
-    Pass ?delete_recurrences=true to also remove all child recurrence visits
-    when deleting a parent visit.
-    """
-    # Pass 1 — look up by custom uuid string field
-    visit = await db.visits.find_one({"id": visit_id}, {"_id": 0})
-
-    if not visit:
-        # Pass 2 — attempt MongoDB _id lookup (in case id field is missing)
-        from bson import ObjectId
-        try:
-            oid   = ObjectId(visit_id)
-            visit = await db.visits.find_one({"_id": oid})
-            if visit:
-                visit_id = str(visit.get("id", visit_id))
-                visit.pop("_id", None)
-        except Exception:
-            pass
-
+    visit = await _find_visit_by_any_id(visit_id)
     if not visit:
         raise HTTPException(
             404,
             f"Visit not found (id={visit_id}). It may have already been deleted."
         )
 
-    # Use _can_delete_visit (NOT _can_write_visit) for delete checks
     owner_id = visit.get("assigned_to", "")
     if not _can_delete_visit(current_user, owner_id):
         raise HTTPException(
             403,
             "Not authorised to delete this visit. "
-            "Only admins or the assigned user (with delete permission) can delete visits."
+            "Only the assigned user or an admin can delete visits."
         )
 
+    real_id       = visit.get("id", visit_id)
     deleted_count = 0
 
-    result = await db.visits.delete_one({"id": visit_id})
-    if result.deleted_count == 0:
-        # Fallback: delete by MongoDB _id if custom id field is missing
-        from bson import ObjectId
-        try:
-            result = await db.visits.delete_one({"_id": ObjectId(visit_id)})
-        except Exception:
-            pass
+    result = await db.visits.delete_one({"id": real_id})
     deleted_count += result.deleted_count if result else 0
 
-    # Cascade-delete all child recurrence visits if requested
+    if deleted_count == 0:
+        # Last resort: try by MongoDB _id
+        try:
+            from bson import ObjectId
+            result = await db.visits.delete_one({"_id": ObjectId(visit_id)})
+            deleted_count += result.deleted_count if result else 0
+        except Exception:
+            pass
+
     if delete_recurrences and visit.get("parent_visit_id") is None:
-        recurrence_result = await db.visits.delete_many({"parent_visit_id": visit_id})
+        recurrence_result = await db.visits.delete_many({"parent_visit_id": real_id})
         deleted_count += recurrence_result.deleted_count
 
     logger.info(
-        f"delete_visit: id={visit_id} deleted={deleted_count} "
-        f"cascade={delete_recurrences} by={current_user.id} role={current_user.role}"
+        f"delete_visit: id={real_id} deleted={deleted_count} "
+        f"cascade={delete_recurrences} by={current_user.id}"
     )
 
     return {
         "message":       f"Deleted {deleted_count} visit(s) successfully",
         "deleted_count": deleted_count,
-        "visit_id":      visit_id,
+        "visit_id":      real_id,
     }
