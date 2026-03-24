@@ -22,7 +22,7 @@ import {
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye,
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
   Mail, Phone, Calendar, Camera, Clock, UserCheck, UserX,
-  AlertCircle, KeyRound, Receipt, Target, Zap,
+  AlertCircle, KeyRound, Receipt, Target, Zap, Lock,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -61,6 +61,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
     can_connect_email: true, can_view_own_data: true,
     can_create_quotations: true,
+    can_view_passwords: true, can_edit_passwords: true,
+    view_password_departments: [],
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -77,6 +79,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true,
     can_create_quotations: false,
+    can_view_passwords: true, can_edit_passwords: false,
+    view_password_departments: [],
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -93,6 +97,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
     can_view_staff_rankings: true, can_delete_data: false, can_delete_tasks: false,
     can_connect_email: true, can_view_own_data: true,
     can_create_quotations: false,
+    can_view_passwords: false, can_edit_passwords: false,
+    view_password_departments: [],
     assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
     view_other_reports: [], view_other_todos: [], view_other_activity: [],
   },
@@ -111,6 +117,8 @@ const EMPTY_PERMISSIONS = {
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false,
   can_create_quotations: false,
+  can_view_passwords: false, can_edit_passwords: false,
+  view_password_departments: [],
   assigned_clients: [], view_other_tasks: [], view_other_attendance: [],
   view_other_reports: [], view_other_todos: [], view_other_activity: [],
 };
@@ -186,7 +194,7 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
     <div className="flex gap-2 pt-3 border-t border-amber-100">
       <Button size="sm" disabled={approving === userData.id} onClick={() => onApprove(userData)}
         className="flex-1 h-9 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs gap-1.5 shadow">
-        <UserCheck className="h-3.5 w-3.5" />{approving === userData.id ? 'Approving\u2026' : 'Approve'}
+        <UserCheck className="h-3.5 w-3.5" />{approving === userData.id ? 'Approving…' : 'Approve'}
       </Button>
       <Button size="sm" disabled={approving === userData.id} onClick={() => onReject(userData)}
         variant="outline" className="flex-1 h-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs gap-1.5">
@@ -196,20 +204,33 @@ const PendingUserCard = ({ userData, onApprove, onReject, approving }) => (
   </motion.div>
 );
 
-// ── NEW: Module access badge shown on each user card ──────────────────────────
+// ── Module access badge shown on user card ────────────────────────────────────
 const ModuleAccessBadges = ({ userData }) => {
   if (userData.role === 'admin') return null;
   const hasLeads      = !!(userData.permissions?.can_view_all_leads);
   const hasQuotations = !!(userData.permissions?.can_create_quotations);
+  const hasPasswords  = !!(userData.permissions?.can_view_passwords);
+  const canEditPass   = !!(userData.permissions?.can_edit_passwords);
+
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
         hasLeads ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>
-        <Target className="h-2.5 w-2.5" />Leads {hasLeads ? '\u2713' : '\u2717'}
+        <Target className="h-2.5 w-2.5" />Leads {hasLeads ? '✓' : '✗'}
       </span>
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
         hasQuotations ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-50 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>
-        <Receipt className="h-2.5 w-2.5" />Quotations {hasQuotations ? '\u2713' : '\u2717'}
+        <Receipt className="h-2.5 w-2.5" />Quotations {hasQuotations ? '✓' : '✗'}
+      </span>
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+        hasPasswords
+          ? canEditPass
+            ? 'bg-amber-50 text-amber-700 border-amber-200'
+            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : 'bg-slate-50 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'
+      }`}>
+        <KeyRound className="h-2.5 w-2.5" />
+        {!hasPasswords ? 'Vault ✗' : canEditPass ? 'Vault (R/W)' : 'Vault (R)'}
       </span>
     </div>
   );
@@ -275,7 +296,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
       {(userData.departments || []).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">{userData.departments.map(d => <DeptPill key={d} dept={d} size="sm" />)}</div>
       )}
-      {/* ── NEW: Module access badges ── */}
+      {/* Module access badges (non-admin only) */}
       <ModuleAccessBadges userData={userData} />
       <div className="space-y-2 text-xs sm:text-sm text-slate-600">
         <p className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 flex-shrink-0" /><span className="truncate">{userData.email}</span></p>
@@ -292,7 +313,7 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
         <div className="flex gap-2 mt-4 pt-3 border-t border-amber-100">
           <Button size="sm" disabled={approving === userData.id} onClick={() => onApprove(userData)}
             className="flex-1 h-8 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs gap-1 shadow">
-            <UserCheck className="h-3.5 w-3.5" />{approving === userData.id ? 'Approving\u2026' : 'Approve'}
+            <UserCheck className="h-3.5 w-3.5" />{approving === userData.id ? 'Approving…' : 'Approve'}
           </Button>
           <Button size="sm" disabled={approving === userData.id} onClick={() => onReject(userData)}
             variant="outline" className="flex-1 h-8 rounded-xl border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs gap-1">
@@ -308,37 +329,31 @@ const UserCard = ({ userData, onEdit, onDelete, onPermissions, onApprove, onReje
 const PermToggleRow = ({ permKey, label, desc, permissions, setPermissions }) => (
   <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors">
     <div className="pr-4">
-      <p className="text-sm font-bold text-slate-700">{label}</p>
+      <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{label}</p>
       <p className="text-[10px] text-slate-500">{desc}</p>
     </div>
     <Switch
       checked={!!permissions[permKey]}
-      onCheckedChange={(val) =>
-        setPermissions(prev => ({ ...prev, [permKey]: val }))
-      }
+      onCheckedChange={val => setPermissions(prev => ({ ...prev, [permKey]: val }))}
     />
   </div>
 );
 
-// ── NEW: Module access card (large toggle card for Leads / Quotations) ─────────
-const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions }) => {
+// ── Module Access card ────────────────────────────────────────────────────────
+const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPermissions, accentColor }) => {
   const isEnabled = !!permissions[permKey];
+  const accent = accentColor || COLORS.mediumBlue;
   return (
     <div
       onClick={() => setPermissions(p => ({ ...p, [permKey]: !p[permKey] }))}
       className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 select-none ${
-        isEnabled
-          ? 'shadow-sm'
-          : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-500 hover:bg-slate-50'
+        isEnabled ? 'shadow-sm' : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-slate-300'
       }`}
-      style={isEnabled ? {
-        borderColor: '#a5b4fc',
-        background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)',
-      } : {}}
+      style={isEnabled ? { borderColor: `${accent}60`, background: `${accent}08` } : {}}
     >
       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${
-        isEnabled ? 'text-white' : 'text-slate-400 bg-slate-100'}`}
-        style={isEnabled ? { background: `linear-gradient(135deg,${COLORS.deepBlue},${COLORS.mediumBlue})` } : {}}>
+        isEnabled ? 'text-white' : 'text-slate-400 bg-slate-100 dark:bg-slate-600'}`}
+        style={isEnabled ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
         <Icon className="h-5 w-5" />
       </div>
       <div className="flex-1 min-w-0">
@@ -346,16 +361,17 @@ const ModuleAccessCard = ({ icon: Icon, title, desc, permKey, permissions, setPe
         <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
       </div>
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm transition-all ${
-        isEnabled ? 'bg-emerald-500 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>
-        {isEnabled ? '\u2713' : '\u2717'}
+        isEnabled ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-600 text-slate-400'}`}
+        style={isEnabled ? { background: COLORS.emeraldGreen } : {}}>
+        {isEnabled ? '✓' : '✗'}
       </div>
     </div>
   );
 };
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ══════════════════════════════════════════════════════════════════════════════
 export default function Users() {
   const { user, refreshUser } = useAuth();
   const isDark = useDark();
@@ -493,7 +509,7 @@ export default function Users() {
         };
         await api.put(`/users/${selectedUser.id}`, payload);
         if (selectedUser.id === user.id) await refreshUser();
-        toast.success('\u2713 User updated successfully');
+        toast.success('✓ User updated successfully');
       } else {
         await api.post('/auth/register', {
           full_name:     formData.full_name.trim(),
@@ -510,7 +526,7 @@ export default function Users() {
           is_active:     false,
           status:        'pending_approval',
         });
-        toast.success('\u2713 Member registered \u2014 awaiting approval');
+        toast.success('✓ Member registered — awaiting approval');
       }
       setDialogOpen(false);
       fetchUsers();
@@ -544,25 +560,26 @@ export default function Users() {
       const ensureArray = (v) => (Array.isArray(v) ? v : []);
       const payload = {
         ...permissions,
-        assigned_clients:      ensureArray(permissions.assigned_clients),
-        view_other_tasks:      ensureArray(permissions.view_other_tasks),
-        view_other_attendance: ensureArray(permissions.view_other_attendance),
-        view_other_reports:    ensureArray(permissions.view_other_reports),
-        view_other_todos:      ensureArray(permissions.view_other_todos),
-        view_other_activity:   ensureArray(permissions.view_other_activity),
+        view_password_departments: ensureArray(permissions.view_password_departments),
+        assigned_clients:          ensureArray(permissions.assigned_clients),
+        view_other_tasks:          ensureArray(permissions.view_other_tasks),
+        view_other_attendance:     ensureArray(permissions.view_other_attendance),
+        view_other_reports:        ensureArray(permissions.view_other_reports),
+        view_other_todos:          ensureArray(permissions.view_other_todos),
+        view_other_activity:       ensureArray(permissions.view_other_activity),
       };
       await api.put(`/users/${selectedUserForPerms.id}/permissions`, payload);
       if (selectedUserForPerms.id === user.id) await refreshUser();
-      toast.success('\u2713 Permissions updated successfully');
+      toast.success('✓ Permissions updated successfully');
       setPermDialogOpen(false);
-      fetchUsers(); // refresh cards so badges update immediately
+      fetchUsers();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to update permissions'); }
     finally { setLoading(false); }
   };
 
   const resetPermissionsToRole = (role) => {
     setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
-    toast.info(`Reset to ${role} defaults \u2014 click "Update Permissions" to save`);
+    toast.info(`Reset to ${role} defaults — click "Update Permissions" to save`);
   };
 
   const handleApprove = async (userData) => {
@@ -570,7 +587,7 @@ export default function Users() {
     setApprovingId(userData.id);
     try {
       await api.post(`/users/${userData.id}/approve`);
-      toast.success(`\u2713 ${userData.full_name} approved`);
+      toast.success(`✓ ${userData.full_name} approved`);
       fetchUsers();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to approve'); }
     finally { setApprovingId(null); }
@@ -611,10 +628,7 @@ export default function Users() {
     );
   }
 
-  // \u2500\u2500 Permission accordion sections \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-  // NOTE: can_view_all_leads and can_create_quotations remain in GLOBAL_PERMS
-  // so they are also accessible via the accordion for fine-grained control,
-  // but the Module Access cards at the top of the dialog are the primary UI.
+  // ── Permission accordion sections ─────────────────────────────────────────
   const GLOBAL_PERMS = [
     { key: 'can_view_all_tasks',              label: 'Universal Task Access',        desc: 'See tasks assigned to any user/dept' },
     { key: 'can_view_all_clients',            label: 'Master Client List',           desc: 'See all company legal entities' },
@@ -629,7 +643,7 @@ export default function Users() {
     { key: 'can_view_selected_users_reports', label: 'Team Reports Access',          desc: 'View reports for selected users' },
     { key: 'can_view_staff_rankings',         label: 'Staff Rankings',               desc: 'View performance leaderboard' },
     { key: 'can_view_own_data',               label: 'View Own Data',                desc: 'Access own attendance, tasks and reports' },
-    { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and WhatsApp share professional quotations' },
+    { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations' },
   ];
 
   const OPS_PERMS = [
@@ -643,7 +657,7 @@ export default function Users() {
     { key: 'can_manage_settings',     label: 'System Settings',       desc: 'Modify global system configuration' },
     { key: 'can_delete_data',         label: 'Delete Records',        desc: 'Permanently delete data entries' },
     { key: 'can_delete_tasks',        label: 'Delete Tasks',          desc: 'Delete any task regardless of ownership' },
-    { key: 'can_connect_email',       label: 'Connect Email Accounts',desc: 'Link personal email via IMAP for event extraction' },
+    { key: 'can_connect_email',       label: 'Connect Email Accounts',desc: 'Link personal email via IMAP' },
   ];
 
   const EDIT_PERMS = [
@@ -656,9 +670,9 @@ export default function Users() {
   ];
 
   return (
-    <motion.div className={`space-y-6 p-4 md:p-8 min-h-screen rounded-2xl ${isDark?"bg-[#0f172a]":""}`} initial="hidden" animate="visible" variants={containerVariants}>
+    <motion.div className={`space-y-6 p-4 md:p-8 min-h-screen rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`} initial="hidden" animate="visible" variants={containerVariants}>
 
-      {/* \u2500\u2500 Header \u2500\u2500 */}
+      {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold dark:text-blue-300" style={{ color: COLORS.deepBlue }}>User Directory</h1>
@@ -689,15 +703,15 @@ export default function Users() {
         )}
       </div>
 
-      {/* \u2500\u2500 Edit / Create Dialog \u2500\u2500 */}
+      {/* ── Edit / Create Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold" style={{ color: COLORS.deepBlue }}>
-              {selectedUser ? `Edit \u2014 ${selectedUser.full_name}` : 'Register New Member'}
+              {selectedUser ? `Edit — ${selectedUser.full_name}` : 'Register New Member'}
             </DialogTitle>
             <DialogDescription>
-              {isAdmin ? 'Admin view \u2014 all fields editable.' : 'Update profile details below.'}
+              {isAdmin ? 'Admin view — all fields editable.' : 'Update profile details below.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
@@ -720,8 +734,7 @@ export default function Users() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Full Name *</Label>
-                <Input name="full_name" value={formData.full_name} onChange={handleInput}
-                  placeholder="e.g. Manthan Desai" className="rounded-xl" />
+                <Input name="full_name" value={formData.full_name} onChange={handleInput} placeholder="e.g. Manthan Desai" className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">
@@ -736,8 +749,7 @@ export default function Users() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Phone</Label>
-                <Input name="phone" value={formData.phone} onChange={handleInput}
-                  placeholder="+91 00000 00000" className="rounded-xl" />
+                <Input name="phone" value={formData.phone} onChange={handleInput} placeholder="+91 00000 00000" className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold flex items-center gap-2">
@@ -746,8 +758,7 @@ export default function Users() {
                   {selectedUser && <span className="text-slate-400 font-normal text-xs">(blank = keep current)</span>}
                 </Label>
                 <Input type="password" name="password" value={formData.password} onChange={handleInput}
-                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'}
-                  className="rounded-xl" />
+                  placeholder={selectedUser ? 'Leave blank to keep unchanged' : 'Set initial password'} className="rounded-xl" />
               </div>
             </div>
 
@@ -758,14 +769,14 @@ export default function Users() {
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { label: 'Punch-In Time',      name: 'punch_in_time'  },
-                  { label: 'Grace Period (HH:MM)', name: 'grace_time'   },
-                  { label: 'Punch-Out Time',      name: 'punch_out_time' },
+                  { label: 'Punch-In Time',       name: 'punch_in_time'  },
+                  { label: 'Grace Period (HH:MM)', name: 'grace_time'    },
+                  { label: 'Punch-Out Time',       name: 'punch_out_time' },
                 ].map(f => (
                   <div key={f.name} className="space-y-2">
                     <Label className="text-xs font-bold text-slate-600">{f.label}</Label>
-                    <Input type="time" name={f.name} value={formData[f.name]}
-                      onChange={handleInput} className="rounded-lg bg-white dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" />
+                    <Input type="time" name={f.name} value={formData[f.name]} onChange={handleInput}
+                      className="rounded-lg bg-white dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" />
                   </div>
                 ))}
               </div>
@@ -774,13 +785,11 @@ export default function Users() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <Label className="font-semibold">Birthday</Label>
-                <Input type="date" name="birthday" value={formData.birthday}
-                  onChange={handleInput} className="rounded-xl" />
+                <Input type="date" name="birthday" value={formData.birthday} onChange={handleInput} className="rounded-xl" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Telegram ID</Label>
-                <Input type="number" name="telegram_id" value={formData.telegram_id}
-                  onChange={handleInput} placeholder="Numeric Telegram ID" className="rounded-xl" />
+                <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="Numeric Telegram ID" className="rounded-xl" />
               </div>
             </div>
 
@@ -799,7 +808,7 @@ export default function Users() {
                   {roleChanged && selectedUser && (
                     <div className="mt-2 flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                       <span className="text-xs text-amber-700 font-semibold flex-1">
-                        Role changed to <b className="capitalize">{formData.role}</b>. Reset permissions to match?
+                        Role changed to <b className="capitalize">{formData.role}</b>. Reset permissions?
                       </span>
                       <button type="button"
                         onClick={async () => {
@@ -813,8 +822,7 @@ export default function Users() {
                         className="text-xs font-bold px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg whitespace-nowrap">
                         Reset
                       </button>
-                      <button type="button" onClick={() => setRoleChanged(false)}
-                        className="text-xs text-amber-500 hover:text-amber-700 font-semibold">Keep</button>
+                      <button type="button" onClick={() => setRoleChanged(false)} className="text-xs text-amber-500 hover:text-amber-700 font-semibold">Keep</button>
                     </div>
                   )}
                 </div>
@@ -843,7 +851,7 @@ export default function Users() {
                     return (
                       <button key={dept.value} type="button" onClick={() => toggleDept(dept.value)}
                         className={`py-2 px-1 rounded-xl text-xs font-bold transition-all border-2 ${
-                          active ? 'text-white border-transparent' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-100 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500'}`}
+                          active ? 'text-white border-transparent' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-100 dark:border-slate-600 hover:border-slate-300'}`}
                         style={{ background: active ? dept.color : 'transparent' }}>
                         {dept.label}
                       </button>
@@ -858,13 +866,13 @@ export default function Users() {
             <Button variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl h-12">Discard</Button>
             <Button onClick={handleSubmit} disabled={loading} className="rounded-xl h-12 px-8 font-bold shadow-lg"
               style={{ background: COLORS.emeraldGreen }}>
-              {loading ? 'Saving\u2026' : selectedUser ? 'Save Updates' : 'Create Member'}
+              {loading ? 'Saving…' : selectedUser ? 'Save Updates' : 'Create Member'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* \u2500\u2500 Pending banner \u2500\u2500 */}
+      {/* ── Pending banner ── */}
       <AnimatePresence>
         {isAdmin && pendingUsers.length > 0 && activeTab !== 'pending' && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -884,12 +892,11 @@ export default function Users() {
         )}
       </AnimatePresence>
 
-      {/* \u2500\u2500 Search + Tabs \u2500\u2500 */}
+      {/* ── Search + Tabs ── */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-          <Input placeholder="Search by name or email\u2026"
-            value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          <Input placeholder="Search by name or email…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
             className="pl-12 h-12 rounded-2xl border-slate-200 shadow-sm" />
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab}
@@ -914,16 +921,14 @@ export default function Users() {
             )}
             {isAdmin && rejectedUsers.length > 0 && (
               <TabsTrigger value="rejected" className="rounded-xl font-bold px-3">
-                <span className="flex items-center gap-1.5">
-                  <XCircle className="h-3.5 w-3.5 text-red-400" />Rejected
-                </span>
+                <span className="flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5 text-red-400" />Rejected</span>
               </TabsTrigger>
             )}
           </TabsList>
         </Tabs>
       </div>
 
-      {/* \u2500\u2500 Pending grid \u2500\u2500 */}
+      {/* ── Pending grid ── */}
       {activeTab === 'pending' && isAdmin && (
         filteredUsers.length === 0
           ? <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-24 text-center">
@@ -933,16 +938,14 @@ export default function Users() {
           : <motion.div variants={containerVariants} initial="hidden" animate="visible"
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredUsers.map(u => (
-                <PendingUserCard key={u.id} userData={u}
-                  onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
+                <PendingUserCard key={u.id} userData={u} onApprove={handleApprove} onReject={handleReject} approving={approvingId} />
               ))}
             </motion.div>
       )}
 
-      {/* \u2500\u2500 Main grid \u2500\u2500 */}
+      {/* ── Main grid ── */}
       {activeTab !== 'pending' && (
-        <motion.div variants={containerVariants}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredUsers.length === 0
             ? <div className="col-span-full py-24 text-center">
                 <UsersIcon className="h-16 w-16 text-slate-200 mx-auto mb-4" />
@@ -960,21 +963,15 @@ export default function Users() {
         </motion.div>
       )}
 
-      {/* \u2500\u2500 PERMISSIONS DIALOG \u2500\u2500 */}
+      {/* ── PERMISSIONS DIALOG ── */}
       <Dialog open={permDialogOpen} onOpenChange={setPermDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-none shadow-2xl">
           <div className="sticky top-0 z-10 p-6 bg-white dark:bg-slate-800 border-b dark:border-slate-700 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-emerald-50 rounded-2xl">
-                <Shield className="h-7 w-7 text-emerald-600" />
-              </div>
+              <div className="p-3 bg-emerald-50 rounded-2xl"><Shield className="h-7 w-7 text-emerald-600" /></div>
               <div>
-                <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>
-                  Access Governance
-                </DialogTitle>
-                <DialogDescription>
-                  Configuring <b>{selectedUserForPerms?.full_name}</b> ({selectedUserForPerms?.role})
-                </DialogDescription>
+                <DialogTitle className="text-xl font-bold" style={{ color: COLORS.deepBlue }}>Access Governance</DialogTitle>
+                <DialogDescription>Configuring <b>{selectedUserForPerms?.full_name}</b> ({selectedUserForPerms?.role})</DialogDescription>
               </div>
             </div>
             <Button variant="ghost" className="rounded-xl" onClick={() => setPermDialogOpen(false)}>Close</Button>
@@ -986,58 +983,59 @@ export default function Users() {
               <span className="text-sm text-amber-800 font-semibold flex-1">
                 Reset all toggles to <b className="capitalize">{selectedUserForPerms?.role}</b> role defaults?
               </span>
-              <button type="button"
-                onClick={() => resetPermissionsToRole(selectedUserForPerms?.role || 'staff')}
+              <button type="button" onClick={() => resetPermissionsToRole(selectedUserForPerms?.role || 'staff')}
                 className="text-xs font-bold px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl whitespace-nowrap">
                 Reset to Role Defaults
               </button>
             </div>
 
-            {/* \u2500\u2500 NEW: Module Access \u2014 prominent section at top of dialog \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
-            <div className="rounded-2xl border-2 border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white p-5 space-y-4">
+            {/* ── Module Access ───────────────────────────────────────────── */}
+            <div className="rounded-2xl border-2 border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white dark:from-slate-800 dark:to-slate-800 dark:border-slate-700 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-100 rounded-xl">
-                  <Zap className="h-5 w-5 text-indigo-600" />
-                </div>
+                <div className="p-2.5 bg-indigo-100 rounded-xl"><Zap className="h-5 w-5 text-indigo-600" /></div>
                 <div>
-                  <p className="text-base font-bold text-indigo-900">Module Access</p>
-                  <p className="text-xs text-indigo-500">Grant access to Leads and/or Quotations independently</p>
+                  <p className="text-base font-bold text-indigo-900 dark:text-indigo-300">Module Access</p>
+                  <p className="text-xs text-indigo-500">Grant access to specialised modules independently</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <ModuleAccessCard
-                  icon={Target}
-                  title="Lead Management"
-                  desc="View the global leads pipeline, create, edit and move leads through stages."
-                  permKey="can_view_all_leads"
-                  permissions={permissions}
-                  setPermissions={setPermissions}
-                />
-                <ModuleAccessCard
-                  icon={Receipt}
-                  title="Quotations"
-                  desc="Create, edit, export and WhatsApp-share professional quotations."
-                  permKey="can_create_quotations"
-                  permissions={permissions}
-                  setPermissions={setPermissions}
-                />
+                <ModuleAccessCard icon={Target} title="Lead Management"
+                  desc="View and manage the global leads pipeline."
+                  permKey="can_view_all_leads" permissions={permissions} setPermissions={setPermissions}
+                  accentColor={COLORS.mediumBlue} />
+                <ModuleAccessCard icon={Receipt} title="Quotations"
+                  desc="Create, edit, export and WhatsApp-share quotations."
+                  permKey="can_create_quotations" permissions={permissions} setPermissions={setPermissions}
+                  accentColor="#7C3AED" />
+                <ModuleAccessCard icon={KeyRound} title="View Password Vault"
+                  desc="See masked credentials for their assigned departments."
+                  permKey="can_view_passwords" permissions={permissions} setPermissions={setPermissions}
+                  accentColor="#0F766E" />
+                <ModuleAccessCard icon={Lock} title="Edit Password Vault"
+                  desc="Add, update and manage portal credentials. Requires View access."
+                  permKey="can_edit_passwords" permissions={permissions} setPermissions={setPermissions}
+                  accentColor="#B45309" />
               </div>
-              {permissions.can_view_all_leads && permissions.can_create_quotations && (
+              {permissions.can_view_passwords && permissions.can_edit_passwords && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-medium">
                   <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                  Both modules enabled \u2014 \u201cCreate Quotation\u201d button appears on lead cards, and quotations auto-link to leads.
+                  Full password vault access granted — user can add, edit, and reveal credentials for permitted departments.
+                </div>
+              )}
+              {permissions.can_edit_passwords && !permissions.can_view_passwords && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700 font-medium">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                  ⚠ Edit requires View. Please also enable "View Password Vault".
                 </div>
               )}
             </div>
 
             <Accordion type="multiple" defaultValue={['global']} className="w-full space-y-4">
 
-              {/* \u2500\u2500 Global Visibility (includes Leads Pipeline + Quotations Module as toggles too) \u2500\u2500 */}
+              {/* Global Visibility */}
               <AccordionItem value="global" className="border rounded-2xl px-4 shadow-sm">
-                <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Eye className="h-5 w-5 text-blue-500" />Global Visibility
-                  </div>
+                <AccordionTrigger className="hover:no-underline font-bold text-slate-800 dark:text-slate-100">
+                  <div className="flex items-center gap-3"><Eye className="h-5 w-5 text-blue-500" />Global Visibility</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {GLOBAL_PERMS.map(p => (
@@ -1047,12 +1045,10 @@ export default function Users() {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* \u2500\u2500 Operational Powers \u2500\u2500 */}
+              {/* Operational Powers */}
               <AccordionItem value="ops" className="border rounded-2xl px-4 shadow-sm">
-                <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Settings className="h-5 w-5 text-purple-500" />Operational Powers
-                  </div>
+                <AccordionTrigger className="hover:no-underline font-bold text-slate-800 dark:text-slate-100">
+                  <div className="flex items-center gap-3"><Settings className="h-5 w-5 text-purple-500" />Operational Powers</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {OPS_PERMS.map(p => (
@@ -1062,12 +1058,10 @@ export default function Users() {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* \u2500\u2500 Edit & Modification \u2500\u2500 */}
+              {/* Edit & Modification */}
               <AccordionItem value="edits" className="border rounded-2xl px-4 shadow-sm">
-                <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Edit className="h-5 w-5 text-orange-500" />Edit & Modification
-                  </div>
+                <AccordionTrigger className="hover:no-underline font-bold text-slate-800 dark:text-slate-100">
+                  <div className="flex items-center gap-3"><Edit className="h-5 w-5 text-orange-500" />Edit & Modification</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-2">
                   {EDIT_PERMS.map(p => (
@@ -1077,12 +1071,59 @@ export default function Users() {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* \u2500\u2500 Cross-User Visibility \u2500\u2500 */}
+              {/* ── NEW: Password Department Access ───────────────────────── */}
+              {permissions.can_view_passwords && (
+                <AccordionItem value="password-depts" className="border-2 border-teal-200 dark:border-teal-800 rounded-2xl px-4 shadow-sm bg-teal-50/30 dark:bg-teal-900/10">
+                  <AccordionTrigger className="hover:no-underline font-bold text-teal-800 dark:text-teal-300">
+                    <div className="flex items-center gap-3">
+                      <KeyRound className="h-5 w-5 text-teal-600" />
+                      Password Vault — Department Access
+                      <Badge className="bg-teal-100 text-teal-700 border-teal-300 text-[10px] font-bold">
+                        {(permissions.view_password_departments || []).length === 0 ? 'Own Dept Only' : `${(permissions.view_password_departments || []).length} depts`}
+                      </Badge>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4 space-y-4">
+                    <p className="text-xs text-slate-500 px-1">
+                      Select which additional department credentials this user can view and reveal.
+                      They can always access their own assigned department(s) without this list.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                      {DEPARTMENTS.map(dept => {
+                        const isSelected = (permissions.view_password_departments || []).includes(dept.value);
+                        return (
+                          <button key={dept.value} type="button"
+                            onClick={() => setPermissions(prev => ({
+                              ...prev,
+                              view_password_departments: isSelected
+                                ? (prev.view_password_departments || []).filter(d => d !== dept.value)
+                                : [...(prev.view_password_departments || []), dept.value],
+                            }))}
+                            className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all border-2 ${
+                              isSelected ? 'text-white border-transparent shadow-md' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-teal-300'
+                            }`}
+                            style={{ background: isSelected ? dept.color : undefined }}
+                          >
+                            {isSelected ? '✓ ' : ''}{dept.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-700 text-xs text-slate-500">
+                      <b>Current access:</b>{' '}
+                      {(permissions.view_password_departments || []).length === 0
+                        ? 'Own departments only'
+                        : `Own departments + ${(permissions.view_password_departments || []).join(', ')}`
+                      }
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+              {/* Cross-User Visibility */}
               <AccordionItem value="cross" className="border rounded-2xl px-4 shadow-sm">
-                <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3">
-                    <UsersIcon className="h-5 w-5 text-emerald-500" />Cross-User Visibility
-                  </div>
+                <AccordionTrigger className="hover:no-underline font-bold text-slate-800 dark:text-slate-100">
+                  <div className="flex items-center gap-3"><UsersIcon className="h-5 w-5 text-emerald-500" />Cross-User Visibility</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-6">
                   {[
@@ -1093,49 +1134,44 @@ export default function Users() {
                     { key: 'view_other_activity',   label: 'App Activity'   },
                   ].map(section => (
                     <div key={section.key} className="space-y-2">
-                      <p className="text-sm font-bold text-slate-800 px-1">Allowed {section.label} Visibility</p>
-                      <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-2xl min-h-[50px]">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 px-1">Allowed {section.label} Visibility</p>
+                      <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-700 rounded-2xl min-h-[50px]">
                         {users.filter(u => u.id !== selectedUserForPerms?.id).map(u => {
-                          const sectionKey = section.key;
-                          const sel = permissions[sectionKey]?.includes(u.id);
+                          const sel = permissions[section.key]?.includes(u.id);
                           return (
                             <Badge key={u.id}
                               onClick={() => setPermissions(prev => ({
                                 ...prev,
-                                [sectionKey]: sel
-                                  ? prev[sectionKey].filter(id => id !== u.id)
-                                  : [...(prev[sectionKey] || []), u.id],
+                                [section.key]: sel
+                                  ? prev[section.key].filter(id => id !== u.id)
+                                  : [...(prev[section.key] || []), u.id],
                               }))}
                               className={`cursor-pointer px-3 py-1.5 rounded-lg border-2 transition-all ${
                                 sel
                                   ? 'bg-emerald-500 border-emerald-600 text-white scale-105 shadow-md'
-                                  : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-500'
+                                  : 'bg-white dark:bg-slate-600 border-slate-200 dark:border-slate-500 text-slate-600 dark:text-slate-300 hover:border-slate-300'
                               }`}>
                               {u.full_name}
                             </Badge>
                           );
                         })}
-                        {users.length <= 1 && (
-                          <p className="text-xs text-slate-400 italic">No other users available</p>
-                        )}
+                        {users.length <= 1 && <p className="text-xs text-slate-400 italic">No other users available</p>}
                       </div>
                     </div>
                   ))}
                 </AccordionContent>
               </AccordionItem>
 
-              {/* \u2500\u2500 Assigned Portfolio \u2500\u2500 */}
+              {/* Assigned Portfolio */}
               <AccordionItem value="clients" className="border rounded-2xl px-4 shadow-sm">
-                <AccordionTrigger className="hover:no-underline font-bold text-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Briefcase className="h-5 w-5 text-cyan-500" />Assigned Portfolio
-                  </div>
+                <AccordionTrigger className="hover:no-underline font-bold text-slate-800 dark:text-slate-100">
+                  <div className="flex items-center gap-3"><Briefcase className="h-5 w-5 text-cyan-500" />Assigned Portfolio</div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4 space-y-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <Input placeholder="Filter company list\u2026" value={clientSearch}
-                      onChange={e => setClientSearch(e.target.value)} className="pl-10 h-10 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 rounded-xl" />
+                    <Input placeholder="Filter company list…" value={clientSearch} onChange={e => setClientSearch(e.target.value)}
+                      className="pl-10 h-10 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 rounded-xl" />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-2">
                     {clients
@@ -1152,32 +1188,26 @@ export default function Users() {
                                 : [...(prev.assigned_clients || []), clientId],
                             }))}
                             className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
-                              assigned
-                                ? 'bg-emerald-50 border-emerald-400'
-                                : 'bg-white dark:bg-slate-700/60 border-slate-100 dark:border-slate-600 hover:border-slate-200 dark:hover:border-slate-500'}`}>
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              assigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                              assigned ? 'bg-emerald-50 border-emerald-400' : 'bg-white dark:bg-slate-700/60 border-slate-100 dark:border-slate-600 hover:border-slate-200'}`}>
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${assigned ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
                               {assigned ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                             </div>
-                            <span className="text-xs font-bold text-slate-700 truncate">{client.company_name}</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{client.company_name}</span>
                           </div>
                         );
                       })}
                   </div>
                 </AccordionContent>
               </AccordionItem>
-
             </Accordion>
           </div>
 
-          <div className="sticky bottom-0 p-6 bg-slate-50 border-t flex justify-end gap-3">
-            <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermDialogOpen(false)}>
-              Discard
-            </Button>
+          <div className="sticky bottom-0 p-6 bg-slate-50 dark:bg-slate-800 border-t dark:border-slate-700 flex justify-end gap-3">
+            <Button variant="ghost" className="rounded-xl h-12" onClick={() => setPermDialogOpen(false)}>Discard</Button>
             <Button onClick={handleSavePermissions} disabled={loading}
               className="rounded-xl h-12 px-10 font-bold shadow-xl"
               style={{ background: COLORS.emeraldGreen }}>
-              {loading ? 'Saving\u2026' : 'Update Permissions'}
+              {loading ? 'Saving…' : 'Update Permissions'}
             </Button>
           </div>
         </DialogContent>
